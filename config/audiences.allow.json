@@ -1,0 +1,20 @@
+{
+  "description": "Audience families each desk may send to Qloo (D21). Denied families and audiences are refused on every desk. Mirror of packages/qloo/src/audiences.ts.",
+  "denied": {
+    "families": ["communities", "political_preferences", "lifestyle_preferences_beliefs", "global_issues"],
+    "audiences": ["urn:audience:leisure:political_junkie"]
+  },
+  "desks": {
+    "investment": [
+      "hobbies_and_interests",
+      "leisure",
+      "spending_habits",
+      "professional_area",
+      "investing_interests",
+      "life_stage"
+    ],
+    "location": ["hobbies_and_interests", "leisure"],
+    "marketing": ["hobbies_and_interests", "leisure", "spending_habits", "professional_area", "life_stage"],
+    "audience": ["hobbies_and_interests", "leisure", "spending_habits", "professional_area", "life_stage"]
+  }
+}

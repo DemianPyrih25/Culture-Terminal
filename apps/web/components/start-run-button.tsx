@@ -2,11 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-
-const MAX_ATTEMPTS = 5;
-const RETRY_MS = 2000;
-
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+import { startRun } from "@/lib/start-run";
 
 export function StartRunButton({ seconds }: { seconds: number }) {
   const router = useRouter();
@@ -16,23 +12,14 @@ export function StartRunButton({ seconds }: { seconds: number }) {
   async function start() {
     setBusy(true);
     setMessage(null);
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      const res = await fetch("/api/runs", { method: "POST" }).catch(() => null);
-      const body = (await res?.json().catch(() => null)) as { runId?: unknown; error?: unknown; retry?: unknown } | null;
-      if (res?.ok && typeof body?.runId === "string") {
-        router.push(`/run/${body.runId}`);
-        return;
-      }
-      // 503 while a deploy drains the old server, 429 when it is full: both say retry.
-      if (body?.retry === true && attempt < MAX_ATTEMPTS) {
-        setMessage(typeof body.error === "string" ? body.error : "Retrying…");
-        await wait(RETRY_MS);
-        continue;
-      }
-      break;
+    // No body: the server starts the synthetic test run.
+    const outcome = await startRun(undefined, { onRetry: setMessage });
+    if (outcome.ok) {
+      router.push(`/run/${outcome.runId}`);
+      return;
     }
     setBusy(false);
-    setMessage("Could not start a run. Try again.");
+    setMessage(outcome.error);
   }
 
   return (
@@ -41,7 +28,7 @@ export function StartRunButton({ seconds }: { seconds: number }) {
         type="button"
         onClick={start}
         disabled={busy}
-        className="rounded border border-amber-400/70 bg-amber-400/10 px-5 py-3 font-mono text-sm tracking-wide text-amber-200 transition-colors hover:bg-amber-400/20 disabled:cursor-wait disabled:opacity-60"
+        className="rounded border border-zinc-700 px-4 py-2 font-mono text-xs tracking-wide text-zinc-300 transition-colors hover:bg-zinc-800 disabled:cursor-wait disabled:opacity-60"
       >
         {busy ? "Starting…" : `Start a ${seconds}-second test run`}
       </button>

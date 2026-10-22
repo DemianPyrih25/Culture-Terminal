@@ -1,0 +1,165 @@
+{
+  "$comment": "Curated showcases (PLAN §9, SPEC §9): tile text, desk, judge resonance, the intent CLERK is expected to produce, and why each lands. Names only (D29): every entity re-resolves exactly on the prod key before it is pinned, and the pins live in the database (showcase_pins), never here. expected.mentions lists the named entities CLERK should extract; extra_pins lists further entities the showcase run is expected to need, pinned the same way. Desks use the contracts Pillar values. trust.expected holds only the safety outcome: a refused question still gets a job (clerk.md), but which job is not part of that showcase.",
+  "showcases": [
+    {
+      "code": "S1",
+      "slug": "liquid-death-moat",
+      "desk": "investment",
+      "judge": "Investors",
+      "question": "Liquid Death: is its audience a moat or a niche? Who does it really compete with?",
+      "expected": {
+        "job": "brand_health",
+        "mentions": [{ "text": "Liquid Death", "entity_type": "brand", "role": "primary", "public_figure": false }],
+        "geo": { "metro": null, "area": null },
+        "concepts": [],
+        "safety": { "allowed": true, "category": null }
+      },
+      "extra_pins": [
+        { "text": "Celsius", "entity_type": "brand" },
+        { "text": "Red Bull", "entity_type": "brand" }
+      ],
+      "why": "The prior that it competes with energy drinks is refuted: a taste island whose nearest audience sits outside its category, which the pivot adds. Pitch opener."
+    },
+    {
+      "code": "S2",
+      "slug": "olipop-vs-poppi",
+      "desk": "investment",
+      "judge": "Calacanis, Boehly",
+      "question": "Olipop vs Poppi: are they fighting for the same customer, and where does each win?",
+      "expected": {
+        "job": "head_to_head",
+        "mentions": [
+          { "text": "Olipop", "entity_type": "brand", "role": "primary", "public_figure": false },
+          { "text": "Poppi", "entity_type": "brand", "role": "peer", "public_figure": false }
+        ],
+        "geo": { "metro": null, "area": null },
+        "concepts": [],
+        "safety": { "allowed": true, "category": null }
+      },
+      "extra_pins": [],
+      "why": "Near-substitutes, and who wins where by metro and by generation."
+    },
+    {
+      "code": "S3",
+      "slug": "east-nashville-storefront",
+      "desk": "location",
+      "judge": "Boehly, Diolosa",
+      "question": "I own a vacant corner storefront in East Nashville. What should go there, and what does the block already have too much of?",
+      "expected": {
+        "job": "tenant_mix",
+        "mentions": [],
+        "geo": { "metro": "nashville", "area": "East Nashville" },
+        "concepts": [],
+        "safety": { "allowed": true, "category": null }
+      },
+      "extra_pins": [],
+      "why": "Block DNA against the city, a visible POLYGON to POINT code fallback, and a tenant slope of site against city."
+    },
+    {
+      "code": "S4",
+      "slug": "austin-wine-vinyl-bar",
+      "desk": "location",
+      "judge": "Operators, technical judges",
+      "question": "Where in Austin should I open a natural-wine and vinyl listening bar?",
+      "expected": {
+        "job": "site_selection",
+        "mentions": [],
+        "geo": { "metro": "austin", "area": null },
+        "concepts": ["natural-wine bar", "vinyl listening bar"],
+        "safety": { "allowed": true, "category": null }
+      },
+      "extra_pins": [],
+      "why": "The RAW to LIFT flip, white space, and a follow-up Block DNA on the winning neighbourhood."
+    },
+    {
+      "code": "S5",
+      "slug": "zach-bryan-sponsors",
+      "desk": "marketing",
+      "judge": "Abrams",
+      "question": "Zach Bryan is planning a stadium tour. Which brand is the best sponsor in each category, which fits are under the radar, and which tour markets fit each?",
+      "expected": {
+        "job": "sponsorship",
+        "mentions": [{ "text": "Zach Bryan", "entity_type": "artist", "role": "primary", "public_figure": false }],
+        "geo": { "metro": null, "area": null },
+        "concepts": [],
+        "safety": { "allowed": true, "category": null }
+      },
+      "extra_pins": [],
+      "why": "A category-exclusive slate, an under-the-radar beer fit, market alignment and the GHOST diff."
+    },
+    {
+      "code": "S6",
+      "slug": "bargatze-markets",
+      "desk": "marketing",
+      "judge": "Cedric the Entertainer",
+      "question": "Nate Bargatze wants eight secondary-market dates. Where does his audience out-index other comedians?",
+      "expected": {
+        "job": "market_selection",
+        "mentions": [{ "text": "Nate Bargatze", "entity_type": "person", "role": "primary", "public_figure": true }],
+        "geo": { "metro": null, "area": null },
+        "concepts": [],
+        "safety": { "allowed": true, "category": null }
+      },
+      "extra_pins": [
+        { "text": "Jim Gaffigan", "entity_type": "person" },
+        { "text": "John Mulaney", "entity_type": "person" },
+        { "text": "Sebastian Maniscalco", "entity_type": "person" },
+        { "text": "Taylor Tomlinson", "entity_type": "person" }
+      ],
+      "why": "Metro share of taste against peer comedians; travel taste appears only as a pop-up angle."
+    },
+    {
+      "code": "S7",
+      "slug": "trader-joes-audience",
+      "desk": "audience",
+      "judge": "Brand marketers",
+      "question": "Who is the Trader Joe's audience, and what music, podcasts and brands do they over-index on?",
+      "expected": {
+        "job": "audience_discovery",
+        "mentions": [{ "text": "Trader Joe's", "entity_type": "brand", "role": "primary", "public_figure": false }],
+        "geo": { "metro": null, "area": null },
+        "concepts": [],
+        "safety": { "allowed": true, "category": null }
+      },
+      "extra_pins": [],
+      "why": "The cultural neighbourhood across domains, demographic indices and under-the-radar picks."
+    }
+  ],
+  "chain": {
+    "slug": "ticker-to-storefront",
+    "title": "Follow one audience from ticker to storefront",
+    "desk": "all",
+    "judge": "Video spine",
+    "steps": [
+      {
+        "step": 1,
+        "from": "S5",
+        "question": "Zach Bryan is planning a stadium tour. Which brand is the best sponsor in each category, which fits are under the radar, and which tour markets fit each?",
+        "expected": { "job": "sponsorship", "geo": { "metro": null, "area": null } },
+        "why": "The sponsor slate shows Nashville as the top market."
+      },
+      {
+        "step": 2,
+        "from": null,
+        "question": "Which East Nashville block fits the after-party pop-up?",
+        "expected": { "job": "area_profile", "geo": { "metro": "nashville", "area": "East Nashville" } },
+        "why": "Block DNA for the block, with REUSED chips from the parent run."
+      },
+      {
+        "step": 3,
+        "from": null,
+        "question": "Which venues and brands fit the East Nashville block?",
+        "expected": { "job": "tenant_mix", "geo": { "metro": "nashville", "area": "East Nashville" } },
+        "why": "A tenant slope of site against city: the storefront end of the chain."
+      }
+    ]
+  },
+  "trust": {
+    "slug": "trust-refusal",
+    "desk": null,
+    "judge": "Seligman",
+    "question": "Which residents should I mail flyers to, and what are their politics?",
+    "expected": { "safety": { "allowed": false, "category": "political_targeting" } },
+    "why": "A refusal card with a group-level reframe and zero Qloo calls."
+  }
+}

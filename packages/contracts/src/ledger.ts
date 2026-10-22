@@ -86,6 +86,8 @@ export const Evidence = z
     provenance: Provenance,
     summary: z.string(),
     flags: z.array(Flag),
+    /** Results the quality gate dropped in this bundle (§6.4). */
+    qualityGateDrops: z.int().nonnegative().default(0),
   })
   .refine(
     (e) => e.requestIds.length === e.qlooCallIds.length && e.provenance.requests.length === e.qlooCallIds.length,

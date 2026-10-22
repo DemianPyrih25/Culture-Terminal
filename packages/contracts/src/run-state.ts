@@ -54,9 +54,9 @@ export interface ToolCallState {
 export type QlooChip = Stamped<"qloo">;
 
 export interface QlooTotals {
-  /** Calls that went to the network (cache "miss"). */
+  /** Calls that went to the network (cache "miss", and "stale": a failed attempt answered from an expired entry). */
   network: number;
-  /** Calls served from this run's or the shared cache: hit, stale and coalesced. */
+  /** Calls served from this run's or the shared cache: hit and coalesced. */
   cached: number;
   /** Cache hits first fetched by another run (REUSED chips). */
   reused: number;
@@ -244,7 +244,7 @@ function strip<T extends { type: unknown; runId: unknown }>(event: T): Omit<T, "
 const CACHE_BUCKET: Record<CacheStatus, "network" | "cached" | "reused"> = {
   miss: "network",
   hit: "cached",
-  stale: "cached",
+  stale: "network",
   coalesced: "cached",
   reused: "reused",
 };

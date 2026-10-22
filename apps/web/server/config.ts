@@ -11,7 +11,10 @@ export function fakeRunSecondsFromEnv(env: NodeJS.ProcessEnv = process.env): num
   return numberFromEnv(env.FAKE_RUN_SECONDS, 200, 1, 900);
 }
 
-/** Concurrent fake runs per process. Each one writes a few hundred rows, so a public URL needs a cap. */
+/**
+ * Concurrent fake runs per process. Each one writes a few hundred rows, so a public URL needs a cap.
+ * Agent runs have their own slots (AGENT_RUN_MAX_ACTIVE), which fake runs never take.
+ */
 export function fakeRunMaxActiveFromEnv(env: NodeJS.ProcessEnv = process.env): number {
   return Math.round(numberFromEnv(env.FAKE_RUN_MAX_ACTIVE, 20, 1, 500));
 }
@@ -27,6 +30,24 @@ export function fakeRunHourlyCapFromEnv(env: NodeJS.ProcessEnv = process.env): n
 /** Finished fake runs older than this are deleted with their events. At least the cap's hour. */
 export function fakeRunRetentionMsFromEnv(env: NodeJS.ProcessEnv = process.env): number {
   return Math.round(numberFromEnv(env.FAKE_RUN_RETENTION_HOURS, 6, 1, 720) * 3_600_000);
+}
+
+/**
+ * Agent runs started per rolling hour by every process together, counted in the database. A coarse
+ * global ceiling on LLM and Qloo spend until the lane limits (PLAN §10.4) arrive.
+ */
+export function agentRunHourlyCapFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  return Math.round(numberFromEnv(env.AGENT_RUN_HOURLY_CAP, 20, 1, 10_000));
+}
+
+/** Agent runs one process holds at once (PLAN §10.4 global concurrency 3), apart from FAKE_RUN_MAX_ACTIVE. */
+export function agentRunMaxActiveFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  return Math.round(numberFromEnv(env.AGENT_RUN_MAX_ACTIVE, 3, 1, 100));
+}
+
+/** The daily LLM breaker in USD (LLM_DAILY_USD_CAP, PLAN §4.2), which the pre-run check keeps to. */
+export function llmDailyUsdCapFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  return numberFromEnv(env.LLM_DAILY_USD_CAP, 1.4, 0, 1000);
 }
 
 /** How long SIGTERM waits for active runs before marking them incomplete (SPEC §3.2: up to 180 s). */

@@ -1,3 +1,4 @@
+import { QuestionForm } from "@/components/question-form";
 import { StartRunButton } from "@/components/start-run-button";
 import { fakeRunSecondsFromEnv } from "@/server/config";
 
@@ -15,11 +16,14 @@ export default function Home() {
           every number traces to a Qloo request.
         </p>
       </div>
-      <StartRunButton seconds={seconds} />
-      <p className="max-w-xl font-mono text-xs leading-relaxed text-zinc-500">
-        The test run is a synthetic agent run on invented brands. It streams event by event; refresh the page
-        mid-run and it resumes where it left off.
-      </p>
+      <QuestionForm />
+      <div className="flex flex-col gap-3 border-t border-zinc-800 pt-6">
+        <StartRunButton seconds={seconds} />
+        <p className="max-w-xl font-mono text-xs leading-relaxed text-zinc-500">
+          The test run is a synthetic agent run on invented brands. It streams event by event; refresh the page
+          mid-run and it resumes where it left off.
+        </p>
+      </div>
     </main>
   );
 }

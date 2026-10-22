@@ -240,7 +240,7 @@ export type GhostDiff = z.infer<typeof GhostDiff>;
 
 // CHECKER (§6.2) ----------------------------------------------------------------------------------------
 
-export const ValidationRule = z.enum(["V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9"]);
+export const ValidationRule = z.enum(["V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10"]);
 export type ValidationRule = z.infer<typeof ValidationRule>;
 
 export const ValidationIssue = z.object({
@@ -270,10 +270,14 @@ export const ConfidenceRule = z.enum([
   "thin_result",
   "quality_gate_drop",
   "checker_warning",
+  "insufficient_evidence",
 ]);
 export type ConfidenceRule = z.infer<typeof ConfidenceRule>;
 
-/** Points subtracted from 100 per occurrence (coarse_geohash and stale_momentum count once). */
+/**
+ * Points subtracted from 100 per occurrence (coarse_geohash, stale_momentum and insufficient_evidence
+ * count once). insufficient_evidence alone puts a note in the LOW band: V7 left no reading to trust.
+ */
 export const CONFIDENCE_PENALTY: Readonly<Record<ConfidenceRule, number>> = {
   dropped_entity: 15,
   code_fallback: 10,
@@ -282,6 +286,7 @@ export const CONFIDENCE_PENALTY: Readonly<Record<ConfidenceRule, number>> = {
   thin_result: 10,
   quality_gate_drop: 5,
   checker_warning: 5,
+  insufficient_evidence: 60,
 };
 
 export function confidenceBand(score: number): ConfidenceBand {

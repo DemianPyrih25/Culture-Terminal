@@ -6,3 +6,5 @@ export * from "./migrate";
 export * from "./repos/runs";
 export * from "./repos/runEvents";
 export * from "./repos/kv";
+export * from "./repos/qloo";
+export * from "./repos/ledger";

@@ -1,0 +1,78 @@
+{
+  "$comment": "Metros and markets (D28, contracts enums.ts MetroId and MarketId). Names, /search query strings and public coordinates only (D29): locality ids are resolved at runtime and pinned in the database, never stored here. gazetteer: metros with neighbourhood polygons (LIFT, BLOCK, areas). reserved: gazetteer metros planned for a later tier. markets: market ids for locality contexts (SHARE metros, SLATE markets, RANK metro contexts); every gazetteer metro is also a market. query and state_name narrow the /search for a locality; they do not always disambiguate it. pin: deliberate marks a name the probe sweep found ambiguous (two exact localities in the same state for Austin), so its locality is chosen by hand and pinned in kv, never picked automatically. Destination search returns no state for these names, so destination ids need their own resolution path. Coordinates use two decimals; bbox is lon/lat degrees.",
+  "gazetteer": [
+    {
+      "id": "nashville",
+      "label": "Nashville",
+      "state": "TN",
+      "state_name": "Tennessee",
+      "query": "Nashville",
+      "center": { "lat": 36.16, "lon": -86.78 },
+      "bbox": { "min_lon": -87.1, "min_lat": 35.95, "max_lon": -86.5, "max_lat": 36.45 },
+      "gazetteer": { "tier": "P0", "status": "planned", "source": null }
+    },
+    {
+      "id": "austin",
+      "label": "Austin",
+      "state": "TX",
+      "state_name": "Texas",
+      "query": "Austin",
+      "pin": "deliberate",
+      "center": { "lat": 30.27, "lon": -97.74 },
+      "bbox": { "min_lon": -98.1, "min_lat": 30.0, "max_lon": -97.5, "max_lat": 30.6 },
+      "gazetteer": { "tier": "P0", "status": "planned", "source": null }
+    }
+  ],
+  "reserved": [
+    {
+      "id": "nyc",
+      "label": "New York City",
+      "state": "NY",
+      "state_name": "New York",
+      "query": "New York",
+      "center": { "lat": 40.71, "lon": -74.01 },
+      "bbox": { "min_lon": -74.26, "min_lat": 40.49, "max_lon": -73.7, "max_lat": 40.92 },
+      "gazetteer": { "tier": "P1", "status": "reserved", "source": null }
+    }
+  ],
+  "markets": [
+    { "id": "nashville", "label": "Nashville", "state": "TN", "state_name": "Tennessee", "query": "Nashville", "tier": "major" },
+    { "id": "austin", "label": "Austin", "state": "TX", "state_name": "Texas", "query": "Austin", "pin": "deliberate", "tier": "major" },
+    { "id": "nyc", "label": "New York City", "state": "NY", "state_name": "New York", "query": "New York", "tier": "major" },
+    { "id": "los_angeles", "label": "Los Angeles", "state": "CA", "state_name": "California", "query": "Los Angeles", "tier": "major" },
+    { "id": "chicago", "label": "Chicago", "state": "IL", "state_name": "Illinois", "query": "Chicago", "tier": "major" },
+    { "id": "houston", "label": "Houston", "state": "TX", "state_name": "Texas", "query": "Houston", "tier": "major" },
+    { "id": "dallas", "label": "Dallas", "state": "TX", "state_name": "Texas", "query": "Dallas", "tier": "major" },
+    { "id": "atlanta", "label": "Atlanta", "state": "GA", "state_name": "Georgia", "query": "Atlanta", "tier": "major" },
+    { "id": "denver", "label": "Denver", "state": "CO", "state_name": "Colorado", "query": "Denver", "tier": "major" },
+    { "id": "seattle", "label": "Seattle", "state": "WA", "state_name": "Washington", "query": "Seattle", "tier": "major" },
+    { "id": "portland", "label": "Portland", "state": "OR", "state_name": "Oregon", "query": "Portland", "tier": "major" },
+    { "id": "phoenix", "label": "Phoenix", "state": "AZ", "state_name": "Arizona", "query": "Phoenix", "tier": "major" },
+    { "id": "miami", "label": "Miami", "state": "FL", "state_name": "Florida", "query": "Miami", "tier": "major" },
+    { "id": "philadelphia", "label": "Philadelphia", "state": "PA", "state_name": "Pennsylvania", "query": "Philadelphia", "tier": "major" },
+    { "id": "boston", "label": "Boston", "state": "MA", "state_name": "Massachusetts", "query": "Boston", "tier": "major" },
+    { "id": "san_francisco", "label": "San Francisco", "state": "CA", "state_name": "California", "query": "San Francisco", "tier": "major" },
+    { "id": "louisville", "label": "Louisville", "state": "KY", "state_name": "Kentucky", "query": "Louisville", "tier": "secondary" },
+    { "id": "kansas_city", "label": "Kansas City", "state": "MO", "state_name": "Missouri", "query": "Kansas City", "tier": "secondary" },
+    { "id": "indianapolis", "label": "Indianapolis", "state": "IN", "state_name": "Indiana", "query": "Indianapolis", "tier": "secondary" },
+    { "id": "columbus", "label": "Columbus", "state": "OH", "state_name": "Ohio", "query": "Columbus", "tier": "secondary" },
+    { "id": "cincinnati", "label": "Cincinnati", "state": "OH", "state_name": "Ohio", "query": "Cincinnati", "tier": "secondary" },
+    { "id": "charlotte", "label": "Charlotte", "state": "NC", "state_name": "North Carolina", "query": "Charlotte", "tier": "secondary" },
+    { "id": "raleigh", "label": "Raleigh", "state": "NC", "state_name": "North Carolina", "query": "Raleigh", "tier": "secondary" },
+    { "id": "richmond", "label": "Richmond", "state": "VA", "state_name": "Virginia", "query": "Richmond", "tier": "secondary" },
+    { "id": "birmingham", "label": "Birmingham", "state": "AL", "state_name": "Alabama", "query": "Birmingham", "tier": "secondary" },
+    { "id": "knoxville", "label": "Knoxville", "state": "TN", "state_name": "Tennessee", "query": "Knoxville", "tier": "secondary" },
+    { "id": "chattanooga", "label": "Chattanooga", "state": "TN", "state_name": "Tennessee", "query": "Chattanooga", "tier": "secondary" },
+    { "id": "memphis", "label": "Memphis", "state": "TN", "state_name": "Tennessee", "query": "Memphis", "tier": "secondary" },
+    { "id": "oklahoma_city", "label": "Oklahoma City", "state": "OK", "state_name": "Oklahoma", "query": "Oklahoma City", "tier": "secondary" },
+    { "id": "tulsa", "label": "Tulsa", "state": "OK", "state_name": "Oklahoma", "query": "Tulsa", "tier": "secondary" },
+    { "id": "omaha", "label": "Omaha", "state": "NE", "state_name": "Nebraska", "query": "Omaha", "tier": "secondary" },
+    { "id": "des_moines", "label": "Des Moines", "state": "IA", "state_name": "Iowa", "query": "Des Moines", "tier": "secondary" },
+    { "id": "grand_rapids", "label": "Grand Rapids", "state": "MI", "state_name": "Michigan", "query": "Grand Rapids", "tier": "secondary" },
+    { "id": "greenville", "label": "Greenville", "state": "SC", "state_name": "South Carolina", "query": "Greenville", "tier": "secondary" },
+    { "id": "little_rock", "label": "Little Rock", "state": "AR", "state_name": "Arkansas", "query": "Little Rock", "tier": "secondary" },
+    { "id": "salt_lake_city", "label": "Salt Lake City", "state": "UT", "state_name": "Utah", "query": "Salt Lake City", "tier": "secondary" },
+    { "id": "boise", "label": "Boise", "state": "ID", "state_name": "Idaho", "query": "Boise", "tier": "secondary" },
+    { "id": "spokane", "label": "Spokane", "state": "WA", "state_name": "Washington", "query": "Spokane", "tier": "secondary" }
+  ]
+}

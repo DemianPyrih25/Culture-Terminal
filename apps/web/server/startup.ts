@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { closeDb, isConnectionError, migrateUrl, resolveDatabaseUrl } from "@ct/db";
 import { shutdownGraceMsFromEnv } from "./config";
-import { getRunManager } from "./container";
+import { getRunManager, peekQlooClient } from "./container";
 import { log } from "./log";
 
 const STARTED = "__ctServerStarted";
@@ -13,6 +13,11 @@ type GlobalWithFlags = typeof globalThis & { [STARTED]?: boolean; [MIGRATED]?: b
 /** Background migration retries after startup gave up: 5 s, doubling, then every minute. */
 const RETRY_FIRST_MS = 5000;
 const RETRY_MAX_MS = 60_000;
+/**
+ * SIGTERM waits at most this long for the Qloo client's background writes. With the drain
+ * (SHUTDOWN_GRACE_MS plus an agent's stop grace) and closing the pool, it stays inside Railway's 200 s.
+ */
+const QLOO_FLUSH_MS = 3000;
 
 /**
  * Whether this process may serve requests that touch the schema: its migrations ran, or
@@ -106,10 +111,32 @@ function afterMigrations(): void {
 }
 
 /**
+ * Waits for the Qloo client's background writes (the quota snapshot, call-log rows, shared cache
+ * entries and counters), at most QLOO_FLUSH_MS. A process that never made a client has none to flush.
+ */
+async function flushQloo(): Promise<void> {
+  const qloo = peekQlooClient();
+  if (!qloo) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<"deadline">((resolve) => {
+    timer = setTimeout(() => resolve("deadline"), QLOO_FLUSH_MS);
+  });
+  try {
+    const outcome = await Promise.race([qloo.flush().then(() => "flushed" as const), deadline]);
+    if (outcome === "deadline") log.warn({ waitedMs: QLOO_FLUSH_MS }, "SIGTERM: Qloo writes still pending; going on without them");
+  } catch (err) {
+    log.warn({ err }, "SIGTERM: the Qloo flush failed");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * SIGTERM (a Railway redeploy): refuse new runs at once, give active runs the grace period, then
- * mark the rest incomplete. With NEXT_MANUAL_SIG_HANDLE set, Next.js leaves the signal to us and we
- * exit once the drain is done; otherwise Next.js exits when its open connections close, and any run
- * cut short there is finalized as an orphan by the next viewer's database tail.
+ * mark the rest incomplete, and let the Qloo client finish its writes. With NEXT_MANUAL_SIG_HANDLE
+ * set, Next.js leaves the signal to us and we close the pool and exit after that; otherwise Next.js
+ * exits when its open connections close, and any run cut short there is finalized as an orphan by
+ * the next viewer's database tail.
  */
 export function installShutdownHandler(): void {
   process.once("SIGTERM", () => {
@@ -123,6 +150,8 @@ export function installShutdownHandler(): void {
       } catch (err) {
         log.error({ err }, "drain failed");
       }
+      // Before the pool closes: the quota snapshot is otherwise written at most every 5 s.
+      await flushQloo();
       if (process.env.NEXT_MANUAL_SIG_HANDLE) {
         await closeDb().catch(() => undefined);
         process.exit(0);

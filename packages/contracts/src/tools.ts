@@ -48,7 +48,9 @@ const T = TagRefSchema.describe("Tag ref from find_tags or the curated map, e.g.
 const triggerFindingId = FindingIdSchema.nullable().describe(
   "The finding (F#) that motivates this call. Null in turn 1; required for every follow-up in turn 2.",
 );
-const stepId = StepIdSchema.nullable().describe("The plan step (S#) this call carries out, or null for a follow-up.");
+const stepId = StepIdSchema.nullable().describe(
+  "The plan step (S#) this call carries out, or null for an unplanned follow-up.",
+);
 
 /** Fields every skill tool carries so the trace can link calls to plan steps and pivots to findings. */
 const callMeta = { trigger_finding_id: triggerFindingId, step_id: stepId };
@@ -286,10 +288,11 @@ export const ANALYST_TOOLS = {
     input: SubmitPlanInput,
     structural: SubmitPlanInputShape,
     description:
-      "Record your plan before any data reaches you. Call it in turn 1, in the same response as your wave-1 tools. " +
-      "Write two to four falsifiable hypotheses from your own knowledge: they become the Hypothesis Scorecard and are " +
-      "later judged CONFIRMED, REFUTED or INCONCLUSIVE against cited metrics. Then list the steps, one tool each. " +
-      "Costs no Qloo calls. Length and count limits in the field descriptions are enforced server-side.",
+      "Record your plan before any data reaches you. Call it once, in turn 1, in the same response as your wave-1 " +
+      "tools. Write two to four falsifiable hypotheses from your own knowledge, each naming the tool and the " +
+      "measurement that decide it: they become the Hypothesis Scorecard and are later judged CONFIRMED, REFUTED or " +
+      "INCONCLUSIVE against cited metrics, never rewritten. Then list the steps, one tool each. Costs no Qloo calls. " +
+      "Length and count limits in the field descriptions are enforced server-side.",
   }),
 
   resolve_entities: defineTool({
@@ -299,11 +302,13 @@ export const ANALYST_TOOLS = {
     endpoints: ["/search"],
     input: ResolveEntitiesInput,
     description:
-      "Resolve names that are not yet in the registry table to entity refs (R#). Costs 1 Qloo call per uncached " +
-      "mention (/search, top 5), 0 when cached. Returns per mention: the ref, the match class (exact, ambiguous, " +
-      "inexact, not_found) and up to 5 alternatives. Only an exact name match of the right type gets a ref; nothing " +
-      "is auto-substituted, so read the match class before relying on a name. Persons resolve only when they are " +
-      "public figures. For type place, give the metro to search in.",
+      "Resolve names that are not yet in the registry table to entity refs (R#); the resolution gate has already " +
+      "resolved the question's own names. Costs 1 Qloo call per uncached mention (/search, top 5), 0 when cached. " +
+      "Returns per mention: the ref, the match class (exact, ambiguous, inexact, not_found) and up to 5 alternatives. " +
+      "Only an exact name match of the right type gets a ref; nothing is auto-substituted, and alternatives are not " +
+      "the entity, so read the match class before relying on a name. Persons resolve only when they are public " +
+      "figures. For type place, give the metro to search in. Locality contexts take market and metro ids; resolve " +
+      "a city only as a destination to rank.",
   }),
 
   find_tags: defineTool({
@@ -329,11 +334,12 @@ export const ANALYST_TOOLS = {
       "Score an exact candidate set on one scale under one to three contexts. Costs 1 Qloo call per context. " +
       "Contexts: none (needs signal_entities or signal_tags), site (an area), city (a gazetteer metro), metro (a " +
       "market), audience, age. One context returns a Ranked table with FIT percentiles; two or more return a Slope of " +
-      "rank shifts, e.g. Tenant Fit uses [site, city]. Scores are per call: compare ranks and percentiles, never raw " +
-      "affinity across calls. Qloo may drop candidates in a context, and candidates tied at the row floor are not " +
-      "scored. Location contexts compress scores, so read ranks. Ranks brands under any context; persons only " +
-      "under site, city or metro contexts with no signal entities or tags; destinations only under a none context " +
-      "with signal_entities and no signal_tags. Other types cannot be ranked.",
+      "rank shifts; Tenant Fit uses [site, city] and is computed by code. Scores are per call: compare ranks and " +
+      "percentiles, never raw affinity across calls. Qloo may drop candidates in a context, and candidates tied at " +
+      "the row floor are not scored. Location contexts compress scores, so read ranks. Ranks brands under any " +
+      "context; persons only under site, city or metro contexts with no signal entities or tags; destinations only " +
+      "under a none context with signal_entities and no signal_tags. Artists, podcasts, TV shows, movies and places " +
+      "cannot be ranked.",
   }),
 
   peer_landscape: defineTool({
@@ -362,8 +368,8 @@ export const ANALYST_TOOLS = {
       "Costs 1 Qloo call per context. Returns a Matrix of within-call percentiles, youth tilt (youngest two buckets " +
       "minus oldest two) and metros won. Ranks hold only within this set and context. A metro context is Qloo's " +
       "locality signal, not residence or sales, and compresses scores. Audiences must come from this desk's " +
-      "AUDIENCES list. Takes brand sets under any context and person sets under metro contexts only; other types " +
-      "cannot be shared.",
+      "AUDIENCES list. Takes brand sets under any context and person sets under metro contexts only; artists and " +
+      "other types cannot be shared.",
   }),
 
   audience_dna: defineTool({
@@ -375,8 +381,9 @@ export const ANALYST_TOOLS = {
     description:
       "Audience DNA: age and gender affinity indices for 1–12 entities. Costs 1 Qloo call (one demographics batch); " +
       "facet tags come from tags already in the registry, grouped by namespace. With compare_with, the two subjects " +
-      "are mirrored as a butterfly with a-only and b-only tags. Indices are relative to the average audience, not " +
-      "shares of customers; gender is binary in the source; an entity without a demographics block is not measured.",
+      "are mirrored as a butterfly with a-only and b-only tags, which are qualitative presence, not measured " +
+      "differences. Indices are relative to the average audience, not shares of customers; gender is binary in the " +
+      "source; an entity without a demographics block is not measured.",
   }),
 
   momentum: defineTool({
@@ -459,7 +466,8 @@ export const ANALYST_TOOLS = {
       "Sponsor Slate for an artist or person: the best-fitting brand in each sponsor category. Costs 1 Qloo call per " +
       "category, 1 one-scale scoring call (the top two per category plus your shortlist) and 1 per market. Returns a " +
       "Slate (best fit and runner-up per category, FIT, popularity, UNDER-THE-RADAR flag, top markets), a Quadrant " +
-      "and a market Slope. Taste fit only: Qloo has no fee, availability, exclusivity or ROI data.",
+      "and a market Slope. Taste fit only: Qloo has no fee, availability, exclusivity or ROI data, and one brand per " +
+      "category is a slate rule, not a contract.",
   }),
 
   submit_report: defineTool({
@@ -471,11 +479,14 @@ export const ANALYST_TOOLS = {
     structural: ReportDraftShape,
     description:
       "Submit the research note once the hypotheses are resolved or the budget is spent; in turn 3 it is the only " +
-      "allowed call. Cite numbers only as {{M#}} metric tokens and [E#] evidence tokens: no decimals or percentages " +
-      "outside tokens. Each argument keeps qloo_fact (QLOO DATA) apart from our_read (OUR READ) and cites at least " +
-      "one metric; each recommendation cites arguments; give a verdict for every planned hypothesis. No buy/sell " +
-      "advice, price targets, causal claims or statements about individuals. Limits in the field descriptions are " +
-      "enforced by the CHECKER. Costs no Qloo calls.",
+      "allowed call. Cite numbers only as {{M#}} metric tokens and [E#] evidence tokens, one id per bracket: no " +
+      "decimals, percentages or integers above ten outside tokens (years, age-bucket labels and digits in registered " +
+      "names are allowed), and every STALE metric sits beside {{WINDOW}}. " +
+      "Each argument keeps qloo_fact (QLOO DATA) apart from our_read (OUR READ) and cites at least one metric; each " +
+      "recommendation cites arguments; give a verdict for every planned hypothesis and one to three bear-case items. " +
+      "No buy/sell advice, price targets, causal claims or statements about individuals. Limits in the field " +
+      "descriptions are enforced by the CHECKER; if it rejects the draft, resubmit the complete corrected draft " +
+      "once. Costs no Qloo calls.",
   }),
 } satisfies { [N in ToolName]: ToolSpec<N> };
 

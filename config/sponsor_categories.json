@@ -1,0 +1,86 @@
+{
+  "$comment": "The ten sponsor categories of SPEC §5.3 S10, keyed by the contracts SponsorCategory enum; a run uses at most six. Names, query strings and public taxonomy URNs only (D29). semantic_query is the /v2/tags semantic search (filter.parents.types=urn:entity:brand) that finds each category's tags at runtime; probe gate G14 matched it for the eight categories marked G14, telecom and fintech were not probed. G14 returned mostly descriptive *:qloo:* tags, which are not taste signals, and whether they work as filter.tags on brand insights is untested (PROBE_FINDINGS, Not covered), so no category has a verified taxonomy tag yet: tags stays empty until a probe verifies one. aliases help CLERK and the command grammar map question words to a category.",
+  "categories": {
+    "beer": {
+      "label": "Beer",
+      "semantic_query": "beer",
+      "probe": "G14",
+      "aliases": ["beer", "lager", "craft beer", "brewery", "brewer"],
+      "tags": [],
+      "tag_status": "unverified"
+    },
+    "spirits": {
+      "label": "Spirits",
+      "semantic_query": "whiskey",
+      "probe": "G14",
+      "aliases": ["spirits", "whiskey", "whisky", "bourbon", "tequila", "vodka", "liquor"],
+      "tags": [],
+      "tag_status": "unverified",
+      "note": "G14 returned a genre:brand taxonomy tag for this query; it is resolved at runtime and has not been tested as a filter."
+    },
+    "rtd_seltzer": {
+      "label": "RTD and hard seltzer",
+      "semantic_query": "hard seltzer",
+      "probe": "G14",
+      "aliases": ["hard seltzer", "seltzer", "canned cocktail", "ready to drink", "rtd"],
+      "tags": [],
+      "tag_status": "unverified"
+    },
+    "outdoor_sporting_retail": {
+      "label": "Outdoor and sporting retail",
+      "semantic_query": "outdoor gear",
+      "probe": "G14",
+      "aliases": ["outdoor gear", "outdoor retail", "sporting goods", "camping gear", "hunting and fishing"],
+      "tags": [],
+      "tag_status": "unverified"
+    },
+    "apparel_footwear": {
+      "label": "Apparel and footwear",
+      "semantic_query": "boots and footwear",
+      "probe": "G14",
+      "aliases": ["apparel", "clothing", "footwear", "boots", "sneakers", "denim"],
+      "tags": [],
+      "tag_status": "unverified"
+    },
+    "qsr": {
+      "label": "Quick-service restaurants",
+      "semantic_query": "fast food",
+      "probe": "G14",
+      "aliases": ["fast food", "quick service", "qsr", "burger chain", "fast casual"],
+      "tags": [],
+      "tag_status": "unverified"
+    },
+    "energy_drinks": {
+      "label": "Energy drinks",
+      "semantic_query": "energy drink",
+      "probe": "G14",
+      "aliases": ["energy drink", "energy drinks", "functional energy"],
+      "tags": [],
+      "tag_status": "unverified"
+    },
+    "auto": {
+      "label": "Auto",
+      "semantic_query": "pickup trucks",
+      "probe": "G14",
+      "aliases": ["auto", "automotive", "cars", "pickup trucks", "trucks", "car brand"],
+      "tags": [],
+      "tag_status": "unverified"
+    },
+    "telecom": {
+      "label": "Telecom",
+      "semantic_query": "wireless carrier",
+      "probe": null,
+      "aliases": ["telecom", "wireless carrier", "mobile carrier", "phone plan", "mobile network"],
+      "tags": [],
+      "tag_status": "unverified"
+    },
+    "fintech": {
+      "label": "Fintech",
+      "semantic_query": "mobile payments app",
+      "probe": null,
+      "aliases": ["fintech", "payments app", "mobile payments", "banking app", "credit card"],
+      "tags": [],
+      "tag_status": "unverified"
+    }
+  }
+}

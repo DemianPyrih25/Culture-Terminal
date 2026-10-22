@@ -146,6 +146,8 @@ export const evidence = pgTable(
     provenance: jsonb("provenance").$type<unknown>(),
     summary: text("summary"),
     flags: textArray("flags"),
+    // Results the quality gate dropped before any metric was computed.
+    qualityGateDrops: integer("quality_gate_drops").notNull().default(0),
   },
   (t) => [primaryKey({ name: "evidence_pk", columns: [t.runId, t.id] })],
 );
@@ -171,6 +173,12 @@ export const metrics = pgTable(
     evidenceIds: textArray("evidence_ids"),
     n: integer("n"),
     conf: doublePrecision("conf"),
+    // NoValueReason; set exactly when the badge is UNAVAILABLE.
+    reason: text("reason"),
+    // Comparator (CITY | PEERS | BASELINE | WITHIN_CALL), or null.
+    comparator: text("comparator"),
+    // TrendWindow {start, end} of a STALE metric (CHECKER V8), or null.
+    window: jsonb("window").$type<unknown>(),
   },
   (t) => [primaryKey({ name: "metrics_pk", columns: [t.runId, t.id] })],
 );

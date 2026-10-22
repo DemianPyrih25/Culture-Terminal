@@ -1,2 +1,24 @@
-// @ct/qloo public API.
+// @ct/qloo public API. Server-only: the only way the app talks to Qloo (PLAN §5.1).
 export * from "./allowlist";
+export * from "./transport-types";
+export * from "./mock";
+export * from "./errors";
+export * from "./audiences";
+export * from "./validate";
+export * from "./canonical";
+export { formatNumber } from "./geometry";
+export * from "./ttl";
+export * from "./http-transport";
+export * from "./limiter";
+export * from "./store";
+export * from "./pg-store";
+export * from "./quota";
+export * from "./budget";
+export { type CacheEntry, L1_MAX_BYTES, L1_MAX_ENTRIES, L1_TTL_MS } from "./cache";
+export * from "./schemas";
+export * from "./records";
+export * from "./client";
+export * from "./env";
+export * from "./logger";
+export * from "./trim";
+export * from "./provenance";

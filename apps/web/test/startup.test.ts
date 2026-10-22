@@ -1,7 +1,8 @@
 // Startup migrations against a database that is not there yet: the server keeps serving, keeps
-// retrying in the background and reports 503 from /api/health until the schema is in place.
+// retrying in the background and reports 503 from /api/health until the schema is in place. And
+// the SIGTERM handler's order: drain, flush the Qloo client's writes, close the pool, exit.
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -9,6 +10,7 @@ const fake = vi.hoisted(() => ({
   migrateUrl: vi.fn<() => Promise<void>>(),
   pingDb: vi.fn(async () => true),
   purgeRuns: vi.fn(async () => 0),
+  closeDb: vi.fn(async () => {}),
 }));
 
 vi.mock("@ct/db", async (importOriginal) => ({
@@ -17,9 +19,10 @@ vi.mock("@ct/db", async (importOriginal) => ({
   migrateUrl: fake.migrateUrl,
   pingDb: fake.pingDb,
   purgeRuns: fake.purgeRuns,
+  closeDb: fake.closeDb,
 }));
 
-const { migrationsApplied, startServer } = await import("../server/startup");
+const { installShutdownHandler, migrationsApplied, startServer } = await import("../server/startup");
 const { health } = await import("../server/http");
 
 const refused = () => Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:5433"), { code: "ECONNREFUSED" });
@@ -112,5 +115,53 @@ describe("startServer migrations", () => {
     expect(fake.migrateUrl).not.toHaveBeenCalled();
     expect(migrationsApplied()).toBe(true);
     expect(await healthBody()).toMatchObject({ status: 200, body: { ok: true, migrations: true } });
+  });
+});
+
+describe("SIGTERM", () => {
+  const steps: string[] = [];
+  let exit: MockInstance<typeof process.exit>;
+
+  beforeEach(() => {
+    steps.length = 0;
+    vi.stubEnv("NEXT_MANUAL_SIG_HANDLE", "true");
+    fake.closeDb.mockImplementation(async () => void steps.push("closeDb"));
+    exit = vi.spyOn(process, "exit").mockImplementation((() => void steps.push("exit")) as never);
+  });
+
+  afterEach(() => {
+    exit.mockRestore();
+    fake.closeDb.mockReset();
+  });
+
+  /** Installs the handler and fires it, as a redeploy does, with this process container. */
+  function sigterm(container: Record<string, unknown>): void {
+    (globalThis as Record<string, unknown>).__ctContainer = container;
+    installShutdownHandler();
+    const handler = process.listeners("SIGTERM").find((l) => !sigtermBefore.includes(l as (typeof sigtermBefore)[number]));
+    if (!handler) throw new Error("no SIGTERM handler was installed");
+    handler("SIGTERM");
+  }
+
+  it("flushes the Qloo client's background writes after the drain and before the pool closes", async () => {
+    sigterm({ qloo: { flush: async () => void steps.push("flush") } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(steps).toEqual(["flush", "closeDb", "exit"]);
+  });
+
+  it("gives up on a flush that hangs after three seconds", async () => {
+    sigterm({ qloo: { flush: () => new Promise<void>(() => {}) } });
+    await vi.advanceTimersByTimeAsync(2900);
+    expect(steps).toEqual([]);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(steps).toEqual(["closeDb", "exit"]);
+  });
+
+  it("creates no Qloo client just to flush it", async () => {
+    const container: Record<string, unknown> = {};
+    sigterm(container);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(steps).toEqual(["closeDb", "exit"]);
+    expect(container.qloo).toBeUndefined();
   });
 });

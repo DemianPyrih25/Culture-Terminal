@@ -1,0 +1,96 @@
+{
+  "$comment": "Curated concept map for find_tags (scope place) and the geo_lift baseline (PLAN §4.3, §5.3 S6; PROBE_FINDINGS G6, G10, G14). Names, query strings and public taxonomy URNs only (D29). Only taxonomy tags (urn:tag:genre:*, urn:tag:category:*) act as signals; descriptive *:qloo:* tags gave flat or empty results, so none appear here. status: verified = exercised live by the named probe gate; research = named as working during research, not re-checked by a gate; unverified = a candidate URN that must be verified live before it is served. verified_as records the use the gate exercised: heatmap_signal (G6, the restaurant baseline heatmap) or place_filter (G10, places filter.tags). No concept tag is yet verified as a heatmap concept signal (PROBE_FINDINGS, Not covered): that probe must pass before geo_lift takes these tags as concept_tags. find_tags serves verified and research tags at zero cost and looks up unverified concepts live with semantic_query (/v2/tags, filter.parents.types=urn:entity:place) until a probe verifies them.",
+  "baseline": {
+    "urn": "urn:tag:genre:place:restaurant",
+    "status": "verified",
+    "verified_by": "G6",
+    "verified_as": "heatmap_signal",
+    "use": "geo_lift baseline heatmap, pinned per metro"
+  },
+  "categories": [
+    {
+      "key": "restaurant",
+      "label": "Restaurant",
+      "aliases": ["restaurant", "eatery", "dining"],
+      "semantic_query": "restaurant",
+      "tags": [{ "urn": "urn:tag:genre:place:restaurant", "status": "verified", "verified_by": "G6", "verified_as": "heatmap_signal" }]
+    },
+    {
+      "key": "cafe",
+      "label": "Cafe and coffee shop",
+      "aliases": ["cafe", "coffee shop", "coffee bar", "espresso bar", "run-club coffee bar"],
+      "semantic_query": "coffee shop",
+      "tags": [{ "urn": "urn:tag:category:place:cafe", "status": "verified", "verified_by": "G10", "verified_as": "place_filter" }]
+    },
+    {
+      "key": "bar",
+      "label": "Bar",
+      "aliases": ["bar", "cocktail bar", "pub", "tavern"],
+      "semantic_query": "bar",
+      "tags": [{ "urn": "urn:tag:genre:place:restaurant:bar", "status": "research", "verified_by": null }]
+    },
+    {
+      "key": "lounge",
+      "label": "Lounge",
+      "aliases": ["lounge", "listening lounge", "listening bar"],
+      "semantic_query": "lounge",
+      "tags": [{ "urn": "urn:tag:genre:place:lounge", "status": "research", "verified_by": null }]
+    },
+    {
+      "key": "wine_bar",
+      "label": "Wine bar",
+      "aliases": ["wine bar", "natural-wine bar", "natural wine bar"],
+      "semantic_query": "natural wine bar",
+      "tags": [{ "urn": "urn:tag:category:place:wine_bar", "status": "unverified", "verified_by": null }]
+    },
+    {
+      "key": "record_store",
+      "label": "Record store",
+      "aliases": ["record store", "vinyl shop", "vinyl record store", "record shop"],
+      "semantic_query": "vinyl record store",
+      "tags": [{ "urn": "urn:tag:category:place:record_store", "status": "unverified", "verified_by": null }]
+    },
+    {
+      "key": "ramen",
+      "label": "Ramen restaurant",
+      "aliases": ["ramen", "ramen counter", "ramen shop", "late-night ramen counter"],
+      "semantic_query": "ramen",
+      "tags": [{ "urn": "urn:tag:category:place:ramen_restaurant", "status": "unverified", "verified_by": null }]
+    },
+    {
+      "key": "live_music_venue",
+      "label": "Live music venue",
+      "aliases": ["live music venue", "music venue", "listening room", "concert venue"],
+      "semantic_query": "live music venue",
+      "tags": [{ "urn": "urn:tag:category:place:live_music_venue", "status": "unverified", "verified_by": null }]
+    },
+    {
+      "key": "bakery",
+      "label": "Bakery",
+      "aliases": ["bakery", "pastry shop", "bread bakery"],
+      "semantic_query": "bakery",
+      "tags": [{ "urn": "urn:tag:category:place:bakery", "status": "unverified", "verified_by": null }]
+    },
+    {
+      "key": "brewery",
+      "label": "Brewery and taproom",
+      "aliases": ["brewery", "taproom", "brewpub", "craft beer bar"],
+      "semantic_query": "brewery taproom",
+      "tags": [{ "urn": "urn:tag:category:place:brewery", "status": "unverified", "verified_by": null }]
+    },
+    {
+      "key": "bookstore",
+      "label": "Bookstore",
+      "aliases": ["bookstore", "book shop", "bookshop"],
+      "semantic_query": "independent bookstore",
+      "tags": [{ "urn": "urn:tag:category:place:book_store", "status": "unverified", "verified_by": null }]
+    },
+    {
+      "key": "clothing_store",
+      "label": "Clothing boutique",
+      "aliases": ["clothing store", "boutique", "vintage clothing", "apparel shop"],
+      "semantic_query": "clothing boutique",
+      "tags": [{ "urn": "urn:tag:category:place:clothing_store", "status": "unverified", "verified_by": null }]
+    }
+  ]
+}

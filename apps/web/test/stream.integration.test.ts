@@ -220,7 +220,7 @@ describe.skipIf(!available)("fake run streaming against Postgres", () => {
   }, 30_000);
 
   it("refuses runs beyond the per-process cap", async () => {
-    const { runs } = setup({ fakeRunSeconds: 60, maxActive: 1 });
+    const { runs } = setup({ fakeRunSeconds: 60, fakeMaxActive: 1 });
     await runs.startFakeRun();
     await expect(runs.startFakeRun()).rejects.toSatisfy((err) => runManagerErrorCode(err) === "busy");
     await runs.drain(0);
@@ -235,13 +235,15 @@ describe.skipIf(!available)("fake run streaming against Postgres", () => {
       await runs.whenDone(runId);
     }
     expect(runs.activeCount()).toBe(0);
-    await expect(runs.startFakeRun()).rejects.toSatisfy((err) => runManagerErrorCode(err) === "busy");
+    await expect(runs.startFakeRun()).rejects.toSatisfy((err) => runManagerErrorCode(err) === "limited");
     expect(runs.activeCount()).toBe(0);
 
+    // 429 without an automatic retry: the cap clears within the hour, not in seconds.
     const http = await import("../server/http");
     const refused = await withContainer({ db, bus, runs }, () => http.startRun());
     expect(refused.status).toBe(429);
-    expect(await refused.json()).toMatchObject({ retry: true });
+    expect(await refused.json()).toMatchObject({ retry: false });
+    expect(refused.headers.get("retry-after")).toBe("3600");
   }, 30_000);
 
   it("admits concurrent starts one at a time, so they cannot overshoot the hourly cap", async () => {
@@ -249,7 +251,7 @@ describe.skipIf(!available)("fake run streaming against Postgres", () => {
     const { runs } = setup({ fakeRunSeconds: 60, hourlyCap: existing + 3 });
     const results = await Promise.allSettled(Array.from({ length: 8 }, () => runs.startFakeRun()));
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(3);
-    for (const r of results) if (r.status === "rejected") expect(runManagerErrorCode(r.reason)).toBe("busy");
+    for (const r of results) if (r.status === "rejected") expect(runManagerErrorCode(r.reason)).toBe("limited");
     await runs.drain(0);
   }, 30_000);
 
@@ -345,6 +347,35 @@ describe.skipIf(!available)("fake run streaming against Postgres", () => {
     expect(await getRun(db, runId)).toMatchObject({ status: "completed", wallMs: 4000, error: null });
     expect(reduceRunEvents(runId, events)).toMatchObject({ lastSeq: 4, status: "completed" });
     expect(await runs.finalizeOrphan(runId)).toBe(false);
+  }, 30_000);
+
+  it("repairs the status when a replay delivers a stored run.end whose row still says running, once that end is old", async () => {
+    const { db, runs } = setup();
+    const viewer: RunStreamDeps = {
+      db,
+      bus: new EventBus(),
+      isLive: () => false,
+      finalizeOrphan: (id) => runs.finalizeOrphan(id),
+    };
+    const withEnd = async (endedAt: number) => {
+      const runId = await seedOrphan(db);
+      const end = stampEvent(
+        { type: "run.end", status: "completed", elapsedMs: 4000, reason: null },
+        { seq: 4, ts: new Date(endedAt).toISOString(), runId },
+      );
+      await appendEvents(db, runId, [toEventRow(end)]);
+      return runId;
+    };
+
+    // A refresh replays from the start and stops at run.end: the replay itself must repair the row.
+    const stale = await withEnd(Date.now() - 9 * 60_000);
+    expect(await collect(viewer, stale, 0, { stream: ORPHAN_STREAM })).toHaveLength(4);
+    expect(await getRun(db, stale)).toMatchObject({ status: "completed", wallMs: 4000, error: null, report: null });
+
+    // Just ended: its driver may still be writing the status, so the replay leaves the row alone.
+    const fresh = await withEnd(Date.now());
+    expect(await collect(viewer, fresh, 0, { stream: ORPHAN_STREAM })).toHaveLength(4);
+    expect((await getRun(db, fresh))?.status).toBe("running");
   }, 30_000);
 
   it("stops a stalled driver that lost its next seq to a finalizer, without publishing past the stored run.end", async () => {

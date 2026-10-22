@@ -271,6 +271,15 @@ export interface DigestContext {
   registry: Registry;
 }
 
+/**
+ * The accepted plan's steps and the step ids already carried out. In turn 2 a call without a trigger
+ * is a planned step only if its step_id names a step that has not run and it calls that step's tool.
+ */
+export interface PlanSteps {
+  steps: readonly { id: string; tool: string }[];
+  run: Set<string>;
+}
+
 // Digest builder ---------------------------------------------------------------------------------------
 
 class DigestBuilder {
@@ -1068,7 +1077,7 @@ function runContextText(registry: Registry): string {
 export const NUDGE_PLAN = "Call submit_plan first, together with any wave-1 tools.";
 export const NUDGE_REPORT = "Your turn ended without submit_report. Call submit_report now; no further tool calls are available.";
 export const TURN2_GUIDE =
-  "TURN 2: follow up only on findings that could change the signal, citing trigger_finding_id on every call (up to 8 Qloo calls), or call submit_report if the hypotheses are resolved.";
+  "TURN 2: run planned steps that needed wave-1 results (their own tool and step_id, no trigger); every other call cites the finding behind it as trigger_finding_id (up to 8 Qloo calls in all), or call submit_report if the hypotheses are resolved.";
 export const TURN3_NOTICE = "TURN 3: follow-ups are complete. Call submit_report now; it is the only call left.";
 
 export type Phase = "wave1" | "followup" | "final";
@@ -1098,12 +1107,14 @@ export function collectRefs(value: unknown, out: string[] = []): string[] {
 /**
  * The tool_result for one skill call, validated the way the agent will validate it: known tool,
  * zod input (eager streaming means the server did not validate), known refs, and a cited finding
- * for every follow-up. Submit tools are handled by the run loop, never here.
+ * for every follow-up that is not a planned step. Submit tools are handled by the run loop, never here.
+ * `plan` records the step ids each accepted call carries out.
  */
 export function answerSkillCall(
   use: Anthropic.Beta.BetaToolUseBlock,
   phase: Phase,
   ctx: DigestContext,
+  plan: PlanSteps | null = null,
 ): { result: Anthropic.Beta.BetaToolResultBlockParam; ok: boolean } {
   const fail = (content: string) => ({ result: errorResult(use, content), ok: false });
   if (!isToolName(use.name)) return fail(`UNKNOWN_TOOL: ${use.name} is not an available tool.`);
@@ -1118,14 +1129,26 @@ export function answerSkillCall(
   const meta = parsed.input as { trigger_finding_id: FindingId | null; step_id: StepId | null };
   if (phase === "followup") {
     if (meta.trigger_finding_id === null) {
-      return fail("TRIGGER_REQUIRED: every follow-up cites the finding (F#) that motivates it as trigger_finding_id.");
-    }
-    if (!ctx.ledger.findings.has(meta.trigger_finding_id)) {
+      const refusal = notPlannedStep(name, meta.step_id, plan);
+      if (refusal !== null) return fail(`TRIGGER_REQUIRED: ${refusal}`);
+    } else if (!ctx.ledger.findings.has(meta.trigger_finding_id)) {
       return fail(`UNKNOWN_FINDING: ${meta.trigger_finding_id} was not issued in this run.`);
     }
   }
+  if (meta.step_id !== null) plan?.run.add(meta.step_id);
   const digest = scriptedDigest(skill.data, parsed.input, ctx);
   return { result: { type: "tool_result", tool_use_id: use.id, content: wrapQlooData(digest, { tool: name, step: meta.step_id }) }, ok: true };
+}
+
+/** Mirrors the agent loop: why an untriggered turn-2 call is not a planned step, or null when it is one. */
+function notPlannedStep(tool: ToolName, step: StepId | null, plan: PlanSteps | null): string | null {
+  const cite = "cites the finding (F#) that motivates it as trigger_finding_id";
+  if (step === null) return `every turn-2 call ${cite}, except a plan step that has not run yet, named by its step_id.`;
+  const planned = plan?.steps.find((s) => s.id === step);
+  if (planned === undefined) return `${step} is not a step of the plan; a follow-up ${cite}.`;
+  if (plan?.run.has(step)) return `${step} has already run; running it again is a follow-up that ${cite}.`;
+  if (planned.tool !== tool) return `${step} plans ${planned.tool}, not ${tool}; a follow-up ${cite}.`;
+  return null;
 }
 
 /** For the dry run and the tests: one representative input per skill, using the scenario's refs. */

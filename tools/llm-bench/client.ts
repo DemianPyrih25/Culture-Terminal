@@ -72,7 +72,7 @@ export function describeError(err: unknown): ErrorInfo {
   if (err instanceof Anthropic.UnprocessableEntityError) return info("unprocessable", "config", false);
   if (err instanceof Anthropic.RateLimitError) return info("rate_limited", "run", false);
   if (err instanceof Anthropic.ConflictError) return info("conflict", "run", false);
-  if (err instanceof Anthropic.InternalServerError) return info("server_error", "run", true);
+  if (err instanceof Anthropic.InternalServerError) return info("server_error", "run", false);
   if (err instanceof Anthropic.APIConnectionTimeoutError) return info("timeout", "run", true);
   if (err instanceof Anthropic.APIConnectionError) return info("connection", "run", true);
   if (err instanceof Anthropic.APIUserAbortError) return info("aborted", "run", true);

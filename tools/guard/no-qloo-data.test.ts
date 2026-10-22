@@ -87,13 +87,45 @@ describe("uuid rule", () => {
     expect(scanText("src/a.ts", `0${fakeUuid("d")}0`)).toEqual([]);
   });
 
-  it.each(["%22", "%2C", "%3a", "%20", "%2F", "%5B%22", "\\x22", "\\u0022"])("flags a UUID right after the escape %s", (prefix) => {
+  it.each([
+    "%22",
+    "%2C",
+    "%3a",
+    "%20",
+    "%2F",
+    "%5B%22",
+    "%252C",
+    "%253D",
+    "%25252C",
+    "%u201C",
+    "%25u201c",
+    "\\x22",
+    "\\u0022",
+    "\\u201c",
+    "\\u2014",
+    "\\uFEFF",
+  ])("flags a UUID right after the escape %s", (prefix) => {
     expect(rules(scanText("packages/qloo/test/fixtures/a.json", `?q=${prefix}${fakeUuid("c")}`))).toEqual(["uuid"]);
+  });
+
+  it("still ignores a UUID-shaped slice of a hex run that no escape ends", () => {
+    for (const prefix of ["ab12", "%2", "%u20", "\\u20", "x0"]) {
+      expect(scanText("src/a.ts", `${prefix}${fakeUuid("d")}`), prefix).toEqual([]);
+    }
   });
 
   it("flags every UUID in a URL-encoded list", () => {
     const text = `entities=${fakeUuid("a")}%2C${fakeUuid("b")}`;
     expect(rules(scanText("docs/QLOO_USAGE.md", text))).toEqual(["uuid", "uuid"]);
+  });
+
+  it("flags UUIDs in a URL encoded twice, inside another URL", () => {
+    const inner = `https%3A%2F%2Fapi.example.test%2Fv2%2Finsights%3Fsignal.interests.entities%253D${fakeUuid("a")}%252C${fakeUuid("b")}`;
+    expect(rules(scanText("docs/README.md", `https://viewer.example.test/?u=${inner}`))).toEqual(["uuid", "uuid"]);
+  });
+
+  it("flags a UUID between escaped curly quotes, as JSON with escaped non-ASCII writes them", () => {
+    expect(rules(scanText("config/notes.json", `{"note": "\\u201c${fakeUuid("e")}\\u201d"}`))).toEqual(["uuid"]);
   });
 
   it("exempts **/test/synthetic/** fixtures", () => {

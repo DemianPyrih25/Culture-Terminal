@@ -67,6 +67,7 @@ export const evidence: Evidence = {
   requestIds: ["req-fixture-1", "req-fixture-2"],
   cached: false,
   fetchedAt: ts(7),
+  qualityGateDrops: 0,
   provenance: {
     requests: [
       { method: "GET", path: "/v2/insights", query: { "filter.type": "urn:entity:brand", take: "20" } },

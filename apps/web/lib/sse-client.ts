@@ -199,7 +199,7 @@ export class RunStreamClient {
       this.forceReconnect();
       return;
     }
-    const entry: LogEntry = { seq: event.seq, ts: event.ts, type: event.type, summary: summarizeEvent(event) };
+    const entry: LogEntry = { seq: event.seq, ts: event.ts, type: event.type, summary: summarizeEvent(event, state.metrics) };
     this.update({ state: applyEvent(state, event), log: [...this.snapshot.log, entry] });
     if (event.type === "run.end") {
       this.closeSource();

@@ -1,30 +1,85 @@
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { RunEvent, stampEvent, type EventInput, type TerminalRunStatus } from "@ct/contracts";
+import {
+  DEFAULT_RUN_LIMITS,
+  reduceRunEvents,
+  Report,
+  RunEvent,
+  stampEvent,
+  type EventInput,
+  type Lane,
+  type Mode,
+  type QlooSearchEntity,
+  type RunState,
+  type TerminalRunStatus,
+  type TokenUsage,
+} from "@ct/contracts";
+import {
+  ANALYST_CONFIGS,
+  buildCaseSummary,
+  findPickerChoice,
+  runAgent,
+  sanitizeQuestion,
+  type AgentRunOptions,
+  type AgentRunResult,
+  type AnalystMode,
+  type AnthropicLike,
+} from "@ct/agent";
 import {
   countRunsSince,
   createRun,
+  getRun,
+  insertLedgerSnapshot,
   isCancelRequested,
   lockRun,
   purgeRuns,
   setStatus,
+  updateRun,
+  type LedgerSnapshotInput,
   type Queryable,
+  type RunPatch,
   type RunStatus,
 } from "@ct/db";
+import type { QlooClient } from "@ct/qloo";
+import { normaliseName, searchParams } from "@ct/quant";
+import { z } from "zod";
 import type { EventBus } from "./event-bus";
-import { appendRunEvent, readEventAt, readLastEvent, sameEvent } from "./event-store";
+import { appendRunEvent, readAllEvents, readEventAt, readLastEvent, sameEvent } from "./event-store";
 import { buildFakeScript, FAKE_MODEL, FAKE_QUESTION } from "./fake-script";
+import { PRE_RUN_USD, SpendMeter, todayLlmUsd } from "./llm-spend";
 import { log } from "./log";
+import { QUESTION_HASH_PREFIX, questionHash } from "./question-hash";
 
-export type RunManagerErrorCode = "not_accepting" | "busy";
+/**
+ * not_accepting: draining for a restart (503, retry). busy: no free slot (429, retry soon). limited:
+ * an hourly cap, or the rest of today's budget is held by runs in progress (429, not soon; see
+ * retryAfterS). budget: today's LLM budget is spent (503, not before 00:00 UTC). unavailable: live
+ * runs are switched off or not configured (503). invalid: the request itself is wrong (400).
+ */
+export type RunManagerErrorCode = "not_accepting" | "busy" | "limited" | "budget" | "unavailable" | "invalid";
+const ERROR_CODES: ReadonlySet<string> = new Set<RunManagerErrorCode>([
+  "not_accepting",
+  "busy",
+  "limited",
+  "budget",
+  "unavailable",
+  "invalid",
+]);
 
 export class RunManagerError extends Error {
   readonly code: RunManagerErrorCode;
-  constructor(code: RunManagerErrorCode, message: string) {
+  /** Seconds before a retry can succeed, when the refusal knows. */
+  readonly retryAfterS: number | null;
+  constructor(code: RunManagerErrorCode, message: string, retryAfterS: number | null = null) {
     super(message);
     this.name = "RunManagerError";
     this.code = code;
+    this.retryAfterS = retryAfterS;
   }
+}
+
+function isRunManagerError(err: unknown): err is { code?: unknown; retryAfterS?: unknown } {
+  return typeof err === "object" && err !== null && (err as { name?: unknown }).name === "RunManagerError";
 }
 
 /**
@@ -32,9 +87,16 @@ export class RunManagerError extends Error {
  * so the class that threw is not always the class the caller imported.
  */
 export function runManagerErrorCode(err: unknown): RunManagerErrorCode | null {
-  if (typeof err !== "object" || err === null || (err as { name?: unknown }).name !== "RunManagerError") return null;
-  const code = (err as { code?: unknown }).code;
-  return code === "not_accepting" || code === "busy" ? code : null;
+  if (!isRunManagerError(err)) return null;
+  const code = err.code;
+  return typeof code === "string" && ERROR_CODES.has(code) ? (code as RunManagerErrorCode) : null;
+}
+
+/** A RunManagerError's retryAfterS, read by name like its code. */
+export function runManagerRetryAfterS(err: unknown): number | null {
+  if (!isRunManagerError(err)) return null;
+  const s = err.retryAfterS;
+  return typeof s === "number" && Number.isFinite(s) && s > 0 ? Math.ceil(s) : null;
 }
 
 export const ACTIVE_STATUSES = ["queued", "running"] as const satisfies readonly RunStatus[];
@@ -61,21 +123,96 @@ export const ORPHAN_REASON = "The server stopped before this run finished.";
 const STOPS = {
   cancelled: { status: "cancelled", reason: "Cancelled by the viewer." },
   aborted: { status: "incomplete", reason: "The server shut down before this run finished." },
+  overran: { status: "incomplete", reason: "The run went past its time limit and was stopped." },
 } as const satisfies Record<string, { status: TerminalRunStatus; reason: string }>;
+type Stop = keyof typeof STOPS;
+type RunEnd = Extract<RunEvent, { type: "run.end" }>;
+
+const AGENT_FAILED_REASON = "The analysis hit an internal error.";
+const UNSAVED_REASON = "The run could not be saved.";
+/** A minute past the agent's own hard stop (limits.hardMs), the run manager stops it: a stuck run must not hold a slot. */
+const AGENT_WATCHDOG_MS = DEFAULT_RUN_LIMITS.hardMs + 60_000;
+/**
+ * After a stop, runAgent gets this long to return before the run ends without it. Short enough that
+ * SIGTERM's drain (SHUTDOWN_GRACE_MS, 180 s) plus this stays inside Railway's 200 s.
+ */
+const AGENT_STOP_GRACE_MS = 10_000;
+/** The picker's /search lookup gives up after this; the gate's own call cached the answer. */
+const PICK_LOOKUP_MS = 10_000;
+/** Ancestors listed in a child run's case summary (§7.3). */
+const CHAIN_MAX = 5;
+/** Parents a child run may follow up on: runs that stored a note. */
+const PARENT_STATUSES: ReadonlySet<string> = new Set<RunStatus>(["completed", "incomplete"]);
+const STORED_PINS = z.record(z.string(), z.string()).nullable();
+const BUSY_REASON = "Too many runs are active. Try again shortly.";
+const NOT_ACCEPTING_REASON = "The server is restarting. Try again in a moment.";
+const PAUSED_REASON = "Live analysis is paused. Recorded runs are still available.";
+
+/** What agent runs take from the process. Getters, so a missing key refuses live runs and nothing else. */
+export interface AgentDeps {
+  /** The process-wide Qloo client; throws when it cannot be configured (no key outside mock mode). */
+  qloo: () => QlooClient;
+  /** Null when ANTHROPIC_API_KEY is unset. */
+  anthropic: () => AnthropicLike | null;
+  /** The current service mode (kv "mode"). */
+  mode: () => Promise<Mode>;
+}
+
+export type RunAgentFn = (options: AgentRunOptions) => Promise<AgentRunResult>;
+
+export interface AgentRunRequest {
+  /** The question as the user typed it; it is sanitized (and capped) before anything else sees it. */
+  question: string;
+  lane: Lane;
+  /**
+   * Mention → Qloo entity id, for trusted callers only (showcase pins, dev tools); mentions are
+   * normalised here. A browser's picker answer goes through answerPicker, which never takes an id.
+   */
+  pins?: Readonly<Record<string, string>>;
+  /** Starts a child run from a finished run's note (next_moves, §7.3). */
+  parentRunId?: string | null;
+}
+
+/** A needs_input picker answer (D20): the waiting run and the opaque key of the chosen candidate. */
+export interface PickerAnswer {
+  runId: string;
+  key: string;
+  lane: Lane;
+}
 
 export interface RunManagerOptions {
   db: Queryable;
   bus: EventBus;
   /** Default length of a fake run. */
   fakeRunSeconds?: number;
-  /** Concurrent runs this process will hold. */
-  maxActive?: number;
+  /** Concurrent fake runs this process will hold. Agent runs have their own agentMaxActive slots. */
+  fakeMaxActive?: number;
   /** Fake runs any process may start per rolling hour, counted in the database. */
   hourlyCap?: number;
   /** Finished fake runs older than this are purged. */
   retentionMs?: number;
   /** How often a run polls the database cancel flag. */
   cancelPollMs?: number;
+  /** Without these, agent runs are refused as unavailable. */
+  agent?: AgentDeps;
+  /** The agent entry point (default: runAgent from @ct/agent); tests inject a scripted one. */
+  runAgent?: RunAgentFn;
+  /** Agent runs any process may start per rolling hour, counted in the database. */
+  agentHourlyCap?: number;
+  /**
+   * Agent runs this process holds at once (default 3, PLAN §10.4). They never share fakeMaxActive:
+   * anyone may start a test run, and test runs must not be able to take a live run's slot.
+   */
+  agentMaxActive?: number;
+  /**
+   * The daily LLM breaker in USD. A run starts only while today's spend, plus PRE_RUN_USD for it and
+   * for each run in flight here (less what each has recorded), stays within it.
+   */
+  llmDailyUsdCap?: number;
+  /** How long an agent run may go before the manager stops it (default: its hard stop plus a minute). */
+  agentWatchdogMs?: number;
+  /** After a stop, how long runAgent gets to return before the run ends without it. */
+  agentStopGraceMs?: number;
 }
 
 export interface DrainResult {
@@ -88,6 +225,35 @@ export interface DrainResult {
 interface ActiveRun {
   controller: AbortController;
   done: Promise<void>;
+  kind: "fake" | "agent";
+  /** An agent run's spend meter, set once admission passes: from then on its reserve counts. */
+  spend: SpendMeter | null;
+}
+
+type Settled<T> = { kind: "result"; value: T } | { kind: "threw"; error: unknown } | { kind: "abandoned" };
+
+/**
+ * Waits for `promise`. Once `signal` aborts, waits at most `graceMs` more and then gives up on it,
+ * so a callee that ignores its signal cannot hold the caller.
+ */
+function settleWithin<T>(promise: Promise<T>, signal: AbortSignal, graceMs: number): Promise<Settled<T>> {
+  return new Promise((resolve) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      timer = setTimeout(() => finish({ kind: "abandoned" }), graceMs);
+    };
+    const finish = (outcome: Settled<T>) => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", arm);
+      resolve(outcome);
+    };
+    promise.then(
+      (value) => finish({ kind: "result", value }),
+      (error: unknown) => finish({ kind: "threw", error }),
+    );
+    if (signal.aborted) arm();
+    else signal.addEventListener("abort", arm, { once: true });
+  });
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -103,6 +269,263 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
+/** Attempts per database write that is safe to repeat: an event, the end-of-run row, the ledger. */
+const WRITE_ATTEMPTS = 3;
+
+/**
+ * Runs a database write that is safe to repeat, and retries a failure 250 ms and then 500 ms later,
+ * unless `final` says that error will not change.
+ */
+async function withRetries<T>(
+  what: string,
+  context: Record<string, unknown>,
+  write: () => Promise<T>,
+  final: (err: unknown) => boolean = () => false,
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await write();
+    } catch (err) {
+      if (final(err) || attempt >= WRITE_ATTEMPTS) throw err;
+      log.warn({ err, ...context, attempt }, `${what} failed; retrying`);
+      await sleep(250 * 2 ** (attempt - 1));
+    }
+  }
+}
+
+interface EventWriterHooks {
+  /** Stores the event; throws SeqTakenError when another writer owns its seq. */
+  store(event: RunEvent): Promise<void>;
+  publish(event: RunEvent): void;
+  /** Bookkeeping after an emitted event is published. */
+  afterPublish(event: RunEvent): Promise<void>;
+  /** The first failed store; nothing emitted after it is stored. */
+  onFailure(err: unknown): void;
+}
+
+/**
+ * Turns a synchronous emit (runAgent's) into ordered writes. Each event gets the next seq and is
+ * validated at once, then stored and published one at a time in emit order. Nothing is stored after
+ * a failed write, so the stored events never have a gap, and append() goes on from the last stored seq.
+ */
+class EventWriter {
+  private assigned = 0;
+  private storedSeq = 0;
+  private tail: Promise<void> = Promise.resolve();
+  private closed = false;
+  private warnedLate = false;
+  private failed: unknown = null;
+
+  constructor(
+    private readonly runId: string,
+    private readonly hooks: EventWriterHooks,
+  ) {}
+
+  /** Seq of the last stored event; 0 before the first. */
+  get stored(): number {
+    return this.storedSeq;
+  }
+
+  /** The error of the first failed write, or null. */
+  get failure(): unknown {
+    return this.failed;
+  }
+
+  readonly emit = (input: EventInput): void => {
+    if (this.failed !== null) return;
+    if (this.closed) {
+      // Once: an agent abandoned after a stop may go on emitting for a while.
+      if (!this.warnedLate) log.warn({ runId: this.runId, type: input.type }, "agent events after the run ended; dropped");
+      this.warnedLate = true;
+      return;
+    }
+    // run.end belongs to the run manager, which writes it from the returned status.
+    if (input.type === "run.end") {
+      log.warn({ runId: this.runId }, "the agent emitted run.end; dropped");
+      return;
+    }
+    const parsed = RunEvent.safeParse(
+      stampEvent(input, { seq: this.assigned + 1, ts: new Date().toISOString(), runId: this.runId }),
+    );
+    if (!parsed.success) {
+      // Dropped rather than thrown: emit runs inside the agent's callbacks, where a throw could escape.
+      log.error({ runId: this.runId, type: input.type, issues: parsed.error.issues.slice(0, 5) }, "agent event breaks the contracts; dropped");
+      return;
+    }
+    const event = parsed.data;
+    this.assigned = event.seq;
+    this.tail = this.tail.then(() => this.write(event));
+  };
+
+  private async write(event: RunEvent): Promise<void> {
+    if (this.failed !== null) return;
+    try {
+      await this.hooks.store(event);
+    } catch (err) {
+      this.failed = err;
+      this.hooks.onFailure(err);
+      return;
+    }
+    this.storedSeq = event.seq;
+    try {
+      this.hooks.publish(event);
+      await this.hooks.afterPublish(event);
+    } catch (err) {
+      log.warn({ err, runId: this.runId, seq: event.seq }, "after-store step failed; continuing");
+    }
+  }
+
+  /** Stops taking emitted events and waits until every accepted one is written. */
+  async close(): Promise<void> {
+    this.closed = true;
+    await this.tail;
+  }
+
+  /** After close(): stores and publishes one more event at the next seq. Throws when the write fails. */
+  async append(input: EventInput): Promise<void> {
+    const event = RunEvent.parse(
+      stampEvent(input, { seq: this.storedSeq + 1, ts: new Date().toISOString(), runId: this.runId }),
+    );
+    await this.hooks.store(event);
+    this.storedSeq = event.seq;
+    this.hooks.publish(event);
+  }
+}
+
+interface AgentRunContext {
+  runId: string;
+  question: string;
+  lane: Lane;
+  mode: AnalystMode;
+  pins: Record<string, string> | undefined;
+  parent: { runId: string; caseSummary: string } | null;
+  qloo: QlooClient;
+  anthropic: AnthropicLike;
+  startedAt: number;
+  spend: SpendMeter;
+}
+
+/** What launchAgent starts: a sanitized question, pins keyed by normaliseName and the parent's summary. */
+interface AgentLaunch {
+  question: string;
+  lane: Lane;
+  pins: Record<string, string> | undefined;
+  parent: { runId: string; caseSummary: string } | null;
+}
+
+interface AgentClients {
+  deps: AgentDeps;
+  qloo: QlooClient;
+  anthropic: AnthropicLike;
+}
+
+/** Pins keyed the way runAgent looks them up (normaliseName); undefined when none are left. */
+function normalisePins(pins: Readonly<Record<string, string>> | undefined): Record<string, string> | undefined {
+  const entries = Object.entries(pins ?? {}).flatMap(([mention, entityId]) => {
+    const key = normaliseName(mention);
+    const id = entityId.trim();
+    return key !== "" && id !== "" ? [[key, id] as const] : [];
+  });
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+/**
+ * run.end's status and reason. A stop (cancel, shutdown, overrun) decides any outcome but a
+ * completed note, which stands even when the stop arrived as it finished; that includes an agent
+ * that threw after the stop or never returned from it.
+ */
+function agentOutcome(
+  result: AgentRunResult | null,
+  stop: Stop | null,
+  unsaved: boolean,
+): { status: TerminalRunStatus; reason: string | null } {
+  if (unsaved) return { status: "failed", reason: UNSAVED_REASON };
+  if (result?.status === "completed") return { status: "completed", reason: null };
+  if (stop) return STOPS[stop];
+  if (!result) return { status: "failed", reason: AGENT_FAILED_REASON };
+  return { status: result.status, reason: result.reason };
+}
+
+const totalTokens = (u: TokenUsage) => u.input + u.output + u.cacheRead + u.cacheCreation;
+
+/** The runs row at the end of an agent run: what the result says, else what the stream recorded. */
+function agentRunPatch(
+  result: AgentRunResult | null,
+  outcome: { status: TerminalRunStatus; reason: string | null },
+  elapsedMs: number,
+  recordedUsd: number,
+): RunPatch {
+  const patch: RunPatch = {
+    wallMs: Math.round(elapsedMs),
+    llmUsd: result?.usd ?? recordedUsd,
+    error: outcome.status === "failed" || outcome.status === "incomplete" ? { reason: outcome.reason } : null,
+  };
+  if (!result) return patch;
+  return {
+    ...patch,
+    report: result.report,
+    validation: result.validation,
+    tokens: totalTokens(result.usage),
+    qlooNetwork: result.qloo.network,
+    // qloo_cached counts every call served without the network, reuses included.
+    qlooCached: result.qloo.cached + result.qloo.reused,
+    ...(result.model ? { model: result.model } : {}),
+    ...(result.intent ? { intent: result.intent, pillar: result.intent.pillar, job: result.intent.job } : {}),
+  };
+}
+
+/**
+ * The runs row its driver writes at run.end, rebuilt from the stored events of a run whose driver
+ * stored run.end but not the row. An agent run's spend, tokens and Qloo counts come from its last
+ * usage event (runAgent emits its totals as it ends). A test run's usage is invented, so its row
+ * gets only what runFake writes.
+ */
+function patchFromEvents(state: RunState, end: RunEnd, agentRun: boolean): RunPatch {
+  const patch: RunPatch = {
+    wallMs: Math.round(end.elapsedMs),
+    error: end.status === "failed" || end.status === "incomplete" ? { reason: end.reason } : null,
+  };
+  if (!agentRun) return { ...patch, report: end.status === "completed" ? state.report : null };
+  const { usage, validation, intent } = state;
+  return {
+    ...patch,
+    report: state.report,
+    validation: validation && { issues: validation.issues, numbersTraced: validation.numbersTraced },
+    ...(usage
+      ? {
+          llmUsd: usage.llmUsd,
+          tokens: totalTokens(usage.tokens),
+          qlooNetwork: usage.qloo.network,
+          qlooCached: usage.qloo.cached + usage.qloo.reused,
+        }
+      : {}),
+    ...(intent ? { intent, pillar: intent.pillar, job: intent.job } : {}),
+  };
+}
+
+/**
+ * An agent run's ledger as its stored events add up to it. Datasets that did not stream inline are
+ * missing: only the driver's own snapshot held them.
+ */
+function ledgerFromEvents(state: RunState): LedgerSnapshotInput {
+  return {
+    evidence: Object.values(state.evidence),
+    metrics: Object.values(state.metrics),
+    datasets: Object.values(state.datasets).flatMap((d) => (d.data ? [d.data] : [])),
+    findings: state.findings,
+  };
+}
+
+/**
+ * A run's status, taken from its stored run.end while the row still says queued or running: a
+ * run.end is final, and its driver may have stored it without managing to write the row. Null for a
+ * run that has not ended.
+ */
+function endedStatus(rowStatus: RunStatus, state: RunState): RunStatus | null {
+  if (!isActiveStatus(rowStatus)) return rowStatus;
+  return state.ended?.status ?? null;
+}
+
 /**
  * Owns the runs this process is executing. Each event is validated against the contracts, given the
  * next seq, appended to run_events and only then published on the bus, so the database is always at
@@ -112,10 +535,17 @@ export class RunManager {
   private readonly db: Queryable;
   private readonly bus: EventBus;
   private readonly fakeRunSeconds: number;
-  private readonly maxActive: number;
+  private readonly fakeMaxActive: number;
   private readonly hourlyCap: number;
   private readonly retentionMs: number;
   private readonly cancelPollMs: number;
+  private readonly agent: AgentDeps | undefined;
+  private readonly runAgentFn: RunAgentFn;
+  private readonly agentHourlyCap: number;
+  private readonly agentMaxActive: number;
+  private readonly llmDailyUsdCap: number;
+  private readonly agentWatchdogMs: number;
+  private readonly agentStopGraceMs: number;
   private readonly active = new Map<string, ActiveRun>();
   /** Orphan finalizations in flight, so viewers of one run in this process share one attempt. */
   private readonly finalizing = new Map<string, Promise<boolean>>();
@@ -128,10 +558,17 @@ export class RunManager {
     this.db = options.db;
     this.bus = options.bus;
     this.fakeRunSeconds = options.fakeRunSeconds ?? 200;
-    this.maxActive = options.maxActive ?? 20;
+    this.fakeMaxActive = options.fakeMaxActive ?? 20;
     this.hourlyCap = options.hourlyCap ?? 60;
     this.retentionMs = options.retentionMs ?? 6 * HOUR_MS;
     this.cancelPollMs = options.cancelPollMs ?? 1000;
+    this.agent = options.agent;
+    this.runAgentFn = options.runAgent ?? runAgent;
+    this.agentHourlyCap = options.agentHourlyCap ?? 20;
+    this.agentMaxActive = options.agentMaxActive ?? 3;
+    this.llmDailyUsdCap = options.llmDailyUsdCap ?? 1.4;
+    this.agentWatchdogMs = options.agentWatchdogMs ?? AGENT_WATCHDOG_MS;
+    this.agentStopGraceMs = options.agentStopGraceMs ?? AGENT_STOP_GRACE_MS;
   }
 
   isAccepting(): boolean {
@@ -152,8 +589,8 @@ export class RunManager {
   }
 
   async startFakeRun(options: { seconds?: number } = {}): Promise<{ runId: string }> {
-    if (!this.accepting) throw new RunManagerError("not_accepting", "The server is restarting. Try again in a moment.");
-    if (this.active.size >= this.maxActive) {
+    if (!this.accepting) throw new RunManagerError("not_accepting", NOT_ACCEPTING_REASON);
+    if (this.activeCountOf("fake") >= this.fakeMaxActive) {
       throw new RunManagerError("busy", "Too many test runs are active. Try again shortly.");
     }
     const seconds = options.seconds ?? this.fakeRunSeconds;
@@ -161,14 +598,14 @@ export class RunManager {
     const controller = new AbortController();
     let release: () => void = () => {};
     const done = new Promise<void>((resolve) => (release = resolve));
-    // Reserve the slot before the first await so concurrent starts respect maxActive and drain sees it.
-    this.active.set(runId, { controller, done });
+    // Reserve the slot before the first await so concurrent starts respect fakeMaxActive and drain sees it.
+    this.active.set(runId, { controller, done, kind: "fake", spend: null });
     try {
       await this.admit(async () => {
         // Counted in the database, so started-then-cancelled runs count too: every run leaves rows.
         const lastHour = await countRunsSince(this.db, { hashPrefix: FAKE_HASH_PREFIX, sinceMs: HOUR_MS });
         if (lastHour >= this.hourlyCap) {
-          throw new RunManagerError("busy", "The hourly limit for test runs is reached. Try again later.");
+          throw new RunManagerError("limited", "The hourly limit for test runs is reached. Try again later.", HOUR_MS / 1000);
         }
         await createRun(this.db, {
           id: runId,
@@ -196,6 +633,206 @@ export class RunManager {
     });
     log.info({ runId, seconds }, "fake run started");
     return { runId };
+  }
+
+  /**
+   * Starts an agent run (PLAN §4.1) on the agent slots, which fake runs never take. Admission checks
+   * the mode, the hourly cap and today's LLM budget, then creates the runs row; runAgent goes on in
+   * the background.
+   */
+  async startAgentRun(request: AgentRunRequest): Promise<{ runId: string }> {
+    if (!this.accepting) throw new RunManagerError("not_accepting", NOT_ACCEPTING_REASON);
+    const question = sanitizeQuestion(request.question);
+    if (question === "") throw new RunManagerError("invalid", "The question is empty.");
+    const clients = this.agentClients();
+    const parent = request.parentRunId ? await this.parentContext(request.parentRunId) : null;
+    return this.launchAgent({ question, lane: request.lane, pins: normalisePins(request.pins), parent }, clients);
+  }
+
+  /**
+   * Answers a needs_input picker (D20, SPEC §4.1 "picker → new run with pins"): re-asks the waiting
+   * run's question with the chosen entity pinned to its mention, keeping that run's pins and parent.
+   * The browser only ever holds the opaque key; the entity id is found here, from the mention's own
+   * /search (cached by the gate, so no Qloo call), and never comes from the request.
+   */
+  async answerPicker(answer: PickerAnswer): Promise<{ runId: string }> {
+    if (!this.accepting) throw new RunManagerError("not_accepting", NOT_ACCEPTING_REASON);
+    const clients = this.agentClients();
+    // Checked again at admission; checked here too so a paused service makes no Qloo call.
+    if ((await clients.deps.mode()) === "replay_only") throw new RunManagerError("unavailable", PAUSED_REASON);
+    const picked = await this.resolvePick(answer, clients.qloo);
+    const parent = picked.parentRunId ? await this.parentContext(picked.parentRunId) : null;
+    return this.launchAgent({ question: picked.question, lane: answer.lane, pins: picked.pins, parent }, clients);
+  }
+
+  private async launchAgent(launch: AgentLaunch, clients: AgentClients): Promise<{ runId: string }> {
+    const { question, lane, pins, parent } = launch;
+    if (!this.accepting) throw new RunManagerError("not_accepting", NOT_ACCEPTING_REASON);
+    if (this.activeCountOf("agent") >= this.agentMaxActive) {
+      throw new RunManagerError("busy", BUSY_REASON);
+    }
+    const runId = randomUUID();
+    const controller = new AbortController();
+    let release: () => void = () => {};
+    const done = new Promise<void>((resolve) => (release = resolve));
+    // Checked and reserved with no await in between, so concurrent starts respect the slots and drain sees it.
+    const slot: ActiveRun = { controller, done, kind: "agent", spend: null };
+    this.active.set(runId, slot);
+    const spend = new SpendMeter(this.db, lane);
+    let mode: AnalystMode;
+    try {
+      mode = await this.admit(async () => {
+        const current = await clients.deps.mode();
+        if (current === "replay_only") throw new RunManagerError("unavailable", PAUSED_REASON);
+        // Counted in the database, whatever the status: every started run may have spent.
+        const lastHour = await countRunsSince(this.db, { hashPrefix: QUESTION_HASH_PREFIX, sinceMs: HOUR_MS });
+        if (lastHour >= this.agentHourlyCap) {
+          throw new RunManagerError("limited", "The hourly limit for live runs is reached. Try again later.", HOUR_MS / 1000);
+        }
+        const today = await todayLlmUsd(this.db);
+        if (today + PRE_RUN_USD > this.llmDailyUsdCap) {
+          throw new RunManagerError("budget", "Today's budget for live analysis is used up. Live runs resume at 00:00 UTC.");
+        }
+        // Runs in flight have spent little of what they will: each holds PRE_RUN_USD until it records more.
+        if (today + this.reservedUsd() + PRE_RUN_USD > this.llmDailyUsdCap) {
+          throw new RunManagerError(
+            "limited",
+            "Live runs in progress hold the rest of today's budget. Try again in a few minutes.",
+            DEFAULT_RUN_LIMITS.hardMs / 1000,
+          );
+        }
+        // Admissions run one at a time, so the next one already counts this run's reserve.
+        slot.spend = spend;
+        await createRun(this.db, {
+          id: runId,
+          question,
+          questionHash: questionHash(question, pins, current),
+          status: "running",
+          mode: current,
+          lane,
+          model: ANALYST_CONFIGS[current].model,
+          effort: ANALYST_CONFIGS[current].effort,
+          pins: pins ?? null,
+          parentRunId: parent?.runId ?? null,
+        });
+        return current;
+      });
+    } catch (err) {
+      this.active.delete(runId);
+      release();
+      throw err;
+    }
+    const { qloo, anthropic } = clients;
+    const run: AgentRunContext = { runId, question, lane, mode, pins, parent, qloo, anthropic, startedAt: Date.now(), spend };
+    void this.driveAgent(run, controller.signal).finally(() => {
+      this.active.delete(runId);
+      this.bus.close(runId);
+      release();
+    });
+    log.info({ runId, mode, lane, child: parent !== null, pinned: pins !== undefined }, "agent run started");
+    return { runId };
+  }
+
+  private activeCountOf(kind: ActiveRun["kind"]): number {
+    let n = 0;
+    for (const run of this.active.values()) if (run.kind === kind) n += 1;
+    return n;
+  }
+
+  /** USD the admitted agent runs in flight here still hold: PRE_RUN_USD each, less what each has recorded. */
+  private reservedUsd(): number {
+    let usd = 0;
+    for (const run of this.active.values()) if (run.spend) usd += Math.max(PRE_RUN_USD - run.spend.recorded, 0);
+    return usd;
+  }
+
+  /** The clients a live run needs, or an "unavailable" refusal that says what is missing. */
+  private agentClients(): AgentClients {
+    const deps = this.agent;
+    if (!deps) throw new RunManagerError("unavailable", "Live analysis is not set up on this server.");
+    const anthropic = deps.anthropic();
+    if (!anthropic) {
+      throw new RunManagerError(
+        "unavailable",
+        "Live analysis is unavailable: this server has no Anthropic API key. Test runs still work.",
+      );
+    }
+    try {
+      return { deps, qloo: deps.qloo(), anthropic };
+    } catch (err) {
+      log.error({ err }, "the Qloo client could not be created; refusing live runs");
+      throw new RunManagerError("unavailable", "Live analysis is unavailable: the Qloo client is not configured.");
+    }
+  }
+
+  /**
+   * A child run's parent and its case summary (§7.3), rebuilt from the parent's stored events. Only
+   * an agent run that stored a note qualifies: a test run's note is invented and must never seed one.
+   * A parent whose row lags behind its stored run.end (see endedStatus) gives its report.final.
+   */
+  private async parentContext(parentRunId: string): Promise<{ runId: string; caseSummary: string }> {
+    const parent = await getRun(this.db, parentRunId);
+    if (!parent) throw new RunManagerError("invalid", "parentRunId does not name a run.");
+    const noNote = () => new RunManagerError("invalid", "The parent run has no finished note to follow up on.");
+    const lagging = isActiveStatus(parent.status);
+    if (!parent.questionHash.startsWith(QUESTION_HASH_PREFIX) || !(lagging || PARENT_STATUSES.has(parent.status))) throw noNote();
+    const state = reduceRunEvents(parentRunId, await readAllEvents(this.db, parentRunId));
+    const status = endedStatus(parent.status, state);
+    const report = Report.safeParse(lagging ? state.report : parent.report);
+    if (status === null || !PARENT_STATUSES.has(status) || !report.success) throw noNote();
+    const priorRunIds: string[] = [];
+    let ancestor = parent.parentRunId;
+    while (ancestor && priorRunIds.length < CHAIN_MAX) {
+      priorRunIds.unshift(ancestor);
+      ancestor = (await getRun(this.db, ancestor))?.parentRunId ?? null;
+    }
+    // The summary writes out metric values; it never reads datasets, which may not have streamed inline.
+    const ledger = {
+      evidence: Object.values(state.evidence),
+      metrics: Object.values(state.metrics),
+      datasets: [],
+      findings: state.findings,
+    };
+    return { runId: parentRunId, caseSummary: buildCaseSummary(report.data, { ledger, priorRunIds }) };
+  }
+
+  /**
+   * A picker answer as the new run's inputs: the waiting run's question and parent, and its pins plus
+   * the chosen entity keyed by the mention. The key must be one the run offered and must still name
+   * a result of the mention's /search, rebuilt exactly as the gate built it.
+   */
+  private async resolvePick(
+    answer: PickerAnswer,
+    qloo: QlooClient,
+  ): Promise<{ question: string; pins: Record<string, string>; parentRunId: string | null }> {
+    const notWaiting = () => new RunManagerError("invalid", "This run is not waiting for a choice.");
+    const run = await getRun(this.db, answer.runId);
+    // Events are read only for a run that waits, or whose row may lag behind its stored run.end.
+    if (!run || !run.questionHash.startsWith(QUESTION_HASH_PREFIX) || !(run.status === "needs_input" || isActiveStatus(run.status))) {
+      throw notWaiting();
+    }
+    const state = reduceRunEvents(answer.runId, await readAllEvents(this.db, answer.runId));
+    if (endedStatus(run.status, state) !== "needs_input") throw notWaiting();
+    const picker = state.needsInput;
+    if (!picker?.candidates.some((c) => c.key === answer.key)) {
+      throw new RunManagerError("invalid", "That choice is not one this run offered.");
+    }
+    const metro = picker.entityType === "place" ? (state.intent?.geo.metro ?? null) : null;
+    const params = searchParams({ text: picker.mention, type: picker.entityType, metro });
+    if (params === null) throw new RunManagerError("invalid", "That choice is not one this run offered.");
+    let results: readonly QlooSearchEntity[];
+    try {
+      const reply = await qloo.standalone({ signal: AbortSignal.timeout(PICK_LOOKUP_MS) }).forTool(null).search(params);
+      results = reply.data.results;
+    } catch (err) {
+      log.warn({ err, runId: answer.runId }, "the picker lookup failed");
+      throw new RunManagerError("unavailable", "The choice could not be checked with Qloo right now. Try again shortly.");
+    }
+    const choice = findPickerChoice(results, answer.key);
+    if (!choice) throw new RunManagerError("invalid", "That choice is no longer offered. Ask the question again.");
+    const stored = STORED_PINS.safeParse(run.pins);
+    const pins = { ...(stored.success ? stored.data : null), [normaliseName(picker.mention)]: choice.entity_id };
+    return { question: run.question, pins, parentRunId: run.parentRunId };
   }
 
   /** Deletes finished fake runs older than the retention, with their events. Returns how many. */
@@ -229,8 +866,9 @@ export class RunManager {
   }
 
   /**
-   * Waits up to `graceMs` for active runs to end, then stops the rest, which end as incomplete.
-   * There is no event buffer to flush: every event is stored before it is published.
+   * Waits up to `graceMs` for active runs to end, then stops the rest, which end as incomplete; an
+   * agent that ignores the stop is left behind after agentStopGraceMs. There is no event buffer to
+   * flush: every event is stored before it is published.
    */
   async drain(graceMs: number): Promise<DrainResult> {
     this.beginShutdown();
@@ -255,9 +893,10 @@ export class RunManager {
 
   /**
    * Ends a run that no process is driving any more (its server crashed or was killed) with an
-   * incomplete run.end. When run.end is already stored (the driver wrote it but not the status), it
-   * only repairs the status from it. Safe to race: it holds the run's row lock throughout, so a run
-   * gets at most one run.end. True when this call changed the run.
+   * incomplete run.end. When run.end is already stored (the driver wrote it but not the row), it
+   * rebuilds the row from the stored events instead, and an agent run's ledger with it. Safe to race:
+   * it holds the run's row lock throughout, so a run gets at most one run.end. True when this call
+   * changed the run.
    */
   async finalizeOrphan(runId: string, reason: string = ORPHAN_REASON): Promise<boolean> {
     if (this.active.has(runId)) return false;
@@ -274,11 +913,11 @@ export class RunManager {
       if (!run || !isActiveStatus(run.status)) return null;
       const last = await readLastEvent(tx, runId);
       if (last?.type === "run.end") {
-        const error = last.status === "failed" || last.status === "incomplete" ? { reason: last.reason } : null;
-        await setStatus(tx, runId, last.status, {
-          from: ACTIVE_STATUSES,
-          patch: { wallMs: Math.round(last.elapsedMs), error },
-        });
+        const state = reduceRunEvents(runId, await readAllEvents(tx, runId));
+        const agentRun = run.questionHash.startsWith(QUESTION_HASH_PREFIX);
+        // Records the driver did store are skipped.
+        if (agentRun) await insertLedgerSnapshot(tx, runId, ledgerFromEvents(state));
+        await setStatus(tx, runId, last.status, { from: ACTIVE_STATUSES, patch: patchFromEvents(state, last, agentRun) });
         return { seq: last.seq, repaired: true };
       }
       const seq = (last?.seq ?? 0) + 1;
@@ -295,7 +934,7 @@ export class RunManager {
       return { seq, repaired: false };
     });
     if (!outcome) return false;
-    if (outcome.repaired) log.warn({ runId, seq: outcome.seq }, "run status repaired from its stored run.end");
+    if (outcome.repaired) log.warn({ runId, seq: outcome.seq }, "run row repaired from its stored run.end");
     else log.warn({ runId, seq: outcome.seq }, "orphaned run marked incomplete");
     return true;
   }
@@ -360,36 +999,190 @@ export class RunManager {
     const elapsedMs = Date.now() - startedAt;
     try {
       await emit({ type: "run.end", status, elapsedMs, reason });
-      await setStatus(this.db, runId, status, {
-        from: ACTIVE_STATUSES,
-        patch: {
-          wallMs: elapsedMs,
-          report: status === "completed" ? script.report : null,
-          error: status === "failed" ? { reason } : null,
-        },
-      });
+      const patch: RunPatch = {
+        wallMs: elapsedMs,
+        report: status === "completed" ? script.report : null,
+        error: status === "failed" ? { reason } : null,
+      };
+      await withRetries("end-of-run status write", { runId }, () =>
+        setStatus(this.db, runId, status, { from: ACTIVE_STATUSES, patch }),
+      );
       log.info({ runId, status, events: seq, elapsedMs }, "fake run ended");
     } catch (err) {
-      // The run stays active in the database. finalizeOrphan, called by a viewer tailing from past
-      // the last stored event, repairs the status from a stored run.end or ends the run incomplete.
+      // The run stays active in the database until finalizeOrphan repairs it from a stored run.end
+      // or ends it incomplete: a viewer's stream calls it after delivering an old run.end, or while
+      // tailing past the last stored event.
       log.error({ err, runId, seq }, "could not record the end of a fake run");
     }
   }
 
-  private async persist(event: RunEvent): Promise<void> {
-    for (let attempt = 1; ; attempt++) {
+  /**
+   * Drives one agent run to its run.end. Cancel (the database flag), shutdown (`shutdown` aborts)
+   * and the watchdog abort runAgent; the stop then decides run.end as for fake runs. An agent that
+   * ignores its signal gets agentStopGraceMs and is then left behind, so it cannot hold a slot or
+   * the drain. The spend and the ledger are stored before run.end, so a viewer that sees the end can
+   * read everything.
+   */
+  private async driveAgent(run: AgentRunContext, shutdown: AbortSignal): Promise<void> {
+    const { runId, lane, spend } = run;
+    const abort = new AbortController();
+    let stop: Stop | null = null;
+    const stopWith = (why: Stop) => {
+      stop ??= why;
+      abort.abort();
+    };
+    const onShutdown = () => stopWith("aborted");
+    shutdown.addEventListener("abort", onShutdown, { once: true });
+    if (shutdown.aborted) onShutdown();
+    const watchdog = setTimeout(() => stopWith("overran"), this.agentWatchdogMs);
+    const writer = new EventWriter(runId, {
+      store: (event) => this.persist(event),
+      publish: (event) => this.bus.publish(event),
+      afterPublish: (event) => this.afterAgentEvent(runId, event, spend),
+      onFailure: (err) => {
+        // A run whose events cannot be stored is not worth finishing.
+        if (!(err instanceof SeqTakenError)) log.error({ err, runId }, "agent run events could not be stored; stopping");
+        abort.abort();
+      },
+    });
+    const polling = new AbortController();
+    const poller = this.pollCancel(runId, polling.signal, () => stopWith("cancelled"));
+
+    // Async, so a runAgent that throws at once rejects like one that throws later.
+    const agent = (async () =>
+      this.runAgentFn({
+        runId,
+        question: run.question,
+        lane,
+        mode: run.mode,
+        emit: writer.emit,
+        qloo: run.qloo,
+        anthropic: run.anthropic,
+        signal: abort.signal,
+        pins: run.pins,
+        parent: run.parent,
+      }))();
+    const settled = await settleWithin(agent, abort.signal, this.agentStopGraceMs);
+    clearTimeout(watchdog);
+    shutdown.removeEventListener("abort", onShutdown);
+    polling.abort();
+    await poller;
+    await writer.close();
+
+    let result: AgentRunResult | null = null;
+    if (settled.kind === "result") {
+      result = settled.value;
+    } else if (settled.kind === "threw") {
+      log.error({ err: settled.error, runId }, "agent run threw");
+    } else {
+      log.error({ runId, stop, graceMs: this.agentStopGraceMs }, "the agent did not return after its stop; ending the run without it");
+      // Whatever it spends from here on is still today's spend.
+      void agent.then(
+        (late) => this.recordSpend(spend, runId, late.usd),
+        () => undefined,
+      );
+    }
+    // The spend is real whoever writes run.end, so it is recorded before anything can return.
+    if (result) await this.recordSpend(spend, runId, result.usd);
+    if (writer.failure instanceof SeqTakenError) {
+      // An orphan finalizer ended this run while it was stalled. The stored run.end stands.
+      log.warn({ runId, seq: writer.failure.seq }, "agent run was ended by another writer; stopping");
+      return;
+    }
+
+    const outcome = agentOutcome(result, stop, writer.failure !== null);
+    if (result) {
+      const { ledger } = result;
       try {
+        // Repeating it is safe: records already stored for the run are skipped.
+        await withRetries("ledger write", { runId }, () => insertLedgerSnapshot(this.db, runId, ledger));
+      } catch (err) {
+        log.error({ err, runId }, "could not store the ledger of an agent run");
+      }
+    }
+    const elapsedMs = Date.now() - run.startedAt;
+    try {
+      // runAgent failed before its first event: the stream still opens with run.created.
+      if (writer.stored === 0) {
+        await writer.append({
+          type: "run.created",
+          question: run.question,
+          mode: run.mode,
+          lane,
+          limits: DEFAULT_RUN_LIMITS,
+          parentRunId: run.parent?.runId ?? null,
+          model: ANALYST_CONFIGS[run.mode].model,
+        });
+      }
+      await writer.append({ type: "run.end", status: outcome.status, elapsedMs, reason: outcome.reason });
+      const patch = agentRunPatch(result, outcome, elapsedMs, spend.recorded);
+      // A repeat after a lost reply finds the status already set and changes nothing.
+      await withRetries("end-of-run status write", { runId }, () =>
+        setStatus(this.db, runId, outcome.status, { from: ACTIVE_STATUSES, patch }),
+      );
+      log.info({ runId, status: outcome.status, events: writer.stored, elapsedMs, usd: spend.recorded }, "agent run ended");
+    } catch (err) {
+      if (err instanceof SeqTakenError) {
+        log.warn({ runId, seq: err.seq }, "agent run was ended by another writer; stopping");
+        return;
+      }
+      // As for fake runs: finalizeOrphan rebuilds the row from a stored run.end or ends the run incomplete.
+      log.error({ err, runId, seq: writer.stored }, "could not record the end of an agent run");
+    }
+  }
+
+  /** Raises the run's recorded LLM spend to `usd`; a failed write is logged, and the next call catches up. */
+  private async recordSpend(spend: SpendMeter, runId: string, usd: number): Promise<void> {
+    try {
+      await spend.upTo(usd);
+    } catch (err) {
+      log.error({ err, runId, usd }, "could not record the LLM spend of an agent run");
+    }
+  }
+
+  /** Polls the database cancel flag until `signal` aborts; calls `onCancel` once when it is raised. */
+  /** Polls the database cancel flag until `signal` aborts; calls `onCancel` once when it is raised. */
+  private async pollCancel(runId: string, signal: AbortSignal, onCancel: () => void): Promise<void> {
+    while (!signal.aborted) {
+      await sleep(this.cancelPollMs, signal);
+      if (signal.aborted) return;
+      try {
+        if (await isCancelRequested(this.db, runId)) {
+          onCancel();
+          return;
+        }
+      } catch (err) {
+        log.warn({ err, runId }, "cancel flag check failed; continuing");
+      }
+    }
+  }
+
+  /** Bookkeeping once an agent event is stored: pillar and job after CLERK, LLM spend as it grows. */
+  private async afterAgentEvent(runId: string, event: RunEvent, spend: SpendMeter): Promise<void> {
+    try {
+      if (event.type === "clerk") {
+        await updateRun(this.db, runId, { pillar: event.intent.pillar, job: event.intent.job, intent: event.intent });
+      } else if (event.type === "usage") {
+        await spend.upTo(event.llmUsd);
+      }
+    } catch (err) {
+      log.warn({ err, runId, type: event.type }, "run bookkeeping failed; continuing");
+    }
+  }
+
+  private async persist(event: RunEvent): Promise<void> {
+    await withRetries(
+      "event write",
+      { runId: event.runId, seq: event.seq },
+      async () => {
         if (await appendRunEvent(this.db, event)) return;
         // The seq is taken: by our own earlier attempt whose reply was lost (fine), or by another
         // writer, in which case this event must not be published.
         const stored = await readEventAt(this.db, event.runId, event.seq);
         if (stored && sameEvent(stored, event)) return;
         throw new SeqTakenError(event.runId, event.seq);
-      } catch (err) {
-        if (err instanceof SeqTakenError || attempt >= 3) throw err;
-        log.warn({ err, runId: event.runId, seq: event.seq, attempt }, "event write failed; retrying");
-        await sleep(250 * 2 ** (attempt - 1));
-      }
-    }
+      },
+      (err) => err instanceof SeqTakenError,
+    );
   }
 }

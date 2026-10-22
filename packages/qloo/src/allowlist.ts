@@ -7,6 +7,7 @@
  *
  * Each value records where the parameter was proven:
  *   "verified Gx"  exercised live by probe gate Gx (or the resolution sweep) on the hackathon host;
+ *   "verified Sx"  exercised live by skill Sx before it shipped (same host, compared with and without the parameter);
  *   "UNVERIFIED"   needed by a P0 skill but not covered by a gate. The skill that first uses it verifies
  *                  it live before the skill is built, then this entry is updated.
  *
@@ -34,14 +35,14 @@ export const ALLOW: Readonly<Record<QlooPath, Readonly<Record<string, ParamTable
       query: "verified SWEEP",
       types: "verified SWEEP",
       take: "verified SWEEP",
-      "filter.location": "UNVERIFIED (S0 place resolution; lat,lon form only)",
-      "filter.radius": "UNVERIFIED (S0 place resolution; miles)",
+      "filter.location": "verified S0 (lat,lon form only; with filter.radius every place result fell inside the radius of the requested metro)",
+      "filter.radius": "verified S0 (miles; only together with filter.location)",
     },
   },
 
   "/entities": {
     [ANY_TYPE]: {
-      entity_ids: "UNVERIFIED (batch describe)",
+      entity_ids: "verified S0 (batch describe; rows have the /search shape)",
     },
   },
 
@@ -56,8 +57,8 @@ export const ALLOW: Readonly<Record<QlooPath, Readonly<Record<string, ParamTable
       "signal.location.query": "verified G2",
       "filter.results.entities": "verified G1",
       "filter.popularity.max": "verified G9",
-      "filter.tags": "UNVERIFIED (S1 same-category discovery, S10 sponsor categories)",
-      "filter.exclude.entities": "UNVERIFIED (S1 discovery)",
+      "filter.tags": "verified S1 (a urn:tag:genre:brand:* tag restricts results to brands carrying it; S1 same-category discovery, S10 sponsor categories)",
+      "filter.exclude.entities": "verified S1 (an excluded entity drops out of results; the signal entity is absent even without it)",
       "filter.exclude.tags": "UNVERIFIED (S9 brand domain)",
       "feature.explainability": "verified G15 (on urn:entity:artist)",
       take: "verified G1",

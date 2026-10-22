@@ -19,11 +19,19 @@
     "db:generate": "pnpm --filter @ct/db generate",
     "db:migrate": "pnpm --filter @ct/db migrate",
     "probe": "node --env-file=.env tools/probe/run-probe.ts",
-    "llm:bench": "tsx --env-file=.env tools/llm-bench/run.ts"
+    "llm:bench": "tsx --env-file=.env tools/llm-bench/run.ts",
+    "prompts:build": "tsx tools/dev/build-prompts.ts",
+    "run-skill": "tsx --env-file-if-exists=.env tools/dev/run-skill.ts",
+    "run-agent": "tsx --env-file-if-exists=.env tools/dev/run-agent.ts",
+    "kit-parity": "tsx --env-file-if-exists=.env tools/kit-parity/run.ts"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "0.131.0",
+    "@ct/agent": "workspace:*",
     "@ct/contracts": "workspace:*",
+    "@ct/db": "workspace:*",
+    "@ct/qloo": "workspace:*",
+    "@ct/quant": "workspace:*",
     "@playwright/test": "1.63.0",
     "@types/node": "24.19.1",
     "eslint": "9.39.5",

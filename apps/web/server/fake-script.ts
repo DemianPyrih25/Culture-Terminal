@@ -23,6 +23,9 @@ import {
   type TrendWindow,
   type ValidationIssue,
 } from "@ct/contracts";
+import { FAKE_MODEL } from "../lib/test-run";
+
+export { FAKE_MODEL };
 
 /**
  * The Foundation fake agent run (PLAN Part 1): a contract-valid brand-health run on invented
@@ -32,7 +35,6 @@ import {
  */
 
 export const FAKE_QUESTION = "Test run: is the Juniper Cola audience a moat or a niche?";
-export const FAKE_MODEL = "fake";
 
 export interface FakeStep {
   /** When to emit, as a fraction of the run's duration (0 ≤ at < 1). run.end is due at 1. */
@@ -136,7 +138,8 @@ class ScriptWriter {
     this.calls += 1;
     const n = this.calls;
     const network = cache === "miss";
-    if (network) this.qloo.network += 1;
+    // A stale call is a failed network attempt, counted with the misses (run-state CACHE_BUCKET).
+    if (network || cache === "stale") this.qloo.network += 1;
     else if (cache === "reused") this.qloo.reused += 1;
     else this.qloo.cached += 1;
     const key = `${path} ${filterType ?? ""}`;
@@ -193,6 +196,7 @@ class ScriptWriter {
       provenance: { requests: calls.map((c) => ({ method: "GET" as const, path: c.path, query: c.query })) },
       summary,
       flags: options.flags ?? [],
+      qualityGateDrops: 0,
     };
     this.evidenceTimes.push(evidence.fetchedAt);
     this.push(weight, { type: "evidence", evidence });

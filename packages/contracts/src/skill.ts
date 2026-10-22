@@ -58,6 +58,8 @@ export interface EvidenceInput {
   status: SkillStatus;
   summary: string;
   flags: readonly Flag[];
+  /** Results this bundle's quality gate dropped (QUALITY_GATE_DROPPED; −5 each, §6.4). Default 0. */
+  qualityGateDrops?: number;
 }
 export type MetricInput = Omit<Metric, "id">;
 export type FindingInput = Omit<Finding, "id">;
@@ -196,10 +198,10 @@ export interface Skill<I> {
   kitWorkflows: readonly KitWorkflow[];
   /** The tool's input schema (ANALYST_TOOLS[id].input). */
   input: z.ZodType<I>;
-  /** Network calls this input would cost now, counting cached requests as free. */
-  estimateCalls(input: I, probe: CacheProbe): Promise<number>;
+  /** Network calls this input would cost now, counting cached requests as free. The registry maps refs to entity ids. */
+  estimateCalls(input: I, probe: CacheProbe, registry: EntityRegistry): Promise<number>;
   run(input: I, ctx: SkillCtx): Promise<SkillResult>;
-  /** Limitation sentences for the flags this skill raised. */
+  /** The skill's fixed method limitations (SKILL_LIMITATIONS); flag sentences come from FLAG_TEXT via buildLimitations. */
   limitations(flags: readonly Flag[]): string[];
 }
 

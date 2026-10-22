@@ -3,6 +3,7 @@ import type { RunEvent } from "@ct/contracts";
 import { getRun, type Queryable } from "@ct/db";
 import type { EventBus } from "./event-bus";
 import { EVENT_PAGE, readEventsAfter, readLastEvent } from "./event-store";
+import { log } from "./log";
 import { isActiveStatus } from "./run-manager";
 
 export interface RunStreamDeps {
@@ -23,6 +24,11 @@ export interface RunStreamOptions {
   orphanAfterMs?: number;
   /** How often the tail rereads the run row (status and orphan checks). */
   statusCheckMs?: number;
+  /**
+   * After delivering a run.end at least this old, a row that still says queued or running is
+   * repaired: its driver stored run.end but not the row. Younger, the driver may still be writing it.
+   */
+  repairAfterMs?: number;
   pageSize?: number;
 }
 
@@ -31,6 +37,8 @@ const DEFAULTS = {
   // Fake runs emit every few seconds and real runs stop at 180 s; two silent minutes means no driver.
   orphanAfterMs: 120_000,
   statusCheckMs: 5000,
+  // Far past the driver's own retried end-of-run write.
+  repairAfterMs: 30_000,
   pageSize: EVENT_PAGE,
 } satisfies Required<RunStreamOptions>;
 
@@ -79,6 +87,7 @@ export async function* runEventStream(
 
   let last = afterSeq;
   let ended = false;
+  let end: RunEvent | null = null;
 
   const waitFor = (ms: number | null) =>
     new Promise<void>((resolve) => {
@@ -106,6 +115,7 @@ export async function* runEventStream(
         yield event;
         if (event.type === "run.end") {
           ended = true;
+          end = event;
           return;
         }
       }
@@ -131,6 +141,19 @@ export async function* runEventStream(
     return false;
   }
 
+  // After run.end: a replay stops there and its client closes, so this is where a row that lost its
+  // end-of-run write gets repaired. Not for a run live here, nor one that ended moments ago.
+  async function repairIfLagging(runEnd: RunEvent): Promise<void> {
+    if (!deps.finalizeOrphan || deps.isLive(runId)) return;
+    if (Date.now() - Date.parse(runEnd.ts) < opts.repairAfterMs) return;
+    try {
+      const run = await getRun(deps.db, runId);
+      if (run && isActiveStatus(run.status)) await deps.finalizeOrphan(runId);
+    } catch (err) {
+      log.warn({ err, runId }, "could not repair the row of an ended run; the next viewer tries again");
+    }
+  }
+
   try {
     yield* catchUp();
 
@@ -152,7 +175,10 @@ export async function* runEventStream(
         }
         last = next.seq;
         yield next;
-        if (next.type === "run.end") ended = true;
+        if (next.type === "run.end") {
+          ended = true;
+          end = next;
+        }
       } else {
         // Not live here: nothing will be published for this run in this process.
         buffer.length = 0;
@@ -166,6 +192,7 @@ export async function* runEventStream(
         await waitFor(opts.tailIntervalMs);
       }
     }
+    if (end) await repairIfLagging(end);
   } finally {
     unsubscribe();
     signal.removeEventListener("abort", notify);

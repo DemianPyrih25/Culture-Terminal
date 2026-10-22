@@ -41,7 +41,9 @@ export const IntentGeo = z.strictObject({
   unsupported_place: z
     .string()
     .nullable()
-    .describe("A US city or region in the question that is not a supported metro, as written; null otherwise."),
+    .describe(
+      "For site_selection, area_profile or tenant_mix: a US city or region that is not a supported metro, as written; null otherwise. Candidate markets for market_selection or sponsorship go in constraints.notes.",
+    ),
 });
 export type IntentGeo = z.infer<typeof IntentGeo>;
 

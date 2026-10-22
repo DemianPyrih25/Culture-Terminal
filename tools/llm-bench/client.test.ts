@@ -17,8 +17,8 @@ describe("describeError", () => {
     expect(describeError(apiError(403))).toMatchObject({ kind: "permission_denied", scope: "bench" });
     expect(describeError(apiError(404))).toMatchObject({ kind: "not_found", scope: "config" });
     expect(describeError(apiError(429))).toMatchObject({ kind: "rate_limited", scope: "run", maybeBilled: false });
-    expect(describeError(apiError(500))).toMatchObject({ kind: "server_error", scope: "run", maybeBilled: true });
-    expect(describeError(apiError(529))).toMatchObject({ kind: "server_error", scope: "run", maybeBilled: true });
+    expect(describeError(apiError(500))).toMatchObject({ kind: "server_error", scope: "run", maybeBilled: false });
+    expect(describeError(apiError(529))).toMatchObject({ kind: "server_error", scope: "run", maybeBilled: false });
   });
 
   it("maps the 4xx statuses the SDK has no class for: never billed, a 402 stops the bench", () => {
@@ -89,7 +89,8 @@ describe("callModel", () => {
 
   it("charges the estimate for a failure that may have been billed, nothing for a 400", async () => {
     const guard = new BudgetGuard(5);
-    const midStream = scriptedStreamer([apiError(500)]);
+    // A dropped connection may have been billed; a 5xx was not (the server produced no tokens).
+    const midStream = scriptedStreamer([new Anthropic.APIConnectionError({ message: "reset" })]);
     const err = await callModel(midStream.streamer, request, guard, fakeClock(1)).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CallFailed);
     expect((err as CallFailed).chargedUsd).toBeGreaterThan(0);

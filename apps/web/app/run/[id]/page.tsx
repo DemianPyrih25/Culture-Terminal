@@ -5,7 +5,7 @@ import { isRunId } from "@/lib/run-id";
 
 // User runs are unlisted (D31).
 export const metadata: Metadata = {
-  title: "Test run · Culture Terminal",
+  title: "Run · Culture Terminal",
   robots: { index: false, follow: false },
 };
 

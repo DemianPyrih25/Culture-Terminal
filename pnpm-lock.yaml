@@ -11,9 +11,21 @@ importers:
       '@anthropic-ai/sdk':
         specifier: 0.131.0
         version: 0.131.0(zod@4.6.5)
+      '@ct/agent':
+        specifier: workspace:*
+        version: link:packages/agent
       '@ct/contracts':
         specifier: workspace:*
         version: link:packages/contracts
+      '@ct/db':
+        specifier: workspace:*
+        version: link:packages/db
+      '@ct/qloo':
+        specifier: workspace:*
+        version: link:packages/qloo
+      '@ct/quant':
+        specifier: workspace:*
+        version: link:packages/quant
       '@playwright/test':
         specifier: 1.63.0
         version: 1.63.0

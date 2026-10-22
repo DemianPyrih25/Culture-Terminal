@@ -12,6 +12,7 @@ import {
   planAck,
   TURN2_GUIDE,
   TURN3_NOTICE,
+  type PlanSteps,
   type Scenario,
 } from "./scenario";
 import { classifyStop, thinkingSummary, toolUses, type RefusalResult } from "./stop";
@@ -173,6 +174,7 @@ export async function runAnalyst(config: BenchConfig, run: number, deps: RunDeps
   let retryCause: string | null = null;
   let turnRetries = 0;
   let planned: string[] = [];
+  let planSteps: PlanSteps | null = null;
 
   for (;;) {
     rec.turnReached = turn;
@@ -252,6 +254,7 @@ export async function runAnalyst(config: BenchConfig, run: number, deps: RunDeps
         const c = checkPlan(planUse.input);
         rec.plan = { submitted: true, structural: c.structural, limits: c.limits, issues: c.issues, input: planUse.input };
         planned = c.plan?.hypotheses.map((h) => h.id) ?? [];
+        if (c.plan) planSteps = { steps: c.plan.steps, run: new Set() };
         mark(planUse, c.structural);
         results.push(
           c.plan
@@ -266,7 +269,7 @@ export async function runAnalyst(config: BenchConfig, run: number, deps: RunDeps
           mark(use, false);
           continue;
         }
-        const answer = answerSkillCall(use, "wave1", scenario);
+        const answer = answerSkillCall(use, "wave1", scenario, planSteps);
         results.push(answer.result);
         mark(use, answer.ok);
       }
@@ -302,7 +305,7 @@ export async function runAnalyst(config: BenchConfig, run: number, deps: RunDeps
         continue;
       }
       const results = uses.map((use) => {
-        const answer = answerSkillCall(use, "followup", scenario);
+        const answer = answerSkillCall(use, "followup", scenario, planSteps);
         mark(use, answer.ok);
         return answer.result;
       });

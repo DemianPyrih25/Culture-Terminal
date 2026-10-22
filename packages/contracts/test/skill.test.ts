@@ -117,7 +117,7 @@ describe("skill contract", () => {
     } satisfies SkillCtx;
 
     const input = momentumSkill.input.parse({ entities: ["R1"], type: "brand", trigger_finding_id: null, step_id: "S4" });
-    expect(await momentumSkill.estimateCalls(input, { has: async () => false })).toBe(1);
+    expect(await momentumSkill.estimateCalls(input, { has: async () => false }, ctx.registry)).toBe(1);
     const result = await momentumSkill.run(input, ctx);
     expect(result.status).toBe("empty");
     expect(digestFits(result.forModel, { tool: "momentum", step: "S4" })).toBe(true);

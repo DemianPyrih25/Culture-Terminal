@@ -76,7 +76,7 @@ export type QlooSearchEntity = z.infer<typeof QlooSearchEntity>;
 export const QlooSearchResponse = z.looseObject({ results: z.array(QlooSearchEntity) });
 export type QlooSearchResponse = z.infer<typeof QlooSearchResponse>;
 
-/** /entities batch describe. Its shape is unverified by the probe; it is assumed to match /search. */
+/** /entities batch describe. Verified live: its rows have the /search shape. */
 export const QlooEntitiesResponse = z.looseObject({ results: z.array(QlooSearchEntity) });
 export type QlooEntitiesResponse = z.infer<typeof QlooEntitiesResponse>;
 

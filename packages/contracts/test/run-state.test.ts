@@ -5,6 +5,14 @@ import { RUN_ID, deepFreeze, fullRunInputs, needsInputInput, stampAll, ts } from
 const events = stampAll(fullRunInputs);
 
 describe("applyEvent", () => {
+  it("counts a stale call as network: it spent a request before the expired entry was served", () => {
+    const base = events.find((e) => e.type === "qloo");
+    if (base?.type !== "qloo") throw new Error("the fixture run has no qloo event");
+    const s = applyEvents(initialRunState(RUN_ID), [events[0]!, { ...base, cache: "stale" }]);
+    expect(s.qloo).toMatchObject({ network: 1, cached: 0, reused: 0 });
+    expect(s.qloo.byCache.stale).toBe(1);
+  });
+
   it("starts empty and queued", () => {
     const s = initialRunState(RUN_ID);
     expect(s.lastSeq).toBe(0);

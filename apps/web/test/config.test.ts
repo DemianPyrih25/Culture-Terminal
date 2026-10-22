@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { fakeRunHourlyCapFromEnv, fakeRunRetentionMsFromEnv } from "../server/config";
+import {
+  agentRunHourlyCapFromEnv,
+  agentRunMaxActiveFromEnv,
+  fakeRunHourlyCapFromEnv,
+  fakeRunRetentionMsFromEnv,
+  llmDailyUsdCapFromEnv,
+} from "../server/config";
 
 vi.mock("server-only", () => ({}));
 
@@ -22,5 +28,27 @@ describe("fake run limits from the environment", () => {
     expect(fakeRunRetentionMsFromEnv(env({ FAKE_RUN_RETENTION_HOURS: "24" }))).toBe(24 * HOUR);
     // Never shorter than the cap's window, or a purge would let the cap count fewer runs.
     expect(fakeRunRetentionMsFromEnv(env({ FAKE_RUN_RETENTION_HOURS: "0.25" }))).toBe(HOUR);
+  });
+});
+
+describe("agent run limits from the environment", () => {
+  it("defaults to 20 agent runs an hour and a 1.40 USD daily LLM cap, also for empty values", () => {
+    expect(agentRunHourlyCapFromEnv(env())).toBe(20);
+    expect(agentRunHourlyCapFromEnv(env({ AGENT_RUN_HOURLY_CAP: "" }))).toBe(20);
+    expect(agentRunMaxActiveFromEnv(env())).toBe(3);
+    expect(agentRunMaxActiveFromEnv(env({ AGENT_RUN_MAX_ACTIVE: " " }))).toBe(3);
+    expect(llmDailyUsdCapFromEnv(env())).toBe(1.4);
+    expect(llmDailyUsdCapFromEnv(env({ LLM_DAILY_USD_CAP: " " }))).toBe(1.4);
+  });
+
+  it("reads and clamps the values", () => {
+    expect(agentRunHourlyCapFromEnv(env({ AGENT_RUN_HOURLY_CAP: "5" }))).toBe(5);
+    expect(agentRunHourlyCapFromEnv(env({ AGENT_RUN_HOURLY_CAP: "0" }))).toBe(1);
+    expect(agentRunHourlyCapFromEnv(env({ AGENT_RUN_HOURLY_CAP: "many" }))).toBe(20);
+    expect(agentRunMaxActiveFromEnv(env({ AGENT_RUN_MAX_ACTIVE: "5" }))).toBe(5);
+    expect(agentRunMaxActiveFromEnv(env({ AGENT_RUN_MAX_ACTIVE: "0" }))).toBe(1);
+    expect(llmDailyUsdCapFromEnv(env({ LLM_DAILY_USD_CAP: "2.5" }))).toBe(2.5);
+    // Zero refuses every live run, which is a valid way to switch them off.
+    expect(llmDailyUsdCapFromEnv(env({ LLM_DAILY_USD_CAP: "-1" }))).toBe(0);
   });
 });

@@ -188,6 +188,25 @@ describe("answerSkillCall", () => {
       expect(result.content).toMatch(pattern);
     }
   });
+
+  it("lets an untriggered turn-2 call run only as an unrun plan step with that step's tool", () => {
+    const s = buildScenario();
+    const plan = { steps: [{ id: "S2", tool: "audience_dna" }, { id: "S3", tool: "audience_dna" }], run: new Set<string>() };
+    expect(answerSkillCall(use({ ...dna(null), step_id: "S2" }), "wave1", s, plan).ok).toBe(true);
+    expect(plan.run.has("S2")).toBe(true);
+    const refused: Array<[unknown, string, RegExp]> = [
+      [{ ...dna(null), step_id: "S2" }, "audience_dna", /^TRIGGER_REQUIRED: S2 has already run/],
+      [{ ...dna(null), step_id: "S9" }, "audience_dna", /^TRIGGER_REQUIRED: S9 is not a step of the plan/],
+      [{ seeds: ["R1"], trigger_finding_id: null, step_id: "S3" }, "destination_affinity", /^TRIGGER_REQUIRED: S3 plans audience_dna, not destination_affinity/],
+    ];
+    for (const [input, name, pattern] of refused) {
+      const { result, ok } = answerSkillCall(use(input, name), "followup", s, plan);
+      expect(ok).toBe(false);
+      expect(result.content).toMatch(pattern);
+    }
+    expect(answerSkillCall(use(dna(null)), "followup", s, plan).ok).toBe(true);
+    expect(answerSkillCall(use(dna(null)), "followup", s, plan).ok).toBe(false);
+  });
 });
 
 describe("collectRefs", () => {

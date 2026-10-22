@@ -51,10 +51,12 @@ const DRIZZLE_SNAPSHOT_ID_LINE = /^\s*"(?:id|prevId)":\s*"[0-9a-f-]{36}",?\s*$/i
 function uuidRule(file: string): TextRule {
   return {
     id: "uuid",
-    // A hex digit right before the UUID means a longer hex run, unless it ends a %XX, \xXX or
-    // \u00XX escape: URL-encoded queries and JSON put UUIDs right after %22, %2C or %3A.
+    // A hex digit right before the UUID means a longer hex run, unless it ends an escape: %XX and
+    // %uXXXX, also percent-encoded again (%252C, %25u201C), \xXX and \uXXXX. URL-encoded queries put
+    // UUIDs right after %22, %2C or %3D (%253D once more when a URL rides inside another), and JSON
+    // with escaped non-ASCII puts them right after " or “.
     pattern:
-      /(?:(?<![0-9a-f])|(?<=(?:%|\\x|\\u00)[0-9a-f]{2}))[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])/gi,
+      /(?:(?<![0-9a-f])|(?<=(?:%(?:25)*(?:u[0-9a-f]{2})?|\\x|\\u[0-9a-f]{2})[0-9a-f]{2}))[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9a-f])/gi,
     message: "UUID-shaped value outside **/test/synthetic/** (D29: Qloo IDs are resolved at runtime and pinned in the database)",
     accept: DRIZZLE_SNAPSHOT.test(file)
       ? (m, text) => !DRIZZLE_SNAPSHOT_ID_LINE.test(lineAt(text, m.index))
