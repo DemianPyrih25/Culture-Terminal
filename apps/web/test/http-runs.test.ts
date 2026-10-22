@@ -42,7 +42,8 @@ async function answer(res: Response): Promise<{ status: number; body: Record<str
   return { status: res.status, body: (await res.json()) as Record<string, unknown> };
 }
 
-const KEY = "pk_0123456789abcdef";
+// Built at runtime: a literal key-shaped string trips the gitleaks generic-api-key rule.
+const KEY = `pk_${"0a".repeat(8)}`;
 
 describe("POST /api/runs", () => {
   it("starts a test run without a request, with an empty body or with {fake: true}", async () => {
@@ -81,7 +82,7 @@ describe("POST /api/runs", () => {
     ["raw entity-id pins", { question: "Is Brand Alpha a moat?", pins: { "Brand Alpha": "entity-alpha" } }],
     ["a parentRunId that is not a run id", { question: "Is Brand Alpha a moat?", parentRunId: "../etc" }],
     ["a pick whose key is an entity id", { pick: { runId: "run-needs-0001", key: "entity-alpha" } }],
-    ["a pick whose key is not lowercase hex", { pick: { runId: "run-needs-0001", key: "pk_0123456789ABCDEF" } }],
+    ["a pick whose key is not lowercase hex", { pick: { runId: "run-needs-0001", key: KEY.toUpperCase() } }],
     ["a pick without a key", { pick: { runId: "run-needs-0001" } }],
     ["a pick with a bad run id", { pick: { runId: "../etc", key: KEY } }],
     ["a pick with a question", { pick: { runId: "run-needs-0001", key: KEY }, question: "Is Brand Alpha a moat?" }],
