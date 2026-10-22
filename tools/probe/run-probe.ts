@@ -559,7 +559,8 @@ function analyse(): Record<string, unknown> {
   // G1
   const control = affs("g1_control_no_signal");
   const row = (k: string) => affs(`g1_row_${k}`);
-  const symDiffs = [["liquid_death", "olipop"], ["liquid_death", "poppi"], ["olipop", "poppi"]].map(([a, b]) => {
+  const symPairs: [string, string][] = [["liquid_death", "olipop"], ["liquid_death", "poppi"], ["olipop", "poppi"]];
+  const symDiffs = symPairs.map(([a, b]) => {
     const ab = row(a).get(ids[b] ?? "");
     const ba = row(b).get(ids[a] ?? "");
     return ab === undefined || ba === undefined ? null : Math.abs(ab - ba);
@@ -587,12 +588,12 @@ function analyse(): Record<string, unknown> {
   // g2_uuid name the same locality, so their agreement is reported separately, not as an ignored signal.
   const ctx = ["g1_tag_row", "g1_audience_row", "g2_query", "g2_uuid", "g2_polygon", "g2_point", "g4_age_only"];
   const pairs: Record<string, { identical: boolean | null; spearman: number | null }> = {};
-  for (let i = 0; i < ctx.length; i++) {
-    for (let j = i + 1; j < ctx.length; j++) {
-      if (ctx[i] === "g2_query" && ctx[j] === "g2_uuid") continue;
-      pairs[`${ctx[i]}~${ctx[j]}`] = { identical: identical(affs(ctx[i]), affs(ctx[j])), spearman: rho(affs(ctx[i]), affs(ctx[j])) };
+  ctx.forEach((a, i) => {
+    for (const b of ctx.slice(i + 1)) {
+      if (a === "g2_query" && b === "g2_uuid") continue;
+      pairs[`${a}~${b}`] = { identical: identical(affs(a), affs(b)), spearman: rho(affs(a), affs(b)) };
     }
-  }
+  });
   out.context_rows = {
     control_status: status("g1_control_no_signal"),
     vs_control: Object.fromEntries(ctx.map((id) => [id, { identical: identical(affs(id), control), spearman: rho(affs(id), control) }])),
@@ -639,7 +640,9 @@ function analyse(): Record<string, unknown> {
   const gh = (c: any) => String(c?.location?.geohash ?? "");
   const heatStats = (id: string) => {
     const cells = heat(id);
-    const pairsAP = cells.map((c) => [Number(c?.query?.affinity), Number(c?.query?.popularity)]).filter(([a, p]) => Number.isFinite(a) && Number.isFinite(p));
+    const pairsAP = cells
+      .map((c): [number, number] => [Number(c?.query?.affinity), Number(c?.query?.popularity)])
+      .filter(([a, p]) => Number.isFinite(a) && Number.isFinite(p));
     return {
       status: status(id), cells: cells.length, bytes: results[id]?.bytes ?? 0, ms: results[id]?.ms ?? 0,
       geohash_lengths: histogram(cells.map((c) => gh(c).length)),
@@ -697,7 +700,7 @@ function analyse(): Record<string, unknown> {
         compared_cells: pairsK.length,
         identical_share: pairsK.length ? round(pairsK.filter(([a, b]) => same(a, b)).length / pairsK.length) : null,
         nonzero_share: num.length ? round(num.filter(([a, b]) => Number(a) > 0 || Number(b) > 0).length / num.length) : null,
-        value_type: pairsK.length ? typeof pairsK[0][0] : null,
+        value_type: pairsK[0] ? typeof pairsK[0][0] : null,
       }];
     })),
   };
@@ -830,7 +833,7 @@ function analyse(): Record<string, unknown> {
     entries: histogram(shares.map((s) => s.length)),
     mean_max_share: listed.length ? round(mean(listed.map((s) => Math.max(...s)))) : null,
     dominated_share: listed.length ? round(listed.filter((s) => Math.max(...s) >= 0.6).length / listed.length) : null,
-    near_uniform_share: twoSeed.length ? round(twoSeed.filter((s) => Math.abs(s[0] - s[1]) < 0.1).length / twoSeed.length) : null,
+    near_uniform_share: twoSeed.length ? round(twoSeed.filter(([x = 0, y = 0]) => Math.abs(x - y) < 0.1).length / twoSeed.length) : null,
     top_level_explainability: isObj(body("g15_explainability")?.query?.explainability),
   };
 
@@ -999,12 +1002,12 @@ function norm(s: string): string {
 }
 
 function ranks(xs: number[]): number[] {
-  const idx = xs.map((v, i) => [v, i] as [number, number]).sort((a, b) => a[0] - b[0]);
-  const r = new Array<number>(xs.length);
-  for (let i = 0; i < idx.length;) {
+  const order = xs.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+  const r = new Array<number>(xs.length).fill(0);
+  for (let i = 0; i < order.length;) {
     let j = i;
-    while (j + 1 < idx.length && idx[j + 1][0] === idx[i][0]) j++;
-    for (let k = i; k <= j; k++) r[idx[k][1]] = (i + j) / 2 + 1;
+    while (j + 1 < order.length && order[j + 1]!.v === order[i]!.v) j++;
+    for (let k = i; k <= j; k++) r[order[k]!.i] = (i + j) / 2 + 1;
     i = j + 1;
   }
   return r;
@@ -1019,11 +1022,12 @@ function spearman(a: number[], b: number[]): number | null {
   let num = 0;
   let da = 0;
   let db = 0;
-  for (let i = 0; i < ra.length; i++) {
-    num += (ra[i] - ma) * (rb[i] - mb);
-    da += (ra[i] - ma) ** 2;
-    db += (rb[i] - mb) ** 2;
-  }
+  ra.forEach((x, i) => {
+    const y = rb[i]!;
+    num += (x - ma) * (y - mb);
+    da += (x - ma) ** 2;
+    db += (y - mb) ** 2;
+  });
   return da && db ? round(num / Math.sqrt(da * db)) : null;
 }
 

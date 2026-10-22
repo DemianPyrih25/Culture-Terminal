@@ -1,0 +1,24 @@
+{
+  "name": "@ct/geo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --root ../.. --passWithNoTests packages/geo/"
+  },
+  "dependencies": {
+    "@ct/contracts": "workspace:*",
+    "@turf/area": "7.4.0",
+    "@turf/boolean-point-in-polygon": "7.4.0",
+    "flatbush": "4.6.2",
+    "ngeohash": "0.6.4"
+  },
+  "devDependencies": {
+    "@types/geojson": "7946.0.16",
+    "@types/ngeohash": "0.6.8"
+  }
+}

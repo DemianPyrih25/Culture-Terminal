@@ -1,0 +1,22 @@
+{
+  "name": "@ct/qloo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --root ../.. --passWithNoTests packages/qloo/"
+  },
+  "dependencies": {
+    "@ct/contracts": "workspace:*",
+    "@ct/db": "workspace:*",
+    "lru-cache": "11.5.3",
+    "p-limit": "7.3.3",
+    "pino": "10.4.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {}
+}

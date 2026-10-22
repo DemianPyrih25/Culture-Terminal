@@ -1,0 +1,31 @@
+# Local development database (D3). Every agent and dev server shares this one instance.
+# Start it with `pnpm db:up`, then apply migrations with `pnpm db:migrate`.
+# Host port 5433, not 5432, so a natively installed Postgres on the default port never shadows it.
+# Set POSTGRES_HOST_PORT to use another port, and point DATABASE_URL at it.
+# Published on 127.0.0.1 only, on purpose: the database holds the private Qloo cache (D29) and its
+# credentials are public, so it must never be reachable from the network.
+name: culture-terminal
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ct
+      POSTGRES_PASSWORD: ct
+      POSTGRES_DB: culture_terminal
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # TCP on purpose: during first-run init the image serves only a Unix socket, so a socket
+      # check would report ready before the real server is listening.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U ct -d culture_terminal"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  pgdata:

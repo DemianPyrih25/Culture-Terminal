@@ -1,0 +1,17 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Every installed version, transitive ones included, must be at least two weeks old (PLAN §3.1).
+minimumReleaseAge: 20160
+
+# Install scripts run only for the packages listed here.
+onlyBuiltDependencies:
+  - esbuild
+
+# Not needed: no image optimisation, no SQLite (mapshaper's optional GeoPackage support), no native msgpack.
+ignoredBuiltDependencies:
+  - better-sqlite3
+  - msgpackr-extract
+  - sharp
+  - unrs-resolver

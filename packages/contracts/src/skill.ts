@@ -1,0 +1,210 @@
+import type { z } from "zod";
+import type { EntityType, Flag, KitWorkflow, MetroId, Phase, Pillar, SkillId, SkillStatus, ToolMnemonic } from "./enums";
+import type { EventInput } from "./events";
+import type { DatasetId, EntityRef, EvidenceId, FindingId, MetricId, TagRef } from "./ids";
+import type { DatasetEnvelope, Evidence, Finding, Metric, QlooCallMeta, QlooResult } from "./ledger";
+import type { RunLimits } from "./limits";
+import type {
+  InsightsFilterType,
+  InsightsResponse,
+  QlooAudiencesResponse,
+  QlooEntitiesResponse,
+  QlooParams,
+  QlooPath,
+  QlooSearchResponse,
+  QlooTagsResponse,
+  QlooTrendingResponse,
+} from "./qloo-types";
+import type { ModelDigest, ToolInput } from "./tools";
+
+/**
+ * The skill contract (PLAN §10.1). A skill is one QUANT analysis behind one ANALYST tool; opening
+ * scans run the same skills with default arguments. Skills reach Qloo, the ledger, the gazetteer and
+ * the registry only through SkillCtx, so every number they produce lands in the ledger with receipts.
+ */
+
+export type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+// Qloo (implemented by @ct/qloo) ---------------------------------------------------------------------
+
+/**
+ * The Qloo client as skills see it: GET-only, allowlisted, cached, rate-limited and budgeted. It
+ * throws on any parameter outside the frozen allowlist, and a budget gate failure surfaces as a
+ * typed error that the skill turns into BUDGET_TRUNCATED. `/v2/analysis/compare` is not part of P0
+ * (probe G13). The scoped instance in SkillCtx attributes every call to the current tool call.
+ */
+export interface QlooApi {
+  search(params: QlooParams): Promise<QlooResult<QlooSearchResponse>>;
+  entities(entityIds: readonly string[]): Promise<QlooResult<QlooEntitiesResponse>>;
+  tags(params: QlooParams): Promise<QlooResult<QlooTagsResponse>>;
+  audiences(params: QlooParams): Promise<QlooResult<QlooAudiencesResponse>>;
+  /** `filter.type` is the first argument and must not be repeated in `params`. */
+  insights<F extends InsightsFilterType>(filterType: F, params: QlooParams): Promise<QlooResult<InsightsResponse<F>>>;
+  trending(params: QlooParams): Promise<QlooResult<QlooTrendingResponse>>;
+}
+
+/** Answers "would this exact request be served from cache?" without spending a call. */
+export interface CacheProbe {
+  has(path: QlooPath, params: QlooParams): Promise<boolean>;
+}
+
+// Ledger (implemented by the agent with @ct/db) --------------------------------------------------------
+
+export interface EvidenceInput {
+  skill: SkillId;
+  purpose: string;
+  /** The calls in this bundle; the ledger derives ids, request ids, caching and provenance from them. */
+  calls: readonly QlooCallMeta[];
+  status: SkillStatus;
+  summary: string;
+  flags: readonly Flag[];
+}
+export type MetricInput = Omit<Metric, "id">;
+export type FindingInput = Omit<Finding, "id">;
+export type DatasetInput = DistributiveOmit<DatasetEnvelope, "id">;
+
+/**
+ * Run-scoped ledger. Each add validates its input, assigns the next id (E#, M#, D#, F#), stores it
+ * and emits the matching event (`evidence`, `metric`, `dataset.ready`, `finding`), so a skill cannot
+ * produce a number the trace and the CHECKER do not see.
+ */
+export interface Ledger {
+  addEvidence(input: EvidenceInput): Evidence;
+  addMetric(input: MetricInput): Metric;
+  addDataset(input: DatasetInput): DatasetEnvelope;
+  addFinding(input: FindingInput): Finding;
+  evidence(id: EvidenceId): Evidence | undefined;
+  metric(id: MetricId): Metric | undefined;
+  dataset(id: DatasetId): DatasetEnvelope | undefined;
+  finding(id: FindingId): Finding | undefined;
+}
+
+// Gazetteer (implemented by @ct/geo) -------------------------------------------------------------------
+
+export interface LatLon {
+  lat: number;
+  lon: number;
+}
+
+export interface Neighbourhood {
+  /** Stable slug, e.g. east_nashville; the `ref` of an `{kind: "nbhd"}` area. */
+  id: string;
+  name: string;
+  metro: MetroId;
+  centroid: LatLon;
+  areaKm2: number;
+}
+
+export interface GeoApi {
+  metros(): readonly MetroId[];
+  neighbourhoods(metro: MetroId): readonly Neighbourhood[];
+  neighbourhood(metro: MetroId, id: string): Neighbourhood | null;
+  /** Matches CLERK's area text (e.g. "East Nashville") to a neighbourhood by normalised name. */
+  matchNeighbourhood(metro: MetroId, text: string): Neighbourhood | null;
+  /** The neighbourhood polygon as lon-first WKT with at most 40 vertices, for signal.location. */
+  polygonWkt(metro: MetroId, id: string): string | null;
+  /** Point-in-polygon: the neighbourhood containing a point, or null. */
+  locate(metro: MetroId, point: LatLon): string | null;
+  geohashCentroid(geohash: string): LatLon;
+  /** Boundary attribution for exhibit captions. */
+  boundarySource(metro: MetroId): string;
+}
+
+// Registry (implemented by the agent) ------------------------------------------------------------------
+
+export interface RegisteredEntity {
+  ref: EntityRef;
+  /** The Qloo entity id; it stays server-side and never reaches the model. */
+  entityId: string;
+  name: string;
+  type: EntityType;
+  popularity: number | null;
+  disambiguation: string | null;
+  tags: readonly { tagId: string; name: string; type: string }[];
+}
+
+export interface RegisteredTag {
+  ref: TagRef;
+  /** Public taxonomy URN, e.g. urn:tag:genre:place:restaurant. */
+  tagId: string;
+  name: string;
+  type: string;
+  /** Taxonomy tags only (isTaxonomyTag): descriptive tags give no signal (probe G1, G6). */
+  signalCapable: boolean;
+}
+
+/**
+ * Maps run-local refs (R#, T#) to Qloo ids. Registration is idempotent by Qloo id: registering a
+ * known entity or tag returns its existing ref.
+ */
+export interface EntityRegistry {
+  registerEntity(entity: Omit<RegisteredEntity, "ref">): RegisteredEntity;
+  registerTag(tag: Omit<RegisteredTag, "ref">): RegisteredTag;
+  entity(ref: EntityRef): RegisteredEntity | null;
+  tag(ref: TagRef): RegisteredTag | null;
+  byEntityId(entityId: string): RegisteredEntity | null;
+  byTagId(tagId: string): RegisteredTag | null;
+  entities(): readonly RegisteredEntity[];
+  tags(): readonly RegisteredTag[];
+}
+
+// Run plumbing --------------------------------------------------------------------------------------------
+
+/** Emits an event; the run manager stamps seq, ts and runId. */
+export type Emit = (event: EventInput) => void;
+
+/** A read view of the run's budgets (D24, §4.2). The Qloo client enforces the caps itself. */
+export interface RunBudget {
+  readonly limits: RunLimits;
+  qlooNetworkUsed(): number;
+  /** Network calls still allowed now: the run cap, and in the follow-up phase also the follow-up cap. */
+  qlooNetworkRemaining(): number;
+  canAfford(calls: number): boolean;
+  elapsedMs(): number;
+  llmUsd(): number;
+}
+
+export interface SkillCtx {
+  qloo: QlooApi;
+  ledger: Ledger;
+  geo: GeoApi;
+  registry: EntityRegistry;
+  emit: Emit;
+  budget: RunBudget;
+  signal: AbortSignal;
+  runId: string;
+  pillar: Pillar;
+  phase: Phase;
+  /** The tool call (or opening-scan step) this skill run belongs to; carried on fallback and finding events. */
+  toolCallId: string;
+}
+
+export interface SkillResult {
+  /** The digest returned to the model, wrapped by wrapQlooData (≤1.5k tokens). */
+  forModel: ModelDigest;
+  evidenceIds: EvidenceId[];
+  metricIds: MetricId[];
+  datasetIds: DatasetId[];
+  findingIds: FindingId[];
+  flags: Flag[];
+  status: SkillStatus;
+}
+
+export interface Skill<I> {
+  id: SkillId;
+  mnemonic: ToolMnemonic;
+  kitWorkflows: readonly KitWorkflow[];
+  /** The tool's input schema (ANALYST_TOOLS[id].input). */
+  input: z.ZodType<I>;
+  /** Network calls this input would cost now, counting cached requests as free. */
+  estimateCalls(input: I, probe: CacheProbe): Promise<number>;
+  run(input: I, ctx: SkillCtx): Promise<SkillResult>;
+  /** Limitation sentences for the flags this skill raised. */
+  limitations(flags: readonly Flag[]): string[];
+}
+
+/** The skill behind a given tool, typed by that tool's input. */
+export type SkillFor<Id extends SkillId> = Skill<ToolInput<Id>>;
+
+/** One skill per skill tool. */
+export type SkillRegistry = { [Id in SkillId]: SkillFor<Id> };

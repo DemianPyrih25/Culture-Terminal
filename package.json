@@ -1,0 +1,38 @@
+{
+  "name": "culture-terminal",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.34.6",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "start": "pnpm --filter web start",
+    "typecheck": "pnpm -r typecheck && tsc -p tsconfig.tools.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "guard": "tsx tools/guard/run.ts",
+    "db:up": "docker compose up -d --wait postgres",
+    "db:generate": "pnpm --filter @ct/db generate",
+    "db:migrate": "pnpm --filter @ct/db migrate",
+    "probe": "node --env-file=.env tools/probe/run-probe.ts",
+    "llm:bench": "tsx --env-file=.env tools/llm-bench/run.ts"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "0.131.0",
+    "@ct/contracts": "workspace:*",
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.19.1",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.8",
+    "mapshaper": "0.7.78",
+    "tsx": "4.23.15",
+    "typescript": "6.0.3",
+    "vite": "7.3.7",
+    "vitest": "4.1.11",
+    "zod": "4.6.5"
+  }
+}

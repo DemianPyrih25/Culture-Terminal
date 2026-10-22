@@ -11,20 +11,25 @@ bower_components/
 !.yarn/sdks
 !.yarn/versions
 
-# Environment variables (API keys — never commit)
-.env
-.env.*
+# Environment variables (API keys — never commit), including variants such as .env-backup and .envrc
+.env*
 !.env.example
 
 # Private planning docs
 docs/
 CLAUDE.md
 
+# Local design files (Pencil); kept out of the repository
+design/
+
 # Private Qloo data (must never reach the public repo)
 .probe/
 .private/
 eval/raw/
 *.dump
+*.backup
+*.pgdump
+*.sql.gz
 
 # Logs
 logs/
@@ -81,3 +86,11 @@ coverage/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Next.js per-agent build dirs (NEXT_DIST_DIR) and generated types
+.next-*/
+next-env.d.ts
+
+# Playwright
+test-results/
+playwright-report/
