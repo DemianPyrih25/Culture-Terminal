@@ -50,6 +50,28 @@ export function llmDailyUsdCapFromEnv(env: NodeJS.ProcessEnv = process.env): num
   return numberFromEnv(env.LLM_DAILY_USD_CAP, 1.4, 0, 1000);
 }
 
+/**
+ * Question previews (POST /api/preview) one process answers per rolling hour. Each one that is not
+ * already in hand costs a CLERK call, so this caps that spend before the daily LLM breaker does.
+ */
+export function previewHourlyCapFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  return Math.round(numberFromEnv(env.PREVIEW_HOURLY_CAP, 120, 1, 10_000));
+}
+
+/**
+ * QLOO_DISABLED=1 (SPEC §6, the fail-closed demo): no Qloo call at all. A preview then skips the
+ * resolution gate's lookups and estimates no data requests; passed to the run manager as
+ * `qlooEnabled: false`, agent runs take the V7 path.
+ */
+export function qlooDisabledFromEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.QLOO_DISABLED?.trim() === "1";
+}
+
+/** Prod fresh Qloo calls per UTC day (QLOO_DAILY_FRESH_CAP, the Qloo client's own setting): the preview's quota share. */
+export function qlooDailyFreshCapFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  return Math.round(numberFromEnv(env.QLOO_DAILY_FRESH_CAP, 1_900, 1, 1_000_000));
+}
+
 /** How long SIGTERM waits for active runs before marking them incomplete (SPEC §3.2: up to 180 s). */
 export function shutdownGraceMsFromEnv(env: NodeJS.ProcessEnv = process.env): number {
   return Math.round(numberFromEnv(env.SHUTDOWN_GRACE_MS, 180_000, 0, 600_000));

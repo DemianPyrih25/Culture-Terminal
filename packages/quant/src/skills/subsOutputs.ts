@@ -474,7 +474,8 @@ export function addSubstitutionMap(
   }
   const dataset = run.ctx.ledger.addDataset({
     kind: "Matrix",
-    title: "Substitution Map",
+    // Named after its target: a run that maps two brands holds two maps.
+    title: `Substitution Map · ${nameOf(members, TARGET)}`,
     evidenceIds: [...evidenceIds],
     formulaIds: [...SUBS_FORMULA_IDS],
     payload: substitutionMapPayload({

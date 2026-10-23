@@ -1,6 +1,6 @@
-import { and, count, desc, eq, gte, inArray, like, lt, notInArray, sql } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, like, lt, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { Queryable } from "../client";
-import { type NewRun, type Run, type RunStatus, runs } from "../schema";
+import { metrics, type NewRun, type Run, type RunStatus, runs } from "../schema";
 
 /** D26: a completed run answers the same question hash for 72 hours. */
 export const ANSWER_CACHE_WINDOW_MS = 72 * 60 * 60 * 1000;
@@ -83,8 +83,9 @@ export async function isCancelRequested(db: Queryable, id: string): Promise<bool
   return row?.at != null;
 }
 
-// Escapes LIKE wildcards so the prefix matches literally (backslash is Postgres' default escape).
-const likePrefix = (prefix: string) => `${prefix.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+// Escapes LIKE wildcards so the text matches literally (backslash is Postgres' default escape).
+const likeLiteral = (text: string) => text.replace(/[\\%_]/g, (c) => `\\${c}`);
+const likePrefix = (prefix: string) => `${likeLiteral(prefix)}%`;
 
 function checkWindow(what: string, ms: number): void {
   if (!Number.isFinite(ms) || ms <= 0) throw new RangeError(`${what}: window must be a positive number of ms, got ${ms}`);
@@ -165,4 +166,280 @@ export async function findAnswerCache(
     .orderBy(desc(runs.createdAt))
     .limit(1);
   return row;
+}
+
+// Listing finished runs (the briefs on Home and in the library) ---------------------------------------
+
+/** The most runs one listRuns page returns. */
+export const RUN_LIST_MAX = 50;
+
+/** date: newest first. conviction: highest confidence score first, runs without one last, then newest. */
+export type RunListSort = "date" | "conviction";
+
+/**
+ * Where a page ended: the next page starts strictly after this row in the sort order. createdAt is
+ * the row's created_at in UTC with microseconds (RunListRow.createdAtKey), so rows created within
+ * the same millisecond are never skipped; id breaks ties. A date cursor without an id lists the runs
+ * created strictly before createdAt. A conviction cursor also carries the row's score.
+ */
+export interface RunListCursor {
+  createdAt: string;
+  id: string | null;
+  /** The conviction sort key of the row; null for a run without a score. Ignored by the date sort. */
+  score?: number | null;
+}
+
+/** The most run ids one RunVisibility names. */
+export const RUN_VISIBLE_IDS_MAX = 50;
+
+/**
+ * Which runs a list may show (D31: user-run notes are unlisted): the curated showcases, and the runs
+ * named by id (the ones a visitor started, from their own browser's history). Nothing else, so one
+ * visitor's runs never appear in another's list.
+ */
+export interface RunVisibility {
+  /** Include runs with is_showcase set. */
+  showcases: boolean;
+  /** Include these runs, at most RUN_VISIBLE_IDS_MAX. */
+  ids: readonly string[];
+}
+
+export interface RunListFilter {
+  /** Only runs whose question_hash starts with this (agent runs: "q1:"). Required, so a list never mixes in test runs. */
+  hashPrefix: string;
+  /** Only runs in these statuses; an empty list matches nothing. */
+  statuses: readonly RunStatus[];
+  /** Case-insensitive substring of the question. LIKE wildcards in it match literally. */
+  search?: string | null;
+  /** Required, so a list never shows every visitor's runs; no showcases and no ids match nothing. */
+  visible: RunVisibility;
+}
+
+export interface ListRunsOptions extends RunListFilter {
+  /** Page size, 1 to RUN_LIST_MAX. */
+  limit: number;
+  /** Defaults to "date". */
+  sort?: RunListSort;
+  /** Only runs on this desk (the pillar column). */
+  pillar?: string | null;
+  /** The previous page's `next`. */
+  after?: RunListCursor | null;
+}
+
+/** One finished run as a list shows it: the row's columns plus what its stored report says. */
+export interface RunListRow {
+  id: string;
+  question: string;
+  pillar: string | null;
+  job: string | null;
+  status: RunStatus;
+  createdAt: Date;
+  /** created_at in UTC with microseconds, for a cursor. */
+  createdAtKey: string;
+  /** report.verdict.signal, or null without a report. */
+  signal: string | null;
+  /** report.verdict.headline, or null. */
+  headline: string | null;
+  /** report.verdict.confidence.score, or null. */
+  confidenceScore: number | null;
+  /** report.verdict.confidence.band, or null. */
+  confidenceBand: string | null;
+  /** The receipt's numbersTraced, else the validation column's, as stored (callers validate it). */
+  numbersTraced: unknown;
+  qlooNetwork: number;
+  qlooCached: number;
+  /** The receipt's requests reused from a parent run (a follow-up), or null without a report. */
+  qlooReused: number | null;
+}
+
+export interface RunListPage {
+  rows: RunListRow[];
+  /** The cursor for the next page, or null when this page is the last. */
+  next: RunListCursor | null;
+}
+
+export interface RunListSummary {
+  /** Matching runs. */
+  total: number;
+  /** Matching runs per pillar column value; runs without a pillar are counted under "". */
+  byPillar: Record<string, number>;
+  /** Numbers traced and checked across the matching runs that recorded them. */
+  numbersTraced: { traced: number; total: number };
+  /** The same per pillar column value, keyed like byPillar. */
+  numbersTracedByPillar: Record<string, { traced: number; total: number }>;
+}
+
+/** A constant jsonb path literal such as '{verdict,signal}'; only plain keys are accepted. */
+function jsonPath(path: string): SQL {
+  if (!/^[A-Za-z]+(,[A-Za-z]+)*$/.test(path)) throw new RangeError(`jsonPath: not a plain key path: ${path}`);
+  return sql.raw(`'{${path}}'`);
+}
+
+const toNumberOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
+
+/** A number inside a jsonb value as float8, or null when the path is missing or holds no number. */
+function jsonNumber(value: SQL, path: string): SQL<number | null> {
+  const at = jsonPath(path);
+  return sql<number | null>`(case when jsonb_typeof(${value} #> ${at}) = 'number' then (${value} #>> ${at})::float8 end)`.mapWith(
+    toNumberOrNull,
+  );
+}
+
+/** A string inside a jsonb value, or null when the path is missing or holds no string. */
+function jsonText(value: SQL, path: string): SQL<string | null> {
+  const at = jsonPath(path);
+  return sql<string | null>`(case when jsonb_typeof(${value} #> ${at}) = 'string' then ${value} #>> ${at} end)`;
+}
+
+const REPORT = sql`${runs.report}`;
+const CONFIDENCE_SCORE = jsonNumber(REPORT, "verdict,confidence,score");
+const RECEIPT_TRACED = jsonPath("receipt,numbersTraced");
+const VALIDATION_TRACED = jsonPath("numbersTraced");
+/** The receipt's numbersTraced, else the validation column's (a run that never assembled a report). */
+const NUMBERS_TRACED = sql`coalesce(${runs.report} #> ${RECEIPT_TRACED}, ${runs.validation} #> ${VALIDATION_TRACED})`;
+const CREATED_AT_KEY = sql<string>`to_char(${runs.createdAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+
+/** The visibility as one condition, or null when it shows no run at all. */
+function visibleCondition(visible: RunVisibility): SQL | null {
+  const ids = [...new Set(visible.ids)];
+  if (ids.length > RUN_VISIBLE_IDS_MAX) {
+    throw new RangeError(`listRuns: at most ${RUN_VISIBLE_IDS_MAX} visible run ids, got ${ids.length}`);
+  }
+  const parts: SQL[] = [];
+  if (visible.showcases) parts.push(eq(runs.isShowcase, true));
+  if (ids.length > 0) parts.push(inArray(runs.id, ids));
+  return parts.length === 0 ? null : (or(...parts) ?? null);
+}
+
+/** The filter's conditions, or null when it can match no run (no statuses, nothing visible). */
+function filterConditions(filter: RunListFilter): SQL[] | null {
+  const { hashPrefix, statuses, search } = filter;
+  if (hashPrefix === "") throw new RangeError("listRuns: hashPrefix must not be empty");
+  const visible = visibleCondition(filter.visible);
+  if (statuses.length === 0 || visible === null) return null;
+  const conditions: SQL[] = [like(runs.questionHash, likePrefix(hashPrefix)), inArray(runs.status, [...statuses]), visible];
+  const text = search?.trim() ?? "";
+  if (text !== "") conditions.push(ilike(runs.question, `%${likeLiteral(text)}%`));
+  return conditions;
+}
+
+/** Rows strictly after the cursor's (created_at, id) in newest-first order. */
+function olderThan(cursor: RunListCursor): SQL {
+  const at = sql`${cursor.createdAt}::timestamptz`;
+  return cursor.id === null ? sql`${runs.createdAt} < ${at}` : sql`(${runs.createdAt}, ${runs.id}) < (${at}, ${cursor.id}::text)`;
+}
+
+/** Rows strictly after the cursor in conviction order: lower scores, the same score but older, then no score. */
+function afterInConviction(cursor: RunListCursor): SQL {
+  const score = cursor.score ?? null;
+  if (score === null) return sql`(${CONFIDENCE_SCORE} is null and ${olderThan(cursor)})`;
+  const s = sql`${score}::float8`;
+  return sql`(${CONFIDENCE_SCORE} < ${s} or (${CONFIDENCE_SCORE} = ${s} and ${olderThan(cursor)}) or ${CONFIDENCE_SCORE} is null)`;
+}
+
+/**
+ * A page of the visible runs, newest first or by conviction, keyset-paginated so a page never repeats
+ * or skips a run as new ones arrive. Reads only the report fields a list shows, never the whole report.
+ */
+export async function listRuns(db: Queryable, options: ListRunsOptions): Promise<RunListPage> {
+  const { limit, sort = "date", pillar, after } = options;
+  if (!Number.isInteger(limit) || limit < 1 || limit > RUN_LIST_MAX) {
+    throw new RangeError(`listRuns: limit must be an integer from 1 to ${RUN_LIST_MAX}, got ${limit}`);
+  }
+  const conditions = filterConditions(options);
+  if (conditions === null) return { rows: [], next: null };
+  if (pillar) conditions.push(eq(runs.pillar, pillar));
+  if (after) conditions.push(sort === "conviction" ? afterInConviction(after) : olderThan(after));
+  const order =
+    sort === "conviction"
+      ? [sql`${CONFIDENCE_SCORE} desc nulls last`, desc(runs.createdAt), desc(runs.id)]
+      : [desc(runs.createdAt), desc(runs.id)];
+  const found = await db
+    .select({
+      id: runs.id,
+      question: runs.question,
+      pillar: runs.pillar,
+      job: runs.job,
+      status: runs.status,
+      createdAt: runs.createdAt,
+      createdAtKey: CREATED_AT_KEY,
+      signal: jsonText(REPORT, "verdict,signal"),
+      headline: jsonText(REPORT, "verdict,headline"),
+      confidenceScore: CONFIDENCE_SCORE,
+      confidenceBand: jsonText(REPORT, "verdict,confidence,band"),
+      numbersTraced: sql<unknown>`${NUMBERS_TRACED}`,
+      qlooNetwork: runs.qlooNetwork,
+      qlooCached: runs.qlooCached,
+      qlooReused: jsonNumber(REPORT, "receipt,qlooReused"),
+    })
+    .from(runs)
+    .where(and(...conditions))
+    .orderBy(...order)
+    .limit(limit + 1);
+  const rows = found.slice(0, limit);
+  const last = rows.at(-1);
+  const next: RunListCursor | null =
+    found.length > limit && last
+      ? { createdAt: last.createdAtKey, id: last.id, ...(sort === "conviction" ? { score: last.confidenceScore } : {}) }
+      : null;
+  return { rows, next };
+}
+
+/** How a list shows one metric a run's headline cites. display is null when the metric is UNAVAILABLE. */
+export interface MetricDisplay {
+  label: string;
+  display: string | null;
+  badge: string;
+}
+
+/**
+ * The display of the metrics each run cites, e.g. in its headline: run id → metric id → display.
+ * Metrics a run never recorded are simply absent. One query whatever the number of runs.
+ */
+export async function listMetricDisplays(
+  db: Queryable,
+  wanted: ReadonlyMap<string, readonly string[]>,
+): Promise<Map<string, Record<string, MetricDisplay>>> {
+  const out = new Map<string, Record<string, MetricDisplay>>();
+  const pairs = [...wanted].filter(([, ids]) => ids.length > 0);
+  if (pairs.length === 0) return out;
+  const rows = await db
+    .select({ runId: metrics.runId, id: metrics.id, label: metrics.label, display: metrics.display, badge: metrics.badge })
+    .from(metrics)
+    .where(or(...pairs.map(([runId, ids]) => and(eq(metrics.runId, runId), inArray(metrics.id, [...ids])))));
+  for (const row of rows) {
+    const byId = out.get(row.runId) ?? {};
+    byId[row.id] = { label: row.label, display: row.display, badge: row.badge };
+    out.set(row.runId, byId);
+  }
+  return out;
+}
+
+/** Counts of the runs a filter matches: in all, per pillar, and the numbers they traced. */
+export async function summarizeRuns(db: Queryable, filter: RunListFilter): Promise<RunListSummary> {
+  const conditions = filterConditions(filter);
+  const summary: RunListSummary = { total: 0, byPillar: {}, numbersTraced: { traced: 0, total: 0 }, numbersTracedByPillar: {} };
+  if (conditions === null) return summary;
+  const traced = jsonNumber(NUMBERS_TRACED, "traced");
+  const total = jsonNumber(NUMBERS_TRACED, "total");
+  const groups = await db
+    .select({
+      pillar: runs.pillar,
+      runs: count(),
+      traced: sql<number>`coalesce(sum(${traced}), 0)::float8`.mapWith(Number),
+      total: sql<number>`coalesce(sum(${total}), 0)::float8`.mapWith(Number),
+    })
+    .from(runs)
+    .where(and(...conditions))
+    .groupBy(runs.pillar);
+  for (const g of groups) {
+    summary.total += g.runs;
+    const key = g.pillar ?? "";
+    summary.byPillar[key] = (summary.byPillar[key] ?? 0) + g.runs;
+    summary.numbersTraced.traced += g.traced;
+    summary.numbersTraced.total += g.total;
+    const desk = summary.numbersTracedByPillar[key] ?? { traced: 0, total: 0 };
+    summary.numbersTracedByPillar[key] = { traced: desk.traced + g.traced, total: desk.total + g.total };
+  }
+  return summary;
 }

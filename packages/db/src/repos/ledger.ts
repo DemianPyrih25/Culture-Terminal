@@ -1,5 +1,5 @@
 import type { DatasetEnvelope, Evidence, Finding, Metric } from "@ct/contracts";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Queryable } from "../client";
 import {
   type DatasetRow,
@@ -148,6 +148,16 @@ export async function insertLedgerSnapshot(
 const byIdNumber = (a: { id: string }, b: { id: string }) => Number(a.id.slice(1)) - Number(b.id.slice(1));
 
 /** A run's stored ledger rows, each table in id order (E1, E2, … E10). */
+/** One stored dataset envelope (D#) of a run, for figures too large to stream inline; null when absent. */
+export async function getDatasetEnvelope(db: Queryable, runId: string, datasetId: string): Promise<DatasetEnvelope | null> {
+  const rows = await db
+    .select({ payload: datasets.payload })
+    .from(datasets)
+    .where(and(eq(datasets.runId, runId), eq(datasets.id, datasetId)))
+    .limit(1);
+  return (rows[0]?.payload as DatasetEnvelope | undefined) ?? null;
+}
+
 export async function listLedgerRows(db: Queryable, runId: string): Promise<LedgerRows> {
   const [e, m, d, f] = await Promise.all([
     db.select().from(evidence).where(eq(evidence.runId, runId)),

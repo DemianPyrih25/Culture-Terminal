@@ -62,8 +62,9 @@ class FakeEventSource implements EventSourceLike {
 let sources: FakeEventSource[];
 let probe: RunProbe;
 
-function makeClient() {
+function makeClient(options: { log?: boolean } = { log: true }) {
   return new RunStreamClient(RUN, {
+    ...options,
     createEventSource: (url) => {
       const source = new FakeEventSource(url);
       sources.push(source);
@@ -107,6 +108,15 @@ describe("RunStreamClient", () => {
     expect(snap.connection).toBe("ended");
     expect(latest().closed).toBe(true);
     expect(sources).toHaveLength(1);
+  });
+
+  it("keeps no event log unless asked for one", () => {
+    const client = makeClient({});
+    client.start();
+    latest().send(created);
+    latest().send(end(2));
+    expect(client.getSnapshot().state.status).toBe("completed");
+    expect(client.getSnapshot().log).toEqual([]);
   });
 
   it("counts a browser auto-reconnect and keeps the same source", () => {

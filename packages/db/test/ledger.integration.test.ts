@@ -3,7 +3,7 @@
 import type { DatasetEnvelope, Evidence, Finding, Metric } from "@ct/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Db } from "../src/client";
-import { datasetBytes, insertLedgerSnapshot, type LedgerSnapshotInput, listLedgerRows } from "../src/repos/ledger";
+import { datasetBytes, getDatasetEnvelope, insertLedgerSnapshot, type LedgerSnapshotInput, listLedgerRows } from "../src/repos/ledger";
 import { createRun, getRun } from "../src/repos/runs";
 import { createTestDatabase, probeTestDatabase, type TestDatabase } from "./support/testDb";
 
@@ -123,6 +123,14 @@ describe.skipIf(!probe.ok)("ledger repo against Postgres", () => {
     expect(rows.datasets[0]).toMatchObject({ id: "D1", kind: "Scorecard", payload: scorecard, bytes: datasetBytes(scorecard) });
     expect(rows.datasets[0]?.bytes).toBe(new TextEncoder().encode(JSON.stringify(scorecard)).length);
     expect(rows.findings[0]).toMatchObject({ id: "F1", kind: "TASTE_ISLAND", severity: "high", metricIds: ["M1"], suggestion: finding.suggestion });
+  });
+
+  it("reads one stored dataset envelope back, and null for an unknown id or run", async () => {
+    const runId = await newRun("run-ledger-dataset");
+    await insertLedgerSnapshot(db, runId, { evidence: [], metrics: [], datasets: [scorecard], findings: [] });
+    expect(await getDatasetEnvelope(db, runId, "D1")).toEqual(scorecard);
+    expect(await getDatasetEnvelope(db, runId, "D2")).toBeNull();
+    expect(await getDatasetEnvelope(db, "run-ledger-elsewhere", "D1")).toBeNull();
   });
 
   it("skips records already stored, so a retried write neither fails nor duplicates", async () => {

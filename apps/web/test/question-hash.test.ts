@@ -14,7 +14,7 @@ describe("questionHash (the D26 answer-cache key)", () => {
     const base = questionHash(Q, undefined, "live");
     expect(questionHash(`  ${Q.toUpperCase()}\n`, undefined, "live")).toBe(base);
     expect(questionHash(Q.replace(/ /g, "  \t"), undefined, "live")).toBe(base);
-    expect(questionHash(`Is the Juniper​ Cola audience a moat or a niche?`, undefined, "live")).toBe(base);
+    expect(questionHash(`Is the Juniper\u200B Cola audience a moat or a niche?`, undefined, "live")).toBe(base);
     expect(questionHash(`${Q} Really?`, undefined, "live")).not.toBe(base);
   });
 

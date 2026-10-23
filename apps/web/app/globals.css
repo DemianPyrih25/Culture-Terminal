@@ -1,19 +1,122 @@
 @import "tailwindcss";
 
-/* Plain dark base for the Foundation skeleton; the design system replaces this in Part 4 (D12). */
-:root {
-  color-scheme: dark;
-  --background: #0b0c0e;
-  --foreground: #e4e4e7;
+/*
+ * Concept A · Brief (D36): a light editorial surface. Answer first, evidence second, mechanics last.
+ * The tokens mirror the variables of design/concept-a-brief.pen; the type ramp follows its A00
+ * Foundations frame. One accent, two data colours, 2 px radius, hairlines instead of shadows.
+ */
+@theme {
+  --color-paper: #ffffff;
+  --color-canvas: #f7f7f5;
+  --color-ink: #121416;
+  --color-text-2: #3d4248;
+  --color-dim: #6b7178;
+  --color-faint: #a3a8ae;
+  --color-line: #e6e7e9;
+  --color-line-strong: #c9ccd0;
+  --color-accent: #1c3d6e;
+  --color-accent-soft: #e8edf4;
+  --color-negative: #8e2f2f;
+  --color-negative-soft: #f5eaea;
+  --color-data: #1c3d6e;
+  --color-data-2: #a9b0b8;
+  --color-on-ink: #ffffff;
+
+  --font-serif: "Source Serif 4 Variable", "Source Serif 4", Georgia, serif;
+  --font-ui: "Inter Variable", Inter, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
+  --font-sans: var(--font-ui);
+
+  --radius-brief: 2px;
+
+  /* The brief grid at 1440: margin 70 · outline 200 · gutter 60 · reading 680 · gutter 60 · sidenotes 300 · margin 70. */
+  --spacing-outline: 200px;
+  --spacing-reading: 680px;
+  --spacing-sidenotes: 300px;
+  --spacing-gutter: 60px;
+  --spacing-margin: 70px;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+/* Type ramp (A00 · 04 Type): serif reads, sans operates, mono traces. */
+@utility type-question {
+  font-family: var(--font-serif);
+  font-size: 40px;
+  line-height: 48px;
+  font-weight: 500;
+}
+@utility type-answer {
+  font-family: var(--font-serif);
+  font-size: 20px;
+  line-height: 30px;
+  font-weight: 400;
+}
+@utility type-key-figure {
+  font-family: var(--font-serif);
+  font-size: 32px;
+  line-height: 37px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+@utility type-figure-title {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 600;
+}
+@utility type-body {
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 22px;
+}
+@utility type-ui {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+}
+@utility type-label {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.3px;
+  text-transform: uppercase;
+}
+@utility type-sidenote {
+  font-family: var(--font-ui);
+  font-size: 12px;
+  line-height: 17px;
+}
+@utility type-trace {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 15px;
+  font-variant-numeric: tabular-nums slashed-zero;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  body {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
 }

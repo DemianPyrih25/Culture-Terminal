@@ -224,7 +224,7 @@ describe("peer_landscape: the triangular matrix", () => {
     });
 
     const d = matrixDataset(run);
-    expect(d.title).toBe("Substitution Map");
+    expect(d.title).toBe("Substitution Map · Brand Alpha");
     expect(d.payload.rows.map((r) => r.label)).toEqual(["Snack Omega", "Brand Delta", "Brand Gamma", "Brand Beta", "Brand Alpha"]);
     const refs = d.payload.rows.map((r) => r.key);
     for (const a of refs) {

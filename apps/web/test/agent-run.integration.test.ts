@@ -399,7 +399,7 @@ describe.skipIf(!available)("agent runs against Postgres", () => {
     await expect(noQloo.runs.startAgentRun({ question: QUESTION, lane: "public" })).rejects.toSatisfy(refusedWith("unavailable"));
     const noDeps = setup({ agent: undefined });
     await expect(noDeps.runs.startAgentRun({ question: QUESTION, lane: "public" })).rejects.toSatisfy(refusedWith("unavailable"));
-    await expect(noDeps.runs.startAgentRun({ question: " ​\n", lane: "public" })).rejects.toSatisfy(refusedWith("invalid"));
+    await expect(noDeps.runs.startAgentRun({ question: " \u200B\n", lane: "public" })).rejects.toSatisfy(refusedWith("invalid"));
   }, 30_000);
 
   it("refuses agent runs beyond the rolling hourly cap, counted apart from fake runs", async () => {

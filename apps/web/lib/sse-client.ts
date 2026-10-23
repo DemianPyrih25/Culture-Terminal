@@ -2,10 +2,10 @@ import {
   applyEvent,
   initialRunState,
   safeParseRunEvent,
+  type RunEvent,
   type RunEventType,
   type RunState,
 } from "@ct/contracts";
-import { summarizeEvent } from "./event-summary";
 
 /**
  * Browser side of the run stream. EventSource reconnects by itself after a network blip and sends
@@ -16,11 +16,11 @@ import { summarizeEvent } from "./event-summary";
 
 export type ConnectionStatus = "idle" | "connecting" | "open" | "reconnecting" | "ended" | "not_found" | "failed";
 
+/** One applied event, as the opt-in log keeps it (the brief page reads the state, not the log). */
 export interface LogEntry {
   seq: number;
   ts: string;
   type: RunEventType;
-  summary: string;
 }
 
 export interface RunStreamSnapshot {
@@ -35,6 +35,7 @@ export interface RunStreamSnapshot {
   duplicates: number;
   /** Messages that failed the contracts schema. */
   invalid: number;
+  /** Every applied event, in seq order, when the client was made with `log: true`; else always empty. */
   log: LogEntry[];
 }
 
@@ -59,6 +60,10 @@ export interface RunStreamClientOptions {
   probeRun?: (runId: string) => Promise<RunProbe>;
   retryDelayMs?: number;
   maxManualRetries?: number;
+  /** Called with each event once it is applied, in seq order; replays record the run with it. */
+  onEvent?: (event: RunEvent) => void;
+  /** Keep an event log in the snapshot (for debugging); off by default, since a long run would copy it on every event. */
+  log?: boolean;
 }
 
 const CONNECTING = 0;
@@ -104,6 +109,8 @@ export class RunStreamClient {
   private readonly probeRun: (runId: string) => Promise<RunProbe>;
   private readonly retryDelayMs: number;
   private readonly maxManualRetries: number;
+  private readonly onEvent: ((event: RunEvent) => void) | null;
+  private readonly keepLog: boolean;
 
   constructor(
     readonly runId: string,
@@ -114,6 +121,8 @@ export class RunStreamClient {
     this.probeRun = options.probeRun ?? defaultProbe;
     this.retryDelayMs = options.retryDelayMs ?? 2000;
     this.maxManualRetries = options.maxManualRetries ?? 10;
+    this.onEvent = options.onEvent ?? null;
+    this.keepLog = options.log ?? false;
   }
 
   // Arrow properties so React's useSyncExternalStore can take them unbound.
@@ -199,8 +208,9 @@ export class RunStreamClient {
       this.forceReconnect();
       return;
     }
-    const entry: LogEntry = { seq: event.seq, ts: event.ts, type: event.type, summary: summarizeEvent(event, state.metrics) };
-    this.update({ state: applyEvent(state, event), log: [...this.snapshot.log, entry] });
+    const log = this.keepLog ? [...this.snapshot.log, { seq: event.seq, ts: event.ts, type: event.type }] : this.snapshot.log;
+    this.update({ state: applyEvent(state, event), log });
+    this.onEvent?.(event);
     if (event.type === "run.end") {
       this.closeSource();
       this.update({ connection: "ended" });

@@ -4,6 +4,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { decodeText, dedupe, lineAt, scanWithRules, type Finding, type TextRule } from "./finding";
+import { INVISIBLE_CHAR } from "./invisible";
 import {
   type BlobEntry,
   listCommitMessages,
@@ -103,7 +104,7 @@ export function inDecimalScope(file: string): boolean {
 }
 
 export function rulesFor(file: string): TextRule[] {
-  const rules: TextRule[] = [REQUEST_ID, ANTHROPIC_KEY];
+  const rules: TextRule[] = [REQUEST_ID, ANTHROPIC_KEY, INVISIBLE_CHAR];
   if (!SYNTHETIC_FIXTURES.test(file)) rules.push(uuidRule(file));
   if (inDecimalScope(file)) rules.push(DECIMAL);
   return rules;

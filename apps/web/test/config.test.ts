@@ -5,6 +5,9 @@ import {
   fakeRunHourlyCapFromEnv,
   fakeRunRetentionMsFromEnv,
   llmDailyUsdCapFromEnv,
+  previewHourlyCapFromEnv,
+  qlooDailyFreshCapFromEnv,
+  qlooDisabledFromEnv,
 } from "../server/config";
 
 vi.mock("server-only", () => ({}));
@@ -50,5 +53,23 @@ describe("agent run limits from the environment", () => {
     expect(llmDailyUsdCapFromEnv(env({ LLM_DAILY_USD_CAP: "2.5" }))).toBe(2.5);
     // Zero refuses every live run, which is a valid way to switch them off.
     expect(llmDailyUsdCapFromEnv(env({ LLM_DAILY_USD_CAP: "-1" }))).toBe(0);
+  });
+});
+
+describe("preview settings from the environment", () => {
+  it("defaults to 120 previews an hour, Qloo on and the 1,900 daily fresh-call quota", () => {
+    expect(previewHourlyCapFromEnv(env())).toBe(120);
+    expect(previewHourlyCapFromEnv(env({ PREVIEW_HOURLY_CAP: " " }))).toBe(120);
+    expect(qlooDisabledFromEnv(env())).toBe(false);
+    expect(qlooDailyFreshCapFromEnv(env())).toBe(1_900);
+  });
+
+  it("reads and clamps the values; only 1 turns Qloo off", () => {
+    expect(previewHourlyCapFromEnv(env({ PREVIEW_HOURLY_CAP: "30" }))).toBe(30);
+    expect(previewHourlyCapFromEnv(env({ PREVIEW_HOURLY_CAP: "0" }))).toBe(1);
+    expect(previewHourlyCapFromEnv(env({ PREVIEW_HOURLY_CAP: "plenty" }))).toBe(120);
+    expect(qlooDisabledFromEnv(env({ QLOO_DISABLED: " 1 " }))).toBe(true);
+    for (const value of ["0", "", "true", "yes"]) expect(qlooDisabledFromEnv(env({ QLOO_DISABLED: value }))).toBe(false);
+    expect(qlooDailyFreshCapFromEnv(env({ QLOO_DAILY_FRESH_CAP: "1200" }))).toBe(1_200);
   });
 });

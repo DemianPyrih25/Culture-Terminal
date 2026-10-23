@@ -119,6 +119,8 @@ describe.skipIf(!available)("fake run streaming against Postgres", () => {
     for (const event of all) expect(() => parseRunEvent(event)).not.toThrow();
     // What streamed live is exactly what was stored.
     expect(all).toEqual(await readAllEvents(db, runId));
+    // run.end is stored and published before the row's status is written: wait for the run's loop.
+    await runs.whenDone(runId);
     expect((await getRun(db, runId))?.status).toBe("completed");
   }, 30_000);
 
@@ -440,6 +442,10 @@ describe.skipIf(!available)("fake run streaming against Postgres", () => {
 
       expect((await http.cancelRun(runId)).status).toBe(202);
       expect((await http.runSnapshot("no-such-run-0000")).status).toBe(404);
+      // Dataset ids are D# only; an absent envelope is a 404, never an empty body.
+      expect((await http.runDataset(runId, "../D1")).status).toBe(404);
+      expect((await http.runDataset(runId, "D9999")).status).toBe(404);
+      expect((await http.runDataset("no-such-run-0000", "D1")).status).toBe(404);
       expect((await http.streamRun(new Request(`${base}/stream`), "../etc")).status).toBe(404);
 
       const health = await http.health();

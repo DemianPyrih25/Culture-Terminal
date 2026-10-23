@@ -184,21 +184,28 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       model,
     });
 
-    // A: CLERK ---------------------------------------------------------------------------------------
-    const clerkStarted = now();
-    const clerk = await runClerk({ client: options.anthropic, question: options.question, signal: options.signal });
-    meter.addLlm(clerk.usage, clerk.usd);
-    if (options.signal.aborted) return cancelled();
-    if (clerk.kind === "error") {
-      if (clerk.code === "cancelled") return cancelled();
-      const code: ErrorCode = clerk.code === "empty_question" ? "internal" : "llm_error";
-      return fail(code, `CLERK: ${clerk.message}`, clerk.retryable, `CLERK could not read the question: ${clerk.message}`);
+    // A: CLERK, or the intent a preview already read from this question ------------------------------
+    let read: Intent;
+    if (options.intent !== undefined) {
+      if (options.signal.aborted) return cancelled();
+      read = normalizeIntent(options.intent);
+      events.emit({ type: "clerk", intent: read, ms: 0 });
+    } else {
+      const clerkStarted = now();
+      const clerk = await runClerk({ client: options.anthropic, question: options.question, signal: options.signal });
+      meter.addLlm(clerk.usage, clerk.usd);
+      if (options.signal.aborted) return cancelled();
+      if (clerk.kind === "error") {
+        if (clerk.code === "cancelled") return cancelled();
+        const code: ErrorCode = clerk.code === "empty_question" ? "internal" : "llm_error";
+        return fail(code, `CLERK: ${clerk.message}`, clerk.retryable, `CLERK could not read the question: ${clerk.message}`);
+      }
+      if (clerk.kind === "refusal") {
+        return end("refused", clerk.explanation ?? "CLERK declined the question.");
+      }
+      read = normalizeIntent(clerk.intent);
+      events.emit({ type: "clerk", intent: read, ms: Math.max(0, now() - clerkStarted) });
     }
-    if (clerk.kind === "refusal") {
-      return end("refused", clerk.explanation ?? "CLERK declined the question.");
-    }
-    const read = normalizeIntent(clerk.intent);
-    events.emit({ type: "clerk", intent: read, ms: Math.max(0, now() - clerkStarted) });
     const refusal = refusalOf(read) ?? privatePersonRefusal(read);
     if (refusal !== null) return end("refused", refusal);
     intent = read;

@@ -1,6 +1,6 @@
 import "server-only";
 import { QUESTION_MAX_CHARS, reduceRunEvents, type Mode } from "@ct/contracts";
-import { getRun, isConnectionError, lastSeq, pingDb, requestCancel } from "@ct/db";
+import { getDatasetEnvelope, getRun, isConnectionError, lastSeq, pingDb, requestCancel } from "@ct/db";
 import type { QlooClient } from "@ct/qloo";
 import { z } from "zod";
 import { isRunId } from "../lib/run-id";
@@ -17,7 +17,14 @@ import {
 import { readAllEvents } from "./event-store";
 import { todayLlmUsd } from "./llm-spend";
 import { log } from "./log";
-import { isActiveStatus, runManagerErrorCode, runManagerRetryAfterS } from "./run-manager";
+import { getPreviewService, PREVIEW_TOKEN } from "./preview";
+import { listBriefs, parseRunListQuery } from "./run-list";
+import {
+  isActiveStatus,
+  runManagerErrorCode,
+  runManagerRetryAfterS,
+  type RunManagerErrorCode,
+} from "./run-manager";
 import { parseCursor, sseResponse } from "./sse";
 import { migrationsApplied } from "./startup";
 import { runEventStream } from "./stream";
@@ -49,26 +56,39 @@ function secondsUntilUtcMidnight(now: number = Date.now()): number {
   return Math.max(1, Math.ceil((next.getTime() - now) / 1000));
 }
 
-/** A RunManagerError as an HTTP answer; `retry: true` tells the client to try again by itself. */
+/**
+ * A refusal as an HTTP answer; `retry: true` tells the client to try again by itself. `extra` adds
+ * fields to the body (a preview's alreadyHave).
+ */
+function refusalResponse(
+  code: RunManagerErrorCode,
+  message: string,
+  retryAfterS: number | null,
+  extra: Record<string, unknown> = {},
+): Response {
+  switch (code) {
+    case "not_accepting":
+      return json({ error: message, retry: true, ...extra }, 503, { "Retry-After": "2" });
+    case "busy":
+      return json({ error: message, retry: true, ...extra }, 429, { "Retry-After": "10" });
+    case "limited":
+      // Not worth an automatic retry: the limit clears in minutes, not seconds.
+      return json({ error: message, retry: false, ...extra }, 429, { "Retry-After": String(retryAfterS ?? 60) });
+    case "budget":
+      return json({ error: message, retry: false, ...extra }, 503, { "Retry-After": String(secondsUntilUtcMidnight()) });
+    case "unavailable":
+      return json({ error: message, retry: false, ...extra }, 503);
+    case "invalid":
+      return json({ error: message, ...extra }, 400);
+  }
+}
+
+/** A RunManagerError as an HTTP answer, or null for any other error. */
 function refusal(err: unknown): Response | null {
   const code = runManagerErrorCode(err);
   if (code === null) return null;
   const message = err instanceof Error ? err.message : "Try again shortly.";
-  switch (code) {
-    case "not_accepting":
-      return json({ error: message, retry: true }, 503, { "Retry-After": "2" });
-    case "busy":
-      return json({ error: message, retry: true }, 429, { "Retry-After": "10" });
-    case "limited":
-      // Not worth an automatic retry: the limit clears in minutes, not seconds.
-      return json({ error: message, retry: false }, 429, { "Retry-After": String(runManagerRetryAfterS(err) ?? 60) });
-    case "budget":
-      return json({ error: message, retry: false }, 503, { "Retry-After": String(secondsUntilUtcMidnight()) });
-    case "unavailable":
-      return json({ error: message, retry: false }, 503);
-    case "invalid":
-      return json({ error: message }, 400);
-  }
+  return refusalResponse(code, message, runManagerRetryAfterS(err));
 }
 
 /** Bodies are a question or a picker answer; anything bigger is not a run request. */
@@ -77,9 +97,13 @@ const RUN_ID = z.string().refine(isRunId, { message: "Not a run id." });
 /** packages/agent/src/run/picker.ts pickerKey: "pk_" and 16 hex digits of a one-way digest. */
 const PICKER_KEY = /^pk_[0-9a-f]{16}$/;
 
+const Question = z.string().trim().min(1).max(QUESTION_MAX_CHARS);
+
 const AgentRunBody = z.strictObject({
-  question: z.string().trim().min(1).max(QUESTION_MAX_CHARS),
+  question: Question,
   parentRunId: RUN_ID.nullish(),
+  /** POST /api/preview's token for this question: the run reuses that reading and skips CLERK. */
+  previewToken: z.string().regex(PREVIEW_TOKEN, "Not a preview token.").nullish(),
 });
 type AgentRunBody = z.infer<typeof AgentRunBody>;
 
@@ -106,7 +130,7 @@ function badRequest(error: string, issues?: readonly { path: readonly PropertyKe
   return json(detail ? { error, issues: detail } : { error }, 400);
 }
 
-const tooLarge = (): StartRequest => ({ kind: "bad", response: json({ error: "The request body is too large." }, 413) });
+const tooLarge = (): JsonBody => ({ kind: "bad", response: json({ error: "The request body is too large." }, 413) });
 
 /** The body as text, or null once it passes `limit` bytes: a body with no Content-Length is never buffered whole. */
 async function readBodyWithin(request: Request, limit: number): Promise<string | null> {
@@ -127,28 +151,39 @@ async function readBodyWithin(request: Request, limit: number): Promise<string |
   }
 }
 
-async function parseStartRequest(request: Request | undefined): Promise<StartRequest> {
-  if (!request) return { kind: "fake" };
-  // Browsers mark a request another site sends; runs start only from this one (CSRF).
-  if (request.headers.get("sec-fetch-site") === "cross-site") {
-    return { kind: "bad", response: json({ error: "Runs can only be started from this site." }, 403) };
-  }
+type JsonBody = { kind: "empty" } | { kind: "json"; value: unknown } | { kind: "bad"; response: Response };
+
+/**
+ * The body of a request that spends on our behalf (a run, a preview), read with the CSRF guards:
+ * 403 when a browser marks it as sent by another site, 413 past MAX_BODY_BYTES, 415 unless it is
+ * JSON (which another site cannot send without a CORS preflight, which these routes never grant),
+ * 400 when it does not parse. An empty body is "empty".
+ */
+async function readJsonBody(request: Request, crossSite: string): Promise<JsonBody> {
+  if (request.headers.get("sec-fetch-site") === "cross-site") return { kind: "bad", response: json({ error: crossSite }, 403) };
   const declared = Number(request.headers.get("content-length") ?? "0");
   if (declared > MAX_BODY_BYTES) return tooLarge();
   const text = await readBodyWithin(request, MAX_BODY_BYTES);
   if (text === null) return tooLarge();
-  if (text.trim() === "") return { kind: "fake" };
-  // JSON only: another site cannot send it without a CORS preflight, which this route never grants.
+  if (text.trim() === "") return { kind: "empty" };
   const type = request.headers.get("content-type") ?? "";
   if (!/^application\/json\s*(;|$)/i.test(type.trim())) {
     return { kind: "bad", response: json({ error: "Send the request body as application/json." }, 415) };
   }
-  let raw: unknown;
   try {
-    raw = JSON.parse(text);
+    return { kind: "json", value: JSON.parse(text) as unknown };
   } catch {
     return { kind: "bad", response: badRequest("The request body is not valid JSON.") };
   }
+}
+
+async function parseStartRequest(request: Request | undefined): Promise<StartRequest> {
+  if (!request) return { kind: "fake" };
+  // Browsers mark a request another site sends; runs start only from this one (CSRF).
+  const read = await readJsonBody(request, "Runs can only be started from this site.");
+  if (read.kind === "bad") return read;
+  if (read.kind === "empty") return { kind: "fake" };
+  const raw = read.value;
   if (typeof raw === "object" && raw !== null && "fake" in raw) {
     const fake = FakeRunBody.safeParse(raw);
     return fake.success ? { kind: "fake" } : { kind: "bad", response: badRequest("Invalid test run request.", fake.error.issues) };
@@ -166,7 +201,9 @@ async function parseStartRequest(request: Request | undefined): Promise<StartReq
 }
 
 /**
- * POST /api/runs, all on the public lane. JSON `{question, parentRunId?}` starts an agent run;
+ * POST /api/runs, all on the public lane. JSON `{question, parentRunId?, previewToken?}` starts an
+ * agent run; a live preview token made for the same question hands the run that preview's reading
+ * and the run skips CLERK, while an unknown, expired or mismatched one is ignored.
  * `{pick: {runId, key}}` answers a needs_input picker with a new run; an empty body or
  * `{fake: true}` starts the Foundation test run (tools/dev/sse-soak.ts posts nothing). 400 on a bad
  * body, 415 on a body that is not JSON, 403 from another site; 503 while the server drains, when
@@ -189,10 +226,13 @@ export async function startRun(request?: Request): Promise<Response> {
     } else if (parsed.kind === "pick") {
       started = await runs.answerPicker({ ...parsed.body.pick, lane: "public" });
     } else {
+      const { question, parentRunId, previewToken } = parsed.body;
+      const intent = previewToken ? getPreviewService().intentFor(previewToken, question) : null;
       started = await runs.startAgentRun({
-        question: parsed.body.question,
+        question,
         lane: "public",
-        parentRunId: parsed.body.parentRunId ?? null,
+        parentRunId: parentRunId ?? null,
+        ...(intent ? { intent } : {}),
       });
     }
     return json({ runId: started.runId }, 201);
@@ -247,11 +287,80 @@ export async function runSnapshot(runId: string): Promise<Response> {
         createdAt: run.createdAt.toISOString(),
         updatedAt: run.updatedAt.toISOString(),
         cancelRequested: run.cancelRequestedAt !== null,
+        isShowcase: run.isShowcase,
       },
       state,
     });
   } catch (err) {
     return failure(err, "run snapshot");
+  }
+}
+
+const DATASET_ID = /^D[1-9]\d{0,3}$/;
+
+/**
+ * GET /api/runs/[id]/datasets/[did]: a stored dataset envelope, for figures whose data was too large
+ * to stream inline. 404 until the run's ledger is written; the envelope never changes after that.
+ */
+export async function runDataset(runId: string, datasetId: string): Promise<Response> {
+  if (!isRunId(runId) || !DATASET_ID.test(datasetId)) return notFound();
+  try {
+    const envelope = await getDatasetEnvelope(getDatabase(), runId, datasetId);
+    if (envelope === null) return json({ error: "Dataset not found." }, 404);
+    return json(envelope, 200, { "Cache-Control": "private, max-age=3600" });
+  } catch (err) {
+    return failure(err, "run dataset");
+  }
+}
+
+/**
+ * GET /api/runs?limit=&before=&q=&sort=date|conviction&pillar=&ids=: the recent briefs for Home and
+ * the library, newest first or by conviction, with the counts the library shows. Agent runs that
+ * stored a note or ended incomplete only, and of those only the showcases plus the runs `ids` names
+ * (up to 50, from the browser's own history): user-run notes are unlisted (D31). 400 on a bad
+ * parameter; `next` pages on.
+ */
+export async function listRecentRuns(request: Request): Promise<Response> {
+  const parsed = parseRunListQuery(new URL(request.url).searchParams);
+  if (!parsed.ok) return badRequest(parsed.error, parsed.issues.map((i) => ({ path: [i.path], message: i.message })));
+  try {
+    return json(await listBriefs(getDatabase(), parsed.query));
+  } catch (err) {
+    return failure(err, "list runs");
+  }
+}
+
+const PreviewBody = z.strictObject({ question: Question });
+
+/**
+ * POST /api/preview `{question}`: the "Understood as" panel (A02), guarded like POST /api/runs.
+ * 200 with the reading, a refusal card when a brief would be declined, the answer-cache hit and the
+ * estimate; 429 past PREVIEW_HOURLY_CAP; 503 when live analysis is paused, unconfigured or out of
+ * budget (with `alreadyHave`, which still helps); 502 when CLERK could not answer.
+ */
+export async function previewQuestion(request: Request): Promise<Response> {
+  let body: JsonBody;
+  try {
+    body = await readJsonBody(request, "Previews can only be requested from this site.");
+  } catch (err) {
+    log.warn({ err }, "could not read the preview request");
+    return badRequest("The request body could not be read.");
+  }
+  if (body.kind === "bad") return body.response;
+  const parsed = PreviewBody.safeParse(body.kind === "json" ? body.value : undefined);
+  if (!parsed.success) return badRequest("Invalid preview request.", parsed.error.issues);
+  try {
+    const outcome = await getPreviewService().preview(parsed.data.question);
+    switch (outcome.kind) {
+      case "ok":
+        return json(outcome.body);
+      case "refused":
+        return refusalResponse(outcome.code, outcome.message, outcome.retryAfterS, { alreadyHave: outcome.alreadyHave });
+      case "failed":
+        return json({ error: outcome.message, retry: outcome.retry }, 502);
+    }
+  } catch (err) {
+    return failure(err, "preview");
   }
 }
 

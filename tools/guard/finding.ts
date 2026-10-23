@@ -7,6 +7,7 @@ export type RuleId =
   | "request-id"
   | "decimal"
   | "anthropic-key"
+  | "invisible-char"
   | "bundle-secret";
 
 export interface Finding {

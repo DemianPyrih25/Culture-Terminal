@@ -46,6 +46,21 @@ describe("checkPath", () => {
   });
 });
 
+describe("invisible characters", () => {
+  const ch = (cp: number) => String.fromCodePoint(cp);
+
+  it("flags a BOM, zero-width, bidi, tag and control characters, with their position", () => {
+    for (const cp of [0xfeff, 0x200b, 0x202e, 0x2066, 0xe0041, 0x07, 0x85, 0xad]) {
+      const findings = scanText("src/a.ts", `const s = "ok${ch(cp)}";`);
+      expect(findings.map((f) => [f.rule, f.line, f.column])).toEqual([["invisible-char", 1, 14]]);
+    }
+  });
+
+  it("allows tabs, line breaks and ordinary non-ASCII text such as accents, dashes and arrows", () => {
+    expect(scanText("src/a.ts", "a\tb\r\nCafé · 25–29 ← →\n")).toEqual([]);
+  });
+});
+
 describe("checkPathText", () => {
   it("flags a UUID in a file name and masks it in the reported path", () => {
     const id = fakeUuid("c");

@@ -1,0 +1,7 @@
+# gitleaks config: the default rules plus one narrow allowlist.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Picker keys: pk_ plus 16 hex digits of a SHA-256 of an entity id (packages/agent/src/run/picker.ts). They are opaque choice keys, never credentials."
+regexes = ['''^pk_[0-9a-f]{16}$''']

@@ -4,7 +4,7 @@ import { sanitizeQlooName, sanitizeQlooText, trimEntity } from "../src/trim";
 
 describe("sanitizeQlooText", () => {
   it("strips URLs, control and invisible characters and collapses whitespace", () => {
-    const raw = "Visit https://example.com/promo?x=1 now\u0000\u0007 or www.example.org,\n\tor fixture.example.com/page ‮evil​ text";
+    const raw = "Visit https://example.com/promo?x=1 now\u0000\u0007 or www.example.org,\n\tor fixture.example.com/page \u202Eevil\u200B text";
     expect(sanitizeQlooText(raw)).toBe("Visit now or or evil text");
   });
 

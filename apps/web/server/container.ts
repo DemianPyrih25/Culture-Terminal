@@ -11,6 +11,7 @@ import {
   fakeRunRetentionMsFromEnv,
   fakeRunSecondsFromEnv,
   llmDailyUsdCapFromEnv,
+  qlooDisabledFromEnv,
 } from "./config";
 import { EventBus } from "./event-bus";
 import { log } from "./log";
@@ -125,6 +126,7 @@ export function getRunManager(): RunManager {
     agentHourlyCap: agentRunHourlyCapFromEnv(),
     agentMaxActive: agentRunMaxActiveFromEnv(),
     llmDailyUsdCap: llmDailyUsdCapFromEnv(),
+    qlooEnabled: !qlooDisabledFromEnv(),
   }));
 }
 

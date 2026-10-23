@@ -163,7 +163,8 @@ function recordDiscovery(run: SubsRun, target: RegisteredEntity, discovery: Disc
   if (discovery.truncated) flags.push("BUDGET_TRUNCATED");
   for (const f of flags) run.flags.add(f);
   if (selection.gateDropped.length > 0) {
-    run.notices.push(`${selection.gateDropped.length} discovery result(s) below the popularity quality gate were skipped.`);
+    const n = selection.gateDropped.length;
+    run.notices.push(`${count(n, "discovery result")} below the popularity quality gate ${n === 1 ? "was" : "were"} skipped.`);
   }
 
   const taken = selection.peers.filter((p) => p.source !== "named").length;
@@ -175,7 +176,7 @@ function recordDiscovery(run: SubsRun, target: RegisteredEntity, discovery: Disc
     status: discovery.truncated ? "partial" : selection.usable === 0 ? "empty" : "ok",
     summary:
       `${discovery.sameCategory.length} same-category and ${discovery.crossCategory.length} cross-category results; ` +
-      `${taken} peer(s) taken from discovery${gate}.`,
+      `${count(taken, "peer")} taken from discovery${gate}.`,
     flags,
     qualityGateDrops: selection.gateDropped.length,
   });
@@ -252,6 +253,11 @@ function failedCallsNotice(scoring: Scoring, planned: number): string {
   return `${scoring.failed.length} of ${planned} scoring calls failed (${codes}); the pairs they score are not measured.`;
 }
 
+/** "1 peer", "5 peers": counts in evidence summaries a reader sees. */
+function count(n: number, noun: string): string {
+  return `${n} ${n === 1 ? noun : `${noun}s`}`;
+}
+
 function recordScoring(run: SubsRun, members: MapMembers, scoring: Scoring): Evidence | null {
   const { pairs } = scoring.matrix;
   const flags: Flag[] = [];
@@ -262,7 +268,7 @@ function recordScoring(run: SubsRun, members: MapMembers, scoring: Scoring): Evi
   for (const f of flags) run.flags.add(f);
 
   const unscored = [
-    pairs.notScored > 0 ? `${pairs.notScored} tied at the floor (not scored)` : null,
+    pairs.notScored > 0 ? `${pairs.notScored} tied at the floor, not scored` : null,
     pairs.dropped > 0 ? `${pairs.dropped} dropped by Qloo` : null,
     pairs.truncated > 0 ? `${pairs.truncated} not called (budget)` : null,
     pairs.failed > 0 ? `${pairs.failed} lost to failed calls` : null,
@@ -273,7 +279,7 @@ function recordScoring(run: SubsRun, members: MapMembers, scoring: Scoring): Evi
     calls: scoring.calls,
     status: scoring.truncated || scoring.failed.length > 0 ? "partial" : pairs.scored === 0 ? "empty" : "ok",
     summary:
-      `${scoring.calls.length} scoring call(s) over ${members.entities.length} brands; ` +
+      `${count(scoring.calls.length, "scoring call")} over ${members.entities.length} brands; ` +
       `${pairs.scored} of ${pairs.total} pairs scored${unscored.length > 0 ? ` (${unscored.join(", ")})` : ""}.`,
     flags,
   });

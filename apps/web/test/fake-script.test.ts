@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
-import { RUN_EVENT_TYPES, reduceRunEvents, RunEvent, stampEvent, type RunEventType } from "@ct/contracts";
-import { summarizeEvent } from "../lib/event-summary";
-import { buildFakeScript } from "../server/fake-script";
+import { isSkillAvailable, SCAN_TABLE } from "@ct/agent";
+import {
+  CacheStatus,
+  RUN_EVENT_TYPES,
+  reduceRunEvents,
+  RunEvent,
+  stampEvent,
+  unstampEvent,
+  type RunEventType,
+} from "@ct/contracts";
+import { buildFakeScript, FAKE_MODEL, FAKE_QUESTION, scanFallback } from "../server/fake-script";
+import { sampleEvents } from "../server/samples";
 
 vi.mock("server-only", () => ({}));
 
@@ -42,7 +51,9 @@ describe("fake run script", () => {
       if (!notInFakeRun.includes(type)) expect(seen, type).toContain(type);
     }
     const caches = new Set(events.flatMap((e) => (e.type === "qloo" ? [e.cache] : [])));
-    for (const cache of ["hit", "miss", "reused"] as const) expect(caches).toContain(cache);
+    expect(caches).toEqual(new Set(CacheStatus.options));
+    // Evidence with a data-quality flag, so the brief's flagged states are reachable from a test run.
+    expect(events.some((e) => e.type === "evidence" && e.evidence.flags.includes("STALE_CACHE"))).toBe(true);
   });
 
   it("only refers to ids that were emitted earlier", () => {
@@ -81,14 +92,101 @@ describe("fake run script", () => {
   it("uses invented data only (no UUIDs or real request ids)", () => {
     const text = JSON.stringify(script);
     expect(text).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-    for (const e of events) if (e.type === "qloo") expect(e.requestId).toMatch(/^synthetic-/);
+    // The mock transport's request ids: derived from the request, never UUID-shaped (D29).
+    for (const e of events) if (e.type === "qloo") expect(e.requestId).toMatch(/^mock-[0-9a-f]{16}$/);
+  });
+});
+
+describe("fake run script: the brand-health sample replayed as a test run", () => {
+  const sample = sampleEvents("brand-health");
+  const sampleReport = sample.find((e) => e.type === "report.final");
+  if (sampleReport?.type !== "report.final") throw new Error("the brand-health sample has no report.final");
+
+  it("replays the sample's events in order, adding only the CODE FALLBACK after the scan starts", () => {
+    const replayed = script.steps.filter((s) => s.input.type !== "fallback").map((s) => s.input.type);
+    expect(replayed).toEqual(sample.slice(0, -1).map((e) => e.type));
+    const types = script.steps.map((s) => s.input.type);
+    const fallback = types.indexOf("fallback");
+    const scanStart = script.steps.find((s) => s.input.type === "tool.start" && s.input.phase === "scan")?.input;
+    expect(scanStart?.type === "tool.start" && scanStart.toolCallId).toBeTruthy();
+    expect(script.steps[fallback - 1]?.input).toBe(scanStart);
+    expect(script.steps[fallback]?.input).toMatchObject({ type: "fallback", toolCallId: scanStart?.type === "tool.start" ? scanStart.toolCallId : "" });
   });
 
-  it("summarizes every event on one line", () => {
-    for (const e of events) {
-      const line = summarizeEvent(e);
-      expect(line.length).toBeGreaterThan(0);
-      expect(line).not.toContain("\n");
+  it("adds the CODE FALLBACK because this build cannot run the rest of the scan (fails once it can)", () => {
+    const planned = SCAN_TABLE.brand_health.map((entry) => entry.tool);
+    const ran = sample.flatMap((e) => (e.type === "tool.start" && e.phase === "scan" ? [e.tool] : []));
+    const missing = planned.filter((tool) => !ran.includes(tool));
+    expect(missing).toEqual(["audience_dna", "destination_affinity"]);
+    for (const tool of missing) expect(isSkillAvailable(tool), tool).toBe(false);
+    const fallback = script.steps.find((s) => s.input.type === "fallback")?.input;
+    expect(fallback).toMatchObject({
+      type: "fallback",
+      from: "SUBS + DNA + TRVL",
+      to: "SUBS",
+      reason: "audience_dna (DNA) and destination_affinity (TRVL) are not in this build, so the opening scan ran peer_landscape (SUBS) alone.",
+    });
+  });
+
+  it("states no CODE FALLBACK for a scan that ran every skill, or left out one this build has", () => {
+    const clerk = sample.find((e) => e.type === "clerk");
+    const start = sample.find((e) => e.type === "tool.start" && e.phase === "scan");
+    if (clerk?.type !== "clerk" || start?.type !== "tool.start") throw new Error("the sample has no clerk or scan");
+    const scanOf = (tools: readonly (typeof start.tool)[]) => tools.map((tool, i) => ({ ...start, toolCallId: `scan-${i + 1}`, tool }));
+    expect(scanFallback([clerk, ...scanOf(SCAN_TABLE.brand_health.map((entry) => entry.tool))])).toBeNull();
+    // peer_landscape is in this build, so a scan without it did not fall back for want of it.
+    expect(scanFallback([clerk, ...scanOf(["audience_dna"])])).toBeNull();
+    expect(scanFallback([clerk, start])).toMatchObject({ toolCallId: start.toolCallId, to: "SUBS" });
+  });
+
+  it("asks the test question as the fake model, keeping the sample's trace", () => {
+    const created = script.steps[0]?.input;
+    expect(created).toMatchObject({ type: "run.created", question: FAKE_QUESTION, model: FAKE_MODEL, parentRunId: null });
+    expect(FAKE_QUESTION.startsWith("Test run:")).toBe(true);
+    const sampleQloo = sample.flatMap((e) => (e.type === "qloo" ? [unstampEvent(e).input] : []));
+    expect(script.steps.flatMap((s) => (s.input.type === "qloo" ? [s.input] : []))).toEqual(sampleQloo);
+    const pivot = script.steps.find((s) => s.input.type === "pivot")?.input;
+    const finding = script.steps.find((s) => s.input.type === "finding" && s.input.finding.kind === "OUTSIDE_CATEGORY_NEIGHBOUR")?.input;
+    expect(pivot?.type === "pivot" && finding?.type === "finding" && pivot.triggerFindingId === finding.finding.id).toBe(true);
+  });
+
+  it("ends with a zero-spend synthetic receipt whose confidence counts the added CODE FALLBACK", () => {
+    const { report } = script;
+    expect(report).toMatchObject({ runId: RUN, question: FAKE_QUESTION, incomplete: false });
+    expect(script.steps.find((s) => s.input.type === "report.final")?.input).toEqual({ type: "report.final", report });
+    expect(report.receipt).toMatchObject({
+      usd: 0,
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+      models: { clerk: null, analyst: null, ghost: null },
+      ms: durationMs,
+    });
+    expect(report.receipt.numbersTraced).toEqual(sampleReport.report.receipt.numbersTraced);
+    expect(report.receipt.numbersTraced.traced).toBe(report.receipt.numbersTraced.total);
+    expect(report.disclaimers.at(-1)).toMatch(/^Data: synthetic test data/);
+    expect(report.disclaimers.filter((d) => d.startsWith("Data: "))).toHaveLength(1);
+    const before = sampleReport.report.verdict.confidence;
+    expect(report.verdict.confidence.breakdown).toContainEqual({ rule: "code_fallback", label: "CODE FALLBACK", count: 1, points: -10 });
+    expect(report.verdict.confidence.score).toBe(Math.max(0, before.score - 10));
+    for (const s of script.steps) if (s.input.type === "usage") expect(s.input).toMatchObject({ llmUsd: 0, tokens: { input: 0, output: 0 } });
+  });
+
+  it("moves the sample's timestamps onto the test run, keeping the age of cached data", () => {
+    const { report } = script;
+    const created = Date.parse(report.createdAt);
+    expect(created).toBeGreaterThan(startedAt);
+    expect(created).toBeLessThanOrEqual(startedAt + durationMs);
+    const from = Date.parse(report.dataFreshness.fetchedFrom ?? "");
+    const sampleStart = Date.parse(sample[0]?.ts ?? "");
+    const sampleFrom = Date.parse(sampleReport.report.dataFreshness.fetchedFrom ?? "");
+    // Data fetched before the sample run started (a reused response) keeps its age.
+    expect(from - startedAt).toBe(sampleFrom - sampleStart);
+    for (const s of script.steps) {
+      if (s.input.type === "evidence") expect(Date.parse(s.input.evidence.fetchedAt)).toBeLessThanOrEqual(startedAt + s.at * durationMs);
     }
+    for (const exhibit of report.exhibits) expect(exhibit.sourceLine).not.toContain(sample[0]?.ts.slice(0, 10) ?? "-");
+  });
+
+  it("is the same script for the same run", () => {
+    expect(buildFakeScript({ runId: RUN, startedAt, durationMs })).toEqual(script);
   });
 });

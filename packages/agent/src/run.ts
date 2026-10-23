@@ -52,6 +52,12 @@ export interface AgentRunOptions {
   parent?: { runId: string; caseSummary: string } | null;
   /** False forces the fail-closed path (V7: insufficient_evidence). Defaults to true. */
   qlooEnabled?: boolean;
+  /**
+   * CLERK's reading of this same question, made earlier for a preview (POST /api/preview). The run
+   * skips CLERK and uses it, still emitting the `clerk` event (ms 0) and still applying the safety
+   * checks. Only a trusted server-side caller passes it; it never comes from the browser.
+   */
+  intent?: Intent;
 }
 
 export interface AgentRunResult {
@@ -82,3 +88,11 @@ export interface AgentRunResult {
 export function runAgent(options: AgentRunOptions): Promise<AgentRunResult> {
   return executeRun(options);
 }
+
+/**
+ * The steps of a run that a preview repeats before the run (POST /api/preview): the safety checks on
+ * CLERK's intent and the resolution gate's matching, exactly as runAgent applies them, so an intent
+ * a preview hands back as `AgentRunOptions.intent` was read and checked the same way.
+ */
+export { refusalOf } from "./run/agentRun";
+export { privatePersonRefusal, runResolutionGate, type GateOutcome, type GateResolved } from "./run/gate";

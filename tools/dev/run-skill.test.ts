@@ -47,7 +47,7 @@ describe("run-skill peer_landscape", () => {
     expect(text).toContain("run-skill peer_landscape · Qloo mock");
     expect(text).toContain(`run ${cliRunId(NOW())}`);
     expect(text).toMatch(/Brand Alpha\s+brand\s+exact\s+R1/);
-    expect(text).toContain("SUBSTITUTION MAP · D1");
+    expect(text).toContain("SUBSTITUTION MAP · BRAND ALPHA · D1");
     expect(text).toMatch(/▸ R1 Brand Alpha/);
     expect(text).toMatch(/hub score\s+distinct/);
     expect(text).toContain("METRICS");

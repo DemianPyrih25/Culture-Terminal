@@ -7,6 +7,7 @@ import {
   RunEvent,
   stampEvent,
   type EventInput,
+  type Intent,
   type Lane,
   type Mode,
   type QlooSearchEntity,
@@ -171,6 +172,11 @@ export interface AgentRunRequest {
   pins?: Readonly<Record<string, string>>;
   /** Starts a child run from a finished run's note (next_moves, §7.3). */
   parentRunId?: string | null;
+  /**
+   * CLERK's reading of this same question from a preview (POST /api/preview): the run skips CLERK.
+   * The caller vouches that it belongs to this question; it never comes from the browser.
+   */
+  intent?: Intent;
 }
 
 /** A needs_input picker answer (D20): the waiting run and the opaque key of the chosen candidate. */
@@ -213,6 +219,8 @@ export interface RunManagerOptions {
   agentWatchdogMs?: number;
   /** After a stop, how long runAgent gets to return before the run ends without it. */
   agentStopGraceMs?: number;
+  /** False (QLOO_DISABLED=1) runs every agent run on the fail-closed path with no Qloo call (V7). Default true. */
+  qlooEnabled?: boolean;
 }
 
 export interface DrainResult {
@@ -399,18 +407,23 @@ interface AgentRunContext {
   mode: AnalystMode;
   pins: Record<string, string> | undefined;
   parent: { runId: string; caseSummary: string } | null;
+  intent: Intent | undefined;
   qloo: QlooClient;
   anthropic: AnthropicLike;
   startedAt: number;
   spend: SpendMeter;
 }
 
-/** What launchAgent starts: a sanitized question, pins keyed by normaliseName and the parent's summary. */
+/**
+ * What launchAgent starts: a sanitized question, pins keyed by normaliseName, the parent's summary
+ * and, from a preview, CLERK's reading of the question.
+ */
 interface AgentLaunch {
   question: string;
   lane: Lane;
   pins: Record<string, string> | undefined;
   parent: { runId: string; caseSummary: string } | null;
+  intent?: Intent;
 }
 
 interface AgentClients {
@@ -546,6 +559,7 @@ export class RunManager {
   private readonly llmDailyUsdCap: number;
   private readonly agentWatchdogMs: number;
   private readonly agentStopGraceMs: number;
+  private readonly qlooEnabled: boolean;
   private readonly active = new Map<string, ActiveRun>();
   /** Orphan finalizations in flight, so viewers of one run in this process share one attempt. */
   private readonly finalizing = new Map<string, Promise<boolean>>();
@@ -569,6 +583,7 @@ export class RunManager {
     this.llmDailyUsdCap = options.llmDailyUsdCap ?? 1.4;
     this.agentWatchdogMs = options.agentWatchdogMs ?? AGENT_WATCHDOG_MS;
     this.agentStopGraceMs = options.agentStopGraceMs ?? AGENT_STOP_GRACE_MS;
+    this.qlooEnabled = options.qlooEnabled ?? true;
   }
 
   isAccepting(): boolean {
@@ -638,7 +653,7 @@ export class RunManager {
   /**
    * Starts an agent run (PLAN §4.1) on the agent slots, which fake runs never take. Admission checks
    * the mode, the hourly cap and today's LLM budget, then creates the runs row; runAgent goes on in
-   * the background.
+   * the background. A preview's intent skips CLERK; everything else runs as without it.
    */
   async startAgentRun(request: AgentRunRequest): Promise<{ runId: string }> {
     if (!this.accepting) throw new RunManagerError("not_accepting", NOT_ACCEPTING_REASON);
@@ -646,7 +661,8 @@ export class RunManager {
     if (question === "") throw new RunManagerError("invalid", "The question is empty.");
     const clients = this.agentClients();
     const parent = request.parentRunId ? await this.parentContext(request.parentRunId) : null;
-    return this.launchAgent({ question, lane: request.lane, pins: normalisePins(request.pins), parent }, clients);
+    const launch: AgentLaunch = { question, lane: request.lane, pins: normalisePins(request.pins), parent };
+    return this.launchAgent(request.intent ? { ...launch, intent: request.intent } : launch, clients);
   }
 
   /**
@@ -666,7 +682,7 @@ export class RunManager {
   }
 
   private async launchAgent(launch: AgentLaunch, clients: AgentClients): Promise<{ runId: string }> {
-    const { question, lane, pins, parent } = launch;
+    const { question, lane, pins, parent, intent } = launch;
     if (!this.accepting) throw new RunManagerError("not_accepting", NOT_ACCEPTING_REASON);
     if (this.activeCountOf("agent") >= this.agentMaxActive) {
       throw new RunManagerError("busy", BUSY_REASON);
@@ -723,13 +739,16 @@ export class RunManager {
       throw err;
     }
     const { qloo, anthropic } = clients;
-    const run: AgentRunContext = { runId, question, lane, mode, pins, parent, qloo, anthropic, startedAt: Date.now(), spend };
+    const run: AgentRunContext = { runId, question, lane, mode, pins, parent, intent, qloo, anthropic, startedAt: Date.now(), spend };
     void this.driveAgent(run, controller.signal).finally(() => {
       this.active.delete(runId);
       this.bus.close(runId);
       release();
     });
-    log.info({ runId, mode, lane, child: parent !== null, pinned: pins !== undefined }, "agent run started");
+    log.info(
+      { runId, mode, lane, child: parent !== null, pinned: pins !== undefined, previewed: intent !== undefined },
+      "agent run started",
+    );
     return { runId };
   }
 
@@ -1061,6 +1080,8 @@ export class RunManager {
         signal: abort.signal,
         pins: run.pins,
         parent: run.parent,
+        ...(run.intent ? { intent: run.intent } : {}),
+        ...(this.qlooEnabled ? {} : { qlooEnabled: false }),
       }))();
     const settled = await settleWithin(agent, abort.signal, this.agentStopGraceMs);
     clearTimeout(watchdog);
@@ -1140,7 +1161,6 @@ export class RunManager {
     }
   }
 
-  /** Polls the database cancel flag until `signal` aborts; calls `onCancel` once when it is raised. */
   /** Polls the database cancel flag until `signal` aborts; calls `onCancel` once when it is raised. */
   private async pollCancel(runId: string, signal: AbortSignal, onCancel: () => void): Promise<void> {
     while (!signal.aborted) {
