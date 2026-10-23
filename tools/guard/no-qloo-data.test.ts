@@ -329,6 +329,16 @@ describe("git sources", () => {
     expect(scanHistory(repo.root).findings).toMatchObject([{ file: "fixtures/<uuid>.json", rule: "uuid", commit: sha }]);
   });
 
+  it("keeps the invisible-character rule out of history, where a committed file cannot be fixed", { timeout: 30_000 }, () => {
+    repo = new TempRepo();
+    const hidden = String.fromCodePoint(0x200b);
+    const file = { "src/a.ts": `export const s = "a${hidden}b";` };
+    repo.commit(file, "first");
+    repo.write(file);
+    expect(scanHistory(repo.root).findings).toEqual([]);
+    expect(rules(scanWorkingTree(repo.root).findings)).toEqual(["invisible-char"]);
+  });
+
   it("scans commit messages and annotated tag messages", { timeout: 30_000 }, () => {
     repo = new TempRepo();
     const first = repo.commit({ "a.md": "fine\n" }, `Pin S1 entity ${fakeUuid("c")}`);

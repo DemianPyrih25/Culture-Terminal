@@ -3,7 +3,7 @@
 // history, and over paths and commit and tag messages.
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { decodeText, dedupe, lineAt, scanWithRules, type Finding, type TextRule } from "./finding";
+import { decodeText, dedupe, lineAt, scanWithRules, type Finding, type RuleId, type TextRule } from "./finding";
 import { INVISIBLE_CHAR } from "./invisible";
 import {
   type BlobEntry,
@@ -184,6 +184,10 @@ export function scanWorkingTree(root: string): ScanResult {
   return { findings: dedupe(findings), scanned: files.length };
 }
 
+// Source hygiene, not data: enforced on the working tree and index, where it can still be fixed. History
+// keeps what was committed (rewriting it needs a force-push), so only the data rules apply there.
+const HYGIENE_RULES: ReadonlySet<RuleId> = new Set<RuleId>(["invisible-char"]);
+
 export function scanHistory(root: string): ScanResult {
   const entries = listHistoryEntries(root);
   const findings: Finding[] = [];
@@ -194,7 +198,7 @@ export function scanHistory(root: string): ScanResult {
     findings.push(...[...checkPath(e.path), ...checkPathText(e.path)].map((f) => ({ ...f, commit: e.commit })));
   }
   const scanned = readEntries(root, entries, (e, text) => {
-    findings.push(...scanDecoded(e.path, text).map((f) => ({ ...f, commit: e.commit })));
+    findings.push(...scanDecoded(e.path, text).filter((f) => !HYGIENE_RULES.has(f.rule)).map((f) => ({ ...f, commit: e.commit })));
   });
 
   // Messages are published with the history, so they follow the same rule as file contents.
