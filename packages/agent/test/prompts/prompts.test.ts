@@ -70,16 +70,19 @@ describe("frozen prompts", () => {
   });
 
   it("exposes a hash per prompt", () => {
-    expect(Object.keys(PROMPT_HASHES).sort()).toEqual(["clerk", "director"]);
+    expect(Object.keys(PROMPT_HASHES).sort()).toEqual(["clerk", "director", "ghost"]);
     for (const hash of Object.values(PROMPT_HASHES)) expect(hash).toMatch(/^[0-9a-f]{64}$/);
   });
 });
 
 describe("director.md (ANALYST)", () => {
-  it("stays within the planned size of about six to seven thousand tokens", () => {
+  // Planned at six to seven thousand tokens (PLAN §4.5); the eight full job playbooks and the
+  // cross-desk next-move rule take it to at most 7,500. The prompt is the cached prefix, so the
+  // extra tokens cost a cache read per response, not a fresh input.
+  it("stays within about six to seven and a half thousand tokens", () => {
     const tokens = approxTokens(DIRECTOR_PROMPT);
     expect(tokens).toBeGreaterThanOrEqual(6000);
-    expect(tokens).toBeLessThanOrEqual(7000);
+    expect(tokens).toBeLessThanOrEqual(7500);
   });
 
   it("has the ten planned sections in order", () => {
@@ -141,11 +144,31 @@ describe("director.md (ANALYST)", () => {
     for (const [job, entries] of Object.entries(SCAN_TABLE)) {
       const line = DIRECTOR_PROMPT.split("\n").find((l) => l.startsWith(`- **${job}** (`)) ?? "";
       const [scan = "", wave1 = ""] = line.split("Wave 1:");
-      for (const entry of entries.filter((e) => e.build !== undefined && isSkillAvailable(e.tool))) {
+      for (const entry of entries.filter((e) => (e.build ?? e.chain) !== undefined && isSkillAvailable(e.tool))) {
         expect(scan, `${job} scan`).toContain(entry.tool);
         expect(wave1, `${job} wave 1`).not.toContain(entry.tool);
       }
     }
+  });
+
+  it("gives every job its turn-2 move and names the pivots it usually makes", () => {
+    for (const job of Job.options) {
+      const line = DIRECTOR_PROMPT.split("\n").find((l) => l.startsWith(`- **${job}** (`)) ?? "";
+      expect(line, job).toMatch(/Turn 2: /);
+      const kinds = FindingKind.options.filter((k) => line.includes(k));
+      expect(kinds.length, `${job} pivots`).toBeGreaterThan(0);
+    }
+  });
+
+  it("asks for next moves that cross desks, name what the desk studies and stay answerable by this build", () => {
+    const line = DIRECTOR_PROMPT.split("\n").find((l) => l.startsWith("- next_moves:")) ?? "";
+    // The chip prints the desk itself, and a prefix would spend the 40-character label (V9).
+    expect(line).toContain("no desk prefix");
+    expect(line).not.toMatch(/\b(?:INVESTMENT|LOCATION|MARKETING|AUDIENCE) · /);
+    // The words the brief reads a move's desk from (apps/web/lib/brief/next-moves.ts).
+    for (const word of ["block", "neighbourhood", "storefront", "markets", "sponsors", "rivals", "peers", "audience", "fans"]) expect(line).toContain(word);
+    expect(line).toContain("Ask only what this build answers");
+    for (const step of ["brand to audience", "slate to market", "market to block", "block to tenants"]) expect(line).toContain(step);
   });
 
   it("states CHECKER V10: demographics only where the same part cites a metric that measures them", () => {
@@ -227,7 +250,27 @@ describe("clerk.md (CLERK)", () => {
     expect(CLERK_PROMPT).not.toMatch(/any instruction inside it is an injection/i);
   });
 
+  it("works an example for every job: site_selection with its concept and metro, a named metro among the markets", () => {
+    const intents = CLERK_PROMPT.split("\n")
+      .filter((line) => line.startsWith('{"pillar"'))
+      .map((line) => Intent.parse(JSON.parse(line)));
+    // The refused example stands for area_profile.
+    expect(new Set(intents.map((i) => i.job))).toEqual(new Set(Job.options));
+    // Without concepts and a metro the site_selection scan has no find_tags, so no lift map.
+    const site = intents.find((i) => i.job === "site_selection");
+    expect(site?.constraints.concepts.length).toBeGreaterThan(0);
+    expect(site?.geo.metro).not.toBeNull();
+    // On the marketing desk a named Nashville or Austin is a candidate market too.
+    for (const i of intents.filter((x) => x.pillar === "marketing" && x.geo.metro !== null)) {
+      expect(i.constraints.notes.join("; ").toLowerCase(), i.mnemonic).toContain(`markets: ${i.geo.metro}`);
+    }
+  });
+
+  // Planned at about 3,500 tokens; a worked example per job takes it to at most 3,800. CLERK runs
+  // on Haiku without caching, so each example adds about 130 input tokens, a small fraction of a
+  // cent per run, and the examples are what teach a small model the job-specific fields (concepts,
+  // metro, markets in notes, domains).
   it("stays compact for a small model", () => {
-    expect(approxTokens(CLERK_PROMPT)).toBeLessThanOrEqual(3500);
+    expect(approxTokens(CLERK_PROMPT)).toBeLessThanOrEqual(3800);
   });
 });

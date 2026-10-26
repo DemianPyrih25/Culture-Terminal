@@ -17,6 +17,8 @@ export interface FigureSource {
   requestId: string | null;
   /** Where the request id links to, e.g. the request in the Sources section. */
   href?: string | null;
+  /** Printed right after the text, e.g. a CODE FALLBACK superscript (A06 note 5). */
+  after?: ReactNode;
 }
 
 /** What every figure takes besides its data. */
@@ -132,7 +134,10 @@ function SourceLine({ source }: { source: FigureSource | null }) {
   const rid = source.requestId ? `req ${abbreviateRequestId(source.requestId)}` : null;
   return (
     <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5">
-      <span className="font-ui text-[11px] text-dim">{source.text}</span>
+      <span className="font-ui text-[11px] text-dim">
+        {source.text}
+        {source.after}
+      </span>
       {rid ? (
         source.href ? (
           <a

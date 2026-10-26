@@ -1,7 +1,9 @@
-// `pnpm run-skill <skill> <name…>`: one QUANT skill end to end through the real Qloo client, run
-// ledger and registry, with no agent and no web server (PLAN Part 2). Names resolve exactly first
-// (D20): a name without a single exact match of the right type prints its candidates, with their
-// entity ids for run-agent --pins, and stops.
+// `pnpm run-skill <skill> …`: one QUANT skill end to end through the real Qloo client, run ledger
+// and registry, with no agent and no web server (PLAN Part 2). peer_landscape and resolve_entities
+// take names as arguments; any skill runs from its tool input (--input), with --names resolved to R#
+// refs and --tags registered as T# refs first. Names resolve exactly first (D20): a name without a
+// single exact match of the right type prints its candidates, with their entity ids for run-agent
+// --pins, and stops.
 import { createEntityRegistry, createRunBudget, createRunLedger, type RunLedger, type RunRegistry } from "@ct/agent";
 import {
   DEFAULT_RUN_LIMITS,
@@ -11,40 +13,71 @@ import {
   type EntityRef,
   type EventInput,
   type GeoApi,
+  type LocalityApi,
   type ResolvedMention,
+  type Skill,
   type SkillCtx,
   type SkillResult,
+  type TagRef,
 } from "@ct/contracts";
+import { getDb } from "@ct/db";
 import { isNetworkCacheStatus, type QlooCallRecord, type QlooClient, type QlooStore, type RunQloo } from "@ct/qloo";
 import { classifyMatches, normaliseName, searchParams, SKILLS } from "@ct/quant";
-import { choiceOption, intOption, listOption, nameArg, parseCli, UsageError } from "./args";
+import { choiceOption, intOption, listOption, nameArg, parseCli, UsageError, type ParsedOptions } from "./args";
+import { renderDatasets } from "./dataset-view";
 import { formatFixed2, NONE } from "./format";
 import { loadGeo } from "./geo";
 import { EXIT, heading, safeIo, type CliIo } from "./io";
 import { callNumbers, evidenceByCall, renderCalls, renderEvidence, renderFindings, renderMetrics, renderQuota } from "./ledger-view";
+import { kvLocalityApi, localitiesKvKey, MalformedPinsError, pgKv, readPins, type KvStore } from "./localities";
 import { renderSubstitutionMap } from "./matrix";
-import { CliError, openCliQloo, stderrLogger, type CliQloo } from "./qloo-setup";
+import { CliError, describeDatabase, openCliQloo, stderrLogger, type CliQloo } from "./qloo-setup";
+import {
+  InputError,
+  maxRefNumber,
+  mentionArg,
+  readInputOption,
+  refsIn,
+  registerTagUrn,
+  registryRefs,
+  renderDigest,
+  renderRegistry,
+  tagsOption,
+  validateInput,
+  withCallMeta,
+  type NameMention,
+} from "./skill-input";
 import { renderTable, truncate } from "./table";
 
 export const RUN_SKILL_USAGE = [
   "usage: pnpm run-skill peer_landscape <brand> [--k N] [--peers \"A,B\"] [--no-discover] [common options]",
   "       pnpm run-skill resolve_entities <name> [<name>…] [--type T] [--metro M] [common options]",
+  "       pnpm run-skill <skill> --input '<json>' [--names \"A,B\"] [--type T] [--metro M] [--tags \"U,V\"] [common options]",
   "  --k N            Substitution Map size including the target, 4–7 (default 6)",
   "  --peers \"A,B\"    peers to put in the map, resolved exactly like the target (at most 6)",
   "  --no-discover    skip the two discovery calls (needs at least 3 --peers)",
-  "  --type T         entity type for resolve_entities (default brand): " + EntityType.options.join(", "),
-  "  --metro M        metro to search in, for --type place: " + MetroId.options.join(", "),
+  "  --type T         entity type of the names (default brand): " + EntityType.options.join(", "),
+  "  --metro M        metro to search place names in: " + MetroId.options.join(", "),
+  "any skill, from its tool input: " + SkillId.options.join(", "),
+  "  --input JSON     the tool input as the ANALYST sends it, with R# and T# refs; @path reads it from a file;",
+  "                   trigger_finding_id and step_id default to null",
+  "  --names \"A,B\"    names resolved through resolve_entities first, registered as R1, R2… in order;",
+  "                   \"type:Name\" gives one name its own type (artist:Artist Nova), --type the others",
+  "  --tags \"U,V\"     tag URNs registered as T1, T2… in order, as find_tags registers them",
+  "                   (run-skill find_tags --input '{\"concepts\":[…]}' prints a concept's tag URNs under REGISTERED BY FIND_TAGS)",
   "common options:",
   "  --mock           synthetic Qloo data (QLOO_MOCK=1): no key, no network",
   "  --tag T          QLOO_TAG for the call log and the per-tag network cap",
   "  --memory         cache in memory instead of the shared Postgres cache (nothing persists; with --mock only)",
   "  -h, --help       this text",
+  "Over Postgres, metro, city and market contexts read the pinned localities in kv (tools/dev/localities.ts pin).",
   "A name without an exact match prints its candidates with their entity ids, for run-agent --pins.",
   "exit codes: 0 done, 1 failed (or a budget gate refused a search), 2 bad arguments, 3 a name needs a choice (not an exact match)",
 ].join("\n");
 
-const SUPPORTED = ["peer_landscape", "resolve_entities"] as const;
-type SupportedSkill = (typeof SUPPORTED)[number];
+/** The skills that take names as arguments (PLAN Part 2); every skill takes --input. */
+const NAMED = ["peer_landscape", "resolve_entities"] as const;
+type NamedSkill = (typeof NAMED)[number];
 
 const OPTIONS = {
   type: { type: "string" },
@@ -52,6 +85,9 @@ const OPTIONS = {
   k: { type: "string" },
   peers: { type: "string" },
   discover: { type: "boolean" },
+  input: { type: "string" },
+  names: { type: "string" },
+  tags: { type: "string" },
   mock: { type: "boolean" },
   tag: { type: "string" },
   memory: { type: "boolean" },
@@ -60,21 +96,70 @@ const OPTIONS = {
 
 const MAX_MENTIONS = 8;
 const MAX_PEERS = 6;
+/** rank_candidates takes up to 50 candidates and 3 seeds; resolution runs in calls of MAX_MENTIONS. */
+const MAX_INPUT_NAMES = 56;
 const RESOLVE_TOOL_CALL = "cli-resolve";
 const MAP_TOOL_CALL = "cli-map";
 const CANDIDATES_TOOL_CALL = "cli-candidates";
 
-export interface SkillArgs {
-  skill: SupportedSkill;
+interface CommonArgs {
+  mock: boolean;
+  tag: string | null;
+  memory: boolean;
+}
+
+/** peer_landscape or resolve_entities with names as arguments. */
+export interface NamedSkillArgs extends CommonArgs {
+  mode: "names";
+  skill: NamedSkill;
   names: string[];
   type: EntityType;
   metro: MetroId | null;
   k: number;
   peers: string[];
   discover: boolean;
-  mock: boolean;
-  tag: string | null;
-  memory: boolean;
+}
+
+/** Any skill from its tool input, after the names and tags it refers to are registered. */
+export interface InputSkillArgs extends CommonArgs {
+  mode: "input";
+  skill: SkillId;
+  mentions: NameMention[];
+  tags: string[];
+  /** The tool input, already valid against the skill's schema. */
+  input: unknown;
+}
+
+export type SkillArgs = NamedSkillArgs | InputSkillArgs;
+
+function parseInputArgs(skill: SkillId, positionals: readonly string[], options: ParsedOptions<typeof OPTIONS>, common: CommonArgs): InputSkillArgs {
+  if (positionals.length > 0) throw new UsageError("with --input, give names with --names, not as arguments");
+  for (const flag of ["k", "peers", "discover"] as const) {
+    if (options[flag] !== undefined) {
+      throw new UsageError(`--${flag === "discover" ? "no-discover" : flag} does not go with --input; put it in the input`);
+    }
+  }
+  const type = choiceOption(options.type, "--type", EntityType.options, "brand");
+  const metro = options.metro === undefined ? null : choiceOption(options.metro, "--metro", MetroId.options, "nashville");
+  const mentions = listOption(options.names).map((item) => mentionArg(item, type, metro));
+  if (mentions.length > MAX_INPUT_NAMES) throw new UsageError(`--names takes at most ${MAX_INPUT_NAMES} names`);
+  if (options.type !== undefined && mentions.length === 0) throw new UsageError("--type applies to --names");
+  if (metro !== null && !mentions.some((m) => m.type === "place")) throw new UsageError("--metro applies to place names only");
+  if (mentions.some((m) => m.type === "place" && m.metro === null)) throw new UsageError(`a place name needs --metro (${MetroId.options.join(", ")})`);
+  const tags = tagsOption(options.tags);
+
+  const input = validateInput(skill, withCallMeta(readInputOption(options.input ?? "")));
+  // Refs are numbered in registration order, so the input cannot name more of them than are given.
+  const refs = refsIn(input);
+  const maxR = maxRefNumber(refs.entities);
+  if (maxR > mentions.length) {
+    throw new InputError(`--input uses R${maxR}, but --names gives ${mentions.length} name(s)${mentions.length > 0 ? ` (R1–R${mentions.length})` : ""}`);
+  }
+  const maxT = maxRefNumber(refs.tags);
+  if (maxT > tags.length) {
+    throw new InputError(`--input uses T${maxT}, but --tags gives ${tags.length} tag(s)${tags.length > 0 ? ` (T1–T${tags.length})` : ""}`);
+  }
+  return { mode: "input", skill, mentions, tags, input, ...common };
 }
 
 /** The parsed command, or null for --help. Throws UsageError. */
@@ -82,30 +167,32 @@ export function parseSkillArgs(argv: readonly string[]): SkillArgs | null {
   const { positionals, options } = parseCli(argv, OPTIONS);
   if (options.help) return null;
   const [skillArg, ...names] = positionals;
-  if (skillArg === undefined) throw new UsageError("name a skill: peer_landscape or resolve_entities");
-  if (!SUPPORTED.includes(skillArg as SupportedSkill)) {
-    if (SkillId.safeParse(skillArg).success) {
-      throw new UsageError(`${skillArg} is not available in run-skill in this build; it runs ${SUPPORTED.join(" and ")}`);
-    }
-    throw new UsageError(`unknown skill "${skillArg}"; run-skill runs ${SUPPORTED.join(" and ")}`);
+  if (skillArg === undefined) throw new UsageError(`name a skill: ${SkillId.options.join(", ")}`);
+  if (!SkillId.safeParse(skillArg).success) throw new UsageError(`unknown skill "${skillArg}"; run-skill runs ${SkillId.options.join(", ")}`);
+  const tag = options.tag?.trim() ?? null;
+  if (tag === "") throw new UsageError("--tag needs a non-empty value");
+  const common: CommonArgs = { mock: options.mock === true, tag, memory: options.memory === true };
+  if (options.input !== undefined) return parseInputArgs(skillArg as SkillId, names, options, common);
+
+  for (const flag of ["names", "tags"] as const) if (options[flag] !== undefined) throw new UsageError(`--${flag} goes with --input`);
+  if (!NAMED.includes(skillArg as NamedSkill)) {
+    throw new UsageError(`${skillArg} runs from its tool input: pnpm run-skill ${skillArg} --input '<json>' (see --help)`);
   }
-  const skill = skillArg as SupportedSkill;
+  const skill = skillArg as NamedSkill;
   if (names.length === 0) throw new UsageError(`${skill} needs a name`);
   const cleaned = names.map((n) => nameArg(n, "a name"));
   const type = choiceOption(options.type, "--type", EntityType.options, "brand");
   const metro = options.metro === undefined ? null : choiceOption(options.metro, "--metro", MetroId.options, "nashville");
   if (metro !== null && type !== "place") throw new UsageError("--metro applies to --type place only");
   if (type === "place" && metro === null) throw new UsageError(`--type place needs --metro (${MetroId.options.join(", ")})`);
-  const tag = options.tag?.trim() ?? null;
-  if (tag === "") throw new UsageError("--tag needs a non-empty value");
-  const common = { mock: options.mock === true, tag, memory: options.memory === true, type, metro };
+  const named = { mode: "names" as const, type, metro, ...common };
 
   if (skill === "resolve_entities") {
     for (const flag of ["k", "peers", "discover"] as const) {
       if (options[flag] !== undefined) throw new UsageError(`--${flag === "discover" ? "no-discover" : flag} applies to peer_landscape only`);
     }
     if (cleaned.length > MAX_MENTIONS) throw new UsageError(`resolve_entities takes at most ${MAX_MENTIONS} names`);
-    return { skill, names: cleaned, k: 0, peers: [], discover: false, ...common };
+    return { skill, names: cleaned, k: 0, peers: [], discover: false, ...named };
   }
 
   if (cleaned.length !== 1) throw new UsageError("peer_landscape takes one brand; name peers with --peers");
@@ -117,7 +204,7 @@ export function parseSkillArgs(argv: readonly string[]): SkillArgs | null {
   const discover = options.discover !== false;
   if (!discover && peers.length < 3) throw new UsageError("--no-discover needs at least 3 --peers");
   const k = intOption(options.k, "--k", { min: 4, max: 7, fallback: 6 });
-  return { skill, names: [target], k, peers, discover, ...common };
+  return { skill, names: [target], k, peers, discover, ...named };
 }
 
 export interface SkillCliDeps {
@@ -125,6 +212,8 @@ export interface SkillCliDeps {
   io: CliIo;
   /** Replaces the Postgres or memory store (tests). */
   store?: QlooStore;
+  /** Replaces the database kv the pinned localities are read from (tests). */
+  kv?: KvStore;
   /** Replaces the live transport's fetch (tests). */
   fetch?: typeof fetch;
   /** Replaces the gazetteer loaded from @ct/geo (tests). */
@@ -138,6 +227,9 @@ export interface SkillSession {
   scope: RunQloo;
   registry: RunRegistry;
   ledger: RunLedger;
+  geo: GeoApi;
+  /** The pinned market localities skills read; null without kv (metro, city and market contexts unavailable). */
+  localities: LocalityApi | null;
   events: EventInput[];
   calls: QlooCallRecord[];
   ctx(toolCallId: string): SkillCtx;
@@ -148,7 +240,7 @@ export function cliRunId(now: Date): string {
   return `cli-${now.toISOString().replace(/[-:.]/g, "")}`;
 }
 
-export function createSkillSession(client: QlooClient, geo: GeoApi, now: Date): SkillSession {
+export function createSkillSession(client: QlooClient, geo: GeoApi, now: Date, localities: LocalityApi | null = null): SkillSession {
   const runId = cliRunId(now);
   const calls: QlooCallRecord[] = [];
   const events: EventInput[] = [];
@@ -174,12 +266,15 @@ export function createSkillSession(client: QlooClient, geo: GeoApi, now: Date): 
     scope,
     registry,
     ledger,
+    geo,
+    localities,
     events,
     calls,
     ctx: (toolCallId) => ({
       qloo: scope.forTool(toolCallId),
       ledger: ledger.forToolCall(toolCallId),
       geo,
+      localities,
       registry,
       emit,
       budget,
@@ -204,29 +299,34 @@ function candidateText(a: ResolvedMention["alternatives"][number]): string {
 interface Resolution {
   /** Per requested name, in order: its resolve entry, or null when it was not searched. */
   mentions: (ResolvedMention | null)[];
-  result: SkillResult;
+  /** One result per resolve_entities call (MAX_MENTIONS names each). */
+  results: SkillResult[];
 }
 
-async function resolveNames(session: SkillSession, args: SkillArgs, names: readonly string[], io: CliIo): Promise<Resolution> {
-  const input = SKILLS.resolve_entities.input.parse({
-    mentions: names.map((text) => ({ text, type: args.type, metro: args.type === "place" ? args.metro : null })),
-    trigger_finding_id: null,
-    step_id: null,
-  });
-  const estimate = await SKILLS.resolve_entities.estimateCalls(input, session.scope.forTool(RESOLVE_TOOL_CALL), session.registry);
-  io.out(`resolve_entities: ${names.length} name(s) as ${args.type}, estimated ${estimate} network call(s)`);
-  const result = await SKILLS.resolve_entities.run(input, session.ctx(RESOLVE_TOOL_CALL));
+const namedMentions = (args: NamedSkillArgs, names: readonly string[]): NameMention[] =>
+  names.map((text) => ({ text, type: args.type, metro: args.type === "place" ? args.metro : null }));
+
+async function resolveMentions(session: SkillSession, mentions: readonly NameMention[], io: CliIo): Promise<Resolution> {
+  const results: SkillResult[] = [];
+  for (let at = 0; at < mentions.length; at += MAX_MENTIONS) {
+    const chunk = mentions.slice(at, at + MAX_MENTIONS);
+    const input = SKILLS.resolve_entities.input.parse({ mentions: chunk, trigger_finding_id: null, step_id: null });
+    const estimate = await SKILLS.resolve_entities.estimateCalls(input, session.scope.forTool(RESOLVE_TOOL_CALL), session.registry);
+    const types = [...new Set(chunk.map((m) => m.type))].join(", ");
+    io.out(`resolve_entities: ${chunk.length} name(s) as ${types}, estimated ${estimate} network call(s)`);
+    results.push(await SKILLS.resolve_entities.run(input, session.ctx(RESOLVE_TOOL_CALL)));
+  }
   const resolved = session.events.flatMap((e) => (e.type === "resolve" ? e.entities : []));
-  return { result, mentions: names.map((name) => resolved.find((m) => m.mention === name) ?? null) };
+  return { results, mentions: mentions.map((m) => resolved.find((r) => r.mention === m.text && r.entityType === m.type) ?? null) };
 }
 
-function renderResolution(names: readonly string[], resolution: Resolution, io: CliIo): void {
+function renderResolution(mentions: readonly NameMention[], resolution: Resolution, io: CliIo): void {
   io.out(heading("RESOLVE (D20: exact normalised name and type only)"));
-  const rows = names.map((name, i) => {
+  const rows = mentions.map(({ text }, i) => {
     const m = resolution.mentions[i] ?? null;
-    if (m === null) return [name, NONE, "not searched", NONE, NONE, NONE, NONE];
+    if (m === null) return [text, NONE, "not searched", NONE, NONE, NONE, NONE];
     const others = m.alternatives.length === 0 ? NONE : m.match === "exact" ? `${m.alternatives.length} other result(s)` : `${m.alternatives.length} candidate(s)`;
-    return [name, m.entityType, m.match, m.ref ?? NONE, m.name ?? NONE, formatFixed2(m.popularity), others];
+    return [text, m.entityType, m.match, m.ref ?? NONE, m.name ?? NONE, formatFixed2(m.popularity), others];
   });
   print(
     io,
@@ -243,14 +343,14 @@ function renderResolution(names: readonly string[], resolution: Resolution, io: 
  * name's /search only when that answer is cached (a HIT, no network call). Terminal output only: it
  * is what run-agent --pins takes. Null when the answer is not cached or cannot be read.
  */
-async function candidateIds(session: SkillSession, args: SkillArgs, name: string): Promise<string[] | null> {
-  const params = searchParams({ text: name, type: args.type, metro: args.type === "place" ? args.metro : null });
+async function candidateIds(session: SkillSession, mention: NameMention): Promise<string[] | null> {
+  const params = searchParams(mention);
   if (params === null) return null;
   const qloo = session.scope.forTool(CANDIDATES_TOOL_CALL);
   try {
     if (!(await qloo.has("/search", params))) return null;
     const search = await qloo.search(params);
-    return classifyMatches({ text: name, type: args.type }, search.data.results).alternatives.map((a) => a.result.entity_id);
+    return classifyMatches(mention, search.data.results).alternatives.map((a) => a.result.entity_id);
   } catch {
     return null;
   }
@@ -261,56 +361,58 @@ async function candidateIds(session: SkillSession, args: SkillArgs, name: string
  * search to send); true when there were any. Such a name has no candidates to choose from, so the
  * command fails (exit 1) rather than asking for a choice (exit 3).
  */
-function reportUnsearched(names: readonly string[], resolution: Resolution, io: CliIo): boolean {
-  const unsearched = names.filter((_, i) => (resolution.mentions[i] ?? null) === null);
+function reportUnsearched(mentions: readonly NameMention[], resolution: Resolution, io: CliIo): boolean {
+  const unsearched = mentions.filter((_, i) => (resolution.mentions[i] ?? null) === null);
   if (unsearched.length === 0) return false;
-  const { flags, forModel } = resolution.result;
-  const reason = flags.includes("BUDGET_TRUNCATED")
+  const truncated = resolution.results.some((r) => r.flags.includes("BUDGET_TRUNCATED"));
+  const reason = truncated
     ? "a Qloo budget gate refused the call; the [qloo warn] line says which"
-    : forModel.notices.join(" ") || "no search was sent";
+    : resolution.results.flatMap((r) => r.forModel.notices).join(" ") || "no search was sent";
   io.out(heading("NOT SEARCHED (nothing was substituted)"));
-  for (const name of unsearched) io.out(`  '${name}': not searched (${reason})`);
+  for (const { text } of unsearched) io.out(`  '${text}': not searched (${reason})`);
   return true;
 }
 
 /** Prints the candidates of every searched name that did not resolve exactly; true when there were any. */
-async function reportUnresolved(session: SkillSession, args: SkillArgs, names: readonly string[], resolution: Resolution, io: CliIo): Promise<boolean> {
-  const open = names.flatMap((name, i) => {
-    const mention = resolution.mentions[i] ?? null;
-    return mention === null || mention.match === "exact" ? [] : [{ name, mention }];
+async function reportUnresolved(session: SkillSession, mentions: readonly NameMention[], resolution: Resolution, io: CliIo): Promise<boolean> {
+  const open = mentions.flatMap((mention, i) => {
+    const resolved = resolution.mentions[i] ?? null;
+    return resolved === null || resolved.match === "exact" ? [] : [{ mention, resolved }];
   });
   if (open.length === 0) return false;
   io.out(heading("NEEDS A CHOICE (nothing was substituted)"));
-  for (const { name, mention } of open) {
-    io.out(`  '${name}' (${mention.entityType}): ${mention.match.replace("_", " ")}; candidates:`);
-    if (mention.alternatives.length === 0) {
+  for (const { mention, resolved } of open) {
+    io.out(`  '${mention.text}' (${resolved.entityType}): ${resolved.match.replace("_", " ")}; candidates:`);
+    if (resolved.alternatives.length === 0) {
       io.out("     (none)");
       continue;
     }
-    const ids = await candidateIds(session, args, name);
-    mention.alternatives.forEach((a, i) => {
+    const ids = await candidateIds(session, mention);
+    resolved.alternatives.forEach((a, i) => {
       const id = ids?.[i];
       io.out(`     ${i + 1}. ${truncate(candidateText(a), 90)}${id === undefined ? "" : `  id ${id}`}`);
     });
-    const key = normaliseName(name);
+    const key = normaliseName(mention.text);
     if (ids !== null && ids.length > 0 && key !== "") io.out(`     to use one in run-agent: --pins "${key}=<id>"`);
   }
   return true;
 }
 
-function renderOutcome(skill: SupportedSkill, result: SkillResult, io: CliIo): void {
+function renderOutcome(skill: SkillId, result: SkillResult, io: CliIo): void {
   io.out(heading(`${skill.toUpperCase()} · status ${result.status} · flags ${result.flags.length === 0 ? "none" : result.flags.join(", ")}`));
   for (const notice of result.forModel.notices) io.out(`  notice: ${notice}`);
 }
 
-function renderLedger(session: SkillSession, skill: SupportedSkill, result: SkillResult, io: CliIo): void {
+function renderLedger(session: SkillSession, skill: SkillId, result: SkillResult, io: CliIo): void {
   const snapshot = session.ledger.snapshot();
   for (const d of snapshot.datasets) {
-    if (d.kind !== "Matrix") continue;
+    if (d.kind !== "Matrix" || d.payload.mode !== "similarity") continue;
     io.out(heading(`${d.title.toUpperCase()} · ${d.id} · ${d.payload.valueLabel}`));
     io.out("  cell = similarity and rank in row (① most similar) · — not scored · ▸ target");
     print(io, renderSubstitutionMap(d.payload, { indent: "  " }));
   }
+  io.out(heading(`DATASETS (${snapshot.datasets.length})`));
+  print(io, renderDatasets(snapshot.datasets));
   io.out(heading(`METRICS (${snapshot.metrics.length})`));
   print(io, renderMetrics(snapshot.metrics));
   io.out(heading(`EVIDENCE (${snapshot.evidence.length}) · request ids by call # in QLOO CALLS`));
@@ -324,12 +426,12 @@ function renderLedger(session: SkillSession, skill: SupportedSkill, result: Skil
   }
 }
 
-async function runPeerLandscape(args: SkillArgs, session: SkillSession, io: CliIo): Promise<number> {
-  const names = [...args.names, ...args.peers];
-  const resolution = await resolveNames(session, args, names, io);
-  renderResolution(names, resolution, io);
-  const unsearched = reportUnsearched(names, resolution, io);
-  const open = await reportUnresolved(session, args, names, resolution, io);
+async function runPeerLandscape(args: NamedSkillArgs, session: SkillSession, io: CliIo): Promise<number> {
+  const mentions = namedMentions(args, [...args.names, ...args.peers]);
+  const resolution = await resolveMentions(session, mentions, io);
+  renderResolution(mentions, resolution, io);
+  const unsearched = reportUnsearched(mentions, resolution, io);
+  const open = await reportUnresolved(session, mentions, resolution, io);
   if (unsearched) return EXIT.failed;
   if (open) return EXIT.needsInput;
 
@@ -350,14 +452,73 @@ async function runPeerLandscape(args: SkillArgs, session: SkillSession, io: CliI
   return result.status === "error" ? EXIT.failed : EXIT.ok;
 }
 
-async function runResolve(args: SkillArgs, session: SkillSession, io: CliIo): Promise<number> {
-  const resolution = await resolveNames(session, args, args.names, io);
-  renderResolution(args.names, resolution, io);
-  renderOutcome("resolve_entities", resolution.result, io);
-  renderLedger(session, "resolve_entities", resolution.result, io);
-  const unsearched = reportUnsearched(args.names, resolution, io);
-  const open = await reportUnresolved(session, args, args.names, resolution, io);
+async function runResolve(args: NamedSkillArgs, session: SkillSession, io: CliIo): Promise<number> {
+  const mentions = namedMentions(args, args.names);
+  const resolution = await resolveMentions(session, mentions, io);
+  const result = resolution.results[0] as SkillResult;
+  renderResolution(mentions, resolution, io);
+  renderOutcome("resolve_entities", result, io);
+  renderLedger(session, "resolve_entities", result, io);
+  const unsearched = reportUnsearched(mentions, resolution, io);
+  const open = await reportUnresolved(session, mentions, resolution, io);
   return unsearched ? EXIT.failed : open ? EXIT.needsInput : EXIT.ok;
+}
+
+/**
+ * The refs a skill run added to the registry, and those it reports registering that were there
+ * already (a tag it found again), so a later run can take their tag URNs with --tags.
+ */
+function refsRegisteredBy(session: SkillSession, before: ReadonlySet<string>, result: SkillResult): Set<string> {
+  const now = registryRefs(session.registry);
+  const reported = result.forModel.registered.map((r) => r.ref).filter((ref) => now.has(ref));
+  return new Set([...[...now].filter((ref) => !before.has(ref)), ...reported]);
+}
+
+/** Refs the input names that the registry does not hold, e.g. two names that resolved to one entity. */
+function missingRefs(session: SkillSession, input: unknown): string[] {
+  const refs = refsIn(input);
+  return [
+    ...refs.entities.filter((ref) => session.registry.entity(ref as EntityRef) === null),
+    ...refs.tags.filter((ref) => session.registry.tag(ref as TagRef) === null),
+  ];
+}
+
+async function runFromInput(args: InputSkillArgs, session: SkillSession, io: CliIo): Promise<number> {
+  if (args.mentions.length > 0) {
+    const resolution = await resolveMentions(session, args.mentions, io);
+    renderResolution(args.mentions, resolution, io);
+    const unsearched = reportUnsearched(args.mentions, resolution, io);
+    const open = await reportUnresolved(session, args.mentions, resolution, io);
+    if (unsearched) return EXIT.failed;
+    if (open) return EXIT.needsInput;
+  }
+  for (const urn of args.tags) registerTagUrn(session.registry, urn);
+  io.out(heading("REGISTRY (the refs the input can use)"));
+  print(io, renderRegistry(session.registry));
+  const missing = missingRefs(session, args.input);
+  if (missing.length > 0) {
+    io.err(`--input uses ${missing.join(", ")}, which the registry does not hold (did two names resolve to one entity?)`);
+    return EXIT.usage;
+  }
+
+  const skill = SKILLS[args.skill] as unknown as Skill<unknown>;
+  const toolCallId = `cli-${args.skill}`;
+  const estimate = await skill.estimateCalls(args.input, session.scope.forTool(toolCallId), session.registry, {
+    localities: session.localities,
+    geo: session.geo,
+  });
+  io.out(`\n${args.skill}: ${truncate(JSON.stringify(args.input), 160)}`);
+  io.out(`${args.skill}: estimated ${estimate} network call(s)`);
+  const before = registryRefs(session.registry);
+  const result = await skill.run(args.input, session.ctx(toolCallId));
+  renderOutcome(args.skill, result, io);
+  io.out(heading("DIGEST (what the model reads)"));
+  print(io, renderDigest(args.skill, result));
+  const registered = refsRegisteredBy(session, before, result);
+  io.out(heading(`REGISTERED BY ${args.skill.toUpperCase()} (${registered.size}) · --tags takes the tag URNs`));
+  print(io, renderRegistry(session.registry, { only: registered }));
+  renderLedger(session, args.skill, result, io);
+  return result.status === "error" ? EXIT.failed : EXIT.ok;
 }
 
 /**
@@ -389,6 +550,16 @@ export async function renderUsage(session: SkillSession, qloo: CliQloo, io: CliI
 
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
+/** The header's localities part: how many markets kv pins for this Qloo environment. */
+async function describePins(kv: KvStore | null, key: string): Promise<string> {
+  if (kv === null) return "none (no kv: metro, city and market contexts unavailable)";
+  try {
+    return `kv ${key} (${Object.keys(await readPins(kv, key)).length} pinned)`;
+  } catch (err) {
+    return `kv ${key} (${err instanceof MalformedPinsError ? "malformed" : `unreadable: ${errorText(err)}`}; lookups fail)`;
+  }
+}
+
 export async function runSkillCommand(argv: readonly string[], deps: SkillCliDeps): Promise<number> {
   const io = safeIo(deps.io);
   let args: SkillArgs | null;
@@ -397,7 +568,7 @@ export async function runSkillCommand(argv: readonly string[], deps: SkillCliDep
   } catch (err) {
     if (!(err instanceof UsageError)) throw err;
     io.err(err.message);
-    io.err(RUN_SKILL_USAGE);
+    io.err(err instanceof InputError ? "(pnpm run-skill --help lists the options)" : RUN_SKILL_USAGE);
     return EXIT.usage;
   }
   if (args === null) {
@@ -405,13 +576,14 @@ export async function runSkillCommand(argv: readonly string[], deps: SkillCliDep
     return EXIT.ok;
   }
 
+  const storeOption = deps.store ?? (args.memory ? "memory" : "pg");
   let qloo: CliQloo;
   try {
     qloo = await openCliQloo({
       env: deps.env,
       mock: args.mock,
       tag: args.tag,
-      store: deps.store ?? (args.memory ? "memory" : "pg"),
+      store: storeOption,
       logger: stderrLogger(io.err),
       fetch: deps.fetch,
     });
@@ -421,14 +593,22 @@ export async function runSkillCommand(argv: readonly string[], deps: SkillCliDep
     return EXIT.failed;
   }
 
+  // Over Postgres the pins come from the kv table the web app reads; openCliQloo has reached it.
+  const kv = deps.kv ?? (storeOption === "pg" ? pgKv(getDb(), `postgres ${describeDatabase(deps.env)}`) : null);
+  const kvKey = localitiesKvKey(qloo.client.env);
   const geo = deps.geo === undefined ? await loadGeo() : { geo: deps.geo, source: "provided" };
-  const session = createSkillSession(qloo.client, geo.geo, deps.now?.() ?? new Date());
+  const session = createSkillSession(qloo.client, geo.geo, deps.now?.() ?? new Date(), kv === null ? null : kvLocalityApi(kv, kvKey));
   io.out(
-    `run-skill ${args.skill} · Qloo ${qloo.client.env} · tag ${qloo.tag} · cache ${qloo.storeLabel} · geo ${geo.source} · run ${session.runId}`,
+    `run-skill ${args.skill} · Qloo ${qloo.client.env} · tag ${qloo.tag} · cache ${qloo.storeLabel} · geo ${geo.source} · ` +
+      `localities ${await describePins(kv, kvKey)} · run ${session.runId}`,
   );
   let code: number;
   try {
-    code = await (args.skill === "peer_landscape" ? runPeerLandscape(args, session, io) : runResolve(args, session, io));
+    code = await (args.mode === "input"
+      ? runFromInput(args, session, io)
+      : args.skill === "peer_landscape"
+        ? runPeerLandscape(args, session, io)
+        : runResolve(args, session, io));
   } catch (err) {
     io.err(`run-skill failed: ${errorText(err)}`);
     code = EXIT.failed;

@@ -43,4 +43,13 @@ describe("TTL classes (D25)", () => {
     expect(ttl("/v2/insights", { "filter.type": "urn:tag", "signal.location": "loc-fixture-other" }, pinned)).toBe(INSIGHTS_TTL_MS);
     expect(isPinnedRequest(canonicalize("/v2/insights", { "filter.type": "urn:tag", "signal.location": "loc-fixture-metro" }))).toBe(false);
   });
+
+  it("pins the Block DNA city brand list of a pinned locality, and nothing else on brands", () => {
+    const pinned = new Set(["loc-fixture-metro"]);
+    const city = { "filter.type": "urn:entity:brand", "signal.location": "loc-fixture-metro", "filter.popularity.max": 0.9, take: 30 };
+    expect(ttl("/v2/insights", city, pinned)).toBeNull();
+    expect(ttl("/v2/insights", { ...city, "filter.results.entities": "ent-a,ent-b" }, pinned)).toBe(INSIGHTS_TTL_MS);
+    expect(ttl("/v2/insights", { ...city, "signal.interests.entities": "ent-a" }, pinned)).toBe(INSIGHTS_TTL_MS);
+    expect(ttl("/v2/insights", { ...city, "signal.location": "loc-fixture-other" }, pinned)).toBe(INSIGHTS_TTL_MS);
+  });
 });

@@ -1,4 +1,4 @@
-import type { DatasetEnvelope, EvidenceId, QlooPath } from "@ct/contracts";
+import type { DatasetEnvelope, EvidenceId, LocationMethod, QlooPath } from "@ct/contracts";
 import { filterLabel, plural, shortRequestId } from "./format";
 import { requestsForEvidence, type Ledger } from "./ledger";
 import type { FigureLegend, FigureSource, LegendSeries } from "./types";
@@ -94,8 +94,17 @@ export function methodHrefFor(formulaIds: readonly string[]): string {
   return first ? `/method#${encodeURIComponent(first)}` : "/method";
 }
 
-/** "Source: Qloo /v2/insights · 8 requests · computed in code", with the endpoints and the first request id. */
-export function figureSource(ledger: Ledger, evidenceIds: readonly EvidenceId[], line: string | null): FigureSource {
+/**
+ * "Source: Qloo /v2/insights · 8 requests · computed in code", with the endpoints and the first request id.
+ * A location figure names the place it reads and how (A06): "Source: Qloo /v2/insights · location ← East
+ * Nashville · 3 requests · read by POINT · computed in code".
+ */
+export function figureSource(
+  ledger: Ledger,
+  evidenceIds: readonly EvidenceId[],
+  line: string | null,
+  location: { place: string | null; method: LocationMethod | null } | null = null,
+): FigureSource {
   const requests = requestsForEvidence(ledger, evidenceIds);
   const endpoints = new Map<QlooPath, string[]>();
   for (const r of requests) {
@@ -108,10 +117,13 @@ export function figureSource(ledger: Ledger, evidenceIds: readonly EvidenceId[],
   const first = requests[0] ?? null;
   const where = endpoints.size > 0 ? `Qloo ${[...endpoints.keys()].join(" + ")}` : "Culture Terminal analysis";
   const parts = [`Source: ${where}`];
+  if (location?.place) parts.push(`location ← ${location.place}`);
   if (requests.length > 0) parts.push(plural(requests.length, "request"));
+  if (location?.method) parts.push(`read by ${location.method}`);
   parts.push("computed in code");
   return {
     text: parts.join(" · "),
+    place: location?.place ?? null,
     endpoints: [...endpoints].map(([path, filterLabels]) => ({ path, filterLabels })),
     requestCount: requests.length,
     computedInCode: true,

@@ -62,6 +62,8 @@ export interface AskPanelProps {
   onAsk?: (question: string) => void;
   /** Drops the follow-up: the question is asked on its own. */
   onDropParent?: () => void;
+  /** The reading waits for the human check under the composer, which needs the visitor. */
+  waitingForCheck?: boolean;
   className?: string;
 }
 
@@ -116,15 +118,18 @@ export function compiledReading(command: CompiledCommand): string {
   return subject ? `${JOB_LABEL[command.job]} · ${subject}` : JOB_LABEL[command.job];
 }
 
-/** What the live region says for the panel: announced politely as the reading arrives. */
-export function askStatusText(state: AskState, draft: string): string {
+/**
+ * What the live region says for the panel: announced politely as the reading arrives, and while it
+ * waits for the human check, whose checkbox sits in Cloudflare's frame below the question.
+ */
+export function askStatusText(state: AskState, draft: string, waitingForCheck = false): string {
   const { phase, run } = state;
   if (run.kind === "starting") return run.message ?? "Starting the brief…";
   if (run.kind === "failed") return run.message;
   if (phase.kind === "idle" || isPending(state, draft)) return "";
   switch (phase.kind) {
     case "loading":
-      return "Reading the question…";
+      return waitingForCheck ? "Waiting for the human check below the question." : "Reading the question…";
     case "ready": {
       const { refusal, understood, estimate } = phase.preview;
       if (refusal) return "This question cannot be answered as asked.";
@@ -261,6 +266,16 @@ function EstimateRow({ estimate }: { estimate: PreviewResponse["estimate"] }) {
   );
 }
 
+/** The economy step of the mode machine: the brief runs on the economy ANALYST, and says why. */
+function AnalystRow({ note }: { note: string | null }) {
+  return (
+    <PanelRow label="Analyst">
+      <p className="text-[15px] leading-[18px] font-medium text-ink">Economy analyst · Claude Haiku</p>
+      <p className={DETAIL}>{economyDetail(note)}</p>
+    </PanelRow>
+  );
+}
+
 /** What a parent the server would refuse says, after its brief label. */
 const BLOCKED_TEXT: Record<NonNullable<AskParent["blocked"]>, string> = {
   running: "is still being written",
@@ -297,6 +312,17 @@ function ParentRow({ parent, onDropParent }: { parent: AskParent; onDropParent?:
   );
 }
 
+/** "Showcases and replays still work.", unless the server's message says so already. */
+export function pausedExtra(message: string): string | null {
+  return /replays/i.test(message) ? null : "Showcases and replays still work.";
+}
+
+/** The economy row's detail: why (the breaker's message), then what does not change. */
+export function economyDetail(note: string | null): string {
+  const why = note?.trim() || "Today's live budget is nearly used.";
+  return `${why} Every number is still traced to its request; showcases and replays are unchanged.`;
+}
+
 /** A service message as one heading and one detail line, never the same words twice. */
 function ServiceMessage({ message, extra = null }: { message: string; extra?: string | null }) {
   const { head, rest } = messageParts(message);
@@ -322,12 +348,25 @@ function Hint({ keys, children }: { keys: readonly string[]; children: ReactNode
 
 /**
  * The composing panel of A02, hung under the question field: UNDERSTOOD AS, YOU ALREADY HAVE and
- * ESTIMATED from the preview, then the footer with the keys and "Run brief". It also shows the
+ * ESTIMATED from the preview (and ANALYST when the economy breaker has tripped), then the footer with
+ * the keys and "Run brief". It also shows the
  * loading skeleton, a reading that lacks a part (STILL NEEDED, no Run button), a refusal with its
  * reframe (no Run button), a paused or capped service, an error with Try again, and a follow-up's
  * parent. Presentational: AskView owns the state and the requests.
  */
-export function AskPanel({ state, draft, compiled, parent = null, onEdit, onRun, onRetry, onAsk, onDropParent, className }: AskPanelProps) {
+export function AskPanel({
+  state,
+  draft,
+  compiled,
+  parent = null,
+  onEdit,
+  onRun,
+  onRetry,
+  onAsk,
+  onDropParent,
+  waitingForCheck = false,
+  className,
+}: AskPanelProps) {
   const apple = useApplePlatform();
   const { phase, run } = state;
   const pending = isPending(state, draft);
@@ -359,7 +398,7 @@ export function AskPanel({ state, draft, compiled, parent = null, onEdit, onRun,
         ) : (
           <Skeleton className="mt-[3px] h-[14px] w-[320px] max-w-full" />
         )}
-        <p className={DETAIL}>Reading the question and matching its names…</p>
+        <p className={DETAIL}>{waitingForCheck ? "Waiting for the human check below…" : "Reading the question and matching its names…"}</p>
         {compiled ? <CompiledLine mnemonic={compiled.mnemonic} pending /> : null}
       </PanelRow>,
       <PanelRow key="estimate" label="Estimated">
@@ -399,12 +438,13 @@ export function AskPanel({ state, draft, compiled, parent = null, onEdit, onRun,
       }
       const gap = preview.understood !== null ? readingGap(preview.understood) : null;
       rows.push(gap ? <GapRow key="gap" gap={gap} /> : <EstimateRow key="estimate" estimate={preview.estimate} />);
+      if (!gap && preview.mode === "economy") rows.push(<AnalystRow key="analyst" note={preview.modeNote} />);
     }
   } else if (phase.kind === "paused") {
     // 503: nothing runs; the footer opens the brief it already has, or the stored briefs.
     rows.push(
       <PanelRow key="service" label="Live analysis">
-        <ServiceMessage message={phase.message} extra="Showcases and replays still work." />
+        <ServiceMessage message={phase.message} extra={pausedExtra(phase.message)} />
         {compiled ? <CompiledLine mnemonic={compiled.mnemonic} pending={false} /> : null}
       </PanelRow>,
     );

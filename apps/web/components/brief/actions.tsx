@@ -4,13 +4,14 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { QUESTION_MAX_CHARS } from "@ct/contracts";
+import type { BriefNextMove } from "../../lib/brief";
 import { askHref } from "../ask/ask-href";
 import { Button, ButtonLink, cx, DownloadIcon, IconButton, LinkIcon } from "../ui";
 import { useCopied } from "./copy-button";
 
 /**
  * The brief's actions: Share copies the permalink, Export PDF prints the brief (the print stylesheet
- * drops the chrome and turns sidenotes into endnotes), and the A/Follow-up bar with the next moves.
+ * drops the chrome and turns sidenotes into endnotes), and the A/Follow-up bar with the next-move chips.
  */
 
 function permalink(path: string): string {
@@ -72,9 +73,36 @@ export interface FollowUpBarProps {
   runId: string;
   /** The brief's own path, copied by Share. */
   permalinkPath: string;
-  nextMoves: readonly { label: string; question: string }[];
+  /** The report's next moves as chips, each with its desk and its Ask link (lib/brief next-moves). */
+  nextMoves: readonly BriefNextMove[];
   /** Where "Replay" goes; null hides it (a run still being written). */
   replayHref?: string | null;
+}
+
+/**
+ * A next move as a chip (SPEC §7.3): the desk it reads as, its short label and an arrow. It opens Ask with
+ * the question filled in and this brief as the parent; the full question is its title and accessible name.
+ */
+function NextMoveChip({ move }: { move: BriefNextMove }) {
+  return (
+    <li className="min-w-0">
+      <Link
+        href={move.href}
+        title={move.question}
+        aria-label={`${move.deskLabel} · ${move.label}: ask “${move.question}”`}
+        className="group inline-flex h-8 max-w-full items-center gap-2 rounded-brief border border-line-strong bg-paper pr-2.5 pl-2 hover:border-accent focus-visible:border-accent"
+        data-next-move={move.label}
+        data-desk={move.pillar}
+      >
+        <span className="shrink-0 text-[10px] leading-none font-semibold tracking-[1.1px] text-accent uppercase">{move.deskLabel}</span>
+        <span aria-hidden="true" className="h-3 w-px shrink-0 bg-line-strong" />
+        <span className="min-w-0 truncate text-[13px] leading-none text-ink group-hover:underline group-hover:underline-offset-4">{move.label}</span>
+        <span aria-hidden="true" className="shrink-0 text-[12px] leading-none text-accent">
+          →
+        </span>
+      </Link>
+    </li>
+  );
 }
 
 /** A/Follow-up bar: the next moves, a follow-up question field, Export PDF, Share, Replay, and Follow (not yet). */
@@ -86,23 +114,11 @@ export function FollowUpBar({ runId, permalinkPath, nextMoves, replayHref = null
   return (
     <section aria-label="Follow up" className="flex w-full flex-col gap-3 border-t border-line-strong pt-[18px] print:hidden">
       {nextMoves.length > 0 ? (
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           <h2 className="m-0 text-[11px] leading-4 font-semibold tracking-[1.3px] text-dim uppercase">Next moves</h2>
-          <ul className="m-0 flex list-none flex-col p-0">
+          <ul className="m-0 flex list-none flex-wrap gap-2 p-0" data-next-moves={nextMoves.length}>
             {nextMoves.map((m) => (
-              <li key={m.question} className="border-b border-line">
-                <Link
-                  href={askHref(m.question, runId)}
-                  className="group flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2 text-[14px] leading-5 sm:flex-nowrap"
-                  data-next-move={m.label}
-                >
-                  <span className="w-full shrink-0 text-[10px] font-semibold tracking-[1.1px] text-accent uppercase sm:w-40">{m.label}</span>
-                  <span className="min-w-0 flex-1 text-ink group-hover:underline group-hover:underline-offset-4">{m.question}</span>
-                  <span aria-hidden="true" className="text-accent">
-                    →
-                  </span>
-                </Link>
-              </li>
+              <NextMoveChip key={m.question} move={m} />
             ))}
           </ul>
         </div>

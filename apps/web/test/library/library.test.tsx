@@ -3,6 +3,7 @@
 // browser's own runs. Invented briefs only.
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
+import { BriefRowView } from "../../components/library/brief-rows";
 import { BriefsError, briefsUrl, fetchBriefs } from "../../components/library/briefs-client";
 import { deskJobText, headlinePieces, headlineText, shortDate, verdictText } from "../../components/library/format";
 import { entersBriefList, LibraryBody, listedRuns, tracedOf, type LibraryData } from "../../components/library/library-body";
@@ -237,6 +238,28 @@ describe("what a row prints", () => {
     expect(deskJobText(brief({ pillar: null, jobLabel: null }))).toBe("Brief RUNB");
   });
 
+  it("prints the verdict tag when the list sends one that keeps its rule, else the signal", () => {
+    expect(verdictText({ ...brief(), tag: "Clear lead" })).toBe("Clear lead");
+    expect(verdictText({ ...brief(), tag: "  Clear lead " })).toBe("Clear lead");
+    expect(verdictText({ ...brief(), tag: null })).toBe("Mixed signal");
+    expect(verdictText({ ...brief(), tag: "Ranks 3rd of 8" })).toBe("Mixed signal");
+    expect(verdictText({ ...brief(), tag: "Taste island {{WINDOW}}" })).toBe("Mixed signal");
+    expect(verdictText({ ...brief({ signal: null, status: "incomplete" }), tag: null })).toBe("Incomplete");
+  });
+
+  it("caps the verdict column at two lines, with the whole tag as its title", () => {
+    // 32 characters, the longest tag the rule allows: three lines in the narrow column without the cap.
+    const tagged = { ...brief(), tag: "Taste island, nearest to apparel" };
+    for (const columns of ["home", "library"] as const) {
+      const row = renderToStaticMarkup(<BriefRowView brief={tagged} columns={columns} year={2026} />);
+      const cell = /<span class="([^"]*)" title="Taste island, nearest to apparel">/.exec(row);
+      expect(cell?.[1], columns).toContain("line-clamp-2");
+      expect(cell?.[1], columns).toContain("[overflow-wrap:anywhere]");
+    }
+    const plain = renderToStaticMarkup(<BriefRowView brief={brief()} columns="library" year={2026} />);
+    expect(plain).toContain('title="Mixed signal"');
+  });
+
   it("numbers each cited metric once, in order, and drops evidence tokens", () => {
     const { pieces, notes } = headlinePieces("A {{M2}} and {{M9}}, again {{M2}} [E1].", {
       M2: { label: "Overlap", display: "0.5", badge: "MEASURED" },
@@ -280,6 +303,18 @@ describe("the list request", () => {
       "/api/runs?limit=2&sort=conviction&q=juniper&pillar=location&before=abc&ids=run-brief-0001%2Crun-brief-0002",
     );
     expect(briefsUrl({ sort: "date" }, ["not an id"])).toBe("/api/runs");
+  });
+
+  it("reads each brief's verdict tag, null from a list that sends none, and the row prints it", async () => {
+    const list = briefList();
+    // The other rows send no tag at all, as a list from before the tag existed.
+    const tagged = { ...list, runs: list.runs.map((r, i) => ({ ...r, tag: i === 0 ? "Taste island" : undefined })) };
+    const page = await fetchBriefs({}, { ids: [], fetch: vi.fn<typeof fetch>(async () => Response.json(tagged)) });
+    const tags = page.runs.map((r) => r.tag);
+    expect(tags).toEqual(["Taste island", ...list.runs.slice(1).map(() => null)]);
+    const row = renderToStaticMarkup(<BriefRowView brief={page.runs[0]!} columns="library" year={2026} />);
+    expect(row).toContain("Taste island");
+    expect(row).not.toContain("Mixed signal");
   });
 
   it("reads a page, and refuses what it cannot trust", async () => {

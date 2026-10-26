@@ -1,5 +1,5 @@
 {
-  "$comment": "Curated concept map for find_tags (scope place) and the geo_lift baseline (PLAN §4.3, §5.3 S6; PROBE_FINDINGS G6, G10, G14). Names, query strings and public taxonomy URNs only (D29). Only taxonomy tags (urn:tag:genre:*, urn:tag:category:*) act as signals; descriptive *:qloo:* tags gave flat or empty results, so none appear here. status: verified = exercised live by the named probe gate; research = named as working during research, not re-checked by a gate; unverified = a candidate URN that must be verified live before it is served. verified_as records the use the gate exercised: heatmap_signal (G6, the restaurant baseline heatmap) or place_filter (G10, places filter.tags). No concept tag is yet verified as a heatmap concept signal (PROBE_FINDINGS, Not covered): that probe must pass before geo_lift takes these tags as concept_tags. find_tags serves verified and research tags at zero cost and looks up unverified concepts live with semantic_query (/v2/tags, filter.parents.types=urn:entity:place) until a probe verifies them.",
+  "$comment": "Curated concept map for find_tags (scope place) and the geo_lift baseline (PLAN §4.3, §5.3 S6; PROBE_FINDINGS G6, G10, G14). Names, query strings and public taxonomy URNs only (D29). Only taxonomy tags (urn:tag:genre:*, urn:tag:category:*) act as signals; descriptive *:qloo:* tags gave flat or empty results, so none appear here. status: verified = exercised live by the named probe gate; research = named as working during research, not re-checked by a gate; unverified = a candidate URN that must be verified live before it is served. verified_as records the use the probe exercised: heatmap_signal (G6, the restaurant baseline heatmap; P5, concept heatmaps) or place_filter (G10, places filter.tags). P5 found that only urn:tag:genre:place:* tags shape a heatmap: a urn:tag:category:place:* tag returned no cells, so category tags serve the supply filter only and geo_lift takes heatmap_signal tags as concept_tags. find_tags serves verified and research tags at zero cost and looks up unverified concepts live with semantic_query (/v2/tags, filter.parents.types=urn:entity:place) until a probe verifies them.",
   "baseline": {
     "urn": "urn:tag:genre:place:restaurant",
     "status": "verified",
@@ -20,14 +20,17 @@
       "label": "Cafe and coffee shop",
       "aliases": ["cafe", "coffee shop", "coffee bar", "espresso bar", "run-club coffee bar"],
       "semantic_query": "coffee shop",
-      "tags": [{ "urn": "urn:tag:category:place:cafe", "status": "verified", "verified_by": "G10", "verified_as": "place_filter" }]
+      "tags": [
+        { "urn": "urn:tag:category:place:cafe", "status": "verified", "verified_by": "G10", "verified_as": "place_filter" },
+        { "urn": "urn:tag:genre:place:restaurant:coffee_shop", "status": "verified", "verified_by": "P5", "verified_as": "heatmap_signal" }
+      ]
     },
     {
       "key": "bar",
       "label": "Bar",
       "aliases": ["bar", "cocktail bar", "pub", "tavern"],
       "semantic_query": "bar",
-      "tags": [{ "urn": "urn:tag:genre:place:restaurant:bar", "status": "research", "verified_by": null }]
+      "tags": [{ "urn": "urn:tag:genre:place:restaurant:bar", "status": "verified", "verified_by": "P5", "verified_as": "heatmap_signal" }]
     },
     {
       "key": "lounge",

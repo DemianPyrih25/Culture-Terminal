@@ -5,6 +5,7 @@ import {
   CONVICTION_BAND_LABEL,
   convictionRuleLabel,
   countWord,
+  DESK_LABEL,
   figureLegend,
   figureNoteText,
   inlineText,
@@ -21,6 +22,7 @@ import {
   type Inline,
   type RequestRef,
 } from "../../lib/brief";
+import { askHref } from "../../components/ask/ask-href";
 import { requestTrace as requestTraceOf } from "../../lib/brief/ledger";
 import {
   FAKE_QUESTION,
@@ -87,6 +89,8 @@ describe("buildBriefModel: a finished brief", () => {
       jobLabel: "Competitors",
       question: FAKE_QUESTION,
       signal: { signal: fakeReport.verdict.signal, label: SIGNAL_LABEL[fakeReport.verdict.signal] },
+      // The running head names the finding; the answer's kicker below stays the signal.
+      finding: fakeReport.verdict.tag,
       conviction: { score, band, bandLabel: CONVICTION_BAND_LABEL[band], text: `${CONVICTION_BAND_LABEL[band]} · ${score}`, position: score / 100 },
       briefLabel: `Brief ${FAKE_RUN.replace(/-/g, "").slice(0, 4).toUpperCase()}`,
       date: "14 Oct 2026",
@@ -100,6 +104,19 @@ describe("buildBriefModel: a finished brief", () => {
     expect(inlineText(model.answer.headline)).toBe(plainProse(fakeReport.verdict.headline, fakeState));
     expect(inlineText(model.answer.thesis)).toBe(plainProse(fakeReport.verdict.thesis, fakeState));
     expect(model.answer.thesis?.some((p) => p.kind === "metric")).toBe(true);
+  });
+
+  it("names the finding by the verdict tag, else by the signal label", () => {
+    expect(fakeReport.verdict.tag).toBe("Taste island");
+    // undefined: a note stored before the tag existed.
+    const labelled = (tag: string | null | undefined) => fixtureModel({ ...fixtureReport, verdict: { ...fixtureReport.verdict, tag } });
+    expect(labelled("Clear lead").header.finding).toBe("Clear lead");
+    for (const tag of [undefined, null, "", "Ranks 3rd of 8 brands"]) {
+      const model = labelled(tag);
+      expect(model.header.finding, String(tag)).toBe(SIGNAL_LABEL[fixtureReport.verdict.signal]);
+      expect(model.answer.tag).toBe(SIGNAL_LABEL[fixtureReport.verdict.signal]);
+    }
+    expect(buildBriefModel(reduceRunEvents(FIXTURE_RUN, []), NOW).header.finding).toBeNull();
   });
 
   it("names the job in the reader's words, terser in the running head", () => {
@@ -217,8 +234,9 @@ describe("buildBriefModel: a finished brief", () => {
   });
 
   it("resolves a DERIVED metric to code, with its formula id", () => {
-    const note = fake().footnotes.find((f) => f.key === "M1");
-    expect(fakeState.metrics.M1).toMatchObject({ badge: "DERIVED", formulaId: "subs.distinctiveness" });
+    const distinct = Object.values(fakeState.metrics).find((m) => m?.formulaId === "subs.distinctiveness");
+    const note = fake().footnotes.find((f) => f.key === distinct?.id);
+    expect(distinct).toMatchObject({ badge: "DERIVED", formulaId: "subs.distinctiveness" });
     expect(note?.computed).toEqual({ formulaId: "subs.distinctiveness", label: "computed in code · QUANT" });
     expect(note?.trace).toBe("computed in code · QUANT · subs.distinctiveness");
     expect(note?.text).toMatch(/computed in QUANT from \d+ requests\.$/);
@@ -249,8 +267,8 @@ describe("buildBriefModel: a finished brief", () => {
     expect(conviction.aside).toBe("Computed, not chosen");
     expect(conviction.why?.label).toBe(`Why ${score}`);
     expect(conviction.why?.lines.map((l) => [l.rule, l.points])).toEqual(breakdown.map((b) => [b.rule, b.points]));
-    // The test run adds one CODE FALLBACK, so at least that penalty applies, in a reader's words.
-    expect(conviction.why?.lines).toContainEqual(expect.objectContaining({ rule: "code_fallback", label: "Code fell back to a simpler query", pointsText: "−10" }));
+    // The test run's scan runs every scan skill, so no CODE FALLBACK penalty applies.
+    expect(conviction.why?.lines.map((l) => l.rule)).not.toContain("code_fallback");
     for (const line of conviction.why?.lines ?? []) expect(line.label).toBe(convictionRuleLabel(line.rule, line.count));
     expect(conviction.why?.total.text).toBe(`= ${score}`);
     expect(conviction.why?.total.label).toMatch(/^Starts at 100; (one penalty applies|\w+ penalties apply)$/);
@@ -269,8 +287,9 @@ describe("buildBriefModel: a finished brief", () => {
     }
     const exhibits = fakeReport.exhibits.filter((e) => e.kind !== "Scorecard");
     expect(evidence.figures.map((f) => [f.number, f.datasetId, f.title, f.needsFetch])).toEqual(exhibits.map((e, i) => [i + 1, e.datasetId, e.title, false]));
-    const [map] = evidence.figures;
-    if (map?.dataset?.kind !== "Matrix") throw new Error("the first figure is not a matrix");
+    // The first Substitution Map (a Taste Position card may open the figures).
+    const map = evidence.figures.find((f) => f.dataset?.kind === "Matrix");
+    if (map?.dataset?.kind !== "Matrix") throw new Error("the brief has no matrix");
     expect(map.viz).toBe("MatrixGrid");
     // Short codes: one per column, unique, two or three letters, initials for a two-word name.
     const codes = map.legend.codes;
@@ -295,6 +314,8 @@ describe("buildBriefModel: a finished brief", () => {
     expect(fake().evidence.keyFigures.map((k) => [k.label, k.comparator])).toEqual([
       ["Nearest audience", "with Granite Outfitters"],
       ["Distinctiveness", "vs peers"],
+      // The next-gen slot holds a youth index here, which keeps its own name.
+      ["Youth index", "0 = average"],
     ]);
     // A short report label is kept; a historical figure names its window.
     expect(fixtureModel(citingReport).evidence.keyFigures.map((k) => [k.key, k.label, k.comparator])).toEqual([
@@ -322,19 +343,25 @@ describe("buildBriefModel: a finished brief", () => {
         }
       }
     }
-    const notes = new Map(fake().footnotes.map((f) => [f.key, f]));
+    const notes = fake().footnotes;
+    const byFormula = (formulaId: string) => notes.find((f) => f.kind === "metric" && f.metric?.formulaId === formulaId);
     // A measured number: its requests, bare refs and rows, then its short label.
-    expect(notes.get("M3")?.short.text).toMatch(/^Qloo \/v2\/insights · brand ← R1, R6 · \d+ rows\. Audience overlap\.$/);
-    expect(notes.get("M3")?.short.trace).toMatch(/^\d+ requests · req .{4}….{4}$/);
-    expect(notes.get("M3")?.text).toContain("R1 Juniper Cola");
+    const overlap = byFormula("subs.similarity");
+    expect(overlap?.short.text).toMatch(/^Qloo \/v2\/insights · brand ← R1, R6 · \d+ rows\. Audience overlap\.$/);
+    expect(overlap?.short.trace).toMatch(/^\d+ requests · req .{4}….{4}$/);
+    expect(overlap?.text).toContain("R1 Juniper Cola");
     // A derived number: its short label and QUANT.
-    expect(notes.get("M1")?.short).toEqual({ text: `Distinctiveness vs peers, from ${notes.get("M1")?.requests.length} Qloo requests.`, trace: "computed in code · QUANT" });
+    const distinct = byFormula("subs.distinctiveness");
+    expect(distinct?.short).toEqual({ text: `Distinctiveness vs peers, from ${distinct?.requests.length} Qloo requests.`, trace: "computed in code · QUANT" });
     // An evidence bundle keeps its purpose when it fits, else names its skill; the long note keeps both.
-    const e2 = notes.get("E2");
-    expect(e2?.short.text).toMatch(/^Qloo \/v2\/insights · brand ← R1 · \d+ rows\. Substitution map\.$/);
-    expect(e2?.text).toContain(fakeState.evidence.E2?.summary.split(";")[0] ?? "missing");
-    // A figure: its short codes.
-    expect(notes.get("D1")?.short.text).toBe(notes.get("D1")?.text);
+    const bundle = notes.find((f) => f.kind === "evidence");
+    expect(bundle?.short.text).toMatch(/^Qloo \/v2\/insights · brand ← R1 · \d+ rows\. Substitution map\.$/);
+    expect(bundle?.text).toContain(fakeState.evidence[bundle?.key as keyof RunState["evidence"]]?.summary.split(";")[0] ?? "missing");
+    // A matrix figure: its short codes.
+    const matrixId = fake().evidence.figures.find((f) => f.kind === "Matrix")?.datasetId;
+    const figure = notes.find((f) => f.kind === "figure" && f.key === matrixId);
+    expect(figure).toBeDefined();
+    expect(figure?.short.text).toBe(figure?.text);
     // A number not measured says so with its short label; a historical one keeps its window.
     const fixtureNotes = new Map(fixtureModel(citingReport).footnotes.map((f) => [f.key, f]));
     expect(fixtureNotes.get("M3")?.short.text).toBe("Momentum of Marlowe Ridge: not measured.");
@@ -370,18 +397,20 @@ describe("buildBriefModel: a finished brief", () => {
   });
 
   it("asks for a dataset the stream did not carry inline, and rebuilds its legend and note once fetched", () => {
-    const d1 = fakeState.datasets.D1;
-    if (!d1?.data) throw new Error("the fake run streams D1 inline");
-    const inline = fake().evidence.figures.find((f) => f.datasetId === "D1");
-    const large = buildBriefModel({ ...fakeState, datasets: { ...fakeState.datasets, D1: { ...d1, data: null } } }, NOW);
-    const figure = large.evidence.figures.find((f) => f.datasetId === "D1");
+    // The first matrix: the opening scan's Substitution Map.
+    const id = fake().evidence.figures.find((f) => f.kind === "Matrix")?.datasetId as keyof RunState["datasets"];
+    const map = fakeState.datasets[id];
+    if (!map?.data) throw new Error(`the fake run streams ${id} inline`);
+    const inline = fake().evidence.figures.find((f) => f.datasetId === id);
+    const large = buildBriefModel({ ...fakeState, datasets: { ...fakeState.datasets, [id]: { ...map, data: null } } }, NOW);
+    const figure = large.evidence.figures.find((f) => f.datasetId === id);
     expect(figure).toMatchObject({ needsFetch: true, dataset: null, kind: "Matrix", methodHref: "/method", legend: { series: [], ramp: null, codes: [] } });
-    expect(figure?.datasetUrl).toBe(`/api/runs/${FAKE_RUN}/datasets/D1`);
-    const note = large.footnotes.find((f) => f.key === "D1");
+    expect(figure?.datasetUrl).toBe(`/api/runs/${FAKE_RUN}/datasets/${id}`);
+    const note = large.footnotes.find((f) => f.key === id);
     expect(note?.text).toMatch(/computed in code\.$/);
     // What the page does with the fetched dataset gives the same legend and note as an inline one.
-    expect(figureLegend(d1.data)).toEqual(inline?.legend);
-    expect(figureNoteText(figureLegend(d1.data), note?.text ?? "")).toBe(fake().footnotes.find((f) => f.key === "D1")?.text);
+    expect(figureLegend(map.data)).toEqual(inline?.legend);
+    expect(figureNoteText(figureLegend(map.data), note?.text ?? "")).toBe(fake().footnotes.find((f) => f.key === id)?.text);
   });
 
   it("lists risks as change rows with what the number is now, and the limitations", () => {
@@ -425,7 +454,8 @@ describe("buildBriefModel: a finished brief", () => {
     expect(steps.filter((s) => s.origin === "plan").map((s) => s.stepId)).toEqual(fakeState.plan?.plan.steps.map((s) => s.id));
     // A finished run never leaves a step "planned" or "running".
     for (const s of steps) expect(["planned", "running"]).not.toContain(s.status);
-    expect(fake().method.fallbacks[0]?.line).toMatch(/^CODE FALLBACK · SUBS \+ DNA \+ TRVL → SUBS: /);
+    // Its scan runs every scan skill of the job, so nothing fell back.
+    expect(fake().method.fallbacks).toEqual([]);
   });
 
   it("lists every Qloo request as a source, with cache status and the evidence that used it", () => {
@@ -449,7 +479,12 @@ describe("buildBriefModel: a finished brief", () => {
     const model = fake();
     const chips = fakeState.qloo.chips.length;
     const cached = fakeState.qloo.cached + fakeState.qloo.reused;
-    expect(model.nextMoves).toEqual(fakeReport.nextMoves.map((m) => ({ label: m.label, question: m.question })));
+    // Each next move is a chip with the desk it reads as, opening Ask with this brief as the parent.
+    expect(model.nextMoves.map((m) => [m.label, m.question])).toEqual(fakeReport.nextMoves.map((m) => [m.label, m.question]));
+    for (const m of model.nextMoves) {
+      expect(m.href).toBe(askHref(m.question, FAKE_RUN));
+      expect(m.deskLabel).toBe(DESK_LABEL[m.pillar]);
+    }
     expect(model.disclaimers).toEqual(fakeReport.disclaimers);
     expect(model.statusLine).toEqual({
       honesty: "Analytics, not financial advice · Group-level taste data · No individuals · Snapshot 14 Oct 2026",

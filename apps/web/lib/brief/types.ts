@@ -16,6 +16,7 @@ import type {
   HypothesisId,
   Job,
   Limitation,
+  LocationMethod,
   MatchClass,
   MetricId,
   MetricUnit,
@@ -132,9 +133,12 @@ export interface ShortNote {
 export interface Footnote {
   /** The superscript number. */
   n: number;
-  /** What it points at: a metric (M#), an evidence bundle (E#) or a figure's dataset (D#). */
+  /**
+   * What it points at: a metric (M#), an evidence bundle (E#), a figure's dataset (D#) or a CODE
+   * FALLBACK step (its index in the run's fallbacks, "0", "1", …).
+   */
   key: string;
-  kind: "metric" | "evidence" | "figure";
+  kind: "metric" | "evidence" | "figure" | "fallback";
   firstCitedIn: CiteSection;
   /**
    * The long note, for the request inspector, the note's hover title and the printed endnotes:
@@ -154,6 +158,8 @@ export interface Footnote {
   computed: { formulaId: string; label: string } | null;
   /** Set when the metric is UNAVAILABLE: why it was not measured. */
   unavailable: { reason: NoValueReason | null; label: string } | null;
+  /** Set for a CODE FALLBACK note: the ladder step code took, never the model. */
+  fallback: { from: string; to: string; reason: string } | null;
 }
 
 // Head ------------------------------------------------------------------------------------------------
@@ -186,6 +192,11 @@ export interface BriefHeader {
   mnemonic: string | null;
   question: string | null;
   signal: SignalTag | null;
+  /**
+   * The finding in a few words for the running head: the verdict tag ("Taste island"), else the
+   * signal label for a note without one. Null until the report is final.
+   */
+  finding: string | null;
   /** Null until the report is final. */
   conviction: ConvictionSummary | null;
   /** "A1F3", from the run id. */
@@ -293,13 +304,22 @@ export interface BriefKeyFigure {
   key: string;
   state: "ready" | "pending";
   metric: MetricView | null;
+  /**
+   * The number the strip prints: the head of the metric's own display ("+0.34" of "+0.34 · site 1 of 8 ·
+   * city 5 of 8"), whose rest moves to `comparator`; "not measured" when UNAVAILABLE, null while pending.
+   * Never a number the run did not print.
+   */
+  value: string | null;
   footnote: number | null;
   /**
    * A short label (A/Key figure): "Audience overlap", "Distinctiveness". The report's KPI label when it
    * is short, else the job's slot label, else the metric's short label; the full label is `metric.label`.
    */
   label: string;
-  /** The line under it: "with Granite Outfitters", "vs peers", "Apr–Sep 2025 only"; null when there is none. */
+  /**
+   * The line under it: "with Granite Outfitters", "vs peers", "Apr–Sep 2025 only", "site 1 of 8 · city 5 of 8",
+   * "vs restaurant baseline"; null when there is none.
+   */
   comparator: string | null;
   /** While pending: "computing · QUANT" or "waiting on age data"; "not measured · run stopped" once the run ended without it. */
   pendingNote: string | null;
@@ -321,8 +341,13 @@ export interface FigureLegend {
 }
 
 export interface FigureSource {
-  /** "Source: Qloo /v2/insights · 8 requests · computed in code". */
+  /**
+   * "Source: Qloo /v2/insights · 8 requests · computed in code", or for a location figure "Source: Qloo
+   * /v2/insights · location ← East Nashville · 3 requests · read by POINT · computed in code".
+   */
   text: string;
+  /** The place a location figure reads ("East Nashville", "Austin"); null for every other figure. */
+  place: string | null;
   endpoints: { path: QlooPath; filterLabels: string[] }[];
   requestCount: number;
   computedInCode: boolean;
@@ -361,6 +386,18 @@ export interface BriefFigure {
   methodHref: string;
   /** Shown before the report assembles its exhibits; title from the dataset, no caption. */
   provisional: boolean;
+  /** How a location figure read its area, and the CODE FALLBACK notes that got it there; null elsewhere. */
+  location: FigureLocation | null;
+}
+
+/** How a figure's area was read (S7 ladder): the method and the fallback steps down to it. */
+export interface FigureLocation {
+  place: string | null;
+  method: LocationMethod | null;
+  /** "read by POINT"; null when the method is unknown. */
+  text: string | null;
+  /** Footnotes of the CODE FALLBACK steps behind this figure, in order. */
+  fallbackNotes: number[];
 }
 
 export interface BriefArgument {
@@ -487,7 +524,7 @@ export interface Interpretation {
   assumptions: string[];
   /** A group-level reframe CLERK applied (financial advice), or null. */
   reframe: string | null;
-  resolves: { mention: string; match: MatchClass; matchLabel: string; name: string | null; applied: boolean }[];
+  resolves: { mention: string; entityType: EntityType; match: MatchClass; matchLabel: string; name: string | null; applied: boolean }[];
   ms: number | null;
 }
 
@@ -553,6 +590,49 @@ export interface BriefSources {
   line: string;
   items: BriefSource[];
   endpoints: { path: QlooPath; filterType: string | null; filterLabel: string | null; calls: number }[];
+}
+
+// Location -----------------------------------------------------------------------------------------------
+
+/**
+ * One area a location brief read, with how it was read (SPEC §5.3 S7 ladder: POLYGON → POINT → QUERY).
+ * An area read by several calls is one area: the method its last read ended on, every read's fallbacks.
+ */
+export interface BriefArea {
+  /** "East Nashville"; unique within a brief. */
+  name: string;
+  method: LocationMethod | null;
+  /** "its gazetteer boundary", "a centre point", "a place-name search". */
+  methodLabel: string | null;
+  /** The CODE FALLBACK steps code took to read it, each with its footnote (null until cited). */
+  fallbacks: { from: string; to: string; reason: string; line: string; footnote: number | null }[];
+}
+
+/**
+ * Where a location brief stands (SPEC §8: the area name and the location method): the city, the areas
+ * read, and how. Null for a brief that reads no place.
+ */
+export interface BriefLocation {
+  /** "Nashville", from the intent or a lift map; null when the run names no city. */
+  city: string | null;
+  /** Areas in the order they were read; empty for a metro-wide lift map. */
+  areas: BriefArea[];
+  /** "East Nashville, Nashville", or the city alone; null when neither is known. */
+  place: string | null;
+}
+
+// Follow-up -----------------------------------------------------------------------------------------------
+
+/** A next move as the follow-up bar's chip prints it (SPEC §7.3): a child run's question and its desk. */
+export interface BriefNextMove {
+  label: string;
+  question: string;
+  /** The desk the question reads as (by its words; CLERK decides when it runs). */
+  pillar: Pillar;
+  /** "Location": the chip's desk label, uppercased on the page. */
+  deskLabel: string;
+  /** "/ask?q=…&parent=<runId>". */
+  href: string;
 }
 
 // Live --------------------------------------------------------------------------------------------------
@@ -678,7 +758,9 @@ export interface BriefModel {
   live: BriefLive | null;
   /** How the run stopped short of a brief, or null. */
   terminal: BriefTerminal | null;
-  nextMoves: { label: string; question: string }[];
+  /** Where a location brief stands; null for every other brief. */
+  location: BriefLocation | null;
+  nextMoves: BriefNextMove[];
   disclaimers: string[];
   statusLine: BriefStatusLine;
 }

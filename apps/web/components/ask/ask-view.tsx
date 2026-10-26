@@ -5,6 +5,9 @@ import { useEffect, useReducer, useRef, useState } from "react";
 import { parseCommand } from "../../lib/grammar/parse";
 import { rememberRun } from "../../lib/recent-briefs";
 import { startRun } from "../../lib/start-run";
+import { desCommandHref } from "../des/des-href";
+import { loadAccess } from "../protection/access-client";
+import { HumanCheckPanel, sharedHumanFetch, useHumanCheck, useHumanState } from "../protection/human-check-panel";
 import { askHref, askQuestionOf } from "./ask-href";
 import { AskComposer } from "./ask-composer";
 import {
@@ -32,13 +35,16 @@ export interface AskViewProps {
  * The Ask page (A02), live: the question is previewed on arrival (POST /api/preview), edited and
  * previewed again on Enter, and run with the preview's token (POST /api/runs). The run id is kept in
  * this browser's recent briefs before the page moves to the run. The URL follows the question without
- * a navigation, and a navigation to another ?q= (the top bar) is read like a new arrival.
+ * a navigation, and a navigation to another ?q= (the top bar) is read like a new arrival. Both
+ * requests pass the human check (Turnstile, under the composer) through humanFetch.
  */
 export function AskView({ initialQuestion, parent: initialParent }: AskViewProps) {
   const router = useRouter();
   const urlQuestion = askQuestionOf(useSearchParams().get("q"));
   const fieldRef = useRef<QuestionFieldHandle>(null);
   const preview = useRef<AbortController | null>(null);
+  const human = useHumanCheck();
+  const humanStatus = useHumanState(human).status;
   // The ?q= this page last wrote or read: any other is a navigation to read.
   const shown = useRef(initialQuestion.trim());
   const [text, setText] = useState(initialQuestion);
@@ -61,7 +67,7 @@ export function AskView({ initialQuestion, parent: initialParent }: AskViewProps
     dispatch({ type: "preview", question });
     let outcome: PreviewOutcome;
     try {
-      const res = await fetch("/api/preview", {
+      const res = await sharedHumanFetch()("/api/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json", accept: "application/json" },
         body: JSON.stringify({ question }),
@@ -75,6 +81,8 @@ export function AskView({ initialQuestion, parent: initialParent }: AskViewProps
     }
     if (controller.signal.aborted) return;
     dispatch({ type: "previewed", question, outcome, at: Date.now() });
+    // Live analysis paused since the page read its access: the status line and the banner hear of it.
+    if (outcome.kind === "paused") void loadAccess(true);
   }
 
   function clear(): void {
@@ -103,7 +111,7 @@ export function AskView({ initialQuestion, parent: initialParent }: AskViewProps
     const body = runRequestBody(state, followsUp(parent) ? (parent?.runId ?? null) : null);
     if (body === null) return;
     dispatch({ type: "run" });
-    const outcome = await startRun(body, { onRetry: (message) => dispatch({ type: "runRetrying", message }) });
+    const outcome = await startRun(body, { onRetry: (message) => dispatch({ type: "runRetrying", message }), fetch: sharedHumanFetch() });
     if (!outcome.ok) {
       dispatch({ type: "runFailed", message: outcome.error });
       return;
@@ -114,6 +122,12 @@ export function AskView({ initialQuestion, parent: initialParent }: AskViewProps
   }
 
   function submit(question: string): void {
+    // "<NAME> DES" opens the tearsheet: this box reads in place, so the server redirect on /ask never sees it.
+    const des = desCommandHref(question);
+    if (des !== null) {
+      router.push(des);
+      return;
+    }
     const { phase } = state;
     if (question !== phaseQuestion(phase)) {
       replaceUrl(question, parent);
@@ -135,32 +149,36 @@ export function AskView({ initialQuestion, parent: initialParent }: AskViewProps
   // ⌘↵ opens the brief that answers the question read, never a draft's.
   const existing = text.trim() === phaseQuestion(state.phase) ? alreadyHaveOfPhase(state.phase) : null;
   return (
-    <AskComposer
-      value={text}
-      onChange={setText}
-      onSubmit={submit}
-      onClear={() => {
-        clear();
-        replaceUrl("", parent);
-      }}
-      onOpenExisting={existing ? () => router.push(`/run/${existing.runId}`) : undefined}
-      state={state}
-      compiled={parseCommand(text)}
-      parent={parent}
-      onEdit={() => fieldRef.current?.focusEnd()}
-      onRun={() => void runBrief()}
-      onRetry={() => {
-        const question = phaseQuestion(state.phase);
-        if (question !== null) void requestPreview(question);
-      }}
-      onAsk={ask}
-      onDropParent={() => {
-        setParent(null);
-        replaceUrl(phaseQuestion(state.phase) ?? text.trim(), null);
-        fieldRef.current?.focusEnd();
-      }}
-      autoFocus
-      fieldRef={fieldRef}
-    />
+    <>
+      <AskComposer
+        value={text}
+        onChange={setText}
+        onSubmit={submit}
+        onClear={() => {
+          clear();
+          replaceUrl("", parent);
+        }}
+        onOpenExisting={existing ? () => router.push(`/run/${existing.runId}`) : undefined}
+        state={state}
+        compiled={parseCommand(text)}
+        parent={parent}
+        onEdit={() => fieldRef.current?.focusEnd()}
+        onRun={() => void runBrief()}
+        onRetry={() => {
+          const question = phaseQuestion(state.phase);
+          if (question !== null) void requestPreview(question);
+        }}
+        onAsk={ask}
+        onDropParent={() => {
+          setParent(null);
+          replaceUrl(phaseQuestion(state.phase) ?? text.trim(), null);
+          fieldRef.current?.focusEnd();
+        }}
+        waitingForCheck={humanStatus === "interactive" || humanStatus === "error"}
+        autoFocus
+        fieldRef={fieldRef}
+      />
+      <HumanCheckPanel check={human} />
+    </>
   );
 }

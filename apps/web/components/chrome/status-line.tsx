@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { PAGE_GUTTER } from "../layout/grid";
+import { ModeStatus } from "../protection/mode-status";
 import { cx } from "../ui/cx";
 
 /** The fixed honesty line (PLAN §2.4); the snapshot date is appended when known. */
@@ -44,11 +45,14 @@ const COMPACT_HEIGHT = "h-7";
 
 /**
  * A/Status line: 32 px on canvas under a hairline. Left, the honesty line with the snapshot date; right,
- * the trend window and the Qloo request count in mono.
+ * the trend window and the Qloo request count in mono. Between them, on every page, the mode while it is
+ * not live (ModeStatus: "Economy analysis", "Replays only", "Judge lane · Economy analysis"; read in the
+ * browser, so never in the server's markup), whatever the page puts in `right`.
  *
  * Below 768 px the whole line wraps to three, too tall to pin over a phone's page: it follows the page
- * instead, and a one-line `compact` strip (HONESTY_SHORT) stays pinned in its place. At the end of the
- * page the status line slides over the strip, so the two never show at once.
+ * instead, and a one-line `compact` strip (HONESTY_SHORT) stays pinned in its place, the mode's short word
+ * at its end while it is not live. At the end of the page the status line slides over the strip, so the
+ * two never show at once.
  */
 export function StatusLine({ snapshot, trendWindow, requests, left, right, compact, sticky = true, className }: StatusLineProps) {
   const requestText =
@@ -73,14 +77,15 @@ export function StatusLine({ snapshot, trendWindow, requests, left, right, compa
         <div
           aria-hidden="true"
           className={cx(
-            "sticky bottom-0 z-30 truncate border-t border-line bg-canvas py-1.5 text-[11px] leading-[15px] text-dim md:hidden",
+            "sticky bottom-0 z-30 flex items-center gap-3 truncate border-t border-line bg-canvas py-1.5 text-[11px] leading-[15px] text-dim md:hidden",
             COMPACT_HEIGHT,
             PAGE_GUTTER,
             className,
           )}
           data-status-strip="true"
         >
-          {strip}
+          <span className="min-w-0 flex-1 truncate">{strip}</span>
+          <ModeStatus short className="shrink-0" />
         </div>
       ) : null}
       <footer
@@ -94,6 +99,7 @@ export function StatusLine({ snapshot, trendWindow, requests, left, right, compa
         )}
       >
         <p className="min-w-0 flex-1">{left ?? honestyText(snapshot)}</p>
+        <ModeStatus className="shrink-0" />
         {rightContent ? <p className="flex shrink-0 flex-wrap gap-x-6 gap-y-1">{rightContent}</p> : null}
       </footer>
     </>

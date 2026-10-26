@@ -24,25 +24,28 @@ import { fitText, linear, niceDomain, px, symmetricDomain, textWidth, ticksBetwe
  * - butterfly: two series mirrored around a centre label column (head-to-head DNA), signed: each
  *   panel has its own zero line, values below it point back toward the centre.
  *
- * The baseline is 0 unless the caller passes one, or the unit is a lift or ratio with every value
- * positive (then 1). DNA indices (dna.age_index, dna.gender_index) run from −1 to 1 around 0.
+ * The payload may say how to draw it (display, baseline, evenBand); an option the caller passes
+ * wins over the payload. Otherwise the baseline is 0, or 1 for a lift or ratio with every value
+ * positive. DNA indices (dna.age_index, dna.gender_index) run from −1 to 1 around 0. A one-series
+ * dumbbell (a dot plot, e.g. neighbourhood lift around 1.00) draws dots below the baseline in the
+ * negative colour.
  */
 
 export type BarsDisplay = "diverging" | "split" | "dumbbell" | "butterfly";
 
 export interface DivergingBarsOptions {
-  /** Default: butterfly for a two-series payload, diverging for one series. */
+  /** Default: the payload's display, else butterfly for a two-series payload, diverging for one series. */
   display?: BarsDisplay;
   /** Layout width in px; the SVG scales with its viewBox. Default 680. */
   width?: number;
   /** Width of the label column. Default 120. */
   labelWidth?: number;
   /**
-   * The centre value. Default: 0.5 for a split; 1 for a lift or ratio whose values are all positive;
-   * 0 otherwise (deltas, and indices such as dna.age_index on −1 to 1).
+   * The centre value. Default: the payload's baseline, else 0.5 for a split; 1 for a lift or ratio
+   * whose values are all positive; 0 otherwise (deltas, and indices such as dna.age_index on −1 to 1).
    */
   baseline?: number;
-  /** Half-width of the "reads as even" band in a split; null hides it. Default 0.02. */
+  /** Half-width of the "reads as even" band in a split; null hides it. Default: the payload's evenBand, else 0.02. */
   band?: number | null;
   /** Head of the label column, e.g. "METRO" or "AGE". */
   labelHeader?: string;
@@ -102,7 +105,7 @@ export function DivergingBars(props: DivergingBarsProps) {
 
 function resolveDisplay(props: DivergingBarsProps): BarsDisplay {
   const two = props.data.series.length === 2;
-  const wanted = props.display ?? (two ? "butterfly" : "diverging");
+  const wanted = props.display ?? props.data.display ?? (two ? "butterfly" : "diverging");
   // Two-series displays need the second series; a one-series payload falls back to its own displays.
   if (!two && (wanted === "split" || wanted === "butterfly")) return "diverging";
   return wanted;
@@ -114,9 +117,16 @@ function allValues(data: BarsPayload): number[] {
 
 function baselineFor(display: BarsDisplay, data: BarsPayload, explicit?: number): number {
   if (explicit !== undefined) return explicit;
+  if (data.baseline !== undefined) return data.baseline;
   if (display === "split") return 0.5;
   const values = allValues(data);
   return BASELINE_ONE.has(data.unit) && values.length > 0 && values.every((x) => x > 0) ? 1 : 0;
+}
+
+/** The "reads as even" half-width: the option, else the payload's evenBand, else 0.02; null hides it. */
+function evenBandFor(props: Pick<DivergingBarsProps, "band" | "data">): number | null {
+  if (props.band !== undefined) return props.band;
+  return props.data.evenBand ?? 0.02;
 }
 
 /**
@@ -163,7 +173,8 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
   const nCols = display === "diverging" || (display === "dumbbell" && !two) ? 1 : 2;
   const trackX = labelW;
   const baseline = baselineFor(display, data, props.baseline);
-  const band = display === "split" ? (props.band === undefined ? 0.02 : props.band) : null;
+  const evenBand = evenBandFor(props);
+  const band = display === "split" ? evenBand : null;
   const rowH = display === "dumbbell" ? (props.deltaColumn ? 24 : 22) : 19;
   const { lines, height: plotBottom } = layoutLines(data, rowH);
   const height = plotBottom + AXIS_H;
@@ -322,6 +333,7 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
                   v0={v0}
                   v1={two ? v1 : baseline}
                   hasSecond={two}
+                  below={!two && v0 !== null && v0 < baseline}
                   reason={bar.values[0]?.reason ?? null}
                 />
               )}
@@ -333,7 +345,7 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
                 bar={bar}
                 unit={data.unit}
                 style={style}
-                band={display === "split" ? (band ?? 0) : 0.02}
+                band={display === "split" ? (band ?? 0) : (evenBand ?? 0.02)}
                 deltaColumn={display === "dumbbell" && two && Boolean(props.deltaColumn)}
                 colX={colX}
                 y={mid + 4}
@@ -421,6 +433,7 @@ function Dumbbell({
   v0,
   v1,
   hasSecond,
+  below = false,
   reason,
 }: {
   x: (v: number) => number;
@@ -431,6 +444,8 @@ function Dumbbell({
   v0: number | null;
   v1: number | null;
   hasSecond: boolean;
+  /** A one-series dot below the baseline: drawn in the negative colour. */
+  below?: boolean;
   reason: Bar["values"][number]["reason"];
 }) {
   if (v0 === null && (v1 === null || !hasSecond)) return <MissingNote x={cx + 6} y={mid} reason={reason} />;
@@ -447,7 +462,7 @@ function Dumbbell({
       ) : null}
       {hasSecond && v1 !== null ? <circle cx={px(x(v1))} cy={px(mid)} r={4.5} className="fill-data-2" /> : null}
       {v0 !== null ? (
-        <circle cx={px(x(v0))} cy={px(mid)} r={4.75} className="fill-data" />
+        <circle cx={px(x(v0))} cy={px(mid)} r={4.75} className={below ? "fill-negative" : "fill-data"} />
       ) : v1 !== null && x(v1) >= cx ? (
         <MissingNote x={span[0]} y={mid} reason={reason} />
       ) : (

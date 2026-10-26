@@ -24,7 +24,7 @@ export function SectionHead({ number, title, aside, as: Heading = "h2", id, clas
       className={cx("flex w-full items-center gap-[10px] border-t border-line-strong pt-[10px] leading-[14px]", className)}
     >
       <Heading className="flex items-center gap-[10px] text-[11px] font-semibold tracking-[1.3px] uppercase">
-        {numberText ? <span className="text-faint">{numberText}</span> : null}
+        {numberText ? <span className="text-dim">{numberText}</span> : null}
         <span className="text-ink">{title}</span>
       </Heading>
       {aside ? <span className="ml-auto text-right text-[12px] text-dim">{aside}</span> : null}

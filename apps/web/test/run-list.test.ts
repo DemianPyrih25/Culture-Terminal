@@ -20,6 +20,7 @@ function row(over: Partial<RunListRow> = {}): RunListRow {
     createdAtKey: "2026-10-22T09:00:00.000123Z",
     signal: "mixed",
     headline: "Juniper Cola is a taste island {{M2}}",
+    tag: "Taste island",
     confidenceScore: 82,
     confidenceBand: "HIGH",
     numbersTraced: { traced: 9, total: 9 },
@@ -135,6 +136,7 @@ describe("toBriefSummary", () => {
       jobLabel: "Real competitors",
       status: "completed",
       signal: "mixed",
+      tag: "Taste island",
       headline: "Juniper Cola is a taste island {{M2}}",
       metrics,
       confidence: { score: 82, band: "HIGH" },
@@ -142,6 +144,12 @@ describe("toBriefSummary", () => {
       numbersTraced: { traced: 9, total: 9 },
       sources: 20,
     });
+  });
+
+  it("lists a verdict tag only when it keeps its rule", () => {
+    expect(toBriefSummary(row({ tag: null })).tag).toBeNull();
+    expect(toBriefSummary(row({ tag: "Ranks 3rd of 8 brands" })).tag).toBeNull();
+    expect(toBriefSummary(row({ tag: " Clear lead " })).tag).toBe("Clear lead");
   });
 
   it("counts the requests a follow-up reused from its parent among its sources, as the brief page does", () => {

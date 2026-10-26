@@ -5,7 +5,7 @@ import { DEFAULT_RUN_LIMITS, Report, type EventInput, type Intent } from "@ct/co
 import { describe, expect, it } from "vitest";
 import { runAgent, type AgentRunResult } from "../../src/run";
 import { FakeAnthropic, type StreamScript } from "../support/fake-anthropic";
-import { draftFrom, intentFor, mockQloo, parseAll, planCall, reportCall, respond, run, RUN_ID, seenIds, typesOf } from "./support";
+import { intentFor, mockQloo, parseAll, planCall, reportWithoutFollowup, respond, run, RUN_ID, typesOf } from "./support";
 
 interface PresetRun {
   result: AgentRunResult;
@@ -31,11 +31,8 @@ async function runWithPreset(intent: Intent, stream: readonly StreamScript[] = [
   return { result, events, fake };
 }
 
-/** Turn 1 submits the plan while the scan runs; turn 2 submits a report citing the scan. */
-const shortScript = (): StreamScript[] => [
-  respond([planCall()]),
-  (req) => respond([reportCall("toolu_report", draftFrom(seenIds(req)))]),
-];
+/** Turn 1 submits the plan while the scan runs; turn 2 submits a report citing the scan, again after the follow-up nudge. */
+const shortScript = (): StreamScript[] => [respond([planCall()]), ...reportWithoutFollowup()];
 
 describe("runAgent with a preset intent", () => {
   it("skips CLERK: no CLERK request or spend, the clerk event at 0 ms, then the gate and scan as usual", async () => {
@@ -48,8 +45,8 @@ describe("runAgent with a preset intent", () => {
     expect(events[1]).toEqual({ type: "clerk", intent, ms: 0 });
     expect(typesOf(events)).toContain("resolve");
     expect(result.intent).toEqual(intent);
-    // Only the two ANALYST responses are billed.
-    expect(result.usage.input).toBe(2 * 1000);
+    // Only the three ANALYST responses are billed.
+    expect(result.usage.input).toBe(3 * 1000);
     const report = Report.parse(result.report);
     expect(report.receipt.numbersTraced.traced).toBe(report.receipt.numbersTraced.total);
     expect(report.receipt.models.clerk).toBe("claude-haiku-5-5");
@@ -58,7 +55,7 @@ describe("runAgent with a preset intent", () => {
     // The same run with CLERK costs CLERK's response on top.
     const viaClerk = await run({ intent, stream: shortScript() });
     expect(viaClerk.fake.createRequests).toHaveLength(1);
-    expect(viaClerk.result.usage.input).toBe(900 + 2 * 1000);
+    expect(viaClerk.result.usage.input).toBe(900 + 3 * 1000);
     expect(result.usd).toBeLessThan(viaClerk.result.usd);
   });
 

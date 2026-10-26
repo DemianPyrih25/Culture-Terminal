@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   compileMnemonic,
   confidenceBand,
+  isVerdictTag,
   GhostAnswer,
   Intent,
   normalizeIntent,
@@ -15,6 +16,8 @@ import {
   SubmitPlanInput,
   SubmitPlanInputShape,
   toStrictJsonSchema,
+  VERDICT_TAG_LIMITS,
+  verdictTagProblems,
   zodToJsonSchema,
   type JsonSchema,
   type MetricId,
@@ -63,6 +66,7 @@ describe("ReportDraft (submit_report input)", () => {
       [
         "headline",
         "signal",
+        "verdict_tag",
         "thesis",
         "hypothesis_verdicts",
         "arguments",
@@ -100,6 +104,55 @@ describe("ReportDraft (submit_report input)", () => {
     expect(ReportDraft.safeParse(long).success).toBe(false);
     expect(ReportDraftShape.safeParse(long).success).toBe(true);
     expect(ReportDraft.safeParse({ ...draft, open_questions: ["x".repeat(200)] }).success).toBe(true);
+  });
+});
+
+describe("verdict tag (submit_report verdict_tag, Report.verdict.tag)", () => {
+  it("takes two to five words, at most 32 characters, no digits or tokens", () => {
+    for (const tag of ["Taste island", "Clear lead", "Taste island, nearest to apparel", "  Strong fit  "]) {
+      expect(verdictTagProblems(tag), tag).toEqual([]);
+      expect(isVerdictTag(tag), tag).toBe(true);
+    }
+    expect(VERDICT_TAG_LIMITS).toEqual({ wordsMin: 2, wordsMax: 5, chars: 32 });
+    expect(verdictTagProblems("")).toEqual(["is empty"]);
+    expect(verdictTagProblems("Island")).toEqual(["has 1 word, not 2 to 5"]);
+    expect(verdictTagProblems("A taste island far from every soft drink")).toEqual([
+      "has 8 words, not 2 to 5",
+      "has 40 characters, more than 32",
+    ]);
+    expect(verdictTagProblems("Top {{M1}} pick")).toEqual(["contains digits", "contains tokens"]);
+    // The window token has no digits, and the brief would print it raw.
+    expect(verdictTagProblems("Taste island {{WINDOW}}")).toEqual(["contains tokens"]);
+    expect(isVerdictTag("Taste island {{WINDOW}}")).toBe(false);
+    expect(verdictTagProblems("Taste island [E4]")).toEqual(["contains digits", "contains tokens"]);
+    expect(isVerdictTag(null)).toBe(false);
+  });
+
+  it("is enforced in the limited variant only, as custom issues on verdict_tag (CHECKER V9)", () => {
+    const bad = { ...draft, verdict_tag: "Ranks 3rd of 8 brands in its category" };
+    const parsed = ReportDraft.safeParse(bad);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues.map((i) => [i.code, i.path.join("."), i.message])).toEqual([
+      ["custom", "verdict_tag", "has 8 words, not 2 to 5"],
+      ["custom", "verdict_tag", "has 37 characters, more than 32"],
+      ["custom", "verdict_tag", "contains digits"],
+    ]);
+    expect(ReportDraftShape.safeParse(bad).success).toBe(true);
+  });
+
+  it("is required by the strict tool schema and described there, yet old drafts and reports without it still parse", () => {
+    const schema = toStrictJsonSchema(zodToJsonSchema(ReportDraftShape));
+    const tag = (schema.properties as Record<string, JsonSchema>).verdict_tag;
+    expect(schema.required).toContain("verdict_tag");
+    expect(tag).toEqual({ type: "string", description: expect.stringMatching(/two to five words.*no digits/) });
+    // As stored before the tag existed: JSON leaves the key out.
+    const stored: unknown = JSON.parse(JSON.stringify({ ...draft, verdict_tag: undefined }));
+    expect(ReportDraftShape.parse(stored).verdict_tag).toBe("");
+    const env = { seq: 1, ts: ts(1), runId: RUN_ID };
+    expect(RunEvent.safeParse({ ...env, type: "report.draft", draft: stored, attempt: 1 }).success).toBe(true);
+    const oldReport: unknown = JSON.parse(JSON.stringify({ ...report, verdict: { ...report.verdict, tag: undefined } }));
+    expect(Report.safeParse(oldReport).success).toBe(true);
+    expect(Report.safeParse({ ...report, verdict: { ...report.verdict, tag: null } }).success).toBe(true);
   });
 });
 

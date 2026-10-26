@@ -4,6 +4,9 @@ import {
   metricToken,
   ReportDraft,
   tokenizeProse,
+  VERDICT_TAG_LIMITS,
+  verdictTagProblems,
+  verdictTagWords,
   WINDOW_TOKEN,
   WINDOW_TOKEN_RE,
   type EntityRegistry,
@@ -18,8 +21,15 @@ import {
 } from "@ct/contracts";
 import type { z } from "zod";
 import { indexSnapshot, type LedgerLookup, type LedgerSnapshot } from "./ledger";
-import { datasetMeasuresDemographics, demographicTerms, measuresDemographics, namePatterns } from "./report/demographics";
-import { digitNames, numeralViolations } from "./report/numerals";
+import {
+  datasetMeasuresDemographics,
+  demographicEvidence,
+  demographicTerms,
+  measuresDemographics,
+  namePatterns,
+} from "./report/demographics";
+import { wordList } from "./report/format";
+import { areaAliases, mergedAgeBuckets, numberWords, numeralNames, numeralValues, numeralViolations } from "./report/numerals";
 import { phraseHits, type PhraseHit } from "./report/phrases";
 import {
   argumentUnit,
@@ -37,13 +47,22 @@ import {
  * the draft as the strict tool guarantees it (structure only) and enforces what strict mode strips:
  * id formats (V1) and lengths and counts (V9). V7 and V8 are fixed by code, never rejected. A
  * rejection buys one repair turn; on the second attempt every rejection is downgraded to a warning
- * and the report is accepted (each warning costs confidence, §6.4).
+ * and the report is accepted (each warning costs confidence, §6.4). The verdict tag names the finding
+ * in a few words and is judged with the headline (V4, V9, V10); on the second attempt code cuts or
+ * drops it instead (forced), since the brief prints the signal label in its place, and it costs nothing.
  */
 
 /** Below this many ok evidence bundles the signal is forced to insufficient_evidence (V7). */
 export const MIN_OK_EVIDENCE = 3;
-/** V3 rejects when a report has more bare numbers than this; fewer are warnings. */
-export const V3_REJECT_ABOVE = 2;
+/**
+ * V3 rejects when a report has more bare numbers than this; fewer are warnings. Zero: any bare number
+ * buys the repair turn, so none reaches the note on the first attempt. A typed number is never proven
+ * to be the code's own constant: "top 20" names a list size, but "13 of 20" in the same metric is Qloo's
+ * count, and a phrase such as "not in the city top 30" is itself a claim about the data.
+ */
+export const V3_REJECT_ABOVE = 0;
+/** The draft path of the verdict tag, a label the CHECKER judges apart from the prose fields. */
+const TAG_PATH = "verdict_tag";
 
 export interface CheckReportInput<D extends ReportDraftShape = ReportDraftShape> {
   draft: D;
@@ -55,6 +74,8 @@ export interface CheckReportInput<D extends ReportDraftShape = ReportDraftShape>
    * inside them are never read as demographic claims (V10).
    */
   registry?: Pick<EntityRegistry, "entities" | "tags">;
+  /** The gazetteer area names of the question's metro: digits inside them are allowed outside tokens (V3). */
+  areas?: readonly string[];
   /** 2 for the draft submitted in the repair turn: rejections become warnings. Defaults to 1. */
   attempt?: 1 | 2;
 }
@@ -65,7 +86,7 @@ export interface CheckResult<D extends ReportDraftShape = ReportDraftShape> {
   numbersTraced: NumbersTraced;
   /** Set when V7 changed the signal. */
   forcedSignal?: Signal;
-  /** The draft with V7 and V8 applied: what the report is assembled from. */
+  /** The draft with V7, V8 and the last attempt's verdict-tag trim applied: what the report is assembled from. */
   patchedDraft: D;
   /** True when a repair turn is required. Always false on attempt 2. */
   reject: boolean;
@@ -94,28 +115,40 @@ export function checkReport<D extends ReportDraftShape>(input: CheckReportInput<
     ...(input.registry?.entities() ?? []).map((e) => e.name),
     ...(input.registry?.tags() ?? []).map((t) => t.name),
   ];
-  const names = digitNames(registered);
+  const names = numeralNames([...registered, ...areaAliases(input.areas ?? [])]);
   // Follow-up questions are parameters of a new run, not claims: their numbers are not V3's concern.
   const numerals = fields
     .filter((field) => field.role !== "followup")
     .map((field) => ({ field, bare: numeralViolations(field.text, names) }));
-  const phrases = fields.map((field) => ({ field, hits: phraseHits(field.text) }));
   const bareCount = numerals.reduce((n, x) => n + x.bare.length, 0);
-
-  const issues: ValidationIssue[] = [
-    ...schemaIssues(draft, blocking),
-    ...referenceIssues(draft, plan, lookup, blocking),
-    ...fields.flatMap((f) => tokenIssues(f, lookup, blocking)),
-    ...numeralIssues(numerals, bareCount > V3_REJECT_ABOVE ? blocking : "warn"),
-    ...phrases.flatMap(({ field, hits }) => phraseIssues(field, hits, blocking)),
-    ...citationIssues(draft, plan, blocking),
-    ...claimUnits(draft, fields).flatMap((u) => affinityIssues(u, lookup, blocking)),
-    ...demographicIssues(draft, fields, lookup, namePatterns(registered), blocking),
-  ];
 
   const patched = structuredClone(draft) as ReportDraftShape;
   const forced = forceSignal(patched, ledger, qlooEnabled);
+  // The verdict tag is judged (V4, V9, V10) while a repair can still rewrite it. On the last attempt
+  // code cuts or drops it instead, and once V7 has dropped it there is nothing left to judge.
+  const tagSettled = blocking === "warn" || forced !== null;
+  const phrases = [
+    ...fields.map((field) => ({ path: field.path, hits: phraseHits(field.text) })),
+    ...(tagSettled ? [] : [{ path: TAG_PATH, hits: phraseHits(draft.verdict_tag) }]),
+  ];
+  const unmeasured = unmeasuredDemographics(draft, lookup, demographicEvidence(ledger.metrics), namePatterns(registered));
+  // The tag names the finding the headline states, so V10 judges it with the headline's part.
+  const tag: DemographicField = { path: TAG_PATH, role: "claim", unit: "headline", text: draft.verdict_tag };
+
+  const issues: ValidationIssue[] = [
+    ...schemaIssues(draft, blocking).filter((i) => !tagSettled || i.path !== TAG_PATH),
+    ...(tagSettled ? [] : tagNumberIssues(draft.verdict_tag, blocking)),
+    ...referenceIssues(draft, plan, lookup, blocking),
+    ...fields.flatMap((f) => tokenIssues(f, lookup, blocking)),
+    ...numeralIssues(numerals, lookup, bareCount > V3_REJECT_ABOVE ? blocking : "warn"),
+    ...phrases.flatMap(({ path, hits }) => phraseIssues(path, hits, blocking)),
+    ...citationIssues(draft, plan, blocking),
+    ...claimUnits(draft, fields).flatMap((u) => affinityIssues(u, lookup, blocking)),
+    ...demographicIssues(tagSettled ? fields : [...fields, tag], unmeasured, blocking),
+  ];
+
   if (forced) issues.push(forced);
+  else if (tagSettled) issues.push(...settleVerdictTag(patched, unmeasured(tag)));
   issues.push(...injectWindows(claimUnits(patched, draftProse(patched)), ledger));
   issues.sort((a, b) => a.rule.localeCompare(b.rule, "en", { numeric: true }));
 
@@ -146,12 +179,45 @@ function schemaIssues(draft: ReportDraftShape, blocking: Blocking): ValidationIs
 }
 
 function limitMessage(path: string, zi: z.core.$ZodIssue, value: unknown): string {
+  // The verdict tag's rule speaks for itself ("verdict_tag has 7 words, not 2 to 5."), except digits.
+  if (zi.code === "custom" && path === TAG_PATH && zi.message === "contains digits") return tagDigitsMessage(String(value));
+  if (zi.code === "custom") return `${path} ${zi.message}.`;
   const size =
     typeof value === "string" ? `${value.length} characters` : Array.isArray(value) ? `${value.length} items` : null;
   if (zi.code === "too_big" && size) return `${path} has ${size}; at most ${String(zi.maximum)} are allowed.`;
   if (zi.code === "too_small" && value === "") return `${path} is empty.`;
   if (zi.code === "too_small" && size) return `${path} has ${size}; at least ${String(zi.minimum)} are required.`;
   return `${path}: ${zi.message}`;
+}
+
+/** What a verdict tag holds instead of a number, for V9's message on one. */
+const TAG_IN_WORDS =
+  'a tag names the finding in words ("Clear lead", "Taste island"); the headline carries ranks, counts and ages with their {{M#}} tokens.';
+
+/**
+ * V9 on digits in the verdict tag names the words that carry them: a tag is a label printed without
+ * its tokens, so a rank, count or age range in it can never be traced (code drops it on the last attempt).
+ */
+function tagDigitsMessage(tag: string): string {
+  const words = verdictTagWords(tag).filter((w) => /\d/.test(w));
+  const listed = words.map((w) => `"${w.replace(/[,;:.!?]+$/u, "")}"`).join(", ");
+  return `${TAG_PATH} contains digits (${listed}): ${TAG_IN_WORDS}`;
+}
+
+/**
+ * V9 on a number above ten spelled out in the verdict tag ("Last of twelve"): as untraceable as its
+ * digits. The contracts' tag rule (verdictTagProblems) reads digits only, so the CHECKER adds it.
+ */
+function tagNumberIssues(tag: string, blocking: Blocking): ValidationIssue[] {
+  const words = numberWords(tag);
+  if (words.length === 0) return [];
+  const listed = words.map((w) => `"${w}"`).join(", ");
+  return [issue("V9", blocking, `${TAG_PATH} contains a number (${listed}): ${TAG_IN_WORDS}`, TAG_PATH, words)];
+}
+
+/** The verdict tag's rule as the CHECKER reads it: the contracts' (verdictTagProblems), and no number spelled out. */
+function tagProblems(tag: string): string[] {
+  return [...verdictTagProblems(tag), ...(numberWords(tag).length > 0 ? ["contains a number"] : [])];
 }
 
 // V1: every referenced id exists in this run ---------------------------------------------------------
@@ -250,22 +316,53 @@ function tokenText(segment: Exclude<ProseSegment, { kind: "text" }>): string {
 
 // V3: numbers outside tokens ----------------------------------------------------------------------------
 
-function numeralIssues(numerals: readonly { field: ProseField; bare: string[] }[], action: Blocking): ValidationIssue[] {
+function numeralIssues(
+  numerals: readonly { field: ProseField; bare: string[] }[],
+  ledger: LedgerLookup,
+  action: Blocking,
+): ValidationIssue[] {
   return numerals
     .filter((x) => x.bare.length > 0)
-    .map(({ field, bare }) => {
-      const listed = bare.map((b) => `"${b}"`).join(", ");
-      const message = `${field.path}: numbers typed outside tokens: ${listed}; cite every number as a {{M#}} token.`;
-      return issue("V3", action, message, field.path, bare);
+    .map(({ field, bare }) => issue("V3", action, `${field.path}: ${numeralAdvice(field.text, bare, ledger)}.`, field.path, bare));
+}
+
+/**
+ * What V3 tells the repair about one field's bare numbers: an age range that merges Qloo buckets names
+ * the buckets it spans, and a number one of the field's own tokens already prints is a copy to delete
+ * ("13 of 20 new tags {{M29}}" when the token shows "13 of 20 in the area top 20").
+ */
+function numeralAdvice(text: string, bare: readonly string[], ledger: LedgerLookup): string {
+  const listed = (xs: readonly string[]) => [...new Set(xs)].map((x) => `"${x}"`).join(", ");
+  const clauses = [`numbers typed outside tokens: ${listed(bare)}`];
+  for (const range of new Set(bare)) {
+    const buckets = mergedAgeBuckets(range);
+    if (buckets === null) continue;
+    clauses.push(
+      `"${range}" is not a Qloo age bucket: name the ${buckets.length === 1 ? "bucket" : "buckets"} it spans ` +
+        `(${wordList(buckets)}), or cite the {{M#}} token of the metric that measures ${buckets.length === 1 ? "it" : "them"}`,
+    );
+  }
+  let rest = bare.filter((b) => mergedAgeBuckets(b) === null);
+  for (const id of new Set(metricTokenOccurrences(text))) {
+    const display = ledger.metric(id)?.display ?? "";
+    const shown = new Set(numeralValues(display));
+    const copies = rest.filter((b) => {
+      const values = numeralValues(b);
+      return values.length > 0 && values.every((v) => shown.has(v));
     });
+    if (copies.length === 0) continue;
+    const verb = new Set(copies).size === 1 ? "repeats" : "repeat";
+    clauses.push(`${listed(copies)} ${verb} what {{${id}}} already prints ("${display}"): delete the typed copy`);
+    rest = rest.filter((b) => !copies.includes(b));
+  }
+  if (rest.length > 0) clauses.push(`cite every ${clauses.length > 1 ? "other " : ""}number as a {{M#}} token`);
+  return clauses.join("; ");
 }
 
 // V4: phrase linter ------------------------------------------------------------------------------------------
 
-function phraseIssues(field: ProseField, hits: readonly PhraseHit[], blocking: Blocking): ValidationIssue[] {
-  return hits.map((h) =>
-    issue("V4", blocking, `${field.path}: "${h.phrase}" is not allowed (${h.rule.hint}).`, field.path, [h.phrase]),
-  );
+function phraseIssues(path: string, hits: readonly PhraseHit[], blocking: Blocking): ValidationIssue[] {
+  return hits.map((h) => issue("V4", blocking, `${path}: "${h.phrase}" is not allowed (${h.rule.hint}).`, path, [h.phrase]));
 }
 
 // V5: citation chains -------------------------------------------------------------------------------------
@@ -368,7 +465,65 @@ function forceSignal(draft: ReportDraftShape, ledger: LedgerSnapshot, qlooEnable
     : "Qloo is disabled for this run";
   const from = draft.signal;
   draft.signal = "insufficient_evidence";
-  return issue("V7", "forced", `signal changed from ${from} to insufficient_evidence: ${why}.`, "signal", [from]);
+  // The tag named a finding the evidence does not carry; the brief prints the forced signal instead.
+  const tag = draft.verdict_tag.trim();
+  draft.verdict_tag = "";
+  const dropped = tag === "" ? "" : `; verdict_tag "${tag}" dropped with it`;
+  return issue("V7", "forced", `signal changed from ${from} to insufficient_evidence: ${why}${dropped}.`, "signal", [from]);
+}
+
+// The verdict tag on the last attempt: code cuts or drops it ------------------------------------------
+
+/** Where a tag's first clause ends: a comma, colon, dash or bracket opens a qualifier; a stop ends it. */
+const CLAUSE_END = /[,;:.!?(–—]|\s-\s/u;
+
+/** Words a clause that says something does not end on ("Close to, but behind" is no tag). */
+const DANGLING_WORDS: ReadonlySet<string> = new Set([
+  "a", "an", "and", "are", "as", "at", "but", "by", "for", "from", "in", "into", "is", "of", "on", "or", "than", "the", "to", "vs", "with",
+]);
+
+/**
+ * A verdict tag cut to its rule, never spliced: its first clause, when that keeps the rule (V9, a number
+ * spelled out included), uses no banned phrase (V4) and does not end on a dangling word; "" otherwise,
+ * and the brief prints the signal label. Words are never taken out of a clause or cut off its end: "No
+ * 1 choice" without its number, or "Clear lead over rivals is unlikely" cut at five words, says the opposite.
+ */
+export function trimVerdictTag(tag: string): string {
+  const clause = verdictTagWords(tag.split(CLAUSE_END)[0] ?? "").join(" ");
+  const last = clause.slice(clause.lastIndexOf(" ") + 1).toLowerCase();
+  if (DANGLING_WORDS.has(last)) return "";
+  return tagProblems(clause).length === 0 && phraseHits(clause).length === 0 ? clause : "";
+}
+
+/**
+ * The last attempt's verdict tag, settled by code: dropped when it uses a banned phrase (V4) or claims
+ * a demographic the headline does not measure (V10, `unmeasured` the terms), else cut to its rule
+ * (V9). The brief prints the signal label in its place, so the fix is `forced` and costs no confidence.
+ */
+function settleVerdictTag(draft: ReportDraftShape, unmeasured: readonly string[]): ValidationIssue[] {
+  const from = draft.verdict_tag;
+  const hits = phraseHits(from);
+  if (hits.length > 0) {
+    draft.verdict_tag = "";
+    const phrase = hits.map((h) => `"${h.phrase}"`).join(", ");
+    const hint = hits[0]?.rule.hint ?? "";
+    const message = `${TAG_PATH} "${from}" dropped: ${phrase} is not allowed (${hint}); the brief prints the signal instead.`;
+    return [issue("V4", "forced", message, TAG_PATH, hits.map((h) => h.phrase))];
+  }
+  if (unmeasured.length > 0) {
+    draft.verdict_tag = "";
+    const listed = unmeasured.map((t) => `"${t}"`).join(", ");
+    const message =
+      `${TAG_PATH} "${from}" dropped: ${listed} ${unmeasured.length === 1 ? "claims" : "claim"} an audience's age, ` +
+      "gender or generation that no metric the headline cites measures; the brief prints the signal instead.";
+    return [issue("V10", "forced", message, TAG_PATH, [...unmeasured])];
+  }
+  const problems = tagProblems(from);
+  if (problems.length === 0) return [];
+  const to = trimVerdictTag(from);
+  draft.verdict_tag = to;
+  const outcome = to === "" ? "dropped; the brief prints the signal instead" : `trimmed to "${to}"`;
+  return [issue("V9", "forced", `${TAG_PATH} "${from}" ${problems.join(" and ")}: ${outcome}.`, TAG_PATH, [from])];
 }
 
 // V8: a STALE metric travels with its window ---------------------------------------------------------------
@@ -434,19 +589,23 @@ function citingParts(draft: ReportDraftShape): Map<string, CitingPart> {
   return parts;
 }
 
+/** A field V10 judges: a prose field of the note, or the verdict tag in the headline's part. */
+type DemographicField = Pick<ProseField, "path" | "role" | "unit" | "text">;
+
 /**
- * A claim that names an audience's age, gender or generation needs a metric in the same part that
- * measures it (SPEC §6.2): an audience_dna index or a share_of_taste age metric with a value.
- * Limitation sentences and registered names are not claims (report/demographics). Labels and next
- * moves are not judged: they state no finding.
+ * V10's judge for one draft: the demographic terms a field claims that no metric of its part measures,
+ * empty when it passes. A claim that names an audience's age, gender or generation needs a metric in
+ * the same part that measures it (SPEC §6.2): an audience_dna index or a share_of_taste age metric
+ * with a value; a caption's dataset counts when it shows one (`calls`: the evidence behind them).
+ * Limitation sentences and registered names are not claims (report/demographics). Next moves and
+ * other labels are not judged, they state no finding; the verdict tag names the headline's.
  */
-function demographicIssues(
+function unmeasuredDemographics(
   draft: ReportDraftShape,
-  fields: readonly ProseField[],
   ledger: LedgerLookup,
+  calls: ReadonlySet<string>,
   names: readonly RegExp[],
-  blocking: Blocking,
-): ValidationIssue[] {
+): (field: DemographicField) => string[] {
   const parts = citingParts(draft);
   const measures = (part: CitingPart): boolean =>
     citedIds("M", part.metricIds, part.texts).some((id) => {
@@ -455,21 +614,35 @@ function demographicIssues(
     }) ||
     part.datasetIds.some((id) => {
       const d = isId("D", id) ? ledger.dataset(id) : undefined;
-      return d !== undefined && datasetMeasuresDemographics(d);
+      return d !== undefined && datasetMeasuresDemographics(d, calls);
     });
-  const out: ValidationIssue[] = [];
-  for (const field of fields) {
-    if (field.role !== "claim") continue;
+  return (field) => {
+    if (field.role !== "claim") return [];
     const terms = demographicTerms(field.text, names);
-    if (terms.length === 0 || measures(parts.get(field.unit) ?? { metricIds: [], texts: [field.text], datasetIds: [] })) continue;
-    const listed = terms.map((t) => `"${t}"`).join(", ");
+    const part = parts.get(field.unit) ?? { metricIds: [], texts: [field.text], datasetIds: [] };
+    return terms.length === 0 || measures(part) ? [] : terms;
+  };
+}
+
+function demographicIssues(
+  fields: readonly DemographicField[],
+  unmeasured: (field: DemographicField) => string[],
+  blocking: Blocking,
+): ValidationIssue[] {
+  return fields.flatMap((field) => {
+    const terms = unmeasured(field);
+    if (terms.length === 0) return [];
+    const claims = `${terms.map((t) => `"${t}"`).join(", ")} ${terms.length === 1 ? "claims" : "claim"}`;
     const message =
-      `${field.path}: ${listed} ${terms.length === 1 ? "claims" : "claim"} an audience's age, gender or generation, but no ` +
-      "metric this part cites measures it; remove the claim or write that it was not measured, or cite a metric that " +
-      "measures it (audience_dna, or a share_of_taste age context) in the same part.";
-    out.push(issue("V10", blocking, message, field.path, terms));
-  }
-  return out;
+      field.path === TAG_PATH
+        ? `${field.path}: ${claims} an audience's age, gender or generation, but no metric the headline cites measures ` +
+          "it; name the finding without it, or cite a metric that measures it (audience_dna, or a share_of_taste age " +
+          "context) in the headline."
+        : `${field.path}: ${claims} an audience's age, gender or generation, but no metric this part cites measures ` +
+          "it; remove the claim or write that it was not measured, or cite a metric that measures it (audience_dna, or a " +
+          "share_of_taste age context) in the same part.";
+    return [issue("V10", blocking, message, field.path, terms)];
+  });
 }
 
 // Numbers traced (receipt) ------------------------------------------------------------------------------------
@@ -495,8 +668,11 @@ function traceNumbers(fields: readonly ProseField[], ledger: LedgerLookup, bare:
 
 // Repair turn ---------------------------------------------------------------------------------------------------
 
-/** The single repair-turn instruction for the ANALYST (SPEC §6.2: at most one repair turn). */
-export function repairMessage(issues: readonly ValidationIssue[]): string {
+/**
+ * The single repair-turn instruction for the ANALYST (SPEC §6.2: at most one repair turn). With the
+ * rejected `draft` it also restates the limits of the fields to rewrite (rewriteLimits).
+ */
+export function repairMessage(issues: readonly ValidationIssue[], draft?: ReportDraftShape): string {
   const toFix = issues.filter((i) => i.action === "reject" || i.action === "warn");
   const fixed = issues.filter((i) => i.action === "forced" || i.action === "injected");
   const lines = [
@@ -507,6 +683,10 @@ export function repairMessage(issues: readonly ValidationIssue[]): string {
     "Fix these issues:",
     ...toFix.map((i) => `- ${i.rule} ${i.message}`),
   ];
+  const limits = draft === undefined ? [] : rewriteLimits(toFix, draft);
+  if (limits.length > 0) {
+    lines.push("", "Limits that still hold for what you rewrite (every {{M#}} and [E#] token counts its characters):", ...limits);
+  }
   if (fixed.length > 0) {
     lines.push("", "Code already applied these; keep them consistent:", ...fixed.map((i) => `- ${i.rule} ${i.message}`));
   }
@@ -517,6 +697,68 @@ export function repairMessage(issues: readonly ValidationIssue[]): string {
       "advice, price targets, causal claims or statements about individuals.",
   );
   return lines.join("\n");
+}
+
+/** Longer than any limited field of the draft: what charLimit writes to find a field's limit. */
+const OVERLONG = "x".repeat(10_000);
+/**
+ * A text field to rewrite is listed once it uses this share of its character limit: a fix that swaps
+ * a typed number for its token, or a word for a measured claim, adds a few characters, and a field
+ * with more room left takes them.
+ */
+export const REWRITE_TIGHT_SHARE = 0.75;
+
+/**
+ * The limits of the fields the repair must rewrite, one line each: the verdict tag's rule, and each
+ * text field near its character limit with its size now. The repaired draft is final, so a rewrite
+ * that fixes one rule must not break another: live repairs put {{M#}} tokens into a headline and ran
+ * it past its 120 characters, and swapped a demographic verdict tag for one hyphenated word. A field
+ * whose own V9 issue is listed already has its limit stated.
+ */
+function rewriteLimits(toFix: readonly ValidationIssue[], draft: ReportDraftShape): string[] {
+  const paths = [...new Set(toFix.flatMap((i) => (i.path === null ? [] : [i.path])))];
+  return paths.flatMap((path) => {
+    if (path === TAG_PATH) {
+      const L = VERDICT_TAG_LIMITS;
+      return [
+        `- ${TAG_PATH}: ${L.wordsMin} to ${L.wordsMax} words, at most ${L.chars} characters, no digits or tokens; words are ` +
+          "split at spaces, so a hyphenated compound is one word.",
+      ];
+    }
+    const keys = pathKeys(path);
+    const text = keys === null ? undefined : valueAt(draft, keys);
+    if (keys === null || typeof text !== "string" || toFix.some((i) => i.rule === "V9" && i.path === path)) return [];
+    const limit = charLimit(draft, keys);
+    if (limit === null || text.length < limit * REWRITE_TIGHT_SHARE) return [];
+    return [`- ${path}: at most ${limit} characters; it has ${text.length} now.`];
+  });
+}
+
+/**
+ * The character limit of the draft's text at `keys`, read from the contracts schema (strict mode
+ * strips it) by checking a copy that holds an overlong text there; null when the field has none.
+ */
+function charLimit(draft: ReportDraftShape, keys: readonly PropertyKey[]): number | null {
+  const probe: unknown = structuredClone(draft);
+  const parent = valueAt(probe, keys.slice(0, -1));
+  const key = keys.at(-1);
+  if (parent === null || typeof parent !== "object" || key === undefined) return null;
+  (parent as Record<PropertyKey, unknown>)[key] = OVERLONG;
+  const parsed = ReportDraft.safeParse(probe);
+  const at = formatPath(keys);
+  const hit = parsed.success ? undefined : parsed.error.issues.find((zi) => zi.code === "too_big" && formatPath(zi.path) === at);
+  return hit?.code === "too_big" && typeof hit.maximum === "number" ? hit.maximum : null;
+}
+
+/** "arguments[3].our_read" as keys (["arguments", 3, "our_read"]), the inverse of formatPath; null for "(draft)". */
+function pathKeys(path: string): PropertyKey[] | null {
+  const keys: PropertyKey[] = [];
+  for (const part of path.split(".")) {
+    const m = /^([a-z_]+)((?:\[\d+\])*)$/.exec(part);
+    if (m === null) return null;
+    keys.push(m[1]!, ...[...m[2]!.matchAll(/\[(\d+)\]/g)].map((x) => Number(x[1])));
+  }
+  return keys;
 }
 
 // Helpers -----------------------------------------------------------------------------------------------------

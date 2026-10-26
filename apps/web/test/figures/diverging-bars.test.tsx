@@ -3,7 +3,14 @@
 import type { BarsPayload } from "@ct/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { DivergingBars, MINUS } from "../../components/figures";
-import { ageIndexPair, agePeers, blockDna, metroSplit } from "../../components/figures/fixtures";
+import {
+  ageDumbbellSelfDescribed,
+  ageIndexPair,
+  agePeers,
+  blockDna,
+  metroSplit,
+  metroSplitSelfDescribed,
+} from "../../components/figures/fixtures";
 import { plotView, rects, render, rowMarkup, tableHeads, tableRows, tableView, text } from "./markup";
 
 // /method ships in Part 7; these tests pin the link each figure will carry then.
@@ -232,5 +239,37 @@ describe("DivergingBars · butterfly", () => {
   it("falls back to diverging for a one-series payload", () => {
     const html = render(<DivergingBars data={blockDna.payload} display="butterfly" title="One series" />);
     expect(text(plotView(html))).toContain("Δ VS CITY");
+  });
+});
+
+describe("DivergingBars · display, baseline and even band from the payload", () => {
+  it("draws the split the payload asks for, with its band, and no display option", () => {
+    const plot = plotView(render(<DivergingBars data={metroSplitSelfDescribed.payload} labelHeader="Metro" title="Split" />));
+    expect(text(plot)).toContain("JUNIPER COLA AHEAD →");
+    // ±.03 around the even split, wider than the default ±.02.
+    const band = rects(rowMarkup(plot, "portland")).find((r) => r.cls === "fill-canvas")!;
+    const fallback = rects(rowMarkup(plotView(render(<DivergingBars data={metroSplit.payload} display="split" title="Split" />)), "portland")).find(
+      (r) => r.cls === "fill-canvas",
+    )!;
+    expect(band.width).toBeGreaterThan(fallback.width);
+  });
+
+  it("draws the dumbbell the payload asks for around its baseline", () => {
+    const plot = plotView(render(<DivergingBars data={ageDumbbellSelfDescribed.payload} title="Dumbbell" />));
+    expect(plot).toContain("fill-data-2");
+    expect(plot).toMatch(/<circle[^>]*r="4.75"/);
+    expect(text(plot)).toContain("BELOW BASELINE");
+  });
+
+  it("lets a display option override the payload", () => {
+    const plot = plotView(render(<DivergingBars data={ageDumbbellSelfDescribed.payload} display="butterfly" title="Butterfly" />));
+    expect(plot).not.toMatch(/<circle[^>]*r="4.75"/);
+  });
+
+  it("centres a payload baseline other than the default", () => {
+    const data = bars([["a", [v(1.2), v(0.9)]]], { mode: "butterfly", unit: "index", baseline: 1, display: "dumbbell" });
+    const table = tableView(render(<DivergingBars data={data} title="Index" />));
+    expect(tableHeads(table)).toContain("Gap vs Brand Beta");
+    expect(text(plotView(render(<DivergingBars data={data} title="Index" />)))).toContain("1.00");
   });
 });

@@ -1,10 +1,12 @@
 // A scripted fake of the SDK surface @ct/agent calls (AnthropicLike): beta.messages.stream for the
 // ANALYST and messages.create for the CLERK. No test ever touches the network.
 import Anthropic from "@anthropic-ai/sdk";
+import { BetaMessageStream } from "@anthropic-ai/sdk/lib/BetaMessageStream";
 import type { AnalystRequest, AnalystStream, AnthropicLike, ClerkRequest, LlmRequestOptions } from "../../src/anthropic";
 
 type BetaMessage = Anthropic.Beta.BetaMessage;
 type BetaContentBlock = Anthropic.Beta.BetaContentBlock;
+type RawEvent = Anthropic.Beta.BetaRawMessageStreamEvent;
 
 // Builders ------------------------------------------------------------------------------------------
 
@@ -106,13 +108,94 @@ export const thinking = (text: string): Anthropic.Beta.BetaThinkingBlock => ({ t
 
 export const text = (value: string): Anthropic.Beta.BetaTextBlock => ({ type: "text", text: value, citations: null });
 
+// Raw stream events ---------------------------------------------------------------------------------
+
+const halves = (s: string): string[] => [s.slice(0, Math.floor(s.length / 2)), s.slice(Math.floor(s.length / 2))].filter((p) => p !== "");
+
+/**
+ * The raw events the API streams for `message`: message_start with the prompt's usage and one output
+ * token, each block (thinking in two deltas plus its signature, text, a tool input as JSON in two
+ * deltas), then message_delta with the stop reason and the final usage. `rawInputs` sends a tool's
+ * input as the given text instead, by tool_use id: JSON the model wrote malformed, say.
+ */
+export function streamEvents(message: BetaMessage, rawInputs: Readonly<Record<string, string>> = {}): RawEvent[] {
+  const { usage } = message;
+  const events: RawEvent[] = [
+    {
+      type: "message_start",
+      message: { ...message, content: [], stop_reason: null, stop_sequence: null, stop_details: null, usage: { ...usage, output_tokens: 1 } },
+    },
+  ];
+  message.content.forEach((block, index) => {
+    if (block.type === "thinking") {
+      events.push({ type: "content_block_start", index, content_block: { type: "thinking", thinking: "", signature: "" } });
+      for (const part of halves(block.thinking)) {
+        events.push({ type: "content_block_delta", index, delta: { type: "thinking_delta", thinking: part, estimated_tokens: null } });
+      }
+      events.push({ type: "content_block_delta", index, delta: { type: "signature_delta", signature: block.signature } });
+    } else if (block.type === "text") {
+      events.push({ type: "content_block_start", index, content_block: { type: "text", text: "", citations: null } });
+      events.push({ type: "content_block_delta", index, delta: { type: "text_delta", text: block.text } });
+    } else if (block.type === "tool_use") {
+      events.push({ type: "content_block_start", index, content_block: { ...block, input: {} } });
+      for (const part of halves(rawInputs[block.id] ?? JSON.stringify(block.input))) {
+        events.push({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: part } });
+      }
+    } else {
+      throw new Error(`streamEvents: no events for a ${block.type} block`);
+    }
+    events.push({ type: "content_block_stop", index });
+  });
+  events.push({
+    type: "message_delta",
+    context_management: null,
+    delta: { container: null, stop_details: null, stop_reason: message.stop_reason, stop_sequence: null },
+    usage: {
+      cache_creation_input_tokens: usage.cache_creation_input_tokens,
+      cache_read_input_tokens: usage.cache_read_input_tokens,
+      fallback_credit: null,
+      input_tokens: usage.input_tokens,
+      iterations: null,
+      output_tokens: usage.output_tokens,
+      output_tokens_details: null,
+      server_tool_use: null,
+    },
+  });
+  events.push({ type: "message_stop" });
+  return events;
+}
+
+/**
+ * The SDK's own BetaMessageStream playing raw events (`body` ends the byte stream, by default after
+ * the last event), so accumulation, tool-input parsing and its errors are the SDK's, not a mock's.
+ */
+export function sdkStream(events: readonly RawEvent[], body: { fail?: unknown } = {}): BetaMessageStream {
+  const encoder = new TextEncoder();
+  const lines = events.map((e) => encoder.encode(`${JSON.stringify(e)}\n`));
+  let next = 0;
+  return BetaMessageStream.fromReadableStream(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        const line = lines[next++];
+        if (line !== undefined) controller.enqueue(line);
+        else if (body.fail !== undefined) controller.error(body.fail);
+        else controller.close();
+      },
+    }),
+  );
+}
+
 // Scripts -------------------------------------------------------------------------------------------
 
-/** One scripted stream: a message, an error, or a stream that only ends when its request is aborted. */
+/** One scripted stream: a message, an error, raw SDK events, or a stream that only ends when its request is aborted. */
 export interface StreamStep {
+  /** Played through the SDK's own BetaMessageStream (sdkStream) instead; the other fields are ignored. */
+  events?: RawEvent[];
   message?: BetaMessage;
   /** finalMessage rejects with this instead of resolving. */
   error?: unknown;
+  /** The stream's currentMessage: what had streamed when `error` came (from message_start on). */
+  partial?: BetaMessage;
   /** Never settles until the request's signal aborts. */
   hang?: boolean;
   /** Waits this long first (setTimeout, so vitest fake timers control it). */
@@ -161,11 +244,17 @@ function thinkingDeltas(message: BetaMessage): Array<[string, string]> {
   return deltas;
 }
 
+type ThinkingListener = (delta: string, snapshot: string) => void;
+type RawEventListener = (event: RawEvent) => void;
+
 class FakeStream implements AnalystStream {
-  readonly #listeners: Array<(delta: string, snapshot: string) => void> = [];
+  readonly #listeners: ThinkingListener[] = [];
+  readonly #eventListeners: RawEventListener[] = [];
   readonly #final: Promise<BetaMessage>;
+  readonly currentMessage: BetaMessage | undefined;
 
   constructor(step: StreamStep, signal: AbortSignal | undefined) {
+    this.currentMessage = step.partial;
     this.#final = this.#play(step, signal);
     // The loop may stop waiting first (a race with its stop signal); a late rejection is expected.
     this.#final.catch(() => {});
@@ -179,11 +268,15 @@ class FakeStream implements AnalystStream {
     if (step.error !== undefined) throw step.error;
     if (!step.message) throw new Error("fake stream step has neither a message nor an error");
     for (const [delta, snapshot] of thinkingDeltas(step.message)) for (const l of this.#listeners) l(delta, snapshot);
+    for (const event of streamEvents(step.message)) for (const l of this.#eventListeners) l(event);
     return step.message;
   }
 
-  on(event: "thinking", listener: (delta: string, snapshot: string) => void): this {
-    if (event === "thinking") this.#listeners.push(listener);
+  on(event: "thinking", listener: ThinkingListener): this;
+  on(event: "streamEvent" | "thinking", listener: RawEventListener | ThinkingListener): this;
+  on(event: "streamEvent" | "thinking", listener: RawEventListener | ThinkingListener): this {
+    if (event === "thinking") this.#listeners.push(listener as ThinkingListener);
+    else this.#eventListeners.push(listener as RawEventListener);
     return this;
   }
 
@@ -222,7 +315,7 @@ export class FakeAnthropic implements AnthropicLike {
           const resolved = typeof entry === "function" ? entry(body, index) : entry;
           const step: StreamStep = isMessage(resolved) ? { message: resolved } : resolved;
           step.onSend?.(body);
-          return new FakeStream(step, options?.signal);
+          return step.events ? sdkStream(step.events) : new FakeStream(step, options?.signal);
         },
       },
     };

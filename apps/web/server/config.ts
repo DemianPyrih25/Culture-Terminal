@@ -1,4 +1,5 @@
 import "server-only";
+import { Mode } from "@ct/contracts";
 
 function numberFromEnv(raw: string | undefined, fallback: number, min: number, max: number): number {
   const n = raw === undefined || raw.trim() === "" ? Number.NaN : Number(raw);
@@ -40,14 +41,56 @@ export function agentRunHourlyCapFromEnv(env: NodeJS.ProcessEnv = process.env): 
   return Math.round(numberFromEnv(env.AGENT_RUN_HOURLY_CAP, 20, 1, 10_000));
 }
 
-/** Agent runs one process holds at once (PLAN §10.4 global concurrency 3), apart from FAKE_RUN_MAX_ACTIVE. */
+/**
+ * Agent runs of both lanes one process holds at once (PLAN §10.4 global concurrency 3), the judge
+ * lane's JUDGE_RUN_MAX_ACTIVE among them while it is open (run-manager laneSlots); apart from FAKE_RUN_MAX_ACTIVE.
+ */
 export function agentRunMaxActiveFromEnv(env: NodeJS.ProcessEnv = process.env): number {
   return Math.round(numberFromEnv(env.AGENT_RUN_MAX_ACTIVE, 3, 1, 100));
+}
+
+/** Agent runs of both lanes started per rolling 24 hours by every process together (SPEC §10.4 global: 200). */
+export function agentRunDailyCapFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  return Math.round(numberFromEnv(env.AGENT_RUN_DAILY_CAP, 200, 1, 100_000));
 }
 
 /** The daily LLM breaker in USD (LLM_DAILY_USD_CAP, PLAN §4.2), which the pre-run check keeps to. */
 export function llmDailyUsdCapFromEnv(env: NodeJS.ProcessEnv = process.env): number {
   return numberFromEnv(env.LLM_DAILY_USD_CAP, 1.4, 0, 1000);
+}
+
+/** Today's LLM spend in USD at which the judge lane steps down to the economy ANALYST (LLM_ECONOMY_USD, SPEC §4.2). */
+export function llmEconomyUsdFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  return numberFromEnv(env.LLM_ECONOMY_USD, 1, 0, 1000);
+}
+
+/** Share of the daily LLM budget held back for the judge lane (LLM_JUDGE_SHARE, SPEC §10.4: 40%). */
+export function llmJudgeShareFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  return numberFromEnv(env.LLM_JUDGE_SHARE, 0.4, 0, 0.9);
+}
+
+/** Judge-lane runs started per rolling hour, counted in the database apart from the public lane's (SPEC §10.4: 20). */
+export function judgeRunHourlyCapFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  return Math.round(numberFromEnv(env.JUDGE_RUN_HOURLY_CAP, 20, 1, 10_000));
+}
+
+/** Of AGENT_RUN_MAX_ACTIVE, the slots held for judge-lane runs, which public runs never take (SPEC §10.4: 1). */
+export function judgeRunMaxActiveFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  return Math.round(numberFromEnv(env.JUDGE_RUN_MAX_ACTIVE, 1, 1, 100));
+}
+
+/** Judge-lane runs started per rolling 24 hours, counted in the database (SPEC §10.4: 60). */
+export function judgeRunDailyCapFromEnv(env: NodeJS.ProcessEnv = process.env): number {
+  return Math.round(numberFromEnv(env.JUDGE_RUN_DAILY_CAP, 60, 1, 10_000));
+}
+
+/**
+ * MODE_OVERRIDE (live, economy or replay_only): forces the mode on every lane for a demo, whatever
+ * the breakers say. Null when unset or not one of the three.
+ */
+export function modeOverrideFromEnv(env: NodeJS.ProcessEnv = process.env): Mode | null {
+  const parsed = Mode.safeParse(env.MODE_OVERRIDE?.trim().toLowerCase());
+  return parsed.success ? parsed.data : null;
 }
 
 /**
@@ -75,4 +118,20 @@ export function qlooDailyFreshCapFromEnv(env: NodeJS.ProcessEnv = process.env): 
 /** How long SIGTERM waits for active runs before marking them incomplete (SPEC §3.2: up to 180 s). */
 export function shutdownGraceMsFromEnv(env: NodeJS.ProcessEnv = process.env): number {
   return Math.round(numberFromEnv(env.SHUTDOWN_GRACE_MS, 180_000, 0, 600_000));
+}
+
+/**
+ * The site's public origin, for the absolute URLs page metadata needs (a showcase's og:image and
+ * twitter:image): PUBLIC_SITE_URL, else Railway's RAILWAY_PUBLIC_DOMAIN. A bare host gets https://.
+ * Undefined when unset or not a URL: Next then falls back to http://localhost:<PORT> instead of the
+ * root layout failing to load, which would fail every page while /api/health stays green.
+ */
+export function publicSiteUrlFromEnv(env: NodeJS.ProcessEnv = process.env): URL | undefined {
+  const raw = env.PUBLIC_SITE_URL?.trim() || env.RAILWAY_PUBLIC_DOMAIN?.trim() || "";
+  if (raw === "") return undefined;
+  try {
+    return new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+  } catch {
+    return undefined;
+  }
 }

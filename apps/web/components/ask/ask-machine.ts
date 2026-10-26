@@ -58,7 +58,10 @@ const PreviewSchema = z.object({
     seconds: z.number(),
     quotaShare: z.number(),
   }),
-}) satisfies z.ZodType<PreviewResponse>;
+  // A server from before the economy breaker sends neither: live, no note.
+  mode: z.enum(["live", "economy"]).default("live"),
+  modeNote: z.string().nullable().default(null),
+}) satisfies z.ZodType<PreviewResponse, unknown>;
 
 /** How a preview request ended. */
 export type PreviewOutcome =
@@ -219,11 +222,15 @@ export interface RunRequestBody {
   question: string;
   previewToken?: string;
   parentRunId?: string;
+  /** Run it live although the panel showed the brief that already answers it ("Re-run live", D26). */
+  fresh?: true;
 }
 
 /**
  * The POST /api/runs body for the question the panel describes: with the preview's token, so the run
- * reuses that reading, and with the parent of a follow-up. Null when the state cannot run.
+ * reuses that reading, and with the parent of a follow-up. When the panel showed "You already have",
+ * Run brief is the choice to run it again, so the body asks for a fresh run; otherwise the server may
+ * still answer from the answer cache. Null when the state cannot run.
  */
 export function runRequestBody(state: AskState, parentRunId: string | null = null): RunRequestBody | null {
   if (!canRun(state)) return null;
@@ -232,6 +239,7 @@ export function runRequestBody(state: AskState, parentRunId: string | null = nul
   const body: RunRequestBody = { question: phase.question };
   if (phase.kind === "ready" && phase.preview.token !== null) body.previewToken = phase.preview.token;
   if (parentRunId) body.parentRunId = parentRunId;
+  if (alreadyHaveOfPhase(phase) !== null) body.fresh = true;
   return body;
 }
 

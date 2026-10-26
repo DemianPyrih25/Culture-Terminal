@@ -62,7 +62,8 @@ export function citingRows(model: BriefModel): CitingRow[] {
     cites: model.evidence.keyFigures.flatMap((k) => (k.footnote === null ? [] : [k.footnote])),
   });
   for (const row of figureRows(model.evidence.figures)) {
-    rows.push({ key: ROW.figures(row), cites: row.flatMap((f) => [...citedIn(f.caption), f.footnote]) });
+    // A location figure's CODE FALLBACK notes sit with it, after its own (A06 notes 4 and 5).
+    rows.push({ key: ROW.figures(row), cites: row.flatMap((f) => [...citedIn(f.caption), f.footnote, ...(f.location?.fallbackNotes ?? [])]) });
   }
   for (const argument of model.evidence.arguments) {
     rows.push({ key: ROW.argument(argument.id), cites: citedIn(argument.qlooFact, argument.ourRead) });

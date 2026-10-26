@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { normalizeIntent, QUESTION_MAX_CHARS } from "@ct/contracts";
 import type { PreviewDeps, PreviewServiceOptions } from "../server/preview";
 import { alreadyHave, clerkAnswering, clerkReply, previewDeps, testIntent } from "./support/preview";
+import { storedMode, testAnswers, testModes } from "./support/protection";
 
 vi.mock("server-only", () => ({}));
 
@@ -26,7 +27,8 @@ function useService(deps: PreviewDeps, options: PreviewServiceOptions = {}) {
 
 beforeEach(() => {
   stub.startAgentRun.mockClear();
-  g.__ctContainer = { runs: stub };
+  // Live, nothing in the answer cache; the human check is off (no Turnstile keys in tests).
+  g.__ctContainer = { runs: stub, modes: testModes(), answers: testAnswers() };
 });
 
 afterEach(() => {
@@ -98,9 +100,13 @@ describe("POST /api/preview", () => {
   });
 
   it("answers 503 when paused or out of budget, and 502 when CLERK fails", async () => {
-    useService(previewDeps(clerkAnswering(), { mode: async () => "replay_only" }));
+    // The route decides the lane's mode and hands it to the service.
+    g.__ctContainer = { runs: stub, modes: testModes({ stored: storedMode("replay_only") }), answers: testAnswers() };
+    useService(previewDeps(clerkAnswering()));
     const paused = await answer(await previewQuestion(postJson("/api/preview", { question: QUESTION })));
     expect(paused).toMatchObject({ status: 503, body: { retry: false, alreadyHave: null } });
+    expect(paused.body.error).toBe("Live analysis is paused: it was paused by the operator.");
+    g.__ctContainer = { runs: stub, modes: testModes(), answers: testAnswers() };
 
     useService(previewDeps(clerkAnswering(), { todayUsd: async () => 5 }));
     const spent = await previewQuestion(postJson("/api/preview", { question: QUESTION }));
@@ -137,6 +143,7 @@ describe("POST /api/runs with a preview token", () => {
       question: QUESTION.toLowerCase(),
       lane: "public",
       parentRunId: null,
+      client: null,
       intent: normalizeIntent(testIntent()),
     });
   });
@@ -145,7 +152,7 @@ describe("POST /api/runs with a preview token", () => {
     const c = { ms: Date.parse("2026-10-22T09:00:00.000Z") };
     useService(previewDeps(clerkAnswering(clerkReply(testIntent()))), { now: () => c.ms });
     const token = await previewToken();
-    const plain = { question: "Who really competes with Brand Beta?", lane: "public", parentRunId: null };
+    const plain = { question: "Who really competes with Brand Beta?", lane: "public", parentRunId: null, client: null };
 
     await startRun(postJson("/api/runs", { question: plain.question, previewToken: token }));
     expect(stub.startAgentRun).toHaveBeenLastCalledWith(plain);
@@ -173,6 +180,6 @@ describe("POST /api/runs with a preview token", () => {
   it("accepts a null token as no token", async () => {
     useService(previewDeps(clerkAnswering()));
     expect((await startRun(postJson("/api/runs", { question: QUESTION, previewToken: null }))).status).toBe(201);
-    expect(stub.startAgentRun).toHaveBeenCalledWith({ question: QUESTION, lane: "public", parentRunId: null });
+    expect(stub.startAgentRun).toHaveBeenCalledWith({ question: QUESTION, lane: "public", parentRunId: null, client: null });
   });
 });

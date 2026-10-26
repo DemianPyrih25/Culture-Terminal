@@ -2,11 +2,14 @@
 // everything the brief page renders. Safe on the server and in the browser.
 export * from "./types";
 export * from "./format";
-export { buildBriefModel, briefIdOf } from "./model";
-export { FootnoteRegistry, createFootnoteRegistry, figureNoteText, inlineText, SHORT_NOTE_MAX } from "./footnotes";
+export { buildBriefModel, briefIdOf, findingOf } from "./model";
+export { FootnoteRegistry, createFootnoteRegistry, fallbackTrace, figureNoteText, inlineText, SHORT_NOTE_MAX } from "./footnotes";
 export { buildLedger, metricView, cacheLabel, shortRequestTrace, SHORT_TRACE_MAX, type Ledger } from "./ledger";
 export { figureLegend, figureSource, methodHrefFor, shortCodes } from "./figures";
-export { KPI_SLOTS, skillForFormula, type KpiSlot } from "./kpi-slots";
+export { inMarket, KPI_SLOTS, pickMatches, skillForFormula, slotFor, type KpiFocus, type KpiPick, type KpiSlot } from "./kpi-slots";
+export { KEY_FIGURE_LABEL_MAX, KEY_FIGURE_SPECS, keyFigureLabel, keyFigureText, type KeyFigureText } from "./key-figures";
+export { areaReads, buildLocation, datasetPlace, LOCATION_METHOD_LABEL, type AreaRead, type DatasetPlace } from "./location";
+export { buildNextMoves, nextMoveDesk, nextMoveHref, nextMoveLabel } from "./next-moves";
 export {
   stageStrip,
   progressLabel,
@@ -21,3 +24,15 @@ export {
   elapsedMs,
 } from "./live";
 export { methodSteps, methodPivots, methodFallbacks, interpretation, checkerLine, buildMethod, buildSources } from "./method";
+export {
+  buildGhostView,
+  ghostOf,
+  markClaims,
+  type GhostCategory,
+  type GhostFigure,
+  type GhostHeadlinePart,
+  type GhostName,
+  type GhostRun,
+  type GhostStatus,
+  type GhostView,
+} from "./ghost";

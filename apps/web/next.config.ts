@@ -14,6 +14,13 @@ const nextConfig: NextConfig = {
   // Parallel agents run separate dev servers with their own NEXT_DIST_DIR (PLAN §10.1).
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
   transpilePackages: ["@ct/contracts", "@ct/qloo", "@ct/quant", "@ct/geo", "@ct/agent", "@ct/db"],
+  // The Launchpad and /method read the eval's aggregates at request time: ship the file when there is one.
+  outputFileTracingIncludes: {
+    "/": ["./content/eval-summary.json"],
+    "/method": ["./content/eval-summary.json"],
+    // The share card reads its fonts at request time (lib/og/fonts.ts). Keys are globs over routes: * spans [id].
+    "/r/*/card": ["./lib/og/fonts/*.woff"],
+  },
   poweredByHeader: false,
   reactStrictMode: true,
 };

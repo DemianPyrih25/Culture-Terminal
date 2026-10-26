@@ -32,16 +32,17 @@ function bar(over: Partial<ReplayBarProps> = {}): string {
 }
 
 describe("the replay bar", () => {
-  it("marks the replay, and offers pause, the three speeds, restart, progress and exit", () => {
+  it("marks the replay, and offers pause, the four speeds, restart, progress and exit", () => {
     const html = bar();
     expect(attrValues(html, "data-marker")).toEqual(["REPLAY"]);
     expect(text(html)).toContain("0 Qloo calls · $0");
     expect(text(html)).toContain("Pause");
-    expect(REPLAY_BAR_SPEEDS).toEqual([1, 4, 16]);
+    expect(REPLAY_BAR_SPEEDS).toEqual([1, 4, 8, 16]);
     const speeds = [...html.matchAll(/role="radio" aria-checked="(true|false)"[^>]*>([^<]+)</g)].map((m) => [m[2], m[1]]);
     expect(speeds).toEqual([
       ["1×", "false"],
       ["4×", "true"],
+      ["8×", "false"],
       ["16×", "false"],
     ]);
     expect(text(html)).toContain("Restart");
@@ -85,7 +86,7 @@ describe("a brief in replay", () => {
     expect(head).toContain('data-marker="REPLAY"');
     expect(head).toContain('data-replay-mini="playing"');
     expect(head).toContain('aria-label="Pause the replay"');
-    expect(attrValues(head, "aria-pressed")).toEqual(["false", "false", "true"]);
+    expect(attrValues(head, "aria-pressed")).toEqual(["false", "false", "false", "true"]);
     expect(tagOf(head, 'aria-label="Replay progress"')).toContain('aria-valuenow="40"');
     // The run's meters show what it used, but there is nothing to stop.
     expect(html).toContain('aria-label="This run"');

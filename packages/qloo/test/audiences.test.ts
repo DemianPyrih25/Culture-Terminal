@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { Pillar } from "@ct/contracts";
+import { isDeniedAudience, Pillar } from "@ct/contracts";
 import { describe, expect, it } from "vitest";
 import { AUDIENCE_ALLOWLIST, audienceDenial, audienceFamiliesFor } from "../src/audiences";
 
@@ -28,5 +28,22 @@ describe("audience allowlist", () => {
     expect(audienceDenial("urn:audience:leisure:fixture_fans", "marketing")).toBeNull();
     expect(audienceDenial("urn:audience:communities:fixture", "marketing")).toMatch(/D21/);
     expect(audienceDenial("urn:tag:genre:brand:fixture", "marketing")).toMatch(/not an audience URN/);
+  });
+
+  it("agrees with contracts isDeniedAudience: denied on every desk, never just off one desk's list", () => {
+    const keys = [
+      "urn:audience:communities:fixture",
+      "urn:audience:global_issues:fixture",
+      "urn:audience:leisure:political_junkie",
+      "urn:audience:leisure:fixture_fans",
+      "urn:audience:investing_interests:fixture",
+    ];
+    for (const key of keys) {
+      const everywhere = Pillar.options.every((desk) => /denied on every desk/.test(audienceDenial(key, desk) ?? ""));
+      expect(isDeniedAudience(key), key).toBe(everywhere);
+    }
+    // Off the location desk's list, yet not a sensitive segment.
+    expect(audienceDenial("urn:audience:investing_interests:fixture", "location")).toMatch(/not allowed/);
+    expect(isDeniedAudience("urn:audience:investing_interests:fixture")).toBe(false);
   });
 });

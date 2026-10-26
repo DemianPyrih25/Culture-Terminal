@@ -99,6 +99,18 @@ describe("validateRequest: value rules", () => {
     expect(run("/v2/insights", { "filter.type": "urn:heatmap", "filter.location": "loc-fixture", "signal.interests.tags": "urn:tag:cuisine:qloo:fixture" })).toThrow(
       /taxonomy tags only/,
     );
+    expect(run("/v2/insights", { "filter.type": "urn:heatmap", "filter.location": "loc-fixture", "signal.interests.tags": "urn:tag:category:place:fixture" })).toThrow(
+      /on urn:heatmap takes urn:tag:genre:/,
+    );
+    expect(run("/v2/insights", { "filter.type": "urn:entity:place", "filter.location": "loc-fixture", "filter.tags": "urn:tag:category:place:fixture" })).not.toThrow();
+  });
+
+  it("keeps heatmap concept tags and entity analogs in separate calls", () => {
+    const heatmap = { "filter.type": "urn:heatmap", "filter.location": "loc-fixture" };
+    expect(run("/v2/insights", { ...heatmap, "signal.interests.entities": "ent-fixture" })).not.toThrow();
+    expect(run("/v2/insights", { ...heatmap, "signal.interests.tags": "urn:tag:genre:place:fixture", "signal.interests.entities": "ent-fixture" })).toThrow(
+      /not both/,
+    );
   });
 
   it("checks booleans and dates", () => {

@@ -159,6 +159,42 @@ describe("the finished brief", () => {
     for (const s of model.sources.items) expect(html).toContain(`id="source-${s.n}"`);
   });
 
+  it("links each applied name of a type a tearsheet describes to its DES tearsheet, and no other name", () => {
+    const state = stateOf(SAMPLE);
+    const base = state.resolves[0];
+    if (!base) throw new Error("the sample resolves no name");
+    type Resolved = RunState["resolves"][number];
+    // Extra names without a ref, so the rest of the brief reads as before.
+    const extra = (mention: string, entityType: Resolved["entityType"], match: Resolved["match"], name: string | null): Resolved => ({
+      ...base,
+      mention,
+      role: "peer",
+      entityType,
+      match,
+      ref: null,
+      name,
+    });
+    const resolves = [
+      ...state.resolves,
+      extra("Artist Nova", "artist", "exact", "Artist Nova"),
+      extra("Kestrel Tonic", "brand", "ambiguous", null),
+      extra("Lantern Hall", "place", "exact", "Lantern Hall"),
+    ];
+    const { html, model } = renderState({ ...state, resolves }, after(SAMPLE));
+    expect(model.method.interpretation?.resolves.map((r) => r.entityType)).toEqual(resolves.map((r) => r.entityType));
+    const reading = slice(html, 'data-clerk-reading="true"', "<table");
+    // The sample's three brands matched exactly, then the artist; the ambiguous brand and the place stay plain text.
+    expect(state.resolves.map((r) => [r.entityType, r.match])).toEqual([["brand", "exact"], ["brand", "exact"], ["brand", "exact"]]);
+    expect(attrValues(reading, "data-des-link")).toEqual(["brand", "brand", "brand", "artist"]);
+    expect(tagOf(reading, 'href="/d/Juniper%20Cola"')).toContain('title="Juniper Cola: open its DES tearsheet"');
+    expect(reading).toContain('href="/d/Artist%20Nova?type=artist"');
+    expect(text(reading)).toContain("Kestrel Tonic · ");
+    expect(text(reading)).toContain("Lantern Hall · ");
+    expect(reading).not.toMatch(/href="\/d\/(Kestrel|Lantern)/);
+    // Each line still reads as the name, then its match.
+    expect(text(reading)).toContain("Juniper Cola · ");
+  });
+
   it("sets a short number in the NOW column, and a number in words on its own line under its condition", () => {
     const { html, model } = finished;
     const changes = model.risks.changes;
@@ -227,6 +263,10 @@ describe("the finished brief", () => {
     expect(head).toContain('data-running-head="hidden"');
     expect(head).toContain('aria-hidden="true"');
     expect(head).toContain('inert=""');
+    // It names the finding by the verdict tag; the answer's kicker stays the signal.
+    expect(model.header.finding).toBe("Taste island");
+    expect(text(slice(html, "data-running-head=", "<main"))).toContain(model.header.finding);
+    expect(model.answer.tag).not.toBe(model.header.finding);
     expect(text(html)).toContain(model.statusLine.honesty);
     expect(text(html)).toContain(model.statusLine.requests);
     // The top bar asks follow-ups on this brief.

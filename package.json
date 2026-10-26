@@ -11,7 +11,7 @@
     "dev": "pnpm --filter web dev",
     "build": "pnpm --filter web build",
     "start": "pnpm --filter web start",
-    "typecheck": "pnpm -r typecheck && tsc -p tsconfig.tools.json",
+    "typecheck": "pnpm -r typecheck && tsc -p tsconfig.tools.json && tsc -p e2e/tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
     "guard": "tsx tools/guard/run.ts",
@@ -23,7 +23,8 @@
     "prompts:build": "tsx tools/dev/build-prompts.ts",
     "run-skill": "tsx --env-file-if-exists=.env tools/dev/run-skill.ts",
     "run-agent": "tsx --env-file-if-exists=.env tools/dev/run-agent.ts",
-    "kit-parity": "tsx --env-file-if-exists=.env tools/kit-parity/run.ts"
+    "kit-parity": "tsx --env-file-if-exists=.env tools/kit-parity/run.ts",
+    "smoke": "playwright test"
   },
   "devDependencies": {
     "@anthropic-ai/sdk": "0.131.0",

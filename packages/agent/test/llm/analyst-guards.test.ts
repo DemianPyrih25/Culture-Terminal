@@ -1,13 +1,33 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { ANALYST_TOOL_NAMES } from "@ct/contracts";
+import { ANALYST_TOOL_NAMES, DEFAULT_RUN_LIMITS } from "@ct/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ANALYST_MIN_MAX_TOKENS } from "../../src/analyst";
 import { ANALYST_MAX_TOKENS, HAIKU_MODEL, SONNET_MODEL, THINKING_UPDATES_BETA } from "../../src/anthropic";
-import { NOTICE_COST, NOTICE_TIME, NUDGE_REPORT, TURN3_NOTICE } from "../../src/llm/notices";
+import { NOTICE_COST, NOTICE_INVALID_JSON, NOTICE_TIME, NUDGE_PLAN, NUDGE_REPORT, TURN3_NOTICE, turn2Guide } from "../../src/llm/notices";
 import { promptChars } from "../../src/llm/request";
-import { estimateRequestUsd } from "../../src/pricing";
-import { ManualClock, respond, text, thinking } from "../support/fake-anthropic";
-import { followUp, lastMessage, peerCall, planCall, reportCall, runScripted, SYSTEM_PROMPT, textsOf, toolResults } from "./builders";
+import { DIRECTOR_PROMPT } from "../../src/prompts";
+import {
+  ESTIMATE_ABORT_LAG_MS,
+  ESTIMATE_OUTPUT_TOKENS_PER_SECOND,
+  estimateRequestUsd,
+  unreportedOutputUsd,
+  usdFor,
+} from "../../src/pricing";
+import { ManualClock, respond, streamEvents, text, thinking } from "../support/fake-anthropic";
+import {
+  followUp,
+  lastMessage,
+  peerCall,
+  planCall,
+  reportCall,
+  resultText,
+  runScripted,
+  shareCall,
+  stepCall,
+  SYSTEM_PROMPT,
+  textsOf,
+  toolResults,
+} from "./builders";
 
 /** The worst case the cost guard reserved for request `i`: what an aborted stream is charged. */
 const reserved = (h: Awaited<ReturnType<typeof runScripted>>, i: number): number => {
@@ -46,7 +66,7 @@ describe("the request shape and the cached prefix", () => {
     const tools = (first.tools ?? []) as Array<{ name: string; strict?: boolean; eager_input_streaming?: boolean }>;
     expect(tools.map((t) => t.name)).toEqual(ANALYST_TOOL_NAMES);
     expect(tools.every((t) => t.eager_input_streaming === true)).toBe(true);
-    expect(tools.filter((t) => t.strict).map((t) => t.name)).toEqual(["submit_plan", "submit_report"]);
+    expect(tools.filter((t) => t.strict).map((t) => t.name)).toEqual(["submit_report"]);
     for (const req of h.fake.streamRequests) {
       expect(JSON.stringify([req.system, req.tools])).toBe(JSON.stringify([first.system, first.tools]));
     }
@@ -294,9 +314,260 @@ describe("API and hook failures", () => {
     expect(h.outcome.status).toBe("completed");
   });
 
+  it("charges a stream that failed after reporting usage that usage, and only the output it could have generated as an estimate", async () => {
+    // An error event mid-stream, after message_start: unlike the case above, its usage is known.
+    const clock = new ManualClock();
+    const midStream = new Anthropic.APIError(undefined, { type: "error", error: { type: "overloaded_error" } }, undefined, new Headers());
+    const partial = respond([thinking("Mapping.")], "tool_use", { input_tokens: 500, cache_read_input_tokens: 12_000, output_tokens: 1 });
+    partial.stop_reason = null;
+    const h = await runScripted([{ error: midStream, partial, onSend: () => clock.advance(30_000) }], { now: clock.now });
+    expect(h.outcome).toMatchObject({ status: "failed", code: "api_error", error: { kind: "api_error" } });
+    expect(h.usages).toEqual([{ usd: usdFor(SONNET_MODEL, partial.usage), model: SONNET_MODEL }]);
+    expect(h.outcome.usd).toBeCloseTo(usdFor(SONNET_MODEL, partial.usage), 12);
+    // 30 s plus the abort lag at the speed ceiling, less the one output token message_start reported.
+    const unreported = ((30_000 + ESTIMATE_ABORT_LAG_MS) / 1000) * ESTIMATE_OUTPUT_TOKENS_PER_SECOND - 1;
+    expect(h.outcome.unmeteredUsd).toBeCloseTo(unreportedOutputUsd(SONNET_MODEL, partial.usage, unreported), 12);
+    expect(h.outcome.usd + h.outcome.unmeteredUsd).toBeLessThan(reserved(h, 0));
+    // A failed stream is never read again: its request is aborted.
+    expect(h.fake.streamSignals[0]?.aborted).toBe(true);
+  });
+
+  it("charges no estimate once message_delta delivered the final usage", async () => {
+    const midStream = new Anthropic.APIError(undefined, { type: "error", error: { type: "overloaded_error" } }, undefined, new Headers());
+    const partial = respond([thinking("Mapping.")], "end_turn", { input_tokens: 500, output_tokens: 900 });
+    const h = await runScripted([{ error: midStream, partial }]);
+    expect(h.outcome.usd).toBeCloseTo(usdFor(SONNET_MODEL, partial.usage), 12);
+    expect(h.outcome.unmeteredUsd).toBe(0);
+  });
+
   it("ends a turn-2 text reply with the report nudge", async () => {
     const h = await runScripted([respond([planCall(), peerCall()]), respond([text("Thinking aloud.")], "end_turn"), respond([reportCall()])]);
     expect(toolResults(lastMessage(h.fake.streamRequests[2]))).toEqual([]);
     expect(textsOf(lastMessage(h.fake.streamRequests[2]))).toEqual([NUDGE_REPORT]);
+  });
+});
+
+describe("a tool input that was not valid JSON (eager input streaming, the SDK's own stream)", () => {
+  /** share_of_taste's input with the comma between two set refs missing, as in the live failure. */
+  const MALFORMED_SHARE =
+    '{"type": "brand", "set": ["R1" "R2"], "ages": ["24_and_younger"], "audiences": [], "metros": [], "trigger_finding_id": null, "step_id": "S2"}';
+  const MALFORMED_DNA = '{"set": ["R1", "R2"} "compare_with": null, "trigger_finding_id": "F1", "step_id": null}';
+  const turnOneUsage = { input_tokens: 300, cache_creation_input_tokens: 9000, output_tokens: 1800 };
+  /** Turn 1 as the model wrote it, its last call malformed; the SDK never reads the text after it. */
+  const brokenTurnOne = () =>
+    streamEvents(
+      respond([thinking("Plan, then peers and ages."), planCall(), peerCall(), shareCall(), text("Waiting for the digests.")], "tool_use", turnOneUsage),
+      { toolu_share: MALFORMED_SHARE },
+    );
+  /** message_start's usage: the prompt side, and one output token. */
+  const startUsage = () => respond([], "tool_use", { ...turnOneUsage, output_tokens: 1 }).usage;
+  const RESEND = "INVALID_JSON: the tool input was not valid JSON; send the call again.";
+  const CLOSED = "INVALID_JSON: the tool input was not valid JSON, so it did not run; only submit_report is left.";
+  /** The answer to an unparsed call: the code line, then the text it sent, JSON-encoded. */
+  const invalidJson = (head: string, raw: string) => `${head}\nreceived: ${JSON.stringify(raw)}`;
+
+  it("answers the call INVALID_JSON with the text it sent, runs the calls before it and keeps the turn going", async () => {
+    const h = await runScripted([{ events: brokenTurnOne() }, respond([stepCall("toolu_share_again", "S2")]), respond([reportCall()])]);
+    expect(h.outcome).toMatchObject({ status: "completed", code: "report_accepted", responses: 3, error: null });
+    expect(h.outcome.repairs).toEqual({ plan: false, report: false, truncated: false, invalidJson: true, input: false });
+
+    // The response goes back as it streamed, up to the unparsed call, whose input is {}.
+    const second = h.fake.streamRequests[1]!;
+    expect(second.messages[1]).toEqual({
+      role: "assistant",
+      content: [thinking("Plan, then peers and ages."), planCall(), peerCall(), { ...shareCall(), input: {} }],
+    });
+    const results = toolResults(lastMessage(second));
+    expect(results.map((r) => [r.tool_use_id, r.is_error ?? false])).toEqual([
+      ["toolu_plan", false],
+      ["toolu_peer", false],
+      ["toolu_share", true],
+    ]);
+    expect(resultText(results[2])).toBe(invalidJson(RESEND, MALFORMED_SHARE));
+    // S2 never ran in wave 1, so the guide says it shares the turn-2 calls.
+    expect(textsOf(lastMessage(second))).toEqual([NOTICE_INVALID_JSON, turn2Guide(DEFAULT_RUN_LIMITS, { stepsPending: true })]);
+
+    // Wave 1 ran without the unparsed call; it ran in turn 2 as the planned step it was.
+    expect(h.executed.map((e) => [e.turn, e.calls.map((c) => c.id)])).toEqual([
+      [1, ["toolu_peer"]],
+      [2, ["toolu_share_again"]],
+    ]);
+    expect(h.plans).toHaveLength(1);
+    expect(h.outcome.rejections).toEqual([{ toolCallId: "toolu_share", tool: "share_of_taste", code: "INVALID_JSON", turn: 1 }]);
+    expect(h.toolEnds.find((e) => e.use.id === "toolu_share")).toMatchObject({ ok: false, code: "INVALID_JSON", executed: false });
+  });
+
+  it("charges the usage the stream reported and the output it could have generated, and stops the stream", async () => {
+    const clock = new ManualClock();
+    const h = await runScripted(
+      [{ events: brokenTurnOne(), onSend: () => clock.advance(20_000) }, respond([stepCall("toolu_share_again", "S2")]), respond([reportCall()])],
+      { now: clock.now },
+    );
+    expect(h.usages[0]).toEqual({ usd: usdFor(SONNET_MODEL, startUsage()), model: SONNET_MODEL });
+    expect(h.outcome.usage.input).toBe(300 + 1000 + 1000);
+    // 20 s plus the abort lag at the speed ceiling outweighs the characters the stream showed.
+    const unreported = ((20_000 + ESTIMATE_ABORT_LAG_MS) / 1000) * ESTIMATE_OUTPUT_TOKENS_PER_SECOND - 1;
+    expect(h.outcome.unmeteredUsd).toBeCloseTo(unreportedOutputUsd(SONNET_MODEL, startUsage(), unreported), 12);
+    expect(h.outcome.unmeteredUsd).toBeLessThan(unreportedOutputUsd(SONNET_MODEL, startUsage(), h.fake.streamRequests[0]!.max_tokens) / 2);
+    expect(h.fake.streamSignals[0]?.aborted).toBe(true);
+    expect(h.fake.streamSignals.slice(1).every((s) => s?.aborted === false)).toBe(true);
+  });
+
+  it("repairs a turn-1 call at a live prompt's size and still completes with its pivot, below the cost nudge", async () => {
+    // The director prompt, a first message and digests of live size, and usage like a live run's.
+    const clock = new ManualClock();
+    const h = await runScripted(
+      [
+        { events: brokenTurnOne(), onSend: () => clock.advance(25_000) },
+        respond([stepCall("toolu_share_again", "S2"), followUp()], "tool_use", { input_tokens: 9000, cache_read_input_tokens: 15_000, output_tokens: 3000 }),
+        respond([reportCall()], "tool_use", { input_tokens: 4000, cache_read_input_tokens: 24_000, output_tokens: 5000 }),
+      ],
+      {
+        now: clock.now,
+        systemPrompt: DIRECTOR_PROMPT,
+        firstUserMessage: `RUN CONTEXT (synthetic)\n${"Brand Alpha context. ".repeat(1500)}`,
+        executeTools: async (calls) => calls.map((c) => ({ tool_use_id: c.id, content: `<qloo_data>${"digest ".repeat(600)}</qloo_data>` })),
+      },
+    );
+    expect(h.outcome).toMatchObject({ status: "completed", responses: 3, repairs: { invalidJson: true }, nudges: { cost: false } });
+    expect(h.pivots).toEqual(["F1"]);
+    expect(h.outcome.usd + h.outcome.unmeteredUsd).toBeLessThan(DEFAULT_RUN_LIMITS.usdNudge);
+  });
+
+  it("holds wave 1 back when submit_plan itself was not valid JSON, without spending the plan nudge", async () => {
+    const plan = streamEvents(respond([peerCall("toolu_early"), planCall("toolu_bad_plan")]), { toolu_bad_plan: '{"restated_question": "Q" "hypotheses": []}' });
+    const h = await runScripted([{ events: plan }, respond([planCall(), peerCall()]), respond([reportCall()])]);
+    const answers = toolResults(lastMessage(h.fake.streamRequests[1]));
+    expect(answers.map((r) => [r.tool_use_id, resultText(r).split(":")[0]])).toEqual([
+      ["toolu_early", "PLAN_REQUIRED"],
+      ["toolu_bad_plan", "INVALID_JSON"],
+    ]);
+    expect(textsOf(lastMessage(h.fake.streamRequests[1]))).toEqual([NOTICE_INVALID_JSON]);
+    expect(textsOf(lastMessage(h.fake.streamRequests[1]))).not.toContain(NUDGE_PLAN);
+    expect(h.executed).toEqual([{ turn: 1, calls: [expect.objectContaining({ id: "toolu_peer" })] }]);
+    expect(h.outcome).toMatchObject({ status: "completed", nudges: { plan: false }, repairs: { plan: false, invalidJson: true } });
+  });
+
+  it("asks a turn again, not with the report nudge, when its only call was not valid JSON", async () => {
+    const dna = streamEvents(respond([followUp()]), { toolu_dna: MALFORMED_DNA });
+    const h = await runScripted([respond([planCall(), peerCall()]), { events: dna }, respond([followUp("toolu_dna_again")]), respond([reportCall()])]);
+    expect(resultText(toolResults(lastMessage(h.fake.streamRequests[2]))[0])).toBe(invalidJson(RESEND, MALFORMED_DNA));
+    expect(textsOf(lastMessage(h.fake.streamRequests[2]))).toEqual([NOTICE_INVALID_JSON]);
+    expect(h.pivots).toEqual(["F1"]);
+    expect(h.executed.map((e) => [e.turn, e.calls.map((c) => c.id)])).toEqual([
+      [1, ["toolu_peer"]],
+      [2, ["toolu_dna_again"]],
+    ]);
+    expect(h.outcome).toMatchObject({ status: "completed", responses: 4, nudges: { report: false } });
+  });
+
+  it("closes turn 2 at a lone unparsed call when only the report's response is left, or after a wrap-up notice", async () => {
+    const dna = () => streamEvents(respond([followUp()]), { toolu_dna: MALFORMED_DNA });
+    const lastResponse = await runScripted([respond([planCall(), peerCall()]), { events: dna() }, respond([reportCall()])], {
+      limits: { modelResponses: 3 },
+    });
+    const clock = new ManualClock();
+    const pastSoft = { events: dna(), onSend: () => clock.advance(DEFAULT_RUN_LIMITS.softMs) };
+    const timedOut = await runScripted([respond([planCall(), peerCall()]), pastSoft, respond([reportCall()])], { now: clock.now });
+
+    for (const [h, notices] of [
+      [lastResponse, [NOTICE_INVALID_JSON, TURN3_NOTICE]],
+      [timedOut, [NOTICE_INVALID_JSON, NOTICE_TIME, TURN3_NOTICE]],
+    ] as const) {
+      const reply = lastMessage(h.fake.streamRequests[2]);
+      expect(resultText(toolResults(reply)[0])).toBe(invalidJson(CLOSED, MALFORMED_DNA));
+      expect(textsOf(reply)).toEqual(notices);
+      expect(h.outcome).toMatchObject({ status: "completed", responses: 3, turn: 3, nudges: { report: false } });
+    }
+  });
+
+  it("keeps turn 2 open for the call after running the follow-ups before it", async () => {
+    const dna = streamEvents(respond([followUp("toolu_first", "F2"), followUp()]), { toolu_dna: MALFORMED_DNA });
+    const h = await runScripted([respond([planCall(), peerCall()]), { events: dna }, respond([followUp("toolu_dna_again")]), respond([reportCall()])]);
+    const reply = lastMessage(h.fake.streamRequests[2]);
+    expect(toolResults(reply).map((r) => [r.tool_use_id, r.is_error ?? false])).toEqual([
+      ["toolu_first", false],
+      ["toolu_dna", true],
+    ]);
+    expect(textsOf(reply)).toEqual([NOTICE_INVALID_JSON]);
+    expect(textsOf(lastMessage(h.fake.streamRequests[3]))).toEqual([TURN3_NOTICE]);
+    expect(h.executed.map((e) => [e.turn, e.calls.map((c) => c.id)])).toEqual([
+      [1, ["toolu_peer"]],
+      [2, ["toolu_first"]],
+      [2, ["toolu_dna_again"]],
+    ]);
+    expect(h.pivots).toEqual(["F2", "F1"]);
+    expect(h.outcome).toMatchObject({ status: "completed", responses: 4 });
+  });
+
+  it("closes turn 2 at an unparsed call after the follow-up nudge, so a rejected report still gets its repair turn", async () => {
+    const listed = [{ findingId: "F1" as const, kind: "NEAR_SUBSTITUTES" as const, tool: "audience_dna" as const, subjects: ["R2"] }];
+    const broken = () => ({ events: streamEvents(respond([followUp()]), { toolu_dna: MALFORMED_DNA }) });
+    // The nudge on a report, or after a planned step, each leaves three responses; the unparsed call then spends one.
+    const afterReport = [respond([planCall(), peerCall(), shareCall()]), respond([reportCall("toolu_r1")])];
+    const afterStep = [respond([planCall(), peerCall()]), respond([stepCall("toolu_s2", "S2")])];
+    for (const opening of [afterReport, afterStep]) {
+      const reviews: Array<{ attempt: 1 | 2; final: boolean }> = [];
+      const h = await runScripted([...opening, broken(), respond([reportCall("toolu_r2")]), respond([reportCall("toolu_r3")])], {
+        followupLeads: () => listed,
+        reviewReport: (_draft, context) => (reviews.push(context), context.final ? { ok: true } : { ok: false, feedback: "V3 thesis: numbers typed outside tokens." }),
+      });
+      const reply = lastMessage(h.fake.streamRequests[3]);
+      expect(resultText(toolResults(reply)[0])).toBe(invalidJson(CLOSED, MALFORMED_DNA));
+      expect(textsOf(reply)).toEqual([NOTICE_INVALID_JSON, TURN3_NOTICE]);
+      expect(reviews).toEqual([
+        { attempt: 1, final: false },
+        { attempt: 2, final: true },
+      ]);
+      expect(h.pivots).toEqual([]);
+      expect(h.outcome).toMatchObject({ status: "completed", responses: 5, nudges: { followup: true }, repairs: { invalidJson: true, report: true } });
+    }
+  });
+
+  it("sends no follow-up nudge to a report in a turn 2 kept open after a follow-up ran", async () => {
+    const dna = streamEvents(respond([followUp("toolu_first", "F2"), followUp()]), { toolu_dna: MALFORMED_DNA });
+    const listed = [{ findingId: "F1" as const, kind: "NEAR_SUBSTITUTES" as const, tool: "audience_dna" as const, subjects: ["R2"] }];
+    const h = await runScripted([respond([planCall(), peerCall()]), { events: dna }, respond([reportCall()])], { followupLeads: () => listed });
+    expect(h.pivots).toEqual(["F2"]);
+    expect(h.outcome).toMatchObject({ status: "completed", responses: 3, turn: 2, nudges: { followup: false } });
+  });
+
+  it("asks turn 3 again, without spending the report nudge, when submit_report was not valid JSON", async () => {
+    const MALFORMED_REPORT = '{"headline": "Brand Alpha" "signal": "mixed"}';
+    const report = streamEvents(respond([followUp("toolu_more", "F2"), reportCall("toolu_r1")]), { toolu_r1: MALFORMED_REPORT });
+    const h = await runScripted([respond([planCall(), peerCall()]), respond([followUp()]), { events: report }, respond([reportCall("toolu_r2")])]);
+    const reply = lastMessage(h.fake.streamRequests[3]);
+    expect(toolResults(reply).map((r) => resultText(r).split(":")[0])).toEqual(["INVESTIGATION_BUDGET_EXHAUSTED", "INVALID_JSON"]);
+    expect(resultText(toolResults(reply)[1])).toBe(invalidJson(RESEND, MALFORMED_REPORT));
+    expect(textsOf(reply)).toEqual([NOTICE_INVALID_JSON]);
+    expect(h.outcome).toMatchObject({ status: "completed", responses: 4, nudges: { report: false }, repairs: { invalidJson: true } });
+  });
+
+  it("tells turn 3 that only submit_report is left when the unparsed call was another tool", async () => {
+    const late = streamEvents(respond([followUp()]), { toolu_dna: MALFORMED_DNA });
+    const h = await runScripted([respond([planCall(), peerCall()]), respond([followUp("toolu_first", "F2")]), { events: late }, respond([reportCall()])]);
+    const reply = lastMessage(h.fake.streamRequests[3]);
+    expect(resultText(toolResults(reply)[0])).toBe(invalidJson(CLOSED, MALFORMED_DNA));
+    expect(textsOf(reply)).toEqual([NOTICE_INVALID_JSON]);
+    expect(h.outcome).toMatchObject({ status: "completed", responses: 4, nudges: { report: false } });
+  });
+
+  it("re-issues the request once when the response before the call cannot go back (an unsigned thinking block)", async () => {
+    const unsigned = streamEvents(respond([{ ...thinking("Planning."), signature: "" }, planCall(), shareCall()]), { toolu_share: MALFORMED_SHARE });
+    const h = await runScripted([{ events: unsigned }, respond([planCall(), peerCall()]), respond([reportCall()])]);
+    const [first, retry] = h.fake.streamRequests;
+    expect(JSON.stringify(retry?.messages)).toBe(JSON.stringify(first?.messages));
+    expect(h.outcome).toMatchObject({ status: "completed", responses: 3, repairs: { invalidJson: true } });
+    expect(h.usages[0]?.usd).toBeCloseTo(usdFor(SONNET_MODEL, respond([], "tool_use", { output_tokens: 1 }).usage), 12);
+  });
+
+  it("ends the run incomplete, not failed, at a second tool input that was not valid JSON", async () => {
+    const dna = streamEvents(respond([followUp()]), { toolu_dna: MALFORMED_DNA });
+    const h = await runScripted([{ events: brokenTurnOne() }, { events: dna }, respond([reportCall()])]);
+    expect(h.fake.streamRequests).toHaveLength(2);
+    expect(h.outcome).toMatchObject({ status: "incomplete", code: "invalid_tool_json", error: null, draft: null });
+    expect(h.outcome.reason).toBe("a second tool input that was not valid JSON (audience_dna); that response was not run");
+    expect(h.executed).toHaveLength(1);
+    expect(h.outcome.plan).not.toBeNull();
   });
 });

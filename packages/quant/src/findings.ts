@@ -1,12 +1,4 @@
-import {
-  LocationMethod,
-  METRO_LABEL,
-  type FindingKind,
-  type FindingSuggestion,
-  type MetroId,
-  type Severity,
-  type SkillId,
-} from "@ct/contracts";
+import { LocationMethod, type AgeBucket, type FindingKind, type FindingSuggestion, type Severity, type SkillId } from "@ct/contracts";
 import { spearman } from "./stats";
 import { TASTE_ISLAND_LAST_SHARE, TASTE_ISLAND_MIN_ROWS } from "./subs";
 
@@ -32,16 +24,18 @@ export interface FindingDraft {
 
 /**
  * The follow-up tool per finding kind (PLAN §4.4), null where the table names no tool. METRO_OUTLIER
- * suggests geo_lift only for a gazetteer metro. EMPTY_RESULT has no fixed tool: the way to broaden
- * (a tag union, a dropped filter, another type, named peers) depends on the call, so
- * emptyResultFinding carries the caller's suggestion.
+ * suggests share_of_taste in other markets, in a gazetteer metro too (its builder says why),
+ * GENERATIONAL_SPLIT share_of_taste only while the call left age buckets unread, and BLOCK_NEW_TAGS
+ * rank_candidates only when a NEW tag can be a taste signal. EMPTY_RESULT and DROPPED_CANDIDATES have
+ * no fixed tool: the way to broaden (a tag union, a dropped filter, another type, named peers) and the
+ * pool to substitute from depend on the call, so their builders carry the caller's suggestion.
  */
 export const FINDING_SUGGESTION: Readonly<Record<FindingKind, SkillId | null>> = {
   TASTE_ISLAND: "cross_domain",
   NEAR_SUBSTITUTES: "share_of_taste",
   OUTSIDE_CATEGORY_NEIGHBOUR: "peer_landscape",
-  GENERATIONAL_SPLIT: null,
-  METRO_OUTLIER: "geo_lift",
+  GENERATIONAL_SPLIT: "share_of_taste",
+  METRO_OUTLIER: "share_of_taste",
   HIDDEN_POCKET: null,
   LATENT_DEMAND: "block_dna",
   BLOCK_NEW_TAGS: "rank_candidates",
@@ -50,12 +44,13 @@ export const FINDING_SUGGESTION: Readonly<Record<FindingKind, SkillId | null>> =
   NO_TREND_SIGNAL: null,
   POPULARITY_DOMINANCE: "cross_domain",
   LOCATION_FALLBACK: null,
+  WEAK_CATEGORY_FIT: "sponsor_slate",
 };
 
 /**
  * Severity per kind: high when a call gave nothing to read, medium for a lead worth a follow-up,
- * low for context the note should mention. A METRO_OUTLIER outside the gazetteer is low, since no
- * follow-up can map it.
+ * low for context the note should mention. DROPPED_CANDIDATES is medium when it carries a
+ * substitution to score.
  */
 export const FINDING_SEVERITY: Readonly<Record<FindingKind, Severity>> = {
   TASTE_ISLAND: "medium",
@@ -71,6 +66,7 @@ export const FINDING_SEVERITY: Readonly<Record<FindingKind, Severity>> = {
   NO_TREND_SIGNAL: "low",
   POPULARITY_DOMINANCE: "medium",
   LOCATION_FALLBACK: "low",
+  WEAK_CATEGORY_FIT: "medium",
 };
 
 // Thresholds (SPEC §4.4) --------------------------------------------------------------------------
@@ -79,7 +75,12 @@ export const FINDING_SEVERITY: Readonly<Record<FindingKind, Severity>> = {
 // finding and the Substitution Map can never disagree on what a taste island is.
 /** Youth tilt spans −1..1; a target 0.4 above the set median skews clearly younger than its peers. */
 export const GENERATIONAL_SPLIT_MIN_GAP = 0.4;
-/** Two places from its median metro rank: one place is within the noise of compressed metro scores. */
+/**
+ * Two places from its median metro rank, in a set of any size: one place is within the noise of
+ * compressed metro scores. In a set of three or four a target whose median rank sits mid-scale
+ * (2.5 of 4) raises no outlier: first or last there is only a place and a half away, which ranks
+ * drawn at random reach in most grids.
+ */
 export const METRO_OUTLIER_MIN_RANK_GAP = 2;
 /** A MAD-z residual of 2 is far above what the popularity fit predicts. */
 export const HIDDEN_POCKET_MIN_Z = 2;
@@ -89,6 +90,14 @@ export const LATENT_DEMAND_MIN_DEMAND = 0.7;
 export const LATENT_DEMAND_MAX_SUPPLY = 0.3;
 /** Three new WHAT tags make a concept direction worth ranking tenants against; one or two may be noise. */
 export const BLOCK_NEW_TAGS_MIN = 3;
+/**
+ * SOUND also needs a quarter of its area top-20 tags NEW. Its list is all music, so its top 20 holds
+ * up to 20 family tags where the mixed list holds a handful of WHAT tags: three NEW of twenty is a far
+ * smaller departure from the city than three of five.
+ */
+export const BLOCK_NEW_SOUND_MIN_SHARE = 0.25;
+/** NEW taxonomy tags a BLOCK_NEW_TAGS suggestion names as the taste signal: rank_candidates takes three. */
+export const BLOCK_SIGNAL_TAGS_MAX = 3;
 /** A rank correlation over fewer (FIT, popularity) pairs is too unstable to call dominance. */
 export const POPULARITY_DOMINANCE_MIN_PAIRS = 8;
 /** Spearman ρ between FIT and popularity at which the ranking mostly restates popularity. */
@@ -103,6 +112,10 @@ export const SUGGESTED_POPULARITY_CAP = 0.85;
 export const POPULARITY_CAP_STEP = 0.1;
 /** The lowest cap cross_domain accepts. */
 export const POPULARITY_CAP_FLOOR = 0.5;
+/** A sponsor category whose best fit sits in the bottom quarter of the one-scale FIT fits weakly. */
+export const WEAK_CATEGORY_FIT_MAX_PCT = 0.25;
+/** A FIT percentile over fewer scored candidates moves in steps too coarse to call a quarter. */
+export const WEAK_CATEGORY_FIT_MIN_SCORED = 8;
 /** Texts name at most this many entities, then "and N more". */
 export const MAX_NAMES_IN_TEXT = 3;
 
@@ -211,7 +224,11 @@ export function outsideCategoryNeighbourFinding(args: {
 
 /**
  * GENERATIONAL_SPLIT: the target's youth tilt minus the set median is ≥ 0.4 (SPEC §4.4). The rule is
- * one-sided: a target that skews older than its peers is not a finding.
+ * one-sided: a target that skews older than its peers is not a finding. The tilt rests on the end
+ * buckets the call read, so while some are unread the follow-up ranks the same set in them to find
+ * the age where the target's lead gives way: one call per bucket, at most four, since a tilt needs a
+ * young and an old bucket read. With all six read no share_of_taste call can sharpen the split, and
+ * audience_dna on the set (SPEC §4.4's move) repeats what the head_to_head scan already reads.
  */
 export function generationalSplitFinding(args: {
   targetName: string;
@@ -219,20 +236,28 @@ export function generationalSplitFinding(args: {
   targetTilt: number | null;
   /** Median youth tilt over the set the target was ranked in. */
   setMedianTilt: number | null;
+  /** Age buckets the call did not read, youngest first. */
+  unreadAges: readonly AgeBucket[];
 }): FindingDraft | null {
   const { targetName, targetTilt, setMedianTilt } = args;
   if (!finite(targetTilt) || !finite(setMedianTilt)) return null;
   if (!atLeast(targetTilt - setMedianTilt, GENERATIONAL_SPLIT_MIN_GAP)) return null;
+  const unread = [...new Set(args.unreadAges)];
   return draft(
     "GENERATIONAL_SPLIT",
     `${targetName} skews clearly younger than its peer set: its youth tilt sits well above the set median.`,
-    null,
+    unread.length === 0 ? null : `Rank the same set in the unread age buckets ${unread.join(", ")} to find the age where ${targetName}'s lead gives way.`,
   );
 }
 
 /**
- * METRO_OUTLIER: the target's rank in one metro context is ≥ 2 places from its median metro rank.
- * Suggests geo_lift only when the metro is a gazetteer metro (neighbourhood polygons exist).
+ * METRO_OUTLIER: the target's rank in one metro context is ≥ 2 places from its median metro rank
+ * (SPEC §4.4), whatever the set size. The follow-up ranks the same set in other markets, nearby ones
+ * first: that tells a local exception from a regional pattern, which is what a market or "who wins
+ * where" question turns on, and it picks those markets. SPEC §4.4 maps a
+ * gazetteer metro with LIFT or BLOCK instead, but a share set gives geo_lift no place tag and
+ * block_dna no area, so neither can run as the turn-2 pivot; a block read of that metro stays a
+ * next move for the note (market to block).
  */
 export function metroOutlierFinding(args: {
   targetName: string;
@@ -244,20 +269,17 @@ export function metroOutlierFinding(args: {
   medianRank: number;
   /** Entities ranked in each context. */
   setSize: number;
-  /** The gazetteer metro this market is, or null outside the gazetteer. */
-  gazetteerMetro: MetroId | null;
 }): FindingDraft | null {
-  const { targetName, marketLabel, metroRank, medianRank, setSize, gazetteerMetro } = args;
+  const { targetName, marketLabel, metroRank, medianRank, setSize } = args;
   if (!Number.isInteger(metroRank) || !Number.isInteger(setSize) || metroRank < 1 || metroRank > setSize) return null;
   if (!finite(medianRank)) return null;
   const gap = medianRank - metroRank;
   if (!atLeast(Math.abs(gap), METRO_OUTLIER_MIN_RANK_GAP)) return null;
-  const text = `${targetName} ranks ${metroRank} of ${setSize} in ${marketLabel}, clearly ${gap > 0 ? "better" : "worse"} than its median rank across metros.`;
-  if (gazetteerMetro === null) return draft("METRO_OUTLIER", text, null, "low");
+  const direction = gap > 0 ? "better" : "worse";
   return draft(
     "METRO_OUTLIER",
-    text,
-    `Map where ${targetName}'s taste concentrates inside ${METRO_LABEL[gazetteerMetro]}, then profile the top neighbourhood.`,
+    `${targetName} ranks ${metroRank} of ${setSize} in ${marketLabel}, clearly ${direction} than its median rank across metros.`,
+    `Rank the same set in other markets, those near ${marketLabel} first, to see whether ${targetName}'s ${direction} showing there is local or regional.`,
   );
 }
 
@@ -334,18 +356,47 @@ export function latentDemandFinding(args: {
 
 // S7 Block DNA ---------------------------------------------------------------------------------------
 
-/** BLOCK_NEW_TAGS: ≥ 3 WHAT-family tags in the area's top 20 that are absent from the city's top 50. */
+/** The families BLOCK_NEW_TAGS reads: venues and dishes (WHAT), and music (SOUND). */
+export type BlockNewTagsFamily = "WHAT" | "SOUND";
+
+/**
+ * The BLOCK_NEW_TAGS rule: ≥ 3 NEW tags in the family (in the area's top 20, absent from the city's
+ * top 50) and, for SOUND, at least a quarter of the family's tags in the area's top 20.
+ */
+export function isBlockNewTags(family: BlockNewTagsFamily, newTags: number, familyTags: number): boolean {
+  if (!Number.isInteger(newTags) || !Number.isInteger(familyTags) || newTags > familyTags) return false;
+  if (newTags < BLOCK_NEW_TAGS_MIN) return false;
+  return family === "WHAT" || atLeast(newTags / familyTags, BLOCK_NEW_SOUND_MIN_SHARE);
+}
+
+/**
+ * BLOCK_NEW_TAGS: the area's NEW WHAT or SOUND tags. SPEC §4.4 reads WHAT; SOUND joins it because a
+ * block can depart from the city in its music while its venue mix matches. Suggests ranking tenant
+ * brands with the NEW taxonomy tags as the taste signal, up to the three rank_candidates takes, named
+ * with their T# refs so the follow-up can pass them even when the digest had to cut its tag rows; the
+ * follow-up picks which fit a tenant. A specialty dish gives a ranking no signal (probe G1, G6), so
+ * with no NEW taxonomy tag there is no follow-up.
+ */
 export function blockNewTagsFinding(args: {
   areaName: string;
-  /** Names of the NEW WHAT tags, most distinctive first. */
-  newWhatTags: readonly string[];
+  family: BlockNewTagsFamily;
+  /** Names of the family's NEW tags, most distinctive first. */
+  newTags: readonly string[];
+  /** The family's tags in the area's top 20, NEW or not. */
+  familyTags: number;
+  /** The NEW tags that are taxonomy tags, most distinctive first, with their registry refs. */
+  signalTags: readonly { name: string; ref: string }[];
 }): FindingDraft | null {
-  const tags = distinctNames(args.newWhatTags);
-  if (tags.length < BLOCK_NEW_TAGS_MIN) return null;
+  const { areaName, family } = args;
+  const tags = distinctNames(args.newTags);
+  if (!isBlockNewTags(family, tags.length, args.familyTags)) return null;
+  const signal = [...new Map(args.signalTags.map((t) => [t.ref, `${t.name} (${t.ref})`])).values()].slice(0, BLOCK_SIGNAL_TAGS_MAX);
+  const list = family === "SOUND" ? "top music tags" : "top tags";
+  const either = signal.length < 2 ? signal.join("") : `${signal.slice(0, -1).join(", ")} or ${signal[signal.length - 1]}`;
   return draft(
     "BLOCK_NEW_TAGS",
-    `Among its top tags, ${args.areaName} has WHAT tags that are not among the city's top tags, led by ${listNames(tags)}.`,
-    `Rank tenant brands carrying ${tags.slice(0, 2).join(" or ")} at this site against the city.`,
+    `Among its ${list}, ${areaName} has ${family} tags that are not among the city's ${list}, led by ${listNames(tags)}.`,
+    signal.length === 0 ? null : `Rank tenant brands with ${either} as the taste signal at this site against the city.`,
   );
 }
 
@@ -372,6 +423,36 @@ export function locationFallbackFinding(args: {
     "LOCATION_FALLBACK",
     `Location for ${areaName} fell back from ${LOCATION_LABEL[from]} to ${LOCATION_LABEL[to]} (a CODE FALLBACK).`,
     null,
+  );
+}
+
+// S10 Sponsor Slate -----------------------------------------------------------------------------------
+
+/**
+ * WEAK_CATEGORY_FIT: a sponsor category's best fit sits in the bottom quarter of the slate's one-scale
+ * FIT over at least 8 scored candidates. Discovery keeps each category to the brands carrying its one
+ * tag, so a brand the audience ties to the category but Qloo tags otherwise never reaches the slate;
+ * the follow-up scores such brands (from the cultural neighbourhood or resolve_entities) on the same
+ * scale by adding them to the shortlist, which tells a weak category from a tag that misses its brands.
+ */
+export function weakCategoryFitFinding(args: {
+  categoryLabel: string;
+  bestName: string;
+  /** The best fit's FIT: its within-call percentile in the one-scale call. */
+  fitPct: number | null;
+  /** Its rank among the scored candidates, 1 = best. */
+  rank: number | null;
+  /** Candidates the one-scale call scored. */
+  scored: number;
+}): FindingDraft | null {
+  const { categoryLabel, bestName, fitPct, rank, scored } = args;
+  if (!finite(fitPct) || !Number.isInteger(scored) || scored < WEAK_CATEGORY_FIT_MIN_SCORED) return null;
+  if (!atMost(fitPct, WEAK_CATEGORY_FIT_MAX_PCT)) return null;
+  const place = rank === null ? "" : ` ranks ${rank} of ${scored} on the slate's one scale and`;
+  return draft(
+    "WEAK_CATEGORY_FIT",
+    `${bestName}, the best ${categoryLabel} fit,${place} sits in the bottom quarter of the slate: the brands carrying the category's tag fit this audience weakly.`,
+    `Score ${categoryLabel} brands the category tag may miss, from the cultural neighbourhood or resolve_entities: run sponsor_slate again with the same categories and them added to the shortlist.`,
   );
 }
 
@@ -449,16 +530,27 @@ export function popularityDominanceFinding(args: {
   );
 }
 
-/** DROPPED_CANDIDATES: entities a call did not score in some context ("not scored here"). */
-export function droppedCandidatesFinding(args: { names: readonly string[]; context: string }): FindingDraft | null {
+/**
+ * DROPPED_CANDIDATES: entities a call did not score in some context ("not scored here"). Context for
+ * the note, unless the caller has substitutes from its discovery pool to score instead (SPEC §4.4):
+ * then it carries that suggestion and is a lead worth a follow-up.
+ */
+export function droppedCandidatesFinding(args: {
+  names: readonly string[];
+  context: string;
+  /** Scoring substitutes from the call's discovery pool, or null when it has none. */
+  suggestion?: FindingSuggestion | null;
+}): FindingDraft | null {
   const names = distinctNames(args.names);
   if (names.length === 0) return null;
   const one = names.length === 1;
-  return draft(
-    "DROPPED_CANDIDATES",
-    `${listNames(names)} ${one ? "was" : "were"} not scored in ${args.context}, so ${one ? "it is" : "they are"} shown as not scored there, not ranked last.`,
-    null,
-  );
+  const suggestion = args.suggestion ?? null;
+  return {
+    kind: "DROPPED_CANDIDATES",
+    severity: suggestion === null ? FINDING_SEVERITY.DROPPED_CANDIDATES : "medium",
+    text: `${listNames(names)} ${one ? "was" : "were"} not scored in ${args.context}, so ${one ? "it is" : "they are"} shown as not scored there, not ranked last.`,
+    suggestion,
+  };
 }
 
 /**

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import metros from "../../config/metros.json";
 import { analystPrefix } from "./analyst-run";
 import { approxTokens, ANALYST_TOOL_NAMES, digestFits, MODEL_DIGEST_MAX_TOKENS, ModelDigest, parseToolInput, SkillId, wrapQlooData } from "./deps";
 import { toolUse } from "./fakes";
@@ -8,6 +9,7 @@ import {
   buildScenario,
   collectRefs,
   Ledger,
+  MARKETS,
   QUESTION,
   Registry,
   sampleInputs,
@@ -67,7 +69,13 @@ describe("buildScenario", () => {
     expect(s.runContext).toContain("| R2 | Marlowe Ridge Sparkling | brand | exact |");
     // Refs the opening scan discovers arrive with its digests, not before the plan.
     expect(s.runContext).not.toContain("| R3 |");
-    expect(s.runContext).toMatch(/MARKETS: nashville, austin/);
+    // The agent's run context format: market ids with city and state, and no areas without a metro.
+    expect(s.runContext).toContain("MARKETS: nashville (Nashville, TN), austin (Austin, TX), denver (Denver, CO)");
+    for (const id of MARKETS) {
+      const market = metros.markets.find((m) => m.id === id);
+      expect(s.runContext, id).toContain(`${id} (${market?.label}, ${market?.state})`);
+    }
+    expect(s.runContext).toContain("AREAS: none (the question names no gazetteer metro");
     expect(s.runContext).toMatch(/AUDIENCES: urn:audience:/);
     expect(s.runContext).not.toMatch(ISO_DATE);
   });

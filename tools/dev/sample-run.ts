@@ -64,6 +64,8 @@ export interface Sample {
 /** The brief's question, with an invented brand. */
 export const SAMPLE_QUESTION = "Is the Juniper Cola audience a moat or a niche?";
 const SAMPLE_BRAND = "Juniper Cola";
+/** The brief's verdict tag: what the library row and the running head print. */
+const SAMPLE_TAG = "Taste island";
 /**
  * The sample's Juniper Cola: an id the mock did not issue, which it describes from the id's hash
  * like any fixture id. Pair scores with such an id carry no same-genre bonus, so the brand tends to
@@ -823,6 +825,7 @@ function draftFrom(r: Readings): ReportDraftShape {
   return {
     headline: `Juniper Cola is a taste island: its closest audience is ${withArticle(apparel)} brand`,
     signal: "mixed",
+    verdict_tag: SAMPLE_TAG,
     thesis:
       `Juniper Cola sits apart from the soft drinks around it ({{${r.island}}}) and has the lowest hub score in its map ` +
       `({{${r.hub}}}) [${r.scan.scoring}]: its peers share their audiences with each other first. Its closest match is ${n}, ` +
@@ -1113,6 +1116,8 @@ async function brandHealth(): Promise<Sample> {
     expectSample(total > 0 && traced === total, `the CHECKER traced ${traced}/${total} numbers`);
     expectSample(!validation.issues.some((i) => i.rule === "V10"), "the CHECKER raised V10");
   }
+  const final = events.find((e) => e.type === "report.final");
+  expectSample(final?.type === "report.final" && final.report.verdict.tag === SAMPLE_TAG, "the report does not carry the verdict tag");
   const outside = events.find((e) => e.type === "finding" && e.finding.kind === "OUTSIDE_CATEGORY_NEIGHBOUR");
   expectSample(
     events.some((e) => e.type === "pivot" && e.tool === "peer_landscape" && outside?.type === "finding" && e.triggerFindingId === outside.finding.id),

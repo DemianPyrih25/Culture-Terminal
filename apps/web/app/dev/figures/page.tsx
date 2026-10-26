@@ -2,34 +2,58 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
 import {
+  CategoryMap,
+  Constellation,
   DivergingBars,
   Exhibit,
   FigurePending,
+  LiftMap,
   MatrixGrid,
+  MomentumStrip,
+  PositionCard,
   QuadrantScatter,
   RankedTable,
   ScorecardList,
   ScorecardTable,
+  SlopeChart,
+  TwinCards,
+  geoLiftBars,
   slateToRanked,
 } from "../../../components/figures";
 import {
   EXPECTED_RIVALS,
   FIXTURE_SOURCES as SRC,
+  NEIGHBOURHOOD_HALO,
+  NEIGHBOURHOOD_SEEDS,
   SCORECARD_BINDINGS,
+  ageDumbbellSelfDescribed,
   ageIndexPair,
   agePeers,
   annotatedSimilarityMap,
   areaBrandShifts,
+  austinLiftMap,
   blockDna,
+  categoryTasteMap,
+  coarseLiftMap,
+  codedSimilarityMap,
   domainLists,
   marginBrands,
+  marketSlope,
   metroSplit,
+  metroSplitSelfDescribed,
+  momentumStrip,
   nearestAudiences,
+  neighbourhood,
+  nearestWithRivals,
   priorsScorecard,
   shareGrid,
   similarityMap,
   sponsorQuadrant,
   sponsorSlate,
+  tastePosition,
+  tasteTwins,
+  tastePositionNoSignal,
+  tenantSlope,
 } from "../../../components/figures/fixtures";
 
 // Development gallery: every figure family in every mode, drawn from invented fixtures (D29), laid
@@ -48,8 +72,9 @@ export default function FiguresGallery() {
         <span className="type-label text-accent">Culture Terminal · dev</span>
         <h1 className="m-0 font-serif text-[32px] leading-[40px] font-medium text-ink">Figures</h1>
         <p className="m-0 max-w-reading type-body text-dim">
-          MatrixGrid, RankedTable, DivergingBars, QuadrantScatter and ScorecardTable in every mode, from invented
-          fixtures. Each figure has a table view and a method link; nothing here is Qloo data.
+          All nine families (MatrixGrid, RankedTable, DivergingBars, QuadrantScatter, ScorecardTable, SlopeChart,
+          LiftMap, MomentumStrip and PositionCard) in every mode, then the P1 figures (Constellation, CategoryMap and
+          TwinCards), from invented fixtures. Each figure has a table view and a method link; nothing here is Qloo data.
         </p>
       </header>
 
@@ -287,15 +312,341 @@ export default function FiguresGallery() {
         </Column>
       </Section>
 
-      <Section id="exhibit" title="Exhibit" note="The dispatcher picks the family from the dataset kind and carries the fixed caption">
+      <Section id="a06" title="A06 · Brief, location" note="The lift map (keys 1/2/3 switch RAW / BASE / LIFT), the lift per neighbourhood as dots, the tenant slope">
+        <Column>
+          <LiftMap
+            data={austinLiftMap.payload}
+            number={19}
+            id="fig-19"
+            title="The fit sits east of the interstate, strongest in Govalle"
+            caption="Lift vs the restaurant baseline (1.00×) for a natural-wine and vinyl audience. Circle size = lift; confidence is the cells' opacity."
+            source={SRC.heatmap}
+            formulaId="lift.area"
+          />
+          <DivergingBars
+            data={geoLiftBars(austinLiftMap.payload)}
+            display="dumbbell"
+            labelHeader="Neighbourhood"
+            directionLabels={["← UNDER", "OVER →"]}
+            baselineLabel="1.00"
+            number={20}
+            id="fig-20"
+            title="Downtown sits just under the baseline; the east side over-indexes"
+            caption="Lift vs the restaurant baseline; dots right of the 1.00 line over-index. Two neighbourhoods have too few cells to claim a lift."
+            source={SRC.heatmap}
+            formulaId="lift.area"
+          />
+          <SlopeChart
+            data={tenantSlope.payload}
+            number={21}
+            id="fig-21"
+            title="A wine bar and a record shop climb most from the city to the site"
+            caption="FIT among the 9 brands ranked in both calls, Austin → East Cesar Chavez. Highlighted: the three largest climbs."
+            source={SRC.tenant}
+            formulaId="tenant.fit"
+          />
+        </Column>
+      </Section>
+
+      <Section id="liftmap" title="LiftMap" note="A coarse map (no neighbourhood claims) opens on RAW, press 3 for its faint lift; the half-width map; the static schematic without map code">
+        <Column>
+          <LiftMap
+            data={coarseLiftMap.payload}
+            number={22}
+            id="fig-22"
+            title="At geohash 4 the map cannot name a neighbourhood"
+            caption="Coarse cells only: the precision factor is 0, so no neighbourhood gets a lift."
+            source={SRC.heatmap}
+            formulaId="lift.confidence"
+          />
+          <div className="grid gap-6 sm:grid-cols-2">
+            <LiftMap
+              data={austinLiftMap.payload}
+              width={328}
+              number={23}
+              id="fig-23"
+              title="The map at half width"
+              caption="The compact map labels four neighbourhoods."
+              source={SRC.heatmap}
+              formulaId="lift.area"
+            />
+            <LiftMap
+              data={austinLiftMap.payload}
+              width={328}
+              interactive={false}
+              initialMode="BASE"
+              number={24}
+              id="fig-24"
+              title="Static schematic"
+              caption="interactive={false}: the server drawing, without the map code."
+              source={SRC.heatmap}
+              formulaId="lift.area"
+            />
+          </div>
+        </Column>
+      </Section>
+
+      <Section id="slope" title="SlopeChart" note="Three contexts with a dropped point; the tenant slope at half width">
+        <Column>
+          <SlopeChart
+            data={marketSlope.payload}
+            number={25}
+            id="fig-25"
+            title="Larkspur Kombucha gains most outside the national ranking"
+            caption="FIT within each market's call, re-ranked over the slate. One brand was dropped from the Austin call."
+            source={SRC.slate}
+            formulaId="slate.market_alignment"
+          />
+          <div className="w-[328px] max-w-full">
+            <SlopeChart
+              data={tenantSlope.payload}
+              width={328}
+              number={26}
+              id="fig-26"
+              title="Tenant slope, half width"
+              caption="Without the score column."
+              source={SRC.tenant}
+              formulaId="tenant.rank_shift"
+            />
+          </div>
+        </Column>
+      </Section>
+
+      <Section id="momentum" title="MomentumStrip" note="Rising, flat and declining series, a scale break, a clipped outlier, NO SIGNAL and no data">
+        <Column>
+          <MomentumStrip
+            data={momentumStrip.payload}
+            asOf="2026-10-14"
+            number={27}
+            id="fig-27"
+            title="Juniper Cola rose through the window; Brand Beta fell"
+            caption="Population percentile by ISO week, Mar–Aug 2026. Historical: nothing after the window is drawn."
+            source={SRC.trending}
+            formulaId="mom.delta_26w"
+          />
+          <div className="w-[328px] max-w-full">
+            <MomentumStrip
+              data={momentumStrip.payload}
+              width={328}
+              number={28}
+              id="fig-28"
+              title="The strip at half width"
+              source={SRC.trending}
+              formulaId="mom.label"
+            />
+          </div>
+        </Column>
+      </Section>
+
+      <Section id="position" title="PositionCard" note="Five axes with peer ranks and badges, no composite; the margin card with momentum unavailable">
+        <div className="flex flex-wrap items-start gap-[60px]">
+          <Column>
+            <PositionCard
+              data={tastePosition.payload}
+              figureHrefs={{ D1: "#fig-2", D8: "#fig-9", D7: "#fig-8", D19: "#fig-27" }}
+              number={29}
+              id="fig-29"
+              title="Distinctive and young, mid-pack on reach"
+              caption="Each axis is measured against the same 6 peers; there is no overall score."
+              source={SRC.position}
+              formulaId="subs.distinctiveness"
+            />
+          </Column>
+          <div className="flex w-sidenotes max-w-full flex-col gap-7">
+            <PositionCard
+              data={tastePositionNoSignal.payload}
+              size="margin"
+              aside="Among 7"
+              number={30}
+              id="fig-30"
+              title="Momentum has no signal"
+              source={SRC.position}
+            />
+          </div>
+        </div>
+      </Section>
+
+      <Section id="contract" title="Contract fields" note="AxisItem.code, RankedRow.comparison, and BarsPayload.display / baseline / evenBand, with no display options passed">
+        <div className="flex flex-wrap items-start gap-6">
+          <div className="w-[272px] max-w-full">
+            <MatrixGrid
+              data={codedSimilarityMap.payload}
+              number={31}
+              id="fig-31"
+              title="Codes from the payload"
+              caption="JNP, ALF, BET … come from AxisItem.code."
+              showMargin={false}
+              source={SRC.pairs}
+              formulaId="subs.similarity"
+            />
+          </div>
+          <div className="w-[384px] max-w-full">
+            <RankedTable
+              data={nearestWithRivals.payload}
+              width={384}
+              number={32}
+              id="fig-32"
+              title="Grey rows from the payload"
+              caption="The rivals carry RankedRow.comparison; no comparisonKeys passed."
+              source={SRC.insights}
+              formulaId="subs.similarity"
+            />
+          </div>
+          <Column>
+            <DivergingBars
+              data={metroSplitSelfDescribed.payload}
+              labelHeader="Metro"
+              number={33}
+              id="fig-33"
+              title="A split the payload asked for, with a ±.03 even band"
+              caption="display, baseline and evenBand come from the payload."
+              source={SRC.computed}
+              formulaId="share.pair_split"
+            />
+            <DivergingBars
+              data={ageDumbbellSelfDescribed.payload}
+              labelHeader="Age"
+              baselineLabel="0 = avg"
+              number={34}
+              id="fig-34"
+              title="A dumbbell the payload asked for"
+              caption="display: dumbbell, baseline 0, from the payload."
+              source={SRC.demographics}
+              formulaId="dna.age_index"
+            />
+          </Column>
+        </div>
+      </Section>
+
+      <Section id="exhibit" title="Exhibit" note="The dispatcher picks the family from the dataset kind and carries the fixed caption; one envelope per kind">
         <Column>
           <Exhibit dataset={sponsorSlate} id="fig-17" number={17} title="A Slate envelope through Exhibit" display={{ Slate: { tick: 0.7 } }} />
           <FigurePending id="fig-18" number={18} title="A figure still computing" note="Plot · computing in QUANT" />
+          {EXHIBIT_KINDS.map((dataset, i) => (
+            <Exhibit key={dataset.id} dataset={dataset} id={`fig-${35 + i}`} number={35 + i} display={{ GeoLift: { interactive: false } }} />
+          ))}
+        </Column>
+      </Section>
+
+      <Section
+        id="constellation"
+        title="Constellation"
+        note="S9 in P1: two seeds with explainability edges, a domain the budget skipped and a gated result; one seed with spokes at half width. Tab to a domain to name all of it"
+      >
+        <Column>
+          <Constellation
+            data={neighbourhood.payload}
+            seeds={NEIGHBOURHOOD_SEEDS}
+            halo={NEIGHBOURHOOD_HALO}
+            number={45}
+            id="fig-45"
+            title="Both brands live next to slow radio and outdoor goods"
+            caption="Cultural neighbourhood of the two seeds. Distance from the centre = 1 − FIT within each domain's call; ringed: the domain's under-the-radar pick."
+            source={SRC.neighbourhood}
+            formulaId="xdom.edge"
+          />
+          <div className="w-[328px] max-w-full">
+            <Constellation
+              data={domainLists.payload}
+              seeds={[{ ref: "R1", label: "Juniper Cola" }]}
+              width={328}
+              number={46}
+              id="fig-46"
+              title="One seed, half width"
+              caption="Spokes carry the distance when there are no edges."
+              source={SRC.insights}
+              formulaId="xdom.under_the_radar"
+            />
+          </div>
+        </Column>
+      </Section>
+
+      <Section
+        id="taste-map"
+        title="CategoryMap"
+        note="Category Taste Map: 13 entities by classical MDS on 1 − similarity, near-substitutes joined, stress on the map; half width with coded labels. Tab to a point for its nearest peer"
+      >
+        <Column>
+          <CategoryMap
+            data={categoryTasteMap.payload}
+            number={47}
+            id="fig-47"
+            title="Juniper Cola sits with the colas, a long way from the ales"
+            caption="Category Taste Map: nearer means a more similar audience. Ringed: the subject. Lines join near-substitutes."
+            source={SRC.tasteMap}
+            formulaId="subs.similarity"
+          />
+          <div className="w-[328px] max-w-full">
+            <CategoryMap
+              data={categoryTasteMap.payload}
+              width={328}
+              number={48}
+              id="fig-48"
+              title="The taste map at half width"
+              source={SRC.tasteMap}
+              formulaId="subs.near_substitutes"
+            />
+          </div>
+        </Column>
+      </Section>
+
+      <Section
+        id="twins"
+        title="TwinCards"
+        note="S11 in P1: East Nashville and its Austin twin with mirrored DNA bars; a runner-up drawn against the same source; a candidate the budget never measured at half width"
+      >
+        <Column>
+          <TwinCards
+            data={tasteTwins.payload}
+            number={49}
+            id="fig-49"
+            title="East Nashville's twin in Austin is Holly"
+            caption="Rank gain of each tag over its own city (d, clipped at ±25). Twin score = Spearman ρ between the two areas' d over 14 tags."
+            source={SRC.twins}
+            formulaId="block.rank_delta"
+          />
+          <TwinCards
+            data={tasteTwins.payload}
+            candidateKey="east-cesar-chavez"
+            maxRows={8}
+            number={50}
+            id="fig-50"
+            title="East Cesar Chavez shares the wine, not the brunch"
+            caption="The third candidate against the same source."
+            source={SRC.twins}
+            formulaId="block.rank_delta"
+          />
+          <div className="w-[328px] max-w-full">
+            <TwinCards
+              data={tasteTwins.payload}
+              candidateKey="rosedale"
+              number={51}
+              id="fig-51"
+              title="Rosedale was never measured"
+              caption="No bars and no callouts for a candidate without a BLOCK call: only its reason."
+              source={SRC.twins}
+              formulaId="block.rank_delta"
+            />
+          </div>
         </Column>
       </Section>
     </main>
   );
 }
+
+/** One envelope of every DatasetKind, in DatasetKind order. */
+const EXHIBIT_KINDS = [
+  similarityMap,
+  sponsorQuadrant,
+  blockDna,
+  tenantSlope,
+  austinLiftMap,
+  nearestAudiences,
+  sponsorSlate,
+  momentumStrip,
+  priorsScorecard,
+  tastePosition,
+] as const;
 
 function Section({ id, title, note, children }: { id: string; title: string; note: string; children: ReactNode }) {
   return (

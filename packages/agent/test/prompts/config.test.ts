@@ -40,13 +40,13 @@ const Lat = z.number().min(-90).max(90);
 const Lon = z.number().min(-180).max(180);
 
 const TagStatus = z.enum(["verified", "research", "unverified"]);
-/** What a probe gate exercised the tag as: a gate verifies one use, not every use (PROBE_FINDINGS, Not covered). */
-const VerifiedAs = z.enum(["heatmap_signal", "place_filter"]);
+/** What a probe exercised the tag as: a probe verifies one use, not every use (PROBE_FINDINGS, Not covered). */
+const VerifiedAs = z.enum(["heatmap_signal", "place_filter", "brand_filter"]);
 const Tag = z
   .strictObject({
     urn: z.string().regex(/^urn:tag:[a-z_]+:[a-z_]+:[a-z0-9_:]+$/),
     status: TagStatus,
-    verified_by: z.string().regex(/^G\d{1,2}$/).nullable(),
+    verified_by: z.string().regex(/^(?:G\d{1,2}|P5)$/).nullable(),
     verified_as: VerifiedAs.optional(),
   })
   .refine((t) => (t.status === "verified") === (t.verified_by !== null), {
@@ -204,6 +204,8 @@ describe("config/categories.json", () => {
     expect(verified.sort()).toEqual([
       "urn:tag:category:place:cafe G10 place_filter",
       "urn:tag:genre:place:restaurant G6 heatmap_signal",
+      "urn:tag:genre:place:restaurant:bar P5 heatmap_signal",
+      "urn:tag:genre:place:restaurant:coffee_shop P5 heatmap_signal",
     ]);
     expect(isTaxonomyTag(categories.baseline.urn)).toBe(true);
   });
@@ -254,10 +256,17 @@ describe("config/sponsor_categories.json", () => {
   });
 
   it("claims no verified tag the probe did not verify", () => {
+    const verified: string[] = [];
     for (const [key, c] of Object.entries(sponsors.categories)) {
-      expect(c.tags.every((t) => t.status !== "verified"), key).toBe(true);
+      for (const t of c.tags) if (t.status === "verified") verified.push(`${key} ${t.urn} ${t.verified_by} ${t.verified_as}`);
       if (c.tags.length === 0) expect(c.tag_status, key).toBe("unverified");
+      // Several filter.tags values combine as a union (P5), so a category names one tag.
+      expect(c.tags.length, key).toBeLessThanOrEqual(1);
     }
+    expect(verified.sort()).toEqual([
+      "beer urn:tag:product_category:qloo:beer P5 brand_filter",
+      "energy_drinks urn:tag:genre:brand:food_and_beverage:drinks:energy_drink P5 brand_filter",
+    ]);
   });
 });
 

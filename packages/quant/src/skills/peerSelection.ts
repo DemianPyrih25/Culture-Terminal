@@ -37,9 +37,9 @@ export function isOutsideCategory(entity: { tags: readonly EntityTagRef[] }, cat
   return categoryTagId !== null && entity.tags.length > 0 && !entity.tags.some((t) => t.tagId === categoryTagId);
 }
 
-/** The §5.2 quality gate; a result without a popularity is kept (a missing field is not an artifact). */
+/** The §5.2 quality gate; a result without a popularity (missing or null) is kept (a missing field is not an artifact). */
 export function passesQualityGate(r: QlooEntity): boolean {
-  return r.popularity === undefined || r.popularity >= QUALITY_GATE_MIN_POPULARITY;
+  return r.popularity === undefined || r.popularity === null || r.popularity >= QUALITY_GATE_MIN_POPULARITY;
 }
 
 export function draftFromInsight(r: QlooEntity): EntityDraft {

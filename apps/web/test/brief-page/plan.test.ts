@@ -2,6 +2,7 @@
 // 1, 2, 3 down a finished brief; figures paired when they fit half the column; and the margin layout
 // that pushes a row's notes clear of the ones above.
 import { describe, expect, it, vi } from "vitest";
+import { jobRunEvents } from "../../app/dev/brief/job-runs";
 import { buildBriefModel, type Inline } from "../../lib/brief";
 import { citedIn, citingRows, expectedRivalRefs, figureRows, isCompactFigure, placeNotes, ROW } from "../../components/brief/plan";
 import { stackNotes } from "../../components/brief/sidenote-layout";
@@ -45,9 +46,23 @@ describe("sidenote placement", () => {
 });
 
 describe("figure rows", () => {
-  it("pairs small similarity matrices and leaves a lone one on its own row", () => {
-    expect(final.evidence.figures.every(isCompactFigure)).toBe(true);
-    expect(figureRows(final.evidence.figures).map((row) => row.map((f) => f.number))).toEqual([[1, 2], [3]]);
+  it("pairs small similarity matrices and leaves a lone one, and every other figure, on its own row", () => {
+    const compact = final.evidence.figures.filter(isCompactFigure);
+    const wide = final.evidence.figures.filter((f) => !isCompactFigure(f));
+    expect(compact.length).toBeGreaterThanOrEqual(3);
+    // A Taste Position card, a lift map or a slope is never compact.
+    for (const f of wide) expect(f.kind).not.toBe("Matrix");
+    const [a, b, c] = compact;
+    if (!a || !b || !c) throw new Error("fewer than three matrices");
+    const key = (rows: (typeof a)[][]) => rows.map((row) => row.map((f) => f.datasetId));
+    expect(key(figureRows([a, b, c]))).toEqual([[a.datasetId, b.datasetId], [c.datasetId]]);
+    // A wide figure between them breaks the pair: the synthetic site-selection brief's lift map, which
+    // is there whatever the recorded sample draws.
+    const site = jobRunEvents("site_selection");
+    const map = buildBriefModel(stateOf(site), after(site)).evidence.figures.find((f) => f.kind === "GeoLift");
+    if (!map) throw new Error("no lift map in the site-selection brief");
+    expect(isCompactFigure(map)).toBe(false);
+    expect(key(figureRows([a, map, b, c]))).toEqual([[a.datasetId], [map.datasetId], [b.datasetId, c.datasetId]]);
   });
 
   it("greys the rivals the priors named: the secondary mentions that matched", () => {

@@ -169,6 +169,15 @@ const SPONSOR_BRANDS: Readonly<Record<SponsorCategory, readonly [string, string]
 
 /** Market ids the tools may use (MarketId); nashville and austin are also gazetteer metros. */
 export const MARKETS = ["nashville", "austin", "denver", "portland", "chicago", "atlanta"] as const;
+/** City and state per market, as config/metros.json labels them and the agent's run context lists them. */
+const MARKET_LABEL: Readonly<Record<(typeof MARKETS)[number], string>> = {
+  nashville: "Nashville, TN",
+  austin: "Austin, TX",
+  denver: "Denver, CO",
+  portland: "Portland, OR",
+  chicago: "Chicago, IL",
+  atlanta: "Atlanta, GA",
+};
 const GAZETTEER_METROS: readonly string[] = ["nashville", "austin"];
 /** Invented audience leaves in the allowlisted URN shape. */
 export const AUDIENCES = [
@@ -1060,9 +1069,9 @@ function runContextText(registry: Registry): string {
     "REGISTRY (entity refs):",
     "| ref | name | type | match |",
     ...rows,
-    `MARKETS: ${MARKETS.join(", ")}`,
+    `MARKETS: ${MARKETS.map((m) => `${m} (${MARKET_LABEL[m]})`).join(", ")}`,
     `AUDIENCES: ${AUDIENCES.join(", ")}`,
-    "AREAS: none for this job",
+    "AREAS: none (the question names no gazetteer metro, so no area tool applies)",
     "OPENING SCAN (running now; its digests arrive with your wave-1 results): peer_landscape discovery for R1 (2 calls), audience_dna for R1 (1 call), destination_affinity for R1 (1 call).",
     "",
     `<user_question>${QUESTION}</user_question>`,

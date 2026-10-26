@@ -10,6 +10,7 @@ import { createMemoryQlooStore, qlooEventFrom } from "@ct/qloo";
 import { normaliseName, searchParams } from "@ct/quant";
 import { afterEach, describe, expect, it } from "vitest";
 import { runAgentCommand, type AgentCliDeps } from "./cli/agent-cli";
+import { memoryKv } from "./cli/localities";
 import { syntheticResult } from "./cli/fixtures";
 import { memoryIo } from "./cli/io";
 
@@ -116,6 +117,16 @@ describe("run-agent", () => {
     expect(options?.pins).toEqual({ "brand alpha": "ent-alpha-1" });
     expect(options?.limits).toEqual(DEFAULT_RUN_LIMITS);
     expect(options?.runId).toBe("cli-20261022T031522123Z");
+  });
+
+  it("hands runAgent the pinned market localities from kv, and none without kv", async () => {
+    const agent = scriptedAgent((o) => syntheticResult(o.runId));
+    const kv = memoryKv({ "metro_localities.mock": { nashville: { entityId: "loc-nashville-mock", label: "Nashville" } } });
+    await cli([QUESTION, "--yes"], { runAgent: agent.run, kv });
+    expect(await agent.seen[0]?.localities?.market("nashville")).toEqual({ entityId: "loc-nashville-mock", label: "Nashville" });
+    expect(await agent.seen[0]?.localities?.market("austin")).toBeNull();
+    await cli([QUESTION, "--yes"], { runAgent: agent.run, kv: null });
+    expect(agent.seen[1]?.localities).toBeNull();
   });
 
   it("refuses to start without ANTHROPIC_API_KEY", async () => {

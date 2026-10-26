@@ -359,7 +359,8 @@ export function toInsightsEntity(rec: EntityRecord, extra: { affinity: number | 
     type: "urn:entity",
     subtype: rec.type,
     properties: properties(rec, true),
-    popularity: rec.popularity,
+    // Some live tv_show insight rows carry popularity: null (P5).
+    popularity: rec.type === "urn:entity:tv_show" && unit("null-popularity", rec.id) < 1 / 15 ? null : rec.popularity,
     tags,
     disambiguation: rec.disambiguation,
   };

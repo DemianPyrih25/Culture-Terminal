@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { EntityType, Flag, KitWorkflow, MetroId, Phase, Pillar, SkillId, SkillStatus, ToolMnemonic } from "./enums";
+import type { EntityType, Flag, KitWorkflow, MarketId, MetroId, Phase, Pillar, SkillId, SkillStatus, ToolMnemonic } from "./enums";
 import type { EventInput } from "./events";
 import type { DatasetId, EntityRef, EvidenceId, FindingId, MetricId, TagRef } from "./ids";
 import type { DatasetEnvelope, Evidence, Finding, Metric, QlooCallMeta, QlooResult } from "./ledger";
@@ -112,6 +112,31 @@ export interface GeoApi {
   boundarySource(metro: MetroId): string;
 }
 
+// Market localities (implemented by the agent from kv) --------------------------------------------------
+
+/** A market's pinned Qloo locality (kv, never in git, D29); the id stays server-side and never reaches the model. */
+export interface MarketLocality {
+  entityId: string;
+  /** Display name, e.g. "Nashville". */
+  label: string;
+}
+
+/**
+ * The pinned localities behind signal.location and filter.location for metro, city and market
+ * contexts (Austin is pinned by hand: its name is ambiguous). `market` resolves null when nothing is
+ * pinned for the id and rejects when the lookup itself fails, so a skill can tell the two apart.
+ */
+export interface LocalityApi {
+  /** The pinned locality for a market or gazetteer metro id (every MetroId is a MarketId). */
+  market(id: MarketId): Promise<MarketLocality | null>;
+}
+
+/** What estimateCalls may use beyond the probe and the registry, so location skills can key their requests. */
+export interface EstimateEnv {
+  localities: LocalityApi | null;
+  geo: GeoApi | null;
+}
+
 // Registry (implemented by the agent) ------------------------------------------------------------------
 
 export interface RegisteredEntity {
@@ -170,6 +195,8 @@ export interface SkillCtx {
   qloo: QlooApi;
   ledger: Ledger;
   geo: GeoApi;
+  /** Pinned market localities; null when the run has none (metro, city and market contexts are then unavailable). */
+  localities: LocalityApi | null;
   registry: EntityRegistry;
   emit: Emit;
   budget: RunBudget;
@@ -198,8 +225,12 @@ export interface Skill<I> {
   kitWorkflows: readonly KitWorkflow[];
   /** The tool's input schema (ANALYST_TOOLS[id].input). */
   input: z.ZodType<I>;
-  /** Network calls this input would cost now, counting cached requests as free. The registry maps refs to entity ids. */
-  estimateCalls(input: I, probe: CacheProbe, registry: EntityRegistry): Promise<number>;
+  /**
+   * Network calls this input would cost now, counting cached requests as free. The registry maps refs
+   * to entity ids; `env` lets location skills key their requests. Without it, a request that needs a
+   * locality or an area counts as one call.
+   */
+  estimateCalls(input: I, probe: CacheProbe, registry: EntityRegistry, env?: EstimateEnv): Promise<number>;
   run(input: I, ctx: SkillCtx): Promise<SkillResult>;
   /** The skill's fixed method limitations (SKILL_LIMITATIONS); flag sentences come from FLAG_TEXT via buildLimitations. */
   limitations(flags: readonly Flag[]): string[];

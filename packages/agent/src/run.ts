@@ -2,6 +2,7 @@ import type {
   Emit,
   Intent,
   Lane,
+  LocalityApi,
   NumbersTraced,
   Report,
   RunLimits,
@@ -50,6 +51,11 @@ export interface AgentRunOptions {
   pins?: Readonly<Record<string, string>>;
   /** A child run launched from next_moves (§7.3): the parent and its case summary. */
   parent?: { runId: string; caseSummary: string } | null;
+  /**
+   * The pinned Qloo locality per market (kv, never in git, D29), behind metro, city and market
+   * contexts and the lift map. Absent or null: those contexts come back unavailable.
+   */
+  localities?: LocalityApi | null;
   /** False forces the fail-closed path (V7: insufficient_evidence). Defaults to true. */
   qlooEnabled?: boolean;
   /**

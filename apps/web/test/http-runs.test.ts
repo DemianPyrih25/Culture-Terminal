@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QUESTION_MAX_CHARS } from "@ct/contracts";
 import { RunManagerError, type RunManagerErrorCode } from "../server/run-manager";
 import { mockQlooClient } from "./support/agent";
+import { testAnswers, testModes } from "./support/protection";
 
 vi.mock("server-only", () => ({}));
 
@@ -23,7 +24,8 @@ beforeEach(() => {
   stub.startFakeRun.mockClear();
   stub.startAgentRun.mockClear();
   stub.answerPicker.mockClear();
-  g.__ctContainer = { runs: stub };
+  // Live, nothing in the answer cache; the human check is off (no Turnstile keys in tests).
+  g.__ctContainer = { runs: stub, modes: testModes(), answers: testAnswers() };
 });
 
 afterEach(() => {
@@ -57,9 +59,14 @@ describe("POST /api/runs", () => {
   it("starts an agent run on the public lane from {question, parentRunId}", async () => {
     const res = await startRun(postJson({ question: "  Is Brand Alpha a moat?  ", parentRunId: "run-parent-0001" }));
     expect(await answer(res)).toEqual({ status: 201, body: { runId: "run-agent-0001" } });
-    expect(stub.startAgentRun).toHaveBeenCalledWith({ question: "Is Brand Alpha a moat?", lane: "public", parentRunId: "run-parent-0001" });
+    expect(stub.startAgentRun).toHaveBeenCalledWith({
+      question: "Is Brand Alpha a moat?",
+      lane: "public",
+      parentRunId: "run-parent-0001",
+      client: null,
+    });
     await startRun(postJson({ question: "Is Brand Alpha a moat?", parentRunId: null }));
-    expect(stub.startAgentRun).toHaveBeenLastCalledWith({ question: "Is Brand Alpha a moat?", lane: "public", parentRunId: null });
+    expect(stub.startAgentRun).toHaveBeenLastCalledWith({ question: "Is Brand Alpha a moat?", lane: "public", parentRunId: null, client: null });
     expect(stub.startFakeRun).not.toHaveBeenCalled();
     expect(stub.answerPicker).not.toHaveBeenCalled();
   });
@@ -67,7 +74,7 @@ describe("POST /api/runs", () => {
   it("answers a picker from {pick: {runId, key}} with the opaque key alone", async () => {
     const res = await startRun(postJson({ pick: { runId: "run-needs-0001", key: KEY } }));
     expect(await answer(res)).toEqual({ status: 201, body: { runId: "run-picked-0001" } });
-    expect(stub.answerPicker).toHaveBeenCalledWith({ runId: "run-needs-0001", key: KEY, lane: "public" });
+    expect(stub.answerPicker).toHaveBeenCalledWith({ runId: "run-needs-0001", key: KEY, lane: "public", client: null });
     expect(stub.startAgentRun).not.toHaveBeenCalled();
   });
 
@@ -191,7 +198,7 @@ describe("GET /api/health without a database", () => {
   it("answers 503 but still reports the mode, the Qloo quota and the LLM cap", async () => {
     vi.stubEnv("LLM_DAILY_USD_CAP", "");
     // A database handle whose every query fails.
-    g.__ctContainer = { db: {}, runs: stub, qloo: mockQlooClient(), anthropic: null };
+    g.__ctContainer = { db: {}, runs: stub, qloo: mockQlooClient(), anthropic: null, modes: testModes() };
     g.__ctMigrationsApplied = true;
     const { status, body } = await answer(await health());
     expect(status).toBe(503);

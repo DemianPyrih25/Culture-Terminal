@@ -1,3 +1,4 @@
+import { METRO_LABEL } from "@ct/contracts";
 import type {
   CacheStatus,
   EvidenceId,
@@ -34,8 +35,13 @@ export interface Ledger {
   /** Qloo call id → the evidence bundles that used it. */
   evidenceByCall: Map<string, EvidenceId[]>;
   toolCalls: Map<string, ToolCallState>;
-  /** R# → entity name, from the resolution gate and the datasets. */
+  /** R# → entity name, from the resolution gate and the datasets; T# → tag name, from the datasets. */
   refNames: Map<string, string>;
+  /**
+   * Place subjects → their names: metro and market ids ("austin" → "Austin"), gazetteer neighbourhoods
+   * (from a lift map) and the area a Block DNA figure read. Metrics name places by id in `subjectRefs`.
+   */
+  placeNames: Map<string, string>;
   /** The trending window the note uses, if any. */
   window: TrendWindow | null;
   /** "<type> <key>" → seq of the latest event that carried it. */
@@ -43,8 +49,12 @@ export interface Ledger {
 }
 
 const REF = /^R[1-9]\d*$/;
+const TAG_REF = /^T[1-9]\d*$/;
 
-/** Walks plain JSON and records every `{ref: "R#", label}` pair it finds (axis items, points, series). */
+/**
+ * Walks plain JSON and records every `{ref: "R#", label}` pair it finds (axis items, points, series), and
+ * every `{tagRef: "T#", label}` (Block DNA bars, tag rows).
+ */
 function collectRefLabels(value: unknown, out: Map<string, string>, depth = 0): void {
   if (depth > 8 || value === null || typeof value !== "object") return;
   if (Array.isArray(value)) {
@@ -52,9 +62,12 @@ function collectRefLabels(value: unknown, out: Map<string, string>, depth = 0): 
     return;
   }
   const record = value as Record<string, unknown>;
-  const ref = record.ref;
   const label = record.label;
-  if (typeof ref === "string" && REF.test(ref) && typeof label === "string" && !out.has(ref)) out.set(ref, label);
+  if (typeof label === "string") {
+    for (const ref of [record.ref, record.tagRef]) {
+      if (typeof ref === "string" && (REF.test(ref) || TAG_REF.test(ref)) && !out.has(ref)) out.set(ref, label);
+    }
+  }
   for (const v of Object.values(record)) collectRefLabels(v, out, depth + 1);
 }
 
@@ -74,6 +87,31 @@ export function refsIn(value: unknown, out: string[] = [], depth = 0): string[] 
   }
   if (typeof value === "object") for (const v of Object.values(value)) refsIn(v, out, depth + 1);
   return out;
+}
+
+/** Place names the datasets carry: lift map neighbourhoods, slate markets, metro axes and Block DNA areas. */
+function collectPlaceNames(state: RunState, out: Map<string, string>): void {
+  for (const [id, label] of Object.entries(METRO_LABEL)) out.set(id, label);
+  for (const d of Object.values(state.datasets)) {
+    const data = d.data;
+    if (!data) continue;
+    switch (data.kind) {
+      case "GeoLift":
+        for (const n of data.payload.neighbourhoods) out.set(n.id, n.name);
+        break;
+      case "Slate":
+        for (const m of data.payload.markets) out.set(m.id, m.label);
+        break;
+      case "Bars":
+        if (data.payload.method !== null) for (const s of data.payload.series) out.set(s.key, s.label);
+        break;
+      case "Matrix":
+        for (const a of [...data.payload.rows, ...data.payload.cols]) if (a.group === "METRO" && !out.has(a.key)) out.set(a.key, a.label);
+        break;
+      default:
+        break;
+    }
+  }
 }
 
 function metricWindow(state: RunState): TrendWindow | null {
@@ -100,6 +138,9 @@ export function buildLedger(state: RunState): Ledger {
   for (const r of state.resolves) if (r.ref && r.name) refNames.set(r.ref, r.name);
   for (const d of Object.values(state.datasets)) if (d.data) collectRefLabels(d.data.payload, refNames);
 
+  const placeNames = new Map<string, string>();
+  collectPlaceNames(state, placeNames);
+
   const arrival = new Map<string, number>();
   for (const t of state.timeline) if (t.key !== null) arrival.set(`${t.type} ${t.key}`, t.seq);
 
@@ -109,6 +150,7 @@ export function buildLedger(state: RunState): Ledger {
     evidenceByCall,
     toolCalls: new Map(state.toolCalls.map((t) => [t.toolCallId, t])),
     refNames,
+    placeNames,
     window: metricWindow(state),
     arrival,
   };
@@ -133,10 +175,18 @@ export function lastTs(state: RunState, type: RunEventType): string | null {
   return null;
 }
 
-/** "R1 Juniper Cola" when the name is known; other subject refs (markets, areas) unchanged. */
+const isLedgerRef = (ref: string) => REF.test(ref) || TAG_REF.test(ref);
+
+/** "R1 Juniper Cola" when the name is known; a place by its name ("Austin"); any other subject unchanged. */
 export function refText(ledger: Ledger, ref: string): string {
   const name = ledger.refNames.get(ref);
-  return name ? `${ref} ${name}` : ref;
+  if (name) return `${ref} ${name}`;
+  return ledger.placeNames.get(ref) ?? ref;
+}
+
+/** The margin's short form: an R# or T# bare, a place by its name; null for an id the brief cannot name. */
+function shortRef(ledger: Ledger, ref: string): string | null {
+  return isLedgerRef(ref) ? ref : (ledger.placeNames.get(ref) ?? null);
 }
 
 // Metrics ---------------------------------------------------------------------------------------------
@@ -278,7 +328,7 @@ export function requestHead(
   const filters = [...new Set(requests.map((r) => r.filterLabel).filter((f): f is string => f !== null))];
   const subjects = (refs && refs.length > 0 ? [...refs] : refsForCalls(ledger, requests.map((r) => r.qlooCallId)))
     .slice(0, 3)
-    .map((r) => (names ? refText(ledger, r) : r));
+    .flatMap((r) => (names ? [refText(ledger, r)] : (shortRef(ledger, r) ?? [])));
   const rows = requests.reduce<number | null>((sum, r) => (r.rows === null ? sum : (sum ?? 0) + r.rows), null);
   const parts = [`Qloo ${endpoints.length > 0 ? endpoints.join(" + ") : "request"}`];
   const what = filters.length > 0 ? filters.slice(0, 3).join(", ") : null;

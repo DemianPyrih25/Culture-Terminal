@@ -1,6 +1,7 @@
 // Startup migrations against a database that is not there yet: the server keeps serving, keeps
 // retrying in the background and reports 503 from /api/health until the schema is in place. And
-// the SIGTERM handler's order: drain, flush the Qloo client's writes, close the pool, exit.
+// the SIGTERM handler's order: drain, flush the Qloo client's writes, close the pool, exit. And the
+// housekeeping after migrations: old fake runs, old visitor hashes, and the market locality pins.
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
@@ -10,7 +11,10 @@ const fake = vi.hoisted(() => ({
   migrateUrl: vi.fn<() => Promise<void>>(),
   pingDb: vi.fn(async () => true),
   purgeRuns: vi.fn(async () => 0),
+  clearIpHashes: vi.fn(async () => 0),
   closeDb: vi.fn(async () => {}),
+  localitiesKey: "metro_localities",
+  localities: undefined as unknown,
 }));
 
 vi.mock("@ct/db", async (importOriginal) => ({
@@ -19,14 +23,18 @@ vi.mock("@ct/db", async (importOriginal) => ({
   migrateUrl: fake.migrateUrl,
   pingDb: fake.pingDb,
   purgeRuns: fake.purgeRuns,
+  clearIpHashes: fake.clearIpHashes,
   closeDb: fake.closeDb,
+  // Only the locality pins are answered here; any other key reads as unset.
+  getKv: async (_db: unknown, key: string) => (key === fake.localitiesKey ? fake.localities : undefined),
 }));
 
-const { installShutdownHandler, migrationsApplied, startServer } = await import("../server/startup");
+const { afterMigrations, HOUSEKEEPING_EVERY_MS, installShutdownHandler, migrationsApplied, startServer } = await import("../server/startup");
+const { log } = await import("../server/log");
 const { health } = await import("../server/http");
 
 const refused = () => Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:5433"), { code: "ECONNREFUSED" });
-const FLAGS = ["__ctServerStarted", "__ctMigrationsApplied", "__ctContainer"] as const;
+const FLAGS = ["__ctServerStarted", "__ctMigrationsApplied", "__ctContainer", "__ctHousekeeping"] as const;
 
 let sigtermBefore: ((...args: unknown[]) => void)[] = [];
 
@@ -34,7 +42,12 @@ beforeEach(() => {
   for (const key of FLAGS) delete (globalThis as Record<string, unknown>)[key];
   fake.migrateUrl.mockReset();
   fake.purgeRuns.mockClear();
+  fake.clearIpHashes.mockClear();
+  fake.localitiesKey = "metro_localities";
+  fake.localities = undefined;
   vi.stubEnv("NODE_ENV", "production");
+  // Live Qloo data, whatever the shell exports: QLOO_MOCK=1 reads the mock pins (the last housekeeping test).
+  vi.stubEnv("QLOO_MOCK", "");
   vi.stubEnv("RUN_MIGRATIONS", "");
   // Production requires DATABASE_URL; the mocked migrateUrl never connects to it.
   vi.stubEnv("DATABASE_URL", "postgres://ct:ct@db.invalid:5432/culture_terminal");
@@ -115,6 +128,77 @@ describe("startServer migrations", () => {
     expect(fake.migrateUrl).not.toHaveBeenCalled();
     expect(migrationsApplied()).toBe(true);
     expect(await healthBody()).toMatchObject({ status: 200, body: { ok: true, migrations: true } });
+  });
+});
+
+describe("housekeeping after migrations", () => {
+  it("purges old fake runs, clears old visitor hashes and says when the locality pins are missing", async () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    try {
+      afterMigrations();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fake.purgeRuns).toHaveBeenCalledTimes(1);
+      expect(fake.clearIpHashes).toHaveBeenCalledWith(expect.anything(), { olderThanMs: 25 * 3_600_000 });
+      const lines = warn.mock.calls.map((call) => JSON.stringify(call));
+      expect(lines.filter((line) => line.includes("metro_localities"))).toEqual([
+        expect.stringContaining('"missing":["nashville","austin"]'),
+      ]);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("clears old visitor hashes every hour after that, with no live run starting, on one timer per process", async () => {
+    expect(HOUSEKEEPING_EVERY_MS).toBe(3_600_000);
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    try {
+      afterMigrations();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fake.clearIpHashes).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(HOUSEKEEPING_EVERY_MS - 1);
+      expect(fake.clearIpHashes).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fake.clearIpHashes).toHaveBeenCalledTimes(2);
+      expect(fake.purgeRuns).toHaveBeenCalledTimes(2);
+      // A second pass (the background migration retry) sweeps at once but adds no second timer.
+      afterMigrations();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fake.clearIpHashes).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(HOUSEKEEPING_EVERY_MS);
+      expect(fake.clearIpHashes).toHaveBeenCalledTimes(4);
+      expect(fake.clearIpHashes).toHaveBeenLastCalledWith(expect.anything(), { olderThanMs: 25 * 3_600_000 });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("names only the unpinned markets of a partial value, never a locality id", async () => {
+    fake.localities = { nashville: { entityId: "invented-locality-0001", label: "Nashville" } };
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    try {
+      afterMigrations();
+      await vi.advanceTimersByTimeAsync(0);
+      const lines = warn.mock.calls.map((call) => JSON.stringify(call)).filter((line) => line.includes("metro_localities"));
+      expect(lines).toEqual([expect.stringContaining('"missing":["austin"]')]);
+      expect(lines.join(" ")).not.toContain("invented-locality");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("reads the mock pins on synthetic Qloo data, as the mock dev server runs", async () => {
+    vi.stubEnv("QLOO_MOCK", "1");
+    fake.localitiesKey = "metro_localities.mock";
+    fake.localities = { nashville: { entityId: "invented-locality-0001", label: "Nashville" } };
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    try {
+      afterMigrations();
+      await vi.advanceTimersByTimeAsync(0);
+      const lines = warn.mock.calls.map((call) => JSON.stringify(call)).filter((line) => line.includes("metro_localities"));
+      expect(lines).toEqual([expect.stringMatching(/"key":"metro_localities\.mock".*"missing":\["austin"\]/)]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

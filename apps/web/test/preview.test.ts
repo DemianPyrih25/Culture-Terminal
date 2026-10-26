@@ -1,6 +1,7 @@
 // The preview service (POST /api/preview) without a database: the agent tests' fake Anthropic
 // answers CLERK and the Qloo mock transport answers the gate. Invented entities only (D29).
 import { describe, expect, it, vi } from "vitest";
+import { planScan } from "@ct/agent";
 import { normalizeIntent } from "@ct/contracts";
 import type { PreviewOutcome, PreviewResponse } from "../server/preview";
 import {
@@ -65,9 +66,10 @@ describe("PreviewService", () => {
       scope: "US · peers & audience",
       lens: "Investment lens · the name matched exactly · vs its nearest peers",
     });
-    // The scan's Substitution Map is cold (2 discovery calls and 5 matrix slots), plus 8 follow-ups;
-    // the gate's lookup is cached now, so the run finds it there.
-    expect(body.estimate).toEqual({ networkCalls: 15, cachedCalls: 1, seconds: 45, quotaShare: 0.0079 });
+    // The scan is cold: the Substitution Map (2 discovery calls and 5 matrix slots), Audience DNA (its
+    // demographics batch and tag describe) and travel taste (1), plus 8 follow-ups; the gate's lookup
+    // is cached now, so the run finds it there.
+    expect(body.estimate).toEqual({ networkCalls: 18, cachedCalls: 1, seconds: 50, quotaShare: 0.0095 });
     expect(recordUsd).toHaveBeenCalledTimes(1);
     expect(recordUsd.mock.calls[0]?.[0]).toBeGreaterThan(0);
   });
@@ -94,6 +96,24 @@ describe("PreviewService", () => {
       ["Brand Beta", "exact"],
     ]);
     expect(estimate.cachedCalls).toBeGreaterThanOrEqual(2);
+  });
+
+  it("counts a site-selection scan's chained geo_lift at its typical cost", async () => {
+    const site = (metro: "austin" | null) =>
+      testIntent({
+        pillar: "location",
+        job: "site_selection",
+        mentions: [],
+        geo: { metro, area: null, unsupported_place: null },
+        constraints: { concepts: ["natural-wine bar"], sponsor_categories: [], domains: [], ages: [], notes: [] },
+        mnemonic: "NATURAL-WINE BAR SITE AUSTIN",
+      });
+    const estimateIn = async (metro: "austin" | null) =>
+      ok(await new PreviewService(previewDeps(clerkAnswering(clerkReply(site(metro))))).preview("Where should a natural-wine bar open?")).estimate;
+    const chained = planScan("site_selection", { intent: site("austin"), primary: null, peers: [] }).chained;
+    expect(chained.map((s) => s.tool)).toEqual(["geo_lift"]);
+    // Without a gazetteer metro nothing is chained; find_tags costs the same either way.
+    expect((await estimateIn("austin")).networkCalls - (await estimateIn(null)).networkCalls).toBe(chained[0]?.estimate);
   });
 
   it("reuses the reading of a question for ten minutes: same token, no CLERK call, no cap charge", async () => {
@@ -224,7 +244,7 @@ describe("PreviewService", () => {
     expect(await paused.preview(QUESTION)).toEqual({
       kind: "refused",
       code: "unavailable",
-      message: "Live analysis is paused. Recorded runs are still available.",
+      message: "Live analysis is paused. Showcases and replays still work.",
       retryAfterS: null,
       alreadyHave: hit,
     });

@@ -71,8 +71,11 @@ function useDatasets(figures: readonly BriefFigure[], ready: boolean): (DatasetE
   return figures.map((f) => f.dataset ?? (f.needsFetch ? fetched[f.datasetUrl] : null));
 }
 
-/** Display options the brief passes each family: matrix codes, the expected rivals in grey, the bars layout. */
-export function figureDisplay(dataset: DatasetEnvelope, rivals: readonly string[], width: number): ExhibitDisplay {
+/**
+ * Display options the brief passes each family: matrix codes, the expected rivals in grey, the bars layout,
+ * the column width, and for a Taste Position card the figures its axes link to (`hrefs`, by dataset id).
+ */
+export function figureDisplay(dataset: DatasetEnvelope, rivals: readonly string[], width: number, hrefs: Readonly<Record<string, string>> = {}): ExhibitDisplay {
   switch (dataset.kind) {
     case "Matrix": {
       const codes = Object.fromEntries(figureLegend(dataset).codes.map((c) => [c.key, c.code]));
@@ -89,7 +92,18 @@ export function figureDisplay(dataset: DatasetEnvelope, rivals: readonly string[
     }
     case "Quadrant":
       return { Quadrant: { width } };
-    default:
+    case "Slate":
+      return { Slate: { width } };
+    case "Slope":
+      return { Slope: { width } };
+    // The lift map always takes the whole reading column (A06), never half of it.
+    case "GeoLift":
+      return { GeoLift: { width: FULL_WIDTH } };
+    case "Momentum":
+      return { Momentum: { width } };
+    case "Position":
+      return { Position: { figureHrefs: hrefs } };
+    case "Scorecard":
       return {};
   }
 }
@@ -111,19 +125,36 @@ function FigureView({
   rivals,
   compact,
   ready,
+  hrefs,
 }: {
   figure: BriefFigure;
   dataset: DatasetEnvelope | null | undefined;
   rivals: readonly string[];
   compact: boolean;
   ready: boolean;
+  hrefs: Readonly<Record<string, string>>;
 }) {
   const { sources, animate } = useBrief();
   const sourceN = figure.source.requestId ? sources.find((s) => s.requestId === figure.source.requestId)?.n ?? null : null;
+  // A location figure's CODE FALLBACK notes close its source line ("… as points⁵", A06).
+  const fallbacks = figure.location?.fallbackNotes ?? [];
   const source: FigureSource = {
     text: figure.source.text,
     requestId: figure.source.requestId,
     href: sourceN !== null ? `#source-${sourceN}` : null,
+    after:
+      fallbacks.length > 0
+        ? fallbacks.map((n, i) => (
+            <span key={n} data-fallback-note={n}>
+              {i > 0 ? (
+                <sup aria-hidden="true" className="text-[0.62em] leading-none text-faint">
+                  ,
+                </sup>
+              ) : null}
+              <NoteRef n={n} />
+            </span>
+          ))
+        : undefined,
   };
   // The figure's own note closes its caption (A05), or its title while it has no caption yet.
   const captioned = figure.caption.length > 0;
@@ -154,9 +185,16 @@ function FigureView({
   const width = compact ? HALF_WIDTH : FULL_WIDTH;
   const style = { "--plot-min": `${compact ? 0 : MIN_FULL_PLOT}px` } as CSSProperties;
   return (
-    <div className={cx("flex h-full min-w-0 flex-col", styles.figure, animate && styles.settle)} style={style} data-figure={figure.number} data-kind={figure.kind}>
+    <div
+      className={cx("flex h-full min-w-0 flex-col", styles.figure, animate && styles.settle)}
+      style={style}
+      data-figure={figure.number}
+      data-kind={figure.kind}
+      data-place={figure.location?.place ?? undefined}
+      data-method={figure.location?.method ?? undefined}
+    >
       {dataset ? (
-        <Exhibit {...meta} dataset={dataset} display={figureDisplay(dataset, rivals, width)} />
+        <Exhibit {...meta} dataset={dataset} display={figureDisplay(dataset, rivals, width, hrefs)} />
       ) : (
         <FigurePending {...meta} note={pendingNote(figure.viz, dataset, ready)} />
       )}
@@ -174,12 +212,15 @@ export function FigureRow({
   rivals,
   first,
   ready,
+  hrefs = {},
 }: {
   figures: readonly BriefFigure[];
   notes: readonly number[];
   rivals: readonly string[];
   first: boolean;
   ready: boolean;
+  /** Each figure's anchor on the page by dataset id, for the links of a Taste Position card's axes. */
+  hrefs?: Readonly<Record<string, string>>;
 }) {
   const datasets = useDatasets(figures, ready);
   // A fetched dataset brings its codes: the figure's sidenote names them.
@@ -201,7 +242,7 @@ export function FigureRow({
       {/* A pair stretches to the taller figure and each frame fills its cell; with the frame's source line at its foot, both sit level (A05). */}
       <div className={cx("grid w-full gap-x-6 gap-y-8", styles.figures, pair ? "grid-cols-1 items-stretch sm:grid-cols-2" : "grid-cols-1 items-start")}>
         {figures.map((f, i) => (
-          <FigureView key={f.datasetId} figure={f} dataset={datasets[i]} rivals={rivals} compact={pair || isCompactFigure(f)} ready={ready} />
+          <FigureView key={f.datasetId} figure={f} dataset={datasets[i]} rivals={rivals} compact={pair || isCompactFigure(f)} ready={ready} hrefs={hrefs} />
         ))}
       </div>
     </BriefRow>

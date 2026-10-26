@@ -75,6 +75,8 @@ export const AxisItem = z.object({
   ref: EntityRefSchema.nullable(),
   /** Section the item belongs to, e.g. "AGE", "AUDIENCE", "METRO" in a share grid; null when unsectioned. */
   group: z.string().nullable(),
+  /** Short code for compact axes (MatrixGrid), e.g. "JC"; the reader derives one when absent. */
+  code: z.string().min(1).max(4).optional(),
 });
 export type AxisItem = z.infer<typeof AxisItem>;
 
@@ -209,7 +211,18 @@ export const BarsPayload = z
     /** Symmetric display domain, or null to fit the data. */
     domain: z.object({ min: z.number(), max: z.number() }).nullable(),
     caption: z.string().nullable(),
+    /**
+     * How the figure draws the values: split (one bar per row around an even split, e.g. share of taste
+     * within a pair), dumbbell (two series as points joined by their gap, butterfly mode only) or
+     * butterfly (two mirrored bars). Absent: diverging bars for one series, butterfly for two.
+     */
+    display: z.enum(["split", "dumbbell", "butterfly"]).optional(),
+    /** The centre line's value, e.g. 0.5 for an even split or 0 for an index centred on the average. */
+    baseline: z.number().optional(),
+    /** Half-width of the band around the baseline that reads as even, e.g. 0.02. */
+    evenBand: z.number().nonnegative().optional(),
   })
+  .refine((b) => b.display !== "dumbbell" || b.mode === "butterfly", { message: "a dumbbell draws two series (butterfly mode)" })
   .refine((b) => (b.mode === "butterfly" ? b.series.length === 2 : b.series.length === 1), {
     message: "diverging has one series, butterfly has two",
   })
@@ -351,6 +364,13 @@ export const RankedRow = z.object({
   flags: z.array(RowFlag),
   /** Explainability edges kept by the share·K ≥ 1.1 rule (G15); empty otherwise. */
   explain: z.array(z.object({ seedRef: EntityRefSchema, share: z.number() })),
+  /**
+   * Every seed's explainability share with two or more seeds, edge or not: the tooltip of a result
+   * drawn without an edge (SPEC §5.3 S9, FORMULAS xdom.edge). Absent with one seed.
+   */
+  shares: z.array(z.object({ seedRef: EntityRefSchema, share: z.number() })).optional(),
+  /** A row shown for contrast, e.g. a rival the priors expected; drawn in the comparison colour. */
+  comparison: z.boolean().optional(),
 });
 export type RankedRow = z.infer<typeof RankedRow>;
 

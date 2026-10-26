@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { isSkillAvailable, SCAN_TABLE } from "@ct/agent";
+import { SCAN_TABLE } from "@ct/agent";
 import {
   CacheStatus,
   RUN_EVENT_TYPES,
@@ -9,7 +9,7 @@ import {
   unstampEvent,
   type RunEventType,
 } from "@ct/contracts";
-import { buildFakeScript, FAKE_MODEL, FAKE_QUESTION, scanFallback } from "../server/fake-script";
+import { buildFakeScript, FAKE_MODEL, FAKE_QUESTION } from "../server/fake-script";
 import { sampleEvents } from "../server/samples";
 
 vi.mock("server-only", () => ({}));
@@ -46,7 +46,8 @@ describe("fake run script", () => {
 
   it("covers every event type except the ones a fake run never takes", () => {
     const seen = new Set<RunEventType>(events.map((e) => e.type));
-    const notInFakeRun: RunEventType[] = ["needs_input", "ghost", "error"];
+    // The brand-health sample's scan runs every scan skill and walks no location ladder, so it has no CODE FALLBACK.
+    const notInFakeRun: RunEventType[] = ["needs_input", "ghost", "error", "fallback"];
     for (const type of RUN_EVENT_TYPES) {
       if (!notInFakeRun.includes(type)) expect(seen, type).toContain(type);
     }
@@ -71,11 +72,11 @@ describe("fake run script", () => {
     }
   });
 
-  it("follows a finding with an ANALYST PIVOT and records a CODE FALLBACK", () => {
+  it("follows a finding with an ANALYST PIVOT, with no CODE FALLBACK", () => {
     const state = reduceRunEvents(RUN, events);
     expect(state.pivots.length).toBeGreaterThan(0);
     for (const pivot of state.pivots) expect(state.findings.map((f) => f.id)).toContain(pivot.triggerFindingId);
-    expect(state.fallbacks).toHaveLength(1);
+    expect(state.fallbacks).toHaveLength(0);
     expect(state.toolCalls.every((t) => t.status !== "running")).toBe(true);
     expect(state.report?.runId).toBe(RUN);
     expect(state.status).toBe("completed");
@@ -102,41 +103,14 @@ describe("fake run script: the brand-health sample replayed as a test run", () =
   const sampleReport = sample.find((e) => e.type === "report.final");
   if (sampleReport?.type !== "report.final") throw new Error("the brand-health sample has no report.final");
 
-  it("replays the sample's events in order, adding only the CODE FALLBACK after the scan starts", () => {
-    const replayed = script.steps.filter((s) => s.input.type !== "fallback").map((s) => s.input.type);
-    expect(replayed).toEqual(sample.slice(0, -1).map((e) => e.type));
-    const types = script.steps.map((s) => s.input.type);
-    const fallback = types.indexOf("fallback");
-    const scanStart = script.steps.find((s) => s.input.type === "tool.start" && s.input.phase === "scan")?.input;
-    expect(scanStart?.type === "tool.start" && scanStart.toolCallId).toBeTruthy();
-    expect(script.steps[fallback - 1]?.input).toBe(scanStart);
-    expect(script.steps[fallback]?.input).toMatchObject({ type: "fallback", toolCallId: scanStart?.type === "tool.start" ? scanStart.toolCallId : "" });
+  it("replays the sample's events in order, adding none", () => {
+    expect(script.steps.map((s) => s.input.type)).toEqual(sample.slice(0, -1).map((e) => e.type));
   });
 
-  it("adds the CODE FALLBACK because this build cannot run the rest of the scan (fails once it can)", () => {
+  it("replays a sample whose opening scan ran every scan skill of its job", () => {
     const planned = SCAN_TABLE.brand_health.map((entry) => entry.tool);
     const ran = sample.flatMap((e) => (e.type === "tool.start" && e.phase === "scan" ? [e.tool] : []));
-    const missing = planned.filter((tool) => !ran.includes(tool));
-    expect(missing).toEqual(["audience_dna", "destination_affinity"]);
-    for (const tool of missing) expect(isSkillAvailable(tool), tool).toBe(false);
-    const fallback = script.steps.find((s) => s.input.type === "fallback")?.input;
-    expect(fallback).toMatchObject({
-      type: "fallback",
-      from: "SUBS + DNA + TRVL",
-      to: "SUBS",
-      reason: "audience_dna (DNA) and destination_affinity (TRVL) are not in this build, so the opening scan ran peer_landscape (SUBS) alone.",
-    });
-  });
-
-  it("states no CODE FALLBACK for a scan that ran every skill, or left out one this build has", () => {
-    const clerk = sample.find((e) => e.type === "clerk");
-    const start = sample.find((e) => e.type === "tool.start" && e.phase === "scan");
-    if (clerk?.type !== "clerk" || start?.type !== "tool.start") throw new Error("the sample has no clerk or scan");
-    const scanOf = (tools: readonly (typeof start.tool)[]) => tools.map((tool, i) => ({ ...start, toolCallId: `scan-${i + 1}`, tool }));
-    expect(scanFallback([clerk, ...scanOf(SCAN_TABLE.brand_health.map((entry) => entry.tool))])).toBeNull();
-    // peer_landscape is in this build, so a scan without it did not fall back for want of it.
-    expect(scanFallback([clerk, ...scanOf(["audience_dna"])])).toBeNull();
-    expect(scanFallback([clerk, start])).toMatchObject({ toolCallId: start.toolCallId, to: "SUBS" });
+    expect(ran).toEqual(planned);
   });
 
   it("asks the test question as the fake model, keeping the sample's trace", () => {
@@ -150,7 +124,7 @@ describe("fake run script: the brand-health sample replayed as a test run", () =
     expect(pivot?.type === "pivot" && finding?.type === "finding" && pivot.triggerFindingId === finding.finding.id).toBe(true);
   });
 
-  it("ends with a zero-spend synthetic receipt whose confidence counts the added CODE FALLBACK", () => {
+  it("ends with a zero-spend synthetic receipt and the sample's confidence", () => {
     const { report } = script;
     expect(report).toMatchObject({ runId: RUN, question: FAKE_QUESTION, incomplete: false });
     expect(script.steps.find((s) => s.input.type === "report.final")?.input).toEqual({ type: "report.final", report });
@@ -164,9 +138,7 @@ describe("fake run script: the brand-health sample replayed as a test run", () =
     expect(report.receipt.numbersTraced.traced).toBe(report.receipt.numbersTraced.total);
     expect(report.disclaimers.at(-1)).toMatch(/^Data: synthetic test data/);
     expect(report.disclaimers.filter((d) => d.startsWith("Data: "))).toHaveLength(1);
-    const before = sampleReport.report.verdict.confidence;
-    expect(report.verdict.confidence.breakdown).toContainEqual({ rule: "code_fallback", label: "CODE FALLBACK", count: 1, points: -10 });
-    expect(report.verdict.confidence.score).toBe(Math.max(0, before.score - 10));
+    expect(report.verdict.confidence).toEqual(sampleReport.report.verdict.confidence);
     for (const s of script.steps) if (s.input.type === "usage") expect(s.input).toMatchObject({ llmUsd: 0, tokens: { input: 0, output: 0 } });
   });
 

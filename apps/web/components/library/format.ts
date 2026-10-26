@@ -1,4 +1,4 @@
-import type { Pillar } from "@ct/contracts";
+import { isVerdictTag, type Pillar } from "@ct/contracts";
 import { briefIdOf } from "../../lib/brief/model";
 import { DESK_LABEL, NOT_MEASURED, SIGNAL_LABEL } from "../../lib/brief/format";
 import type { BriefSummary } from "./briefs-client";
@@ -23,8 +23,16 @@ export function briefLabel(runId: string): string {
   return `Brief ${briefIdOf(runId)}`;
 }
 
-/** The verdict column: the signal of the note, "Incomplete" for a run that stopped without one. */
-export function verdictText(brief: Pick<BriefSummary, "signal" | "status">): string {
+/** What the verdict column reads. */
+export type VerdictSource = Pick<BriefSummary, "signal" | "status" | "tag">;
+
+/**
+ * The verdict column: the note's verdict tag ("Taste island"), else its signal label, "Incomplete" for
+ * a run that stopped without a note.
+ */
+export function verdictText(brief: VerdictSource): string {
+  const tag = brief.tag?.trim();
+  if (isVerdictTag(tag)) return tag;
   if (brief.signal !== null) return SIGNAL_LABEL[brief.signal];
   return brief.status === "incomplete" ? "Incomplete" : "No verdict";
 }

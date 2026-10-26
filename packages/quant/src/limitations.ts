@@ -137,7 +137,11 @@ export const SKILL_LIMITATIONS: Readonly<Record<SkillId, readonly string[]>> = {
     VENUE_GOERS,
     TENANT_FIT,
   ],
-  cross_domain: [EXPLAINABILITY],
+  cross_domain: [
+    EXPLAINABILITY,
+    "Seed tags add taste context next to the seeds; they are not a genre filter.",
+    "Each list is capped by popularity, so the most popular names are left out by design.",
+  ],
   sponsor_slate: [SPONSOR_FIT, "No return on investment is estimated."],
 };
 

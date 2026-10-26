@@ -28,7 +28,7 @@ describe("buildIncompleteReport", () => {
       recommendations: [],
       nextMoves: [],
       warnings: [],
-      verdict: { headline: INCOMPLETE_HEADLINE, signal: "insufficient_evidence" },
+      verdict: { headline: INCOMPLETE_HEADLINE, signal: "insufficient_evidence", tag: null },
       receipt: { numbersTraced: { traced: 0, total: 0 } },
     });
     expect(report.verdict.thesis).toContain("(hard time limit reached)");

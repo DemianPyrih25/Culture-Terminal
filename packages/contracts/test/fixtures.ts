@@ -173,6 +173,7 @@ export const matrixDataset: DatasetEnvelope = {
 export const draft: ReportDraft = {
   headline: "Juniper Cola is a taste island {{M1}}",
   signal: "mixed",
+  verdict_tag: "Taste island",
   thesis: "Its audience sits apart from its category {{M1}} [E1].",
   hypothesis_verdicts: [{ hypothesis_id: "H1", verdict: "refuted", metric_ids: ["M1"], note: "Last in its row {{M1}}." }],
   arguments: [
@@ -224,6 +225,7 @@ export const report: Report = {
   verdict: {
     headline: draft.headline,
     signal: "mixed",
+    tag: draft.verdict_tag,
     thesis: draft.thesis,
     confidence: {
       score: 80,

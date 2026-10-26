@@ -1,14 +1,17 @@
-import { FindingKind, FindingSuggestion, Severity } from "@ct/contracts";
+import { FindingKind, FindingSuggestion, Severity, type AgeBucket } from "@ct/contracts";
 import { describe, expect, it } from "vitest";
 import {
+  BLOCK_NEW_SOUND_MIN_SHARE,
   FINDING_SEVERITY,
   FINDING_SUGGESTION,
+  METRO_OUTLIER_MIN_RANK_GAP,
   blockNewTagsFinding,
   droppedCandidatesFinding,
   emptyResultFinding,
   fitPopularityRho,
   generationalSplitFinding,
   hiddenPocketFinding,
+  isBlockNewTags,
   isHiddenPocket,
   isLatentDemand,
   isOutsideCategoryNeighbour,
@@ -21,9 +24,11 @@ import {
   popularityDominanceFinding,
   suggestedPopularityCap,
   tasteIslandFinding,
+  weakCategoryFitFinding,
   type FindingDraft,
   type PopularityDominanceResult,
 } from "../src/findings";
+import { median } from "../src/stats";
 
 // Invented entities only (D29).
 const ALPHA = "Brand Alpha";
@@ -57,7 +62,7 @@ function oneOfEach(): FindingDraft[] {
     fired(tasteIslandFinding({ targetName: ALPHA, lastInRows: 4, scoredRows: 5, nearestName: BETA })),
     nearSubstitutesFinding({ aName: ALPHA, bName: BETA }),
     outsideCategoryNeighbourFinding({ targetName: ALPHA, neighbourName: GAMMA, neighbourCategory: "Energy Drink", neighbourInMap: false }),
-    fired(generationalSplitFinding({ targetName: ALPHA, targetTilt: 0.5, setMedianTilt: 0 })),
+    fired(generationalSplitFinding({ targetName: ALPHA, targetTilt: 0.5, setMedianTilt: 0, unreadAges: ["25_to_29", "30_to_34", "45_to_54"] })),
     fired(
       metroOutlierFinding({
         targetName: ALPHA,
@@ -65,7 +70,6 @@ function oneOfEach(): FindingDraft[] {
         metroRank: 1,
         medianRank: 4,
         setSize: 6,
-        gazetteerMetro: "nashville",
       }),
     ),
     fired(
@@ -81,7 +85,18 @@ function oneOfEach(): FindingDraft[] {
         neighbourhoods: [{ name: "Riverside", demandPct: 0.9, supplyPct: 0.1 }],
       }),
     ),
-    fired(blockNewTagsFinding({ areaName: "Riverside", newWhatTags: ["Natural Wine", "Omakase", "Vinyl Bar"] })),
+    fired(
+      blockNewTagsFinding({
+        areaName: "Riverside",
+        family: "WHAT",
+        newTags: ["Natural Wine", "Omakase", "Vinyl Bar"],
+        familyTags: 6,
+        signalTags: [
+          { name: "Natural Wine", ref: "T4" },
+          { name: "Vinyl Bar", ref: "T6" },
+        ],
+      }),
+    ),
     emptyResultFinding({
       what: "the concept heatmap for Austin",
       suggestion: { tool: "find_tags", reason: "Try broader taxonomy place tags." },
@@ -92,6 +107,7 @@ function oneOfEach(): FindingDraft[] {
       popularityDominanceFinding({ context: "the music results", results: pops(8, 2), popularityMax: null }),
     ),
     locationFallbackFinding({ areaName: "Riverside", from: "POLYGON", to: "POINT" }),
+    fired(weakCategoryFitFinding({ categoryLabel: "Outdoor retail", bestName: GAMMA, fitPct: 0.09, rank: 11, scored: 12 })),
   ];
 }
 
@@ -106,12 +122,13 @@ describe("policy tables", () => {
       TASTE_ISLAND: "cross_domain",
       NEAR_SUBSTITUTES: "share_of_taste",
       OUTSIDE_CATEGORY_NEIGHBOUR: "peer_landscape",
-      METRO_OUTLIER: "geo_lift",
+      METRO_OUTLIER: "share_of_taste",
       LATENT_DEMAND: "block_dna",
       BLOCK_NEW_TAGS: "rank_candidates",
       POPULARITY_DOMINANCE: "cross_domain",
+      GENERATIONAL_SPLIT: "share_of_taste",
+      WEAK_CATEGORY_FIT: "sponsor_slate",
       EMPTY_RESULT: null,
-      GENERATIONAL_SPLIT: null,
       HIDDEN_POCKET: null,
       DROPPED_CANDIDATES: null,
       NO_TREND_SIGNAL: null,
@@ -136,7 +153,7 @@ describe("every finding kind", () => {
     if (d.suggestion) {
       expect(FindingSuggestion.parse(d.suggestion)).toEqual(d.suggestion);
       expect(d.suggestion.reason).toMatch(/^[A-Z].*\.$/);
-      // EMPTY_RESULT has no fixed tool; it carries the caller's.
+      // EMPTY_RESULT and DROPPED_CANDIDATES have no fixed tool; they carry the caller's.
       if (FINDING_SUGGESTION[kind] !== null) expect(d.suggestion.tool).toBe(FINDING_SUGGESTION[kind]);
     } else {
       expect(["GENERATIONAL_SPLIT", "HIDDEN_POCKET", "DROPPED_CANDIDATES", "NO_TREND_SIGNAL", "LOCATION_FALLBACK"]).toContain(kind);
@@ -220,8 +237,8 @@ describe("NEAR_SUBSTITUTES and OUTSIDE_CATEGORY_NEIGHBOUR", () => {
 });
 
 describe("GENERATIONAL_SPLIT", () => {
-  const split = (targetTilt: number | null, setMedianTilt: number | null) =>
-    generationalSplitFinding({ targetName: ALPHA, targetTilt, setMedianTilt });
+  const split = (targetTilt: number | null, setMedianTilt: number | null, unreadAges: readonly AgeBucket[] = []) =>
+    generationalSplitFinding({ targetName: ALPHA, targetTilt, setMedianTilt, unreadAges });
 
   it("fires when the target's tilt is 0.4 above the set median, absorbing float error at the edge", () => {
     expect(split(0.7, 0.3)).not.toBeNull();
@@ -234,10 +251,18 @@ describe("GENERATIONAL_SPLIT", () => {
     expect(split(-0.9, 0.9)).toBeNull();
   });
 
-  it("says the target skews younger, with no follow-up", () => {
-    const d = fired(split(0.5, 0));
+  it("says the target skews younger and follows up in the age buckets the call left unread", () => {
+    const d = fired(split(0.5, 0, ["25_to_29", "30_to_34", "45_to_54", "30_to_34"]));
     expect(d.text).toBe("Brand Alpha skews clearly younger than its peer set: its youth tilt sits well above the set median.");
-    expect(d.suggestion).toBeNull();
+    expect(d.severity).toBe("medium");
+    expect(d.suggestion).toEqual({
+      tool: "share_of_taste",
+      reason: "Rank the same set in the unread age buckets 25_to_29, 30_to_34, 45_to_54 to find the age where Brand Alpha's lead gives way.",
+    });
+  });
+
+  it("suggests no follow-up once every age bucket was read", () => {
+    expect(fired(split(0.5, 0)).suggestion).toBeNull();
   });
 
   it("needs both tilts", () => {
@@ -247,8 +272,8 @@ describe("GENERATIONAL_SPLIT", () => {
 });
 
 describe("METRO_OUTLIER", () => {
-  const outlier = (metroRank: number, medianRank: number, gazetteerMetro: "austin" | null = "austin") =>
-    metroOutlierFinding({ targetName: ALPHA, marketLabel: "Austin", metroRank, medianRank, setSize: 6, gazetteerMetro });
+  const outlier = (metroRank: number, medianRank: number) =>
+    metroOutlierFinding({ targetName: ALPHA, marketLabel: "Austin", metroRank, medianRank, setSize: 6 });
 
   it("fires at two places from the median rank, either way", () => {
     expect(fired(outlier(1, 3)).text).toBe("Brand Alpha ranks 1 of 6 in Austin, clearly better than its median rank across metros.");
@@ -258,14 +283,54 @@ describe("METRO_OUTLIER", () => {
     expect(outlier(2, 3.5)).toBeNull();
   });
 
-  it("suggests geo_lift only in a gazetteer metro", () => {
-    const inGazetteer = fired(outlier(1, 3));
-    expect(inGazetteer.severity).toBe("medium");
-    expect(inGazetteer.suggestion?.tool).toBe("geo_lift");
-    expect(inGazetteer.suggestion?.reason).toContain("inside Austin");
-    const outside = fired(outlier(1, 3, null));
-    expect(outside.severity).toBe("low");
-    expect(outside.suggestion).toBeNull();
+  it("asks two places in a set of three or four too, so a target whose median sits mid-scale raises none", () => {
+    const inSet = (setSize: number, metroRank: number, medianRank: number) =>
+      metroOutlierFinding({ targetName: ALPHA, marketLabel: "Riverton", metroRank, medianRank, setSize });
+    expect(METRO_OUTLIER_MIN_RANK_GAP).toBe(2);
+    // First or last of four where its median rank is 2.5: a place and a half, within reach of noise.
+    expect(inSet(4, 1, 2.5)).toBeNull();
+    expect(inSet(4, 4, 2.5)).toBeNull();
+    expect(inSet(3, 3, 1.5)).toBeNull();
+    expect(fired(inSet(4, 1, 3)).text).toBe("Brand Alpha ranks 1 of 4 in Riverton, clearly better than its median rank across metros.");
+    expect(fired(inSet(4, 4, 2)).text).toContain("clearly worse");
+    expect(fired(inSet(3, 3, 1)).text).toContain("ranks 3 of 3");
+    expect(inSet(2, 1, 2)).toBeNull();
+  });
+
+  it("fires on pure noise in a set of four over eight metros no more often than the two-place rule itself does", () => {
+    // mulberry32: a fixed seed keeps the rate the same on every run.
+    let seed = 20261023;
+    const random = (): number => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    // The target's rank in each metro drawn uniformly, so no metro differs from the rest but by chance.
+    const noiseRate = (setSize: number, metros: number, trials = 4000): number => {
+      let firing = 0;
+      for (let t = 0; t < trials; t++) {
+        const ranks = Array.from({ length: metros }, () => 1 + Math.floor(random() * setSize));
+        const medianRank = median(ranks)!;
+        const fires = ranks.some((metroRank) => metroOutlierFinding({ targetName: ALPHA, marketLabel: "Riverton", metroRank, medianRank, setSize }) !== null);
+        if (fires) firing++;
+      }
+      return firing / trials;
+    };
+    // Two places fire on about 62% of such grids (a place and a half fired on about 90%), and on about
+    // 15% for a set of three. Lowering the gap for short sets would push both bounds.
+    expect(noiseRate(4, 8)).toBeLessThan(2 / 3);
+    expect(noiseRate(3, 8)).toBeLessThan(0.2);
+  });
+
+  it("suggests the same set ranked in other markets, in a gazetteer metro too, since no lift map can run from a share set", () => {
+    const better = fired(outlier(1, 3));
+    expect(better.severity).toBe("medium");
+    expect(better.suggestion).toEqual({
+      tool: "share_of_taste",
+      reason: "Rank the same set in other markets, those near Austin first, to see whether Brand Alpha's better showing there is local or regional.",
+    });
+    expect(fired(outlier(5, 3)).suggestion?.reason).toContain("Brand Alpha's worse showing there");
   });
 
   it("rejects ranks outside the set", () => {
@@ -334,17 +399,87 @@ describe("LATENT_DEMAND", () => {
 });
 
 describe("BLOCK_NEW_TAGS", () => {
-  it("fires at three distinct new WHAT tags", () => {
-    const d = fired(blockNewTagsFinding({ areaName: "Riverside", newWhatTags: ["Natural Wine", "Omakase", "Vinyl Bar", "Tapas"] }));
+  /** Every name a taxonomy tag, with refs T1, T2, … in order. */
+  const refs = (names: readonly string[]) => names.map((name, i) => ({ name, ref: `T${i + 1}` }));
+  const what = (newTags: readonly string[], signalTags = refs(newTags), familyTags = 8) =>
+    blockNewTagsFinding({ areaName: "Riverside", family: "WHAT", newTags, familyTags, signalTags });
+  const sound = (newTags: readonly string[], familyTags: number, signalTags = refs(newTags)) =>
+    blockNewTagsFinding({ areaName: "Riverside", family: "SOUND", newTags, familyTags, signalTags });
+  const songs = (n: number) => Array.from({ length: n }, (_, i) => `Genre ${i + 1}`);
+
+  it("fires at three distinct new WHAT tags, whatever share of the family they are", () => {
+    const signal = [
+      { name: "Natural Wine", ref: "T4" },
+      { name: "Natural Wine", ref: "T4" },
+      { name: "Vinyl Bar", ref: "T6" },
+      { name: "Tapas", ref: "T7" },
+      { name: "Omakase", ref: "T8" },
+    ];
+    const d = fired(what(["Natural Wine", "Omakase", "Vinyl Bar", "Tapas"], signal, 20));
     expect(d.text).toBe(
       "Among its top tags, Riverside has WHAT tags that are not among the city's top tags, led by Natural Wine, Omakase, Vinyl Bar and 1 more.",
     );
+    // Up to the three signal tags rank_candidates takes, so the follow-up can pick the ones that fit a tenant.
     expect(d.suggestion).toEqual({
       tool: "rank_candidates",
-      reason: "Rank tenant brands carrying Natural Wine or Omakase at this site against the city.",
+      reason: "Rank tenant brands with Natural Wine (T4), Vinyl Bar (T6) or Tapas (T7) as the taste signal at this site against the city.",
     });
-    expect(blockNewTagsFinding({ areaName: "Riverside", newWhatTags: ["Natural Wine", "Omakase"] })).toBeNull();
-    expect(blockNewTagsFinding({ areaName: "Riverside", newWhatTags: ["Omakase", "Omakase", "Tapas"] })).toBeNull();
+    expect(fired(what(["Natural Wine", "Omakase", "Vinyl Bar"], [{ name: "Vinyl Bar", ref: "T6" }])).suggestion?.reason).toBe(
+      "Rank tenant brands with Vinyl Bar (T6) as the taste signal at this site against the city.",
+    );
+    expect(what(["Natural Wine", "Omakase"])).toBeNull();
+    expect(what(["Omakase", "Omakase", "Tapas"])).toBeNull();
+  });
+
+  it("fires on SOUND at three new tags that are at least a quarter of its area top 20", () => {
+    const d = fired(sound(songs(5), 20));
+    expect(d.text).toBe(
+      "Among its top music tags, Riverside has SOUND tags that are not among the city's top music tags, led by Genre 1, Genre 2, Genre 3 and 2 more.",
+    );
+    expect(d.suggestion?.reason).toBe("Rank tenant brands with Genre 1 (T1), Genre 2 (T2) or Genre 3 (T3) as the taste signal at this site against the city.");
+    expect(sound(songs(4), 20)).toBeNull();
+    expect(sound(songs(3), 12)).not.toBeNull();
+    expect(sound(songs(3), 13)).toBeNull();
+    expect(sound(songs(2), 4)).toBeNull();
+    expect(isBlockNewTags("SOUND", 5, 20)).toBe(true);
+    expect(isBlockNewTags("SOUND", 4, 20)).toBe(false);
+    expect(isBlockNewTags("WHAT", 3, 20)).toBe(true);
+    expect(BLOCK_NEW_SOUND_MIN_SHARE).toBe(0.25);
+  });
+
+  it("rejects counts the family cannot hold", () => {
+    expect(isBlockNewTags("WHAT", 4, 3)).toBe(false);
+    expect(isBlockNewTags("SOUND", 3.5, 10)).toBe(false);
+    expect(sound(songs(6), 5)).toBeNull();
+  });
+
+  it("suggests no ranking when no NEW tag can be a taste signal", () => {
+    const d = fired(what(["Smash Burger", "Fried Pickles", "Brisket"], []));
+    expect(d.suggestion).toBeNull();
+    expect(d.severity).toBe("medium");
+  });
+});
+
+describe("WEAK_CATEGORY_FIT", () => {
+  const weak = (fitPct: number | null, scored: number, rank: number | null = 11) =>
+    weakCategoryFitFinding({ categoryLabel: "Outdoor retail", bestName: GAMMA, fitPct, rank, scored });
+
+  it("fires for a best fit in the bottom quarter of at least eight scored candidates", () => {
+    expect(weak(0.25, 8)).not.toBeNull();
+    expect(weak(0.26, 12)).toBeNull();
+    expect(weak(0.1, 7)).toBeNull();
+    expect(weak(null, 12)).toBeNull();
+    expect(weak(0.1, 8.5)).toBeNull();
+  });
+
+  it("names the rank when known and suggests scoring brands the tag may miss on the slate's scale", () => {
+    const d = fired(weak(0.09, 12));
+    expect(d.text).toBe(
+      "Brand Gamma, the best Outdoor retail fit, ranks 11 of 12 on the slate's one scale and sits in the bottom quarter of the slate: the brands carrying the category's tag fit this audience weakly.",
+    );
+    expect(d.suggestion?.tool).toBe("sponsor_slate");
+    expect(d.suggestion?.reason).toContain("added to the shortlist");
+    expect(fired(weak(0.09, 12, null)).text).toMatch(/^Brand Gamma, the best Outdoor retail fit, sits in the bottom quarter/);
   });
 });
 
@@ -377,6 +512,14 @@ describe("EMPTY_RESULT, DROPPED_CANDIDATES and NO_TREND_SIGNAL", () => {
     expect(fired(droppedCandidatesFinding({ names: [BETA, GAMMA, BETA], context: "the Austin metro context" })).text).toMatch(
       /^Brand Beta and Brand Gamma were not scored .* they are shown/,
     );
+  });
+
+  it("is context without substitutes and a medium lead with the caller's substitution", () => {
+    const plain = fired(droppedCandidatesFinding({ names: [BETA], context: "the one-scale scoring call" }));
+    expect(plain).toMatchObject({ severity: "low", suggestion: null });
+    const swap = { tool: "sponsor_slate", reason: "Score Brand Gamma from the Beer discovery results instead." } as const;
+    const lead = fired(droppedCandidatesFinding({ names: [BETA], context: "the one-scale scoring call", suggestion: swap }));
+    expect(lead).toMatchObject({ severity: "medium", suggestion: swap, text: plain.text });
   });
 
   it("says no signal is not flat", () => {

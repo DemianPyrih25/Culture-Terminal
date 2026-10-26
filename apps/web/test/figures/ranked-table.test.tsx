@@ -1,7 +1,7 @@
 // RankedTable: the A05 lollipop, the A07 table (from a Slate), the A08 lists and margin bars.
 import type { RankedPayload } from "@ct/contracts";
 import { describe, expect, it } from "vitest";
-import { RankedTable, formatNumber, slateToRanked } from "../../components/figures";
+import { RankedTable, comparisonSet, formatNumber, slateToRanked } from "../../components/figures";
 import {
   EXPECTED_RIVALS,
   FIXTURE_SOURCES,
@@ -10,6 +10,7 @@ import {
   domainLists,
   marginBrands,
   nearestAudiences,
+  nearestWithRivals,
   sponsorSlate,
 } from "../../components/figures/fixtures";
 import { plotView, rects, render, rowMarkup, tableHeads, tableRows, tableView, text } from "./markup";
@@ -223,5 +224,25 @@ describe("RankedTable · lists and bars", () => {
     expect(rowMarkup(plot, "B15")).not.toMatch(/<rect[^>]*fill-(data|negative)/);
     expect(text(rowMarkup(plot, "B15"))).toContain("not scored");
     expect(html).toContain("Venue-goer taste signals, not residents or census.");
+  });
+});
+
+describe("RankedTable · comparison rows from the payload", () => {
+  it("greys rows marked RankedRow.comparison without comparisonKeys, in every variant and the table", () => {
+    const plot = plotView(render(<RankedTable data={nearestWithRivals.payload} width={384} title="Rivals" />));
+    for (const key of EXPECTED_RIVALS) expect(rowMarkup(plot, key)).toContain('data-tone="comparison"');
+    expect(rowMarkup(plot, "R5")).toContain('data-tone="highlight"');
+    const bars = plotView(render(<RankedTable data={nearestWithRivals.payload} variant="bars" size="margin" title="Rivals" />));
+    expect(rowMarkup(bars, "R2")).toContain("fill-data-2");
+    expect(rowMarkup(bars, "R7")).toContain('class="fill-data"');
+    const lists = render(<RankedTable data={nearestWithRivals.payload} variant="lists" title="Rivals" />);
+    expect(rowMarkup(plotView(lists), "R3")).toContain('data-tone="comparison"');
+    const rows = tableRows(tableView(lists));
+    expect(rows.find((r) => r[0] === "Brand Alpha")!.at(-1)).toBe("expected");
+  });
+
+  it("adds the caller's keys to the payload's", () => {
+    expect([...comparisonSet(nearestWithRivals.payload, ["R9"])].sort()).toEqual(["R2", "R3", "R4", "R9"]);
+    expect(comparisonSet(nearestAudiences.payload).size).toBe(0);
   });
 });

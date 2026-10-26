@@ -1,21 +1,26 @@
 // FigureFrame, FigureTable and Exhibit: the frame every family shares (label, source, ⧉ toggle,
 // ⓘ link, fixed caption), the table view's structure, and the dispatch from a dataset envelope to
 // its family.
-import type { DatasetEnvelope, Evidence } from "@ct/contracts";
+import { DatasetKind, VIZ_COMPAT, type DatasetEnvelope, type Evidence } from "@ct/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { Exhibit, FigureFrame, FigurePending, FigureTable, methodHref, sourceFromEvidence } from "../../components/figures";
 import {
   FIXTURE_SOURCES,
   SLATE_CAPTION,
   agePeers,
+  austinLiftMap,
   blockDna,
   domainLists,
+  marketSlope,
+  momentumStrip,
   nearestAudiences,
   priorsScorecard,
   shareGrid,
   similarityMap,
   sponsorQuadrant,
   sponsorSlate,
+  tastePosition,
+  tenantSlope,
 } from "../../components/figures/fixtures";
 import { plotView, render, text } from "./markup";
 
@@ -113,6 +118,11 @@ describe("Exhibit", () => {
     ["Bars, two series", agePeers, "JUNIPER COLA"],
     ["Quadrant", sponsorQuadrant, 'data-quadrant="HIDDEN_POCKET"'],
     ["Scorecard", priorsScorecard, 'data-state="REFUTED"'],
+    ["Slope", tenantSlope, 'data-tone="highlight"'],
+    ["Slope, three contexts", marketSlope, 'data-axis="nashville"'],
+    ["GeoLift", austinLiftMap, 'data-schematic="LIFT"'],
+    ["Momentum", momentumStrip, 'data-badge="STALE"'],
+    ["Position", tastePosition, 'data-axis="next_gen_tilt"'],
   ] as const)("renders a %s envelope with its family", (_, dataset, marker) => {
     const html = render(<Exhibit dataset={dataset} number={1} display={{ Ranked: { variant: dataset === domainLists ? "lists" : "lollipop" } }} />);
     expect(html).toContain(marker);
@@ -121,7 +131,13 @@ describe("Exhibit", () => {
     expect(html).not.toContain("not built yet");
   });
 
-  it("frames a family that is not built yet without failing", () => {
+  it("has a family for every dataset kind", () => {
+    const shown = new Set([similarityMap, sponsorQuadrant, blockDna, tenantSlope, austinLiftMap, nearestAudiences, sponsorSlate, momentumStrip, priorsScorecard, tastePosition].map((d) => d.kind));
+    expect([...shown].sort()).toEqual([...DatasetKind.options].sort());
+    expect(new Set(Object.values(VIZ_COMPAT)).size).toBe(9);
+  });
+
+  it("frames an empty momentum strip without failing", () => {
     const momentum: DatasetEnvelope = {
       id: "D20",
       kind: "Momentum",
@@ -130,7 +146,23 @@ describe("Exhibit", () => {
       formulaIds: ["mom.mann_kendall"],
       payload: { window: { start: "2026-03-01", end: "2026-08-31" }, badgeText: "HISTORICAL", badge: "STALE", series: [] },
     };
-    expect(text(render(<Exhibit dataset={momentum} />))).toContain("MomentumStrip · this figure family is not built yet");
+    const html = text(render(<Exhibit dataset={momentum} />));
+    expect(html).toContain("No signal after Aug 2026");
+    expect(html).not.toContain("not built yet");
+  });
+
+  it("passes display options to the new families", () => {
+    const map = render(<Exhibit dataset={austinLiftMap} display={{ GeoLift: { initialMode: "BASE", interactive: false } }} />);
+    expect(map).toContain('data-schematic="BASE"');
+    const slope = render(<Exhibit dataset={tenantSlope} display={{ Slope: { width: 328 } }} />);
+    expect(text(slope)).not.toContain("TENANT FIT");
+    const card = render(<Exhibit dataset={tastePosition} display={{ Position: { figureHrefs: { D1: "#figure-2" } } }} />);
+    expect(card).toContain('href="#figure-2"');
+  });
+
+  it("frames a kind it does not know (a newer server) instead of failing", () => {
+    const future = { ...similarityMap, kind: "Constellation" } as unknown as DatasetEnvelope;
+    expect(text(render(<Exhibit dataset={future} />))).toContain("Constellation · no figure family for this kind");
   });
 });
 

@@ -34,6 +34,8 @@ const BriefSummarySchema = z.object({
   jobLabel: z.string().nullable(),
   status: z.enum(["completed", "incomplete"]),
   signal: Signal.nullable(),
+  // A list from before the verdict tag existed sends none: the row prints the signal label.
+  tag: z.string().nullable().default(null),
   headline: z.string().nullable(),
   metrics: z.record(z.string(), MetricDisplaySchema),
   confidence: z.object({ score: z.number(), band: ConfidenceBand }).nullable(),

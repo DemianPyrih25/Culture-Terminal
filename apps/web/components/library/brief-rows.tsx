@@ -101,7 +101,11 @@ export function BriefRowView({
             {date ? ` · ${date}` : null}
           </p>
         </div>
-        <span className={cx("shrink-0 text-[13px] leading-4 font-medium text-ink max-sm:hidden", c.verdict)}>
+        {/* A tag may run to 32 characters: two lines at most in the narrow column, the whole tag on hover. */}
+        <span
+          className={cx("line-clamp-2 shrink-0 text-[13px] leading-4 font-medium text-ink [overflow-wrap:anywhere] max-sm:hidden", c.verdict)}
+          title={verdict}
+        >
           <span className="sr-only">Verdict: </span>
           {verdict}
         </span>

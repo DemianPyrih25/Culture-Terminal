@@ -1,13 +1,13 @@
 {
-  "$comment": "The ten sponsor categories of SPEC §5.3 S10, keyed by the contracts SponsorCategory enum; a run uses at most six. Names, query strings and public taxonomy URNs only (D29). semantic_query is the /v2/tags semantic search (filter.parents.types=urn:entity:brand) that finds each category's tags at runtime; probe gate G14 matched it for the eight categories marked G14, telecom and fintech were not probed. G14 returned mostly descriptive *:qloo:* tags, which are not taste signals, and whether they work as filter.tags on brand insights is untested (PROBE_FINDINGS, Not covered), so no category has a verified taxonomy tag yet: tags stays empty until a probe verifies one. aliases help CLERK and the command grammar map question words to a category.",
+  "$comment": "The ten sponsor categories of SPEC §5.3 S10, keyed by the contracts SponsorCategory enum; a run uses at most six. Names, query strings and public taxonomy URNs only (D29). semantic_query is the /v2/tags semantic search (filter.parents.types=urn:entity:brand) that finds each category's tags at runtime; probe gate G14 matched it for the eight categories marked G14, telecom and fintech were not probed. G14 returned mostly descriptive *:qloo:* tags, which are not taste signals. The P5 probe verified both a urn:tag:product_category:qloo:* tag and a urn:tag:genre:brand:* leaf as filter.tags on brand insights (20/20 results carry the tag; verified_as brand_filter, never a signal), so tags lists the filter tag P5 exercised and stays empty for the other categories until one is verified. Several filter.tags values combine as a union (P5: 20/20 rows carried either energy tag, 9/20 both), so each category lists one tag and S10 sends one category per call. aliases help CLERK and the command grammar map question words to a category.",
   "categories": {
     "beer": {
       "label": "Beer",
       "semantic_query": "beer",
       "probe": "G14",
       "aliases": ["beer", "lager", "craft beer", "brewery", "brewer"],
-      "tags": [],
-      "tag_status": "unverified"
+      "tags": [{ "urn": "urn:tag:product_category:qloo:beer", "status": "verified", "verified_by": "P5", "verified_as": "brand_filter" }],
+      "tag_status": "verified"
     },
     "spirits": {
       "label": "Spirits",
@@ -55,8 +55,8 @@
       "semantic_query": "energy drink",
       "probe": "G14",
       "aliases": ["energy drink", "energy drinks", "functional energy"],
-      "tags": [],
-      "tag_status": "unverified"
+      "tags": [{ "urn": "urn:tag:genre:brand:food_and_beverage:drinks:energy_drink", "status": "verified", "verified_by": "P5", "verified_as": "brand_filter" }],
+      "tag_status": "verified"
     },
     "auto": {
       "label": "Auto",

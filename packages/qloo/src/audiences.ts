@@ -1,4 +1,4 @@
-import { AudienceKey, type Pillar } from "@ct/contracts";
+import { AudienceKey, DENIED_AUDIENCE_FAMILIES, DENIED_AUDIENCES as DENIED_AUDIENCE_KEYS, type Pillar } from "@ct/contracts";
 
 /**
  * The desk audience allowlist (D21, SPEC §0.1 D21). This module is the source of truth; the file
@@ -9,10 +9,8 @@ import { AudienceKey, type Pillar } from "@ct/contracts";
 export const AUDIENCE_ALLOWLIST = {
   description:
     "Audience families each desk may send to Qloo (D21). Denied families and audiences are refused on every desk. Mirror of packages/qloo/src/audiences.ts.",
-  denied: {
-    families: ["communities", "political_preferences", "lifestyle_preferences_beliefs", "global_issues"],
-    audiences: ["urn:audience:leisure:political_junkie"],
-  },
+  // The denied set lives in contracts so skills can tell a sensitive segment from an off-desk family.
+  denied: { families: DENIED_AUDIENCE_FAMILIES, audiences: DENIED_AUDIENCE_KEYS },
   desks: {
     investment: [
       "hobbies_and_interests",

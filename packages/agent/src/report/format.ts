@@ -1,5 +1,10 @@
 /** Formatting shared by source lines, disclaimers and summaries. Times are shown in UTC. */
 
+/** Items as a phrase: "a", "a and b", "a, b and c". */
+export function wordList(items: readonly string[]): string {
+  return items.length < 2 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]!}`;
+}
+
 /** "2026-10-21 14:05 UTC". */
 export function formatUtc(iso: string): string {
   const d = new Date(iso);

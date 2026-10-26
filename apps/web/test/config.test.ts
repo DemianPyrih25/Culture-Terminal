@@ -1,11 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  agentRunDailyCapFromEnv,
   agentRunHourlyCapFromEnv,
   agentRunMaxActiveFromEnv,
   fakeRunHourlyCapFromEnv,
   fakeRunRetentionMsFromEnv,
+  judgeRunDailyCapFromEnv,
+  judgeRunHourlyCapFromEnv,
+  judgeRunMaxActiveFromEnv,
   llmDailyUsdCapFromEnv,
+  llmEconomyUsdFromEnv,
+  llmJudgeShareFromEnv,
+  modeOverrideFromEnv,
   previewHourlyCapFromEnv,
+  publicSiteUrlFromEnv,
   qlooDailyFreshCapFromEnv,
   qlooDisabledFromEnv,
 } from "../server/config";
@@ -56,6 +64,25 @@ describe("agent run limits from the environment", () => {
   });
 });
 
+describe("the public site URL from the environment", () => {
+  it("is undefined when unset or blank, so Next falls back to localhost", () => {
+    expect(publicSiteUrlFromEnv(env())).toBeUndefined();
+    expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: " ", RAILWAY_PUBLIC_DOMAIN: "" }))).toBeUndefined();
+  });
+
+  it("reads a full URL, gives a bare host https://, and falls back to Railway's public domain", () => {
+    expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: "https://culture-terminal.example" }))?.href).toBe("https://culture-terminal.example/");
+    expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: " culture-terminal.example " }))?.href).toBe("https://culture-terminal.example/");
+    expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: "http://localhost:3100" }))?.href).toBe("http://localhost:3100/");
+    expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: " ", RAILWAY_PUBLIC_DOMAIN: "web.railway.example" }))?.href).toBe("https://web.railway.example/");
+    expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: "culture-terminal.example", RAILWAY_PUBLIC_DOMAIN: "web.railway.example" }))?.host).toBe("culture-terminal.example");
+  });
+
+  it("is undefined for a value that is not a URL, instead of failing the root layout", () => {
+    for (const value of ["not a url", "https://", "https://bad host.example"]) expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: value }))).toBeUndefined();
+  });
+});
+
 describe("preview settings from the environment", () => {
   it("defaults to 120 previews an hour, Qloo on and the 1,900 daily fresh-call quota", () => {
     expect(previewHourlyCapFromEnv(env())).toBe(120);
@@ -71,5 +98,41 @@ describe("preview settings from the environment", () => {
     expect(qlooDisabledFromEnv(env({ QLOO_DISABLED: " 1 " }))).toBe(true);
     for (const value of ["0", "", "true", "yes"]) expect(qlooDisabledFromEnv(env({ QLOO_DISABLED: value }))).toBe(false);
     expect(qlooDailyFreshCapFromEnv(env({ QLOO_DAILY_FRESH_CAP: "1200" }))).toBe(1_200);
+  });
+});
+
+describe("lanes and breakers from the environment", () => {
+  it("defaults to SPEC §4.2 and §10.4: economy at $1.00, 40% for judges, 20 judge runs an hour on one slot", () => {
+    expect(llmEconomyUsdFromEnv(env())).toBe(1);
+    expect(llmJudgeShareFromEnv(env())).toBe(0.4);
+    expect(judgeRunHourlyCapFromEnv(env())).toBe(20);
+    expect(judgeRunMaxActiveFromEnv(env())).toBe(1);
+    expect(modeOverrideFromEnv(env())).toBeNull();
+  });
+
+  it("defaults to SPEC §10.4's daily caps: 60 judge runs and 200 live runs in all, also for empty values", () => {
+    expect(judgeRunDailyCapFromEnv(env())).toBe(60);
+    expect(judgeRunDailyCapFromEnv(env({ JUDGE_RUN_DAILY_CAP: " " }))).toBe(60);
+    expect(agentRunDailyCapFromEnv(env())).toBe(200);
+    expect(agentRunDailyCapFromEnv(env({ AGENT_RUN_DAILY_CAP: "" }))).toBe(200);
+    expect(judgeRunDailyCapFromEnv(env({ JUDGE_RUN_DAILY_CAP: "0" }))).toBe(1);
+    expect(agentRunDailyCapFromEnv(env({ AGENT_RUN_DAILY_CAP: "50" }))).toBe(50);
+  });
+
+  it("reads and clamps the values, so each breaker can be forced", () => {
+    expect(llmEconomyUsdFromEnv(env({ LLM_ECONOMY_USD: "0" }))).toBe(0);
+    expect(llmEconomyUsdFromEnv(env({ LLM_ECONOMY_USD: "0.5" }))).toBe(0.5);
+    // A judge share above 90% would leave the public lane nothing.
+    expect(llmJudgeShareFromEnv(env({ LLM_JUDGE_SHARE: "1" }))).toBe(0.9);
+    expect(llmJudgeShareFromEnv(env({ LLM_JUDGE_SHARE: "-1" }))).toBe(0);
+    expect(judgeRunHourlyCapFromEnv(env({ JUDGE_RUN_HOURLY_CAP: "60" }))).toBe(60);
+    expect(judgeRunMaxActiveFromEnv(env({ JUDGE_RUN_MAX_ACTIVE: "0" }))).toBe(1);
+  });
+
+  it("takes MODE_OVERRIDE only as one of the three modes", () => {
+    expect(modeOverrideFromEnv(env({ MODE_OVERRIDE: " Replay_Only " }))).toBe("replay_only");
+    expect(modeOverrideFromEnv(env({ MODE_OVERRIDE: "economy" }))).toBe("economy");
+    expect(modeOverrideFromEnv(env({ MODE_OVERRIDE: "live" }))).toBe("live");
+    for (const value of ["", "off", "normal"]) expect(modeOverrideFromEnv(env({ MODE_OVERRIDE: value }))).toBeNull();
   });
 });

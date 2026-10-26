@@ -23,6 +23,7 @@ export const FORMULA_IDS = [
   "share.pct",
   "share.youth_tilt",
   "share.metros_won",
+  "share.pair_split",
   // S3 Audience DNA
   "dna.age_index",
   "dna.gender_index",
@@ -46,6 +47,7 @@ export const FORMULA_IDS = [
   "block.new_tag",
   "tenant.rank_shift",
   "tenant.fit",
+  "rank.shift",
   // S9 Cultural neighbourhood and S10 Sponsor Slate
   "xdom.under_the_radar",
   "xdom.edge",
@@ -197,17 +199,34 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
   },
   "share.youth_tilt": {
     name: "Youth tilt",
-    formula_tex: String.raw`\mathrm{Tilt}_j = \tfrac{1}{2}\big(\mathrm{pct}_{j,\le 24} + \mathrm{pct}_{j,25\text{–}29}\big) - \tfrac{1}{2}\big(\mathrm{pct}_{j,45\text{–}54} + \mathrm{pct}_{j,55+}\big)`,
+    formula_tex: String.raw`\mathrm{Tilt}_j = \frac{1}{|Y|} \sum_{b \in Y} \mathrm{pct}_{j,b} - \frac{1}{|O|} \sum_{b \in O} \mathrm{pct}_{j,b}, \quad Y \subseteq \{ \le 24,\ 25\text{–}29 \},\ O \subseteq \{ 45\text{–}54,\ 55+ \} \text{ queried, pct among the entities all of them ranked}`,
     plain_english:
-      "The entity's average percentile in the two youngest age contexts minus its average in the two oldest. Positive means the set ranks it higher for younger audiences than for older ones.",
-    caveats: ["Relative to this set of entities, not the age mix of customers.", WITHIN_CALL, GROUP_LEVEL],
+      "The entity's average percentile in the young age contexts queried (24 and younger, 25–29) minus its average in the old ones queried (45–54, 55 and older); it needs at least one of each. Those calls are re-ranked over the entities all of them scored, so every tilt subtracts percentiles of the same set. With all four buckets fully scored it is the two youngest minus the two oldest. Positive means the set ranks it higher for younger audiences than for older ones.",
+    caveats: [
+      "Relative to this set of entities, not the age mix of customers.",
+      WITHIN_CALL,
+      GROUP_LEVEL,
+      "An entity one of those calls did not score has no tilt, never 0.",
+    ],
   },
   "share.metros_won": {
     name: "Metros won",
     formula_tex: String.raw`W_j = \#\{ m : r_{mj} = 1 \}, \quad H_j = \#\{ m : \mathrm{pct}_{mj} \ge 0.5 \}`,
     plain_english:
       "The number of metros where the entity ranks first in the set, together with how many metros place it in the top half (top-half in K of M).",
-    caveats: [METRO, "Only the metros queried in this run count.", WITHIN_CALL],
+    caveats: [
+      METRO,
+      "Only the metros queried in this run that ranked the set count.",
+      WITHIN_CALL,
+      "An entity no metro ranked has no count, never 0; one ranked in only some metros shows how many ranked it.",
+    ],
+  },
+  "share.pair_split": {
+    name: "Pair split (who wins where)",
+    formula_tex: String.raw`s_c = \frac{a_{c,1}}{a_{c,1} + a_{c,2}}, \quad 1 - s_c \text{ for the second entity}`,
+    plain_english:
+      "For a pair, in each context: the first entity's share of the two entities' affinities from that one Qloo call; the second entity has the rest, so the two sum to 1. A share within 0.02 of an even split reads as even.",
+    caveats: [WITHIN_CALL, METRO, "A share of two affinities in one call, not market share or sales."],
   },
   "dna.age_index": {
     name: "Age affinity index",
@@ -233,11 +252,12 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
     name: "Distinctive tags",
     formula_tex: String.raw`\{ \tau \in T_t : \#\{ p \in P : \tau \in T_p \} < |P| / 2 \}`,
     plain_english:
-      "Search tags that the target carries and fewer than half of its peers carry, grouped by namespace: aesthetic, emotional tone, lifestyle, customer segment, personal style, product and genre.",
+      "Search tags that the target carries and fewer than half of its peers of the same entity type carry, grouped by namespace: aesthetic, emotional tone, lifestyle, customer segment, personal style, product and genre. Tags in other namespaces are listed as context, never as distinctive.",
     caveats: [
       "Tags describe Qloo's catalogue profile of the entity, not measured customer attributes.",
       "A missing tag is not evidence that the trait is absent.",
       PEER_SET,
+      "Compared only with set peers of the same entity type that carry tags; with none, no tag is called distinctive.",
     ],
   },
   "mom.delta_26w": {
@@ -305,11 +325,12 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
     name: "Cell lift",
     formula_tex: String.raw`L_c = \frac{u_c + 0.05}{v_c + 0.05}, \quad \text{for cells with } u_c \ge 0.5`,
     plain_english:
-      "For each map cell, the concept's heat compared with the baseline's heat (restaurants): u and v are the cell's percentiles among the non-zero cells of the concept map and of the baseline map. The 0.05 cushion stops cold baseline cells from producing huge ratios, and only cells in the top half of the concept map are scored.",
+      "For each map cell, the concept's heat compared with the baseline's heat (restaurants): u and v are the cell's percentiles among the non-zero cells both maps cover. The 0.05 cushion stops cold baseline cells from producing huge ratios, and only cells in the top half of the concept map are scored.",
     caveats: [
       "Relative within the metro.",
       "Lift against the named baseline, not absolute demand.",
       "Both maps are re-keyed to their coarsest shared geohash precision, and zero-affinity cells are excluded.",
+      "A cell only one map covers has no lift: not measured, never 0.",
     ],
   },
   "lift.area": {
@@ -334,17 +355,18 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
     name: "White space",
     formula_tex: String.raw`\mathrm{WS}_N = \mathrm{Demand\_pct}_N \cdot \big(1 - \mathrm{Supply\_pct}_N\big)`,
     plain_english:
-      "High where the concept's taste lift is strong and the density of indexed venues is low. Demand_pct is the neighbourhood's lift percentile among eligible neighbourhoods; Supply_pct is its percentile of venues per square kilometre. Median splits give four groups: Latent & open, Proven & crowded, Saturated and Cold.",
+      "High where the concept's taste lift is strong and the density of indexed venues is low. Demand_pct is the neighbourhood's lift percentile and Supply_pct its percentile of venues per square kilometre, both among the neighbourhoods with a lift and only when there are at least three of them. Neighbourhoods tied on density share the lowest percentile of the tie, so one with no sampled venue has Supply_pct 0 and never counts as high supply. Median splits give four groups: Latent & open, Proven & crowded, Saturated and Cold.",
     caveats: [
       "Supply is a capped sample of venues Qloo indexes, not a full count of businesses.",
       "Relative within the metro; not rent, footfall or sales.",
+      "Without a supply sample (none asked for, no category tag, or a first page that did not come back) white space is not measured, never 0.",
     ],
   },
   "block.rank_delta": {
     name: "Block rank delta",
-    formula_tex: String.raw`\Delta_t = \mathrm{rank}_{\text{city}}(t) - \mathrm{rank}_{\text{area}}(t), \quad \text{a missing rank counts as } 51`,
+    formula_tex: String.raw`\Delta_t = \mathrm{rank}_{\text{city}}(t) - \mathrm{rank}_{\text{area}}(t), \quad \text{a missing rank counts as } N+1`,
     plain_english:
-      "How much higher a tag (or a brand) ranks in the area than in the city as a whole. Positive means the area over-indexes on it; a tag missing from a top-50 list counts as rank 51.",
+      "How much higher a tag (or a brand) ranks in the area than in the city as a whole. Positive means the area over-indexes on it. A tag missing from a top-50 list counts as rank 51 and a brand missing from a top-30 list as rank 31; a row tied at its list's floor value has no rank and counts as missing.",
     caveats: [
       "Affinities are compressed, so only rank deltas against the city are shown.",
       "Taste signals of venue-goers, not residents or census data.",
@@ -354,14 +376,15 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
   "block.new_tag": {
     name: "NEW tag",
     formula_tex: String.raw`t \text{ is NEW} \iff t \notin \mathrm{Top50}_{\text{city}} \ \wedge\ t \in \mathrm{Top20}_{\text{area}}`,
-    plain_english: "A tag is NEW when it is absent from the city's top 50 yet present in the area's top 20.",
+    plain_english:
+      "A tag is NEW when it is absent from the city's top 50 yet present in the area's top 20. A tag the city list holds, even unranked at its floor, is not NEW.",
     caveats: ["Taste signals of venue-goers, not residents or census data.", "Commercial concept fit only."],
   },
   "tenant.rank_shift": {
     name: "Rank shift (site vs city)",
-    formula_tex: String.raw`\Delta_j = \mathrm{pct}_{\text{site}, j} - \mathrm{pct}_{\text{city}, j}`,
+    formula_tex: String.raw`\Delta_j = \mathrm{pct}_{\text{site}, j} - \mathrm{pct}_{\text{city}, j}, \quad \text{both among the candidates both calls ranked}`,
     plain_english:
-      "How much higher a candidate ranks among the same candidates when the site's location is the signal than when the whole city is. Positive means the site suits it better than the city at large.",
+      "How much higher a candidate ranks among the same candidates when the site's location is the signal than when the whole city is: each call is re-ranked over the candidates both scored. Positive means the site suits it better than the city at large. A candidate one call did not score has no shift.",
     caveats: [WITHIN_CALL, "Commercial concept fit only."],
   },
   "tenant.fit": {
@@ -375,15 +398,28 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
       WITHIN_CALL,
     ],
   },
+  "rank.shift": {
+    name: "Rank shift (between contexts)",
+    formula_tex: String.raw`\Delta_j = \mathrm{pct}_{\text{last}, j} - \mathrm{pct}_{\text{first}, j}, \quad \text{both among the candidates every compared context ranked}`,
+    plain_english:
+      "How much higher a candidate ranks in the last context of a slope than in the first, among the same candidates: each call is re-ranked over the candidates every compared context scored. Positive means it climbs from the first context to the last. A candidate one of the compared contexts did not score has no shift.",
+    caveats: [
+      "Ranks are compared across calls, never raw affinities.",
+      UNSCORED,
+      METRO,
+      "A shift among a few common candidates moves in large steps; read it with the set size.",
+    ],
+  },
   "xdom.under_the_radar": {
     name: "UNDER-THE-RADAR (cultural neighbourhood)",
-    formula_tex: String.raw`U_n = A_n - p_n, \quad A_n = \text{within-call percentile}, \ p_n = \text{popularity}`,
+    formula_tex: String.raw`U_n = A_n - p_n, \quad \text{pick} = \arg\max_{n:\ A_n \ge \operatorname{median}(A),\ p_n < \operatorname{median}(p),\ U_n > 0} U_n`,
     plain_english:
-      "Fit minus popularity: high when the audience's taste points strongly to something that is not yet widely popular.",
+      "Fit minus popularity: high when the audience's taste points strongly to something that is not yet widely popular. A domain's under-the-radar pick is its highest score among results with fit at or above the domain's median fit and popularity below its median popularity; a domain where no result clears that bar has no pick.",
     caveats: [
       NO_PRICE,
       "It subtracts a global popularity from a within-call percentile, so read it as an ordering inside one domain.",
       "The call caps popularity, so the most popular entities are not in the list.",
+      "The medians are relative to this list: a pick is less popular than most of its neighbours, not obscure.",
     ],
   },
   "xdom.edge": {
@@ -416,13 +452,10 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
   },
   "slate.market_alignment": {
     name: "Market alignment",
-    formula_tex: String.raw`\Delta_{jm} = \mathrm{pct}_{jm} - A_j`,
+    formula_tex: String.raw`\Delta_{jm} = \mathrm{pct}_{jm} - A^{(m)}_j, \quad A^{(m)}_j = \text{national percentile of } j \text{ among } S_m`,
     plain_english:
-      "How much higher a sponsor candidate ranks when the seed's taste is read in metro m than in the national one-scale call. Positive means the market leans toward that candidate.",
-    caveats: [
-      METRO,
-      "The two percentiles come from calls over different candidate sets, so read the direction more than the size.",
-    ],
+      "How much higher a sponsor candidate ranks when the seed's taste is read in metro m than nationally, among the same brands: S_m, the slate brands the metro call scored. Positive means the market leans toward that candidate. A metro that scored fewer than three slate brands gives no value.",
+    caveats: [METRO, "Read within the brands the metro scored, often a few of the slate; a brand the metro dropped is not scored there."],
   },
   "confidence.run": {
     name: "Run confidence",

@@ -223,6 +223,7 @@ export function fakeRun(qloo: QlooApi, registry = new FakeRegistry()): FakeRun {
     qloo,
     ledger,
     geo,
+    localities: null,
     registry,
     emit: (e) => events.push(e),
     budget,

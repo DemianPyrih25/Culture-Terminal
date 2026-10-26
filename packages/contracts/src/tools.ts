@@ -36,8 +36,10 @@ import { ReportDraft, ReportDraftShape, SubmitPlanInput, SubmitPlanInputShape } 
 /**
  * The 14 P0 ANALYST tools (PLAN §4.3). Arguments are refs only: entity refs R#, tag refs T#, metro
  * and market ids, areas, allowlisted audience URNs and the six age buckets, so the model can never
- * invent a Qloo id. Only submit_plan and submit_report are strict; every other tool is validated
- * here with zod and answers `is_error` on bad input.
+ * invent a Qloo id. Only submit_report is strict; every other tool, submit_plan included, is validated
+ * here with zod and answers `is_error` on bad input. The API compiles one grammar from the strict
+ * tools alongside the rest, and with the full tool list a strict submit_plan too exceeds its size limit
+ * ("The compiled grammar is too large"), so the plan is checked in code (INVALID_PLAN) instead.
  */
 
 // Argument atoms ----------------------------------------------------------------------------------------
@@ -100,15 +102,18 @@ export const RankContext = z.discriminatedUnion("kind", [
 export type RankContext = z.infer<typeof RankContext>;
 
 /**
- * What the frozen Qloo allowlist can score: filter.results.entities exists for brand, person and
- * destination only, persons take only signal.location, and destinations only seed entities. So
- * rank_candidates ranks brands under any context, persons under location contexts with no interest
- * signal, and destinations under a none context from seed entities; share_of_taste takes brands
- * under any context and persons under metro contexts.
+ * What the frozen Qloo allowlist can score with filter.results.entities (packages/qloo allowlist,
+ * PROBE "Part 5 consequences"): brands under any context, with seeds and tags riding on each;
+ * persons under location and age contexts with no interest signal; artists from seeds and tags
+ * alone (a none context); places under location contexts, or from seeds alone under a none context
+ * (a location and a seed together are not verified for places); destinations from seeds alone.
+ * share_of_taste takes brands under any context and persons under age and metro contexts.
  */
-const RANKABLE_TYPES: readonly EntityType[] = ["brand", "person", "destination"];
+const RANKABLE_TYPES: readonly EntityType[] = ["brand", "person", "artist", "place", "destination"];
 const SHAREABLE_TYPES: readonly EntityType[] = ["brand", "person"];
 const LOCATION_CONTEXTS: readonly RankContext["kind"][] = ["site", "city", "metro"];
+const PERSON_CONTEXTS: readonly RankContext["kind"][] = [...LOCATION_CONTEXTS, "age"];
+const PLACE_CONTEXTS: readonly RankContext["kind"][] = ["none", ...LOCATION_CONTEXTS];
 
 // Inputs ---------------------------------------------------------------------------------------------------
 
@@ -153,12 +158,23 @@ export const RankCandidatesInput = z
     (i) => !i.contexts.some((c) => c.kind === "none") || i.signal_entities.length + i.signal_tags.length > 0,
     { message: "a 'none' context needs signal_entities or signal_tags" },
   )
-  .refine((i) => RANKABLE_TYPES.includes(i.type), { message: "only brand, person and destination can be ranked" })
+  .refine((i) => RANKABLE_TYPES.includes(i.type), { message: "only brand, person, artist, place and destination can be ranked" })
   .refine(
     (i) =>
       i.type !== "person" ||
-      (i.contexts.every((c) => LOCATION_CONTEXTS.includes(c.kind)) && i.signal_entities.length + i.signal_tags.length === 0),
-    { message: "persons rank only under site, city or metro contexts, with no signal_entities or signal_tags" },
+      (i.contexts.every((c) => PERSON_CONTEXTS.includes(c.kind)) && i.signal_entities.length + i.signal_tags.length === 0),
+    { message: "persons rank only under site, city, metro or age contexts, with no signal_entities or signal_tags" },
+  )
+  .refine((i) => i.type !== "artist" || i.contexts.every((c) => c.kind === "none"), {
+    message: "artists rank only under a 'none' context, from signal_entities or signal_tags",
+  })
+  .refine(
+    (i) =>
+      i.type !== "place" ||
+      (i.contexts.every((c) => PLACE_CONTEXTS.includes(c.kind)) &&
+        i.signal_tags.length === 0 &&
+        (i.signal_entities.length === 0 || i.contexts.every((c) => c.kind === "none"))),
+    { message: "places rank under site, city or metro contexts with no signals, or under a 'none' context from signal_entities alone" },
   )
   .refine(
     (i) =>
@@ -194,8 +210,8 @@ export const ShareOfTasteInput = z
     message: "give at least one age, audience or metro context",
   })
   .refine((i) => SHAREABLE_TYPES.includes(i.type), { message: "share_of_taste takes brand or person sets only" })
-  .refine((i) => i.type !== "person" || i.ages.length + i.audiences.length === 0, {
-    message: "person sets take metro contexts only",
+  .refine((i) => i.type !== "person" || i.audiences.length === 0, {
+    message: "person sets take age and metro contexts only",
   });
 
 export const AudienceDnaInput = z
@@ -282,7 +298,7 @@ function defineTool<N extends ToolName, S extends z.ZodType>(
 export const ANALYST_TOOLS = {
   submit_plan: defineTool({
     name: "submit_plan",
-    strict: true,
+    strict: false,
     kitWorkflows: [],
     endpoints: [],
     input: SubmitPlanInput,
@@ -334,12 +350,13 @@ export const ANALYST_TOOLS = {
       "Score an exact candidate set on one scale under one to three contexts. Costs 1 Qloo call per context. " +
       "Contexts: none (needs signal_entities or signal_tags), site (an area), city (a gazetteer metro), metro (a " +
       "market), audience, age. One context returns a Ranked table with FIT percentiles; two or more return a Slope of " +
-      "rank shifts; Tenant Fit uses [site, city] and is computed by code. Scores are per call: compare ranks and " +
-      "percentiles, never raw affinity across calls. Qloo may drop candidates in a context, and candidates tied at " +
-      "the row floor are not scored. Location contexts compress scores, so read ranks. Ranks brands under any " +
-      "context; persons only under site, city or metro contexts with no signal entities or tags; destinations only " +
-      "under a none context with signal_entities and no signal_tags. Artists, podcasts, TV shows, movies and places " +
-      "cannot be ranked.",
+      "rank shifts among the candidates every context ranked; Tenant Fit uses [site, city] and is computed by code. " +
+      "Scores are per call: compare ranks and percentiles, never raw affinity across calls. Qloo may drop candidates " +
+      "in a context, and candidates tied at the row floor are not scored. Location contexts compress scores, so read " +
+      "ranks. Ranks brands under any context; persons under site, city, metro or age contexts with no signal " +
+      "entities or tags; artists only under a none context; places under site, city or metro contexts with no " +
+      "signals, or under a none context from signal_entities alone; destinations only under a none context with " +
+      "signal_entities and no signal_tags. Podcasts, TV shows and movies cannot be ranked.",
   }),
 
   peer_landscape: defineTool({
@@ -365,22 +382,24 @@ export const ANALYST_TOOLS = {
     input: ShareOfTasteInput,
     description:
       "Share-of-Taste grid: rank a set of 2–8 entities within each context (age buckets, audiences, market metros). " +
-      "Costs 1 Qloo call per context. Returns a Matrix of within-call percentiles, youth tilt (youngest two buckets " +
-      "minus oldest two) and metros won. Ranks hold only within this set and context. A metro context is Qloo's " +
-      "locality signal, not residence or sales, and compresses scores. Audiences must come from this desk's " +
-      "AUDIENCES list. Takes brand sets under any context and person sets under metro contexts only; artists and " +
-      "other types cannot be shared.",
+      "The first ref is the subject. Costs 1 Qloo call per context. Returns a Matrix of within-call percentiles, " +
+      "youth tilt (the young buckets queried minus the old ones, at least one of each) and metros won; a pair also " +
+      "gets who wins where. Ranks hold only within this set and context. A metro context is Qloo's locality signal, " +
+      "not residence or sales, and compresses scores. Audiences must come from this desk's AUDIENCES list. Takes " +
+      "brand sets under any context and person sets under age and metro contexts; artists and other types cannot " +
+      "be shared.",
   }),
 
   audience_dna: defineTool({
     name: "audience_dna",
     strict: false,
     kitWorkflows: ["audience_demographics", "entity_tags", "compare_audiences"],
-    endpoints: ["/v2/insights"],
+    endpoints: ["/v2/insights", "/entities"],
     input: AudienceDnaInput,
     description:
-      "Audience DNA: age and gender affinity indices for 1–12 entities. Costs 1 Qloo call (one demographics batch); " +
-      "facet tags come from tags already in the registry, grouped by namespace. With compare_with, the two subjects " +
+      "Audience DNA: age and gender affinity indices for 1–12 entities. Costs 2 Qloo calls, each free when cached: one " +
+      "demographics batch and one /entities describe for the facet tags, grouped by namespace; distinctive tags are " +
+      "counted against set peers of the same type. With compare_with, the two subjects " +
       "are mirrored as a butterfly with a-only and b-only tags, which are qualitative presence, not measured " +
       "differences. Indices are relative to the average audience, not shares of customers; gender is binary in the " +
       "source; an entity without a demographics block is not measured.",
@@ -423,9 +442,11 @@ export const ANALYST_TOOLS = {
       "Lift map for a concept in a gazetteer metro: where the concept's taste concentrates relative to a pinned " +
       "restaurant baseline. Costs 1 Qloo call for the concept heatmap, 0–1 for the baseline (pinned per metro) and " +
       "1–2 more with supply. Returns cells, neighbourhood lifts with confidence, and white space (high demand, low " +
-      "supply) when supply is true. Concept tags must be taxonomy place tags (genre:place:*, category:place:*); " +
-      "descriptive tags return an empty map. Raw heat tracks popularity, so only lift means anything. Coarse " +
-      "precision allows no neighbourhood claims. Supply is a capped sample of Qloo-indexed venues.",
+      "supply) when supply is true. Concept tags must be taxonomy place tags: genre:place:* tags shape the map, " +
+      "category:place:* tags only filter the supply sample (white space needs one); concept_entities map the concept " +
+      "only when no genre tag fits. Descriptive tags return an empty map. Raw heat tracks popularity, so only lift " +
+      "means anything. Neighbourhoods are ranked only when at least three have a lift. Coarse precision allows no " +
+      "neighbourhood claims. Supply is a capped sample of Qloo-indexed venues.",
   }),
 
   block_dna: defineTool({
@@ -436,8 +457,9 @@ export const ANALYST_TOOLS = {
     input: BlockDnaInput,
     description:
       "Block DNA for a neighbourhood or point: which taste tags over- and under-index there compared with the whole " +
-      "city. Costs 1 Qloo call for the area's tags plus 1 for local brands when include_brands is true; the city " +
-      "side is pinned. Returns rank-delta bars by family (WHO venue-goer taste tags, VIBE, WHAT, SOUND), NEW tags " +
+      "city. Costs 2 Qloo calls for the area (its tags, then its music tags for SOUND) plus 1 for local brands when " +
+      "include_brands is true; the city side is pinned per metro (2 calls, 3 with brands, the first time a metro is " +
+      "profiled). Returns rank-delta bars by family (WHO venue-goer taste tags, VIBE, WHAT, SOUND), NEW tags " +
       "absent city-wide, and local brand refs to feed rank_candidates. If the area polygon fails, code falls back to " +
       "a point, then a text query (a CODE FALLBACK that lowers confidence). These are venue-goer taste signals, not " +
       "residents or census data.",
@@ -460,11 +482,12 @@ export const ANALYST_TOOLS = {
     name: "sponsor_slate",
     strict: false,
     kitWorkflows: ["recommend", "rank"],
-    endpoints: ["/v2/insights"],
+    endpoints: ["/v2/insights", "/v2/tags"],
     input: SponsorSlateInput,
     description:
       "Sponsor Slate for an artist or person: the best-fitting brand in each sponsor category. Costs 1 Qloo call per " +
-      "category, 1 one-scale scoring call (the top two per category plus your shortlist) and 1 per market. Returns a " +
+      "category (+1 cached tag lookup per category without a pinned tag), 1 one-scale scoring call (the top two per " +
+      "category plus your shortlist) and 1 per market. Returns a " +
       "Slate (best fit and runner-up per category, FIT, popularity, UNDER-THE-RADAR flag, top markets), a Quadrant " +
       "and a market Slope. Taste fit only: Qloo has no fee, availability, exclusivity or ROI data, and one brand per " +
       "category is a slate rule, not a contract.",
@@ -484,6 +507,7 @@ export const ANALYST_TOOLS = {
       "names are allowed), and every STALE metric sits beside {{WINDOW}}. " +
       "Each argument keeps qloo_fact (QLOO DATA) apart from our_read (OUR READ) and cites at least one metric; each " +
       "recommendation cites arguments; give a verdict for every planned hypothesis and one to three bear-case items. " +
+      "verdict_tag names the finding in two to five plain words for list rows, e.g. 'Taste island'. " +
       "No buy/sell advice, price targets, causal claims or statements about individuals. Limits in the field " +
       "descriptions are enforced by the CHECKER; if it rejects the draft, resubmit the complete corrected draft " +
       "once. Costs no Qloo calls.",

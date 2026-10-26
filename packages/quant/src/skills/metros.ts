@@ -1,4 +1,4 @@
-import type { LatLon, MetroId } from "@ct/contracts";
+import { METRO_LABEL, MetroId, type LatLon, type MarketId } from "@ct/contracts";
 
 /**
  * Public city-centre coordinates of the gazetteer metros. Place mentions are searched around these
@@ -11,6 +11,13 @@ export const METRO_CENTRES: Readonly<Record<MetroId, LatLon>> = {
 
 /** Search radius around a metro centre for place resolution, in miles (Qloo's unit for filter.radius). */
 export const PLACE_SEARCH_RADIUS_MILES = 25;
+
+/** A market's label without a locality: the gazetteer label, else the id in words ("kansas_city" → "Kansas City"). */
+export function marketLabel(id: MarketId): string {
+  const metro = MetroId.safeParse(id);
+  if (metro.success) return METRO_LABEL[metro.data];
+  return id.replace(/_/g, " ").replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
 
 /** The "lat,lon" form /search takes in filter.location (latitude first, unlike WKT). */
 export function metroCentreLatLon(metro: MetroId): string {

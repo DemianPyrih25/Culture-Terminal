@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import type { RunState } from "@ct/contracts";
-import type { BriefAnswer, BriefModel, BriefSectionId, BriefTerminal } from "../../lib/brief";
+import { buildGhostView, ghostOf, type BriefAnswer, type BriefModel, type BriefSectionId, type BriefTerminal } from "../../lib/brief";
 import type { ConnectionStatus } from "../../lib/sse-client";
 import { FAKE_MODEL } from "../../lib/test-run";
 // Straight from its file: the ask barrel would bring the whole Ask panel into this page's bundle.
@@ -17,8 +17,10 @@ import styles from "./brief.module.css";
 import { ConvictionStrip, PriorItem, PriorsKicker } from "./conviction";
 import { argumentsKicker, ArgumentItem, BlockKicker, KeyFigures, Recommendations } from "./evidence";
 import { FigureRow } from "./figure-row";
+import { GHOST_OUTLINE_LABEL, GHOST_SECTION_ID, GhostSection } from "./ghost";
 import { useMedia, useScrolledPast } from "./hooks";
 import { ProgressLine, RunMeters, StopRunButton, useStopRun } from "./live";
+import { LocationLine } from "./location";
 import { IncomingNote, MarginNote, NO_SCRIPT_NOTES, NoteList, Sidenotes, TraceNoteView } from "./margin";
 import { MethodBlock } from "./method";
 import { sentenceCase } from "./note-text";
@@ -43,8 +45,11 @@ export type BriefDocumentView = "live" | "replay" | "final";
 
 export interface BriefDocumentProps {
   model: BriefModel;
-  /** The state the model was built from: the evidence bundles, the resolved names and the last event. */
-  state: Pick<RunState, "evidence" | "resolves" | "model" | "lastSeq">;
+  /**
+   * The state the model was built from: the evidence bundles, the resolved names and the last event, and
+   * the run's GHOST (its event, or the final report's) when it has one.
+   */
+  state: Pick<RunState, "evidence" | "resolves" | "model" | "lastSeq"> & Partial<Pick<RunState, "ghost" | "report">>;
   view: BriefDocumentView;
   /** The stream's connection, while live. */
   connection?: ConnectionStatus;
@@ -64,7 +69,7 @@ export interface BriefDocumentProps {
 const TOP_BAR_HEIGHT = 56;
 const RUNNING_HEAD_HEIGHT = 44;
 
-/** From here the running head has room for the signal tag over the reading column. */
+/** From here the running head has room for the finding over the reading column. */
 const WIDE = "(min-width: 1280px)";
 
 const CONNECTION_NOTE: Partial<Record<ConnectionStatus, string>> = {
@@ -88,10 +93,10 @@ function shownSections(model: BriefModel): Set<BriefSectionId> {
   return shown;
 }
 
-/** The running head's tag: the signal once written, otherwise where the run stands. */
+/** The running head's tag: the finding ("Taste island") once written, otherwise where the run stands. */
 function headTag(model: BriefModel, view: BriefDocumentView): string {
   // A replay's REPLAY marker sits beside its controls in the head's right slot.
-  if (view === "replay") return model.header.signal?.label ?? "";
+  if (view === "replay") return model.header.finding ?? "";
   switch (model.terminal?.kind) {
     case "needs_input":
       return "Needs a pick";
@@ -102,9 +107,9 @@ function headTag(model: BriefModel, view: BriefDocumentView): string {
     case "cancelled":
       return "Stopped";
     case "incomplete":
-      return `Incomplete · ${model.header.signal?.label ?? "evidence digest"}`;
+      return `Incomplete · ${model.header.finding ?? "evidence digest"}`;
     default:
-      return model.header.signal?.label ?? (model.live ? "Being written" : "");
+      return model.header.finding ?? (model.live ? "Being written" : "");
   }
 }
 
@@ -248,9 +253,14 @@ export function BriefDocument({
   const notes = useMemo(() => placeNotes(model), [model]);
   const rows = useMemo(() => figureRows(model.evidence.figures), [model]);
   const rivals = useMemo(() => expectedRivalRefs(state.resolves), [state.resolves]);
+  const figureHrefs = useMemo(() => Object.fromEntries(model.evidence.figures.map((f) => [f.datasetId, `#figure-${f.number}`])), [model]);
   const shown = shownSections(model);
   const progress = useSteadyProgress(model.live?.progress.label ?? null, state.lastSeq);
   const answered = model.answer.state === "final";
+  // LLM alone vs Culture Terminal (§6.6): only for a run with a GHOST, never on a picker or a refusal.
+  const ghostRun = ghostOf(state);
+  const ghostView = useMemo(() => buildGhostView(ghostRun), [ghostRun]);
+  const ghost = model.terminal?.kind === "needs_input" || model.terminal?.kind === "refused" ? null : ghostView;
 
   // Once the answer is written there is nothing left to stop, though run.end may still be on its way.
   const cancellable = view === "live" && (model.live?.cancellable ?? false) && !answered;
@@ -272,6 +282,11 @@ export function BriefDocument({
   const testRun = state.model === FAKE_MODEL;
 
   const outlineItems: OutlineItem[] = model.outline.map((o) => ({ id: o.id, label: o.label, pending: !shown.has(o.id) }));
+  if (ghost) {
+    // GHOST reads after Risks, before the mechanics; Method and Sources move one number down.
+    const at = outlineItems.findIndex((o) => o.id === "method");
+    outlineItems.splice(at < 0 ? outlineItems.length : at, 0, { id: GHOST_SECTION_ID, label: GHOST_OUTLINE_LABEL });
+  }
   const metaExtra: ReactNode[] = [];
   if (header.parentRunId) {
     metaExtra.push(
@@ -420,6 +435,7 @@ export function BriefDocument({
                   <h1 ref={setHeading} className="m-0 type-question tracking-[-0.6px] text-ink [overflow-wrap:anywhere] max-md:text-[30px] max-md:leading-[37px]">
                     {question ?? "Waiting for the question…"}
                   </h1>
+                  {model.location ? <LocationLine location={model.location} /> : null}
                 </div>
               </BriefRow>
 
@@ -467,6 +483,7 @@ export function BriefDocument({
                       first={i === 0 && model.evidence.keyFigures.length === 0}
                       // A dataset not streamed inline is stored with the run's ledger, before run.end.
                       ready={view === "replay" || model.live === null}
+                      hrefs={figureHrefs}
                     />
                   ))}
                   {model.evidence.arguments.length > 0 ? (
@@ -512,9 +529,13 @@ export function BriefDocument({
                 </>
               ) : null}
 
+              {ghost ? (
+                <GhostSection view={ghost} number="05" headline={answered ? model.answer.headline : null} pending={answerTag(model.answer, model.terminal)} />
+              ) : null}
+
               {shown.has("method") ? (
                 <BriefRow className="pt-10">
-                  <SectionHead id="method" className={SCROLL_ANCHOR_CLASS} number="05" title="Method" aside="Mechanics last" />
+                  <SectionHead id="method" className={SCROLL_ANCHOR_CLASS} number={ghost ? "06" : "05"} title="Method" aside="Mechanics last" />
                   <div className="pt-1">
                     <MethodBlock method={model.method} />
                   </div>
@@ -523,7 +544,7 @@ export function BriefDocument({
 
               {shown.has("sources") ? (
                 <BriefRow className="pt-10" notes={notesAt(ROW.sources)}>
-                  <SectionHead id="sources" className={SCROLL_ANCHOR_CLASS} number="06" title="Sources" aside={model.sources.line} />
+                  <SectionHead id="sources" className={SCROLL_ANCHOR_CLASS} number={ghost ? "07" : "06"} title="Sources" aside={model.sources.line} />
                   <div className="pt-2">
                     <SourcesList sources={model.sources} />
                   </div>

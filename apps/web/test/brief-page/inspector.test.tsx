@@ -207,9 +207,10 @@ describe("copy as curl", () => {
   });
 
   it("falls back to the redacted parameters for a call in no evidence bundle, and flags a shortened one", () => {
-    const search = model.sources.items.find((s) => !Object.values(state.evidence).some((e) => e.qlooCallIds.includes(s.qlooCallId)));
-    if (!search) throw new Error("no call outside the bundles");
-    expect(requestCurl(search, context.queries.get(search.qlooCallId))).toEqual({ command: curlCommand(search.endpoint, search.params), exact: true });
+    // A call in no bundle has no full query (runs recorded before the gate's name searches had one).
+    const search = model.sources.items.find((s) => s.endpoint === "/search") ?? model.sources.items[0];
+    if (!search) throw new Error("no call");
+    expect(requestCurl(search, undefined)).toEqual({ command: curlCommand(search.endpoint, search.params), exact: true });
     const polygon = requestCurl({ endpoint: "/v2/insights", params: [["filter.location", "POLYGON (12 pts)"]] }, null);
     expect(polygon?.exact).toBe(false);
     expect(hasShortenedParams([["filter.location", "MULTIPOLYGON (40 pts)"]])).toBe(true);

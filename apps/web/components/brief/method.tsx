@@ -1,7 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useId, useState } from "react";
 import type { BriefMethod, CheckerLine, Interpretation, MethodStep, StepStatus } from "../../lib/brief";
+import { desHref, isDesType } from "../des/des-href";
 import { CheckIcon, ChevronIcon, CrossIcon, cx, DashIcon } from "../ui";
 
 /**
@@ -104,7 +106,24 @@ function ClerkReading({ reading }: { reading: Interpretation }) {
           {reading.resolves.map((r, i) => (
             <li key={i} className="flex items-center gap-1">
               {r.applied ? <CheckIcon size={12} className="text-accent" /> : <DashIcon size={12} className="text-faint" />}
-              {r.mention} · {r.matchLabel}
+              {/* One flex item, so the name and its match read as one line of text, linked or not. */}
+              <span>
+                {/* An applied name of a type a tearsheet describes opens its DES tearsheet (P1 #1). */}
+                {r.applied && r.name !== null && isDesType(r.entityType) ? (
+                  <Link
+                    href={desHref({ name: r.name, type: r.entityType })}
+                    prefetch={false}
+                    className="hover:text-accent hover:underline hover:underline-offset-2"
+                    title={`${r.name}: open its DES tearsheet`}
+                    data-des-link={r.entityType}
+                  >
+                    {r.mention}
+                  </Link>
+                ) : (
+                  r.mention
+                )}{" "}
+                · {r.matchLabel}
+              </span>
             </li>
           ))}
         </ul>

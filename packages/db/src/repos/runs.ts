@@ -1,6 +1,6 @@
-import { and, count, desc, eq, gte, ilike, inArray, like, lt, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, isNotNull, isNull, like, lt, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { Queryable } from "../client";
-import { metrics, type NewRun, type Run, type RunStatus, runs } from "../schema";
+import { metrics, type NewRun, type Run, type RunLane, type RunStatus, runs } from "../schema";
 
 /** D26: a completed run answers the same question hash for 72 hours. */
 export const ANSWER_CACHE_WINDOW_MS = 72 * 60 * 60 * 1000;
@@ -96,22 +96,83 @@ export interface CountRunsSinceOptions {
   hashPrefix: string;
   /** Window length, measured back from the database clock. */
   sinceMs: number;
+  /** Only runs started by this visitor: the salted hash of its address in ip_hash (never the address). */
+  ipHash?: string;
+  /** Only runs of this lane. */
+  lane?: RunLane;
 }
 
-/** How many runs with this question-hash prefix were created within the window, whatever their status. */
+/** The conditions of countRunsSince's filter. */
+function sinceConditions(what: string, options: CountRunsSinceOptions): SQL[] {
+  const { hashPrefix, sinceMs, ipHash, lane } = options;
+  checkWindow(what, sinceMs);
+  if (ipHash !== undefined && ipHash.trim() === "") throw new RangeError(`${what}: ipHash must not be empty`);
+  const conditions = [
+    like(runs.questionHash, likePrefix(hashPrefix)),
+    gte(runs.createdAt, sql`now() - make_interval(secs => ${sinceMs / 1000})`),
+  ];
+  if (ipHash !== undefined) conditions.push(eq(runs.ipHash, ipHash));
+  if (lane !== undefined) conditions.push(eq(runs.lane, lane));
+  return conditions;
+}
+
+/**
+ * How many runs with this question-hash prefix (and, when given, this visitor and lane) were created
+ * within the window, whatever their status.
+ */
 export async function countRunsSince(db: Queryable, options: CountRunsSinceOptions): Promise<number> {
-  const { hashPrefix, sinceMs } = options;
-  checkWindow("countRunsSince", sinceMs);
   const [row] = await db
     .select({ n: count() })
     .from(runs)
-    .where(
-      and(
-        like(runs.questionHash, likePrefix(hashPrefix)),
-        gte(runs.createdAt, sql`now() - make_interval(secs => ${sinceMs / 1000})`),
-      ),
-    );
+    .where(and(...sinceConditions("countRunsSince", options)));
   return row?.n ?? 0;
+}
+
+/** The most ages one runAgesSince call returns. */
+export const RUN_AGES_MAX = 100;
+
+export interface RunAgesSinceOptions extends CountRunsSinceOptions {
+  /** At most this many, newest first (1 to RUN_AGES_MAX). */
+  limit: number;
+}
+
+/**
+ * How long ago, in ms on the database clock, the newest runs countRunsSince would count were
+ * created, newest first. A rolling limit of k reads the k-th: its leaving the window frees a start.
+ */
+export async function runAgesSince(db: Queryable, options: RunAgesSinceOptions): Promise<number[]> {
+  const { limit } = options;
+  if (!Number.isInteger(limit) || limit < 1 || limit > RUN_AGES_MAX) {
+    throw new RangeError(`runAgesSince: limit must be an integer from 1 to ${RUN_AGES_MAX}, got ${limit}`);
+  }
+  const rows = await db
+    .select({ ageMs: sql<number>`(extract(epoch from (now() - ${runs.createdAt})) * 1000)::float8`.mapWith(Number) })
+    .from(runs)
+    .where(and(...sinceConditions("runAgesSince", options)))
+    .orderBy(desc(runs.createdAt), desc(runs.id))
+    .limit(limit);
+  return rows.map((row) => Math.max(0, row.ageMs));
+}
+
+export interface ClearIpHashesOptions {
+  /** Runs created longer ago than this (database clock) lose their ip_hash. */
+  olderThanMs: number;
+}
+
+/**
+ * Clears ip_hash on runs created before the window: past every per-visitor window, a visitor's hash
+ * counts toward nothing, so it is not kept. updated_at is left alone (the run itself did not change).
+ * Returns how many runs were cleared.
+ */
+export async function clearIpHashes(db: Queryable, options: ClearIpHashesOptions): Promise<number> {
+  const { olderThanMs } = options;
+  checkWindow("clearIpHashes", olderThanMs);
+  const rows = await db
+    .update(runs)
+    .set({ ipHash: null })
+    .where(and(isNotNull(runs.ipHash), lt(runs.createdAt, sql`now() - make_interval(secs => ${olderThanMs / 1000})`)))
+    .returning({ id: runs.id });
+  return rows.length;
 }
 
 export interface PurgeRunsOptions {
@@ -160,6 +221,8 @@ export async function findAnswerCache(
       and(
         eq(runs.questionHash, questionHash),
         eq(runs.status, "completed"),
+        // A follow-up answers its parent's context, never a fresh question (safety net: the hash already differs).
+        isNull(runs.parentRunId),
         gte(runs.createdAt, sql`now() - make_interval(secs => ${windowMs / 1000})`),
       ),
     )
@@ -240,6 +303,8 @@ export interface RunListRow {
   signal: string | null;
   /** report.verdict.headline, or null. */
   headline: string | null;
+  /** report.verdict.tag, or null (absent in reports stored before it existed; callers validate it). */
+  tag: string | null;
   /** report.verdict.confidence.score, or null. */
   confidenceScore: number | null;
   /** report.verdict.confidence.band, or null. */
@@ -365,6 +430,7 @@ export async function listRuns(db: Queryable, options: ListRunsOptions): Promise
       createdAtKey: CREATED_AT_KEY,
       signal: jsonText(REPORT, "verdict,signal"),
       headline: jsonText(REPORT, "verdict,headline"),
+      tag: jsonText(REPORT, "verdict,tag"),
       confidenceScore: CONFIDENCE_SCORE,
       confidenceBand: jsonText(REPORT, "verdict,confidence,band"),
       numbersTraced: sql<unknown>`${NUMBERS_TRACED}`,
@@ -442,4 +508,46 @@ export async function summarizeRuns(db: Queryable, filter: RunListFilter): Promi
     summary.numbersTracedByPillar[key] = { traced: desk.traced + g.traced, total: desk.total + g.total };
   }
   return summary;
+}
+
+export interface RecentRunStatusesOptions {
+  /** Only runs whose question_hash starts with this, e.g. "q1:" or "fake:". */
+  hashPrefix: string;
+  /** At most this many, newest first (1 to RUN_LIST_MAX). */
+  limit: number;
+}
+
+/** Statuses of the latest runs with this question-hash prefix, newest first (/status). */
+export async function recentRunStatuses(db: Queryable, options: RecentRunStatusesOptions): Promise<RunStatus[]> {
+  const rows = await db
+    .select({ status: runs.status })
+    .from(runs)
+    .where(like(runs.questionHash, likePrefix(options.hashPrefix)))
+    .orderBy(desc(runs.createdAt), desc(runs.id))
+    .limit(Math.max(1, Math.min(options.limit, RUN_LIST_MAX)));
+  return rows.map((row) => row.status);
+}
+
+/** Names listPublicFigureNames returns at most. */
+export const PUBLIC_FIGURE_NAMES_MAX = 2_000;
+
+/**
+ * The person mentions CLERK marked `public_figure` in briefs that ran (completed or incomplete), each
+ * name once as written, newest first. The DES tearsheet vets a person with them before any Qloo request
+ * (SPEC §4.6). Names only: no entity id.
+ */
+export async function listPublicFigureNames(db: Queryable, limit = PUBLIC_FIGURE_NAMES_MAX): Promise<string[]> {
+  const capped = Math.max(1, Math.min(Math.trunc(limit), PUBLIC_FIGURE_NAMES_MAX));
+  const mentions = sql`(case when jsonb_typeof(${runs.intent} -> 'mentions') = 'array' then ${runs.intent} -> 'mentions' else '[]'::jsonb end)`;
+  const rows = await db.execute<{ name: string }>(sql`
+    select m.value ->> 'text' as name
+    from ${runs} cross join lateral jsonb_array_elements(${mentions}) as m(value)
+    where ${runs.status} in ('completed', 'incomplete')
+      and m.value ->> 'entity_type' = 'person'
+      and m.value -> 'public_figure' = 'true'::jsonb
+      and jsonb_typeof(m.value -> 'text') = 'string'
+    group by 1
+    order by max(${runs.createdAt}) desc
+    limit ${capped}`);
+  return rows.map((row) => row.name);
 }

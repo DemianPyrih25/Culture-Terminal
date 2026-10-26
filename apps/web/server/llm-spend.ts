@@ -1,4 +1,5 @@
 import "server-only";
+import type { AnalystMode } from "@ct/agent";
 import type { Lane } from "@ct/contracts";
 import { getQlooUsage, incrementQlooUsage, type Queryable } from "@ct/db";
 import { utcDay } from "@ct/qloo";
@@ -8,6 +9,15 @@ export const LLM_USD_METRIC = "llm_usd";
 
 /** Pre-run check (PLAN §4.2): a live run starts only while today's spend plus this stays within the cap. */
 export const PRE_RUN_USD = 0.35;
+
+/**
+ * The pre-run reserve of a run on the economy ANALYST (Haiku): the LLM bench measured under a cent
+ * a run, so this leaves room for a long one. A larger reserve would leave economy almost no window.
+ */
+export const PRE_RUN_ECONOMY_USD = 0.05;
+
+/** What a run on this ANALYST holds of today's budget until it records its own spend. */
+export const preRunUsd = (mode: AnalystMode): number => (mode === "economy" ? PRE_RUN_ECONOMY_USD : PRE_RUN_USD);
 
 /** Today's (UTC) LLM spend across lanes. */
 export function todayLlmUsd(db: Queryable, now: number = Date.now()): Promise<number> {

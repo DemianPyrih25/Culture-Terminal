@@ -3,6 +3,7 @@ import {
   ConfidenceBand,
   extractMetricIds,
   IsoDateTime,
+  isVerdictTag,
   Job,
   NumbersTraced,
   Pillar,
@@ -72,6 +73,8 @@ export interface BriefSummary {
   status: BriefStatus;
   /** Null when the run stored no note. */
   signal: Signal | null;
+  /** The note's verdict tag ("Taste island") when it keeps its rule; null otherwise, and the row prints the signal. */
+  tag: string | null;
   /** The verdict headline with its {{M#}} and [E#] tokens, rendered with `metrics`; null without a note. */
   headline: string | null;
   /** The display of every metric the headline cites, by id. A metric display of null is UNAVAILABLE, never 0. */
@@ -230,6 +233,7 @@ export function toBriefSummary(row: RunListRow, metrics: Record<string, MetricDi
     jobLabel: job === null ? null : JOB_LABEL[job],
     status: row.status === "completed" ? "completed" : "incomplete",
     signal: option(Signal, row.signal),
+    tag: isVerdictTag(row.tag) ? row.tag.trim() : null,
     headline: row.headline,
     metrics,
     confidence: confidenceOf(row),

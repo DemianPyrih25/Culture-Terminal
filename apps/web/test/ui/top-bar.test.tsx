@@ -25,25 +25,25 @@ describe("TopBar", () => {
     expect(html).toContain('aria-label="Main"');
   });
 
-  it("renders Following and Method disabled until their parts exist", () => {
-    expect(NAV_ENABLED).toEqual({ briefs: true, following: false, method: false });
+  it("renders Following disabled until its part exists, and Method enabled", () => {
+    expect(NAV_ENABLED).toEqual({ briefs: true, following: false, method: true });
     const html = renderToStaticMarkup(<TopBar active="briefs" />);
-    for (const key of ["following", "method"]) {
-      const tag = navTag(html, key);
-      // A disabled link to assistive technology: the link role, aria-disabled, no destination, no tab stop.
-      expect(tag).toContain('role="link"');
-      expect(tag).toContain('aria-disabled="true"');
-      expect(tag).not.toContain("href=");
-      expect(tag).not.toContain("tabindex");
-      expect(tag).toContain("text-faint");
-      // And the reason, spoken: the title alone never reaches keyboard or screen-reader users.
-      expect(navItem(html, key)).toContain('<span class="sr-only"> (not available yet)</span>');
+    const tag = navTag(html, "following");
+    // A disabled link to assistive technology: the link role, aria-disabled, no destination, no tab stop.
+    expect(tag).toContain('role="link"');
+    expect(tag).toContain('aria-disabled="true"');
+    expect(tag).not.toContain("href=");
+    expect(tag).not.toContain("tabindex");
+    expect(tag).toContain("text-faint");
+    // And the reason, spoken: the title alone never reaches keyboard or screen-reader users.
+    expect(navItem(html, "following")).toContain('<span class="sr-only"> (not available yet)</span>');
+    for (const key of ["briefs", "method"]) {
+      const link = navTag(html, key);
+      expect(link).toContain(`href="/${key}"`);
+      expect(link).not.toContain("aria-disabled");
+      expect(link).not.toContain('role="link"');
+      expect(navItem(html, key)).not.toContain("not available");
     }
-    const briefs = navTag(html, "briefs");
-    expect(briefs).toContain('href="/briefs"');
-    expect(briefs).not.toContain("aria-disabled");
-    expect(briefs).not.toContain('role="link"');
-    expect(navItem(html, "briefs")).not.toContain("not available");
   });
 
   it("marks the active section with aria-current and the accent underline", () => {

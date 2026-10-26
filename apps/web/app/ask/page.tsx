@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { askQuestionOf } from "../../components/ask/ask-href";
 import type { AskParent } from "../../components/ask/ask-panel";
 import { AskView } from "../../components/ask/ask-view";
+import { desCommandHref } from "../../components/des/des-href";
 import { AppChrome } from "../../components/home/app-chrome";
 import { qlooRequestsToday } from "../../components/home/qloo-usage";
 import { RecentBriefs } from "../../components/home/recent-briefs";
@@ -40,6 +42,9 @@ async function parentOf(runId: string): Promise<AskParent | null> {
 export default async function AskPage(props: PageProps<"/ask">) {
   const params = await props.searchParams;
   const question = askQuestionOf(one(params.q));
+  // "<NAME> DES" is a page, not a run (§8.2): every way here (top bar, hero, follow-up, link) opens the tearsheet.
+  const des = desCommandHref(question);
+  if (des !== null) redirect(des);
   const parent = await parentOf(one(params.parent));
   return (
     <AppChrome qlooCap={qlooDailyFreshCapFromEnv()} qlooUsed={qlooRequestsToday(peekQlooClient, getQlooClient)}>

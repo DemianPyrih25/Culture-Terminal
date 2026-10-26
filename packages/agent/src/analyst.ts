@@ -1,5 +1,6 @@
 import type {
   FindingId,
+  FindingKind,
   ReportDraftShape,
   RunLimits,
   SkillId,
@@ -14,7 +15,7 @@ import type { AnalystToolErrorCode } from "./llm/notices";
 import type { LlmRefusal } from "./llm/stop";
 
 export { ANALYST_TOOL_ERROR_CODES, type AnalystToolErrorCode } from "./llm/notices";
-export { ANALYST_MIN_MAX_TOKENS } from "./llm/loop";
+export { ANALYST_MIN_MAX_TOKENS, FOLLOWUP_LEADS_MAX } from "./llm/loop";
 export type { LlmErrorInfo } from "./llm/errors";
 export type { LlmRefusal } from "./llm/stop";
 
@@ -74,6 +75,33 @@ export interface AnalystPivot {
   tool: SkillId;
   triggerFindingId: FindingId;
   args: unknown;
+  /**
+   * True when the follow-up nudge went out before this call (FOLLOWUP_EXPECTED on a turn-2 report, or
+   * NOTICE_FOLLOWUP_OPEN after planned steps), so a trace can tell a pivot made after it from one the
+   * model made unprompted. The `pivot` event does not carry it yet.
+   */
+  afterNudge: boolean;
+}
+
+/** A finding whose suggested tool could make an ANALYST PIVOT in turn 2. */
+export interface FollowupLead {
+  findingId: FindingId;
+  kind: FindingKind;
+  /** The tool the finding suggests. */
+  tool: SkillId;
+  /**
+   * Ids the follow-up would be about, at most three; never names. R# and T# refs for a tool whose
+   * contexts can change (share_of_taste, rank_candidates, sponsor_slate, cross_domain), whose markets,
+   * metros, areas and ages are contexts; a market, metro or area id for a tool it is the subject of
+   * (geo_lift, block_dna). None when the finding names what to run on only in its reason (a weak
+   * category fit, a substitution for dropped candidates).
+   */
+  subjects: readonly string[];
+  /**
+   * Set when an earlier call of the tool already read all of the subjects: what the follow-up must
+   * change to be new, e.g. "ages or markets".
+   */
+  vary?: string;
 }
 
 export interface AnalystRejection {
@@ -128,6 +156,25 @@ export interface AnalystOptions {
    */
   findingExists(id: FindingId): boolean;
   /**
+   * The run's findings so far, ids and kinds, asked when a turn-2 call is refused UNTRIGGERED_FOLLOWUP
+   * so its answer names what a follow-up could cite. Without it the answer names none.
+   */
+  findings?(): readonly { id: FindingId; kind: FindingKind }[];
+  /**
+   * Run-level checks on a skill input that passed its schema, in any turn, before it is accepted:
+   * issue lines in INVALID_INPUT's form for ids this run does not have (a market outside MARKETS),
+   * empty when it passes. A call with issues is answered INVALID_INPUT, never run, like one that
+   * failed its schema.
+   */
+  checkInput?(tool: SkillId, input: unknown): readonly string[];
+  /**
+   * The tool of every call the opening scan ran, asked once when turn 1 closes, after turnContext. A
+   * plan often names scan calls as steps: each covers the first pending step that plans its tool, so
+   * what the loop tells the model never calls that step still to run. The planned-step rule itself
+   * reads only the model's own calls.
+   */
+  scanTools?(): readonly SkillId[];
+  /**
    * Extra text blocks for the message that closes a turn, after its tool results: for turn 1 the
    * opening-scan digests and findings (PLAN §4.1 D), awaited, so the scan can run in parallel with
    * turn 1. Called once per closed turn.
@@ -140,6 +187,23 @@ export interface AnalystOptions {
    * the EVIDENCE line, belongs here so it never contradicts the closing TURN guide.
    */
   closingContext?(closedTurn: 1 | 2, nextTurn: AnalystTurn): readonly string[];
+  /**
+   * Findings worth a follow-up, asked when turn 1 closes with turn 2 next: each suggests a tool this
+   * build answers and that no earlier call already ran on its subjects in the same way, most
+   * promising first, and none once the follow-up Qloo allowance is spent. The loop puts those whose
+   * tool tests a hypothesis first, names the plan step a lead would replace when a pending step plans
+   * the same tool (and drops such a lead when it names no subjects), lists up to FOLLOWUP_LEADS_MAX
+   * after the closing context (FOLLOW-UPS WORTH RUNNING) and has the TURN 2 guide ask for at least
+   * one before submit_report. Asked again, as things then stand, for the follow-up nudge, sent once
+   * per run while no follow-up ran, three responses are left (the follow-up, the report and its
+   * repair), the time and cost they need are left, and no wrap-up notice went out: a turn-2
+   * submit_report sent while leads were listed is answered with FOLLOWUP_EXPECTED and the leads,
+   * unless an open question already names a listed lead's finding (the decline the TURN 2 guide
+   * allows), and the next submit_report is reviewed either way; a turn-2 response that ran only
+   * planned steps keeps turn 2 open with the leads then standing, those the steps raised included
+   * (NOTICE_FOLLOWUP_OPEN).
+   */
+  followupLeads?(): readonly FollowupLead[];
   /**
    * The CHECKER (V1–V10) on every structurally valid submit_report, as strict mode guarantees it: id
    * formats (V1) and lengths and counts (V9) are the CHECKER's to judge, so all issues reach the model
@@ -172,8 +236,8 @@ export interface AnalystOptions {
 /**
  * completed: a report was accepted, possibly with CHECKER warnings. incomplete: no accepted report
  * (the caller builds the evidence-digest report marked INCOMPLETE), including a second max_tokens
- * cut with a pending tool_use. refused: the model refused. failed: an API error or a failing hook.
- * cancelled: the caller aborted.
+ * cut with a pending tool_use and a second tool input that was not valid JSON. refused: the model
+ * refused. failed: an API error or a failing hook. cancelled: the caller aborted.
  */
 export type AnalystStatus = "completed" | "incomplete" | "refused" | "failed" | "cancelled";
 
@@ -187,6 +251,7 @@ export type AnalystStopCode =
   | "usd_limit"
   | "cancelled"
   | "max_tokens_pending_tool"
+  | "invalid_tool_json"
   | "api_error"
   | "hook_error";
 
@@ -214,17 +279,29 @@ export interface AnalystOutcome {
   /** Measured from usage. */
   usd: number;
   /**
-   * Worst-case estimates charged for requests that may have been billed without a usage report:
-   * failed requests and streams aborted by a cancel or the hard wall clock. Counts toward the cap
-   * and belongs in the daily spend.
+   * Estimates charged for requests that may have been billed beyond any usage report: failed
+   * requests and streams aborted by a cancel or the hard wall clock. A stream that reported usage
+   * before it ended has that usage in `usd` and only its unreported output here, the most it could
+   * have generated in the time it ran (pricing.ts unreportedOutputTokens); one that reported none is
+   * charged its worst case. Counts toward the cap and belongs in the daily spend.
    */
   unmeteredUsd: number;
   refusal: LlmRefusal | null;
   error: LlmErrorInfo | null;
-  nudges: { plan: boolean; report: boolean; time: boolean; cost: boolean };
-  /** plan, report: the one repair turn was used. truncated: a turn cut off by max_tokens was asked again. */
-  repairs: { plan: boolean; report: boolean; truncated: boolean };
-  /** The accepted finding-triggered turn-2 calls; planned steps run in turn 2 are not pivots. */
+  /**
+   * followup: the follow-up nudge went out (followupLeads): a turn-2 submit_report was answered with
+   * FOLLOWUP_EXPECTED, or turn 2 stayed open after planned steps with NOTICE_FOLLOWUP_OPEN.
+   */
+  nudges: { plan: boolean; report: boolean; time: boolean; cost: boolean; followup: boolean };
+  /**
+   * plan, report: the one repair turn was used. truncated: a turn cut off by max_tokens was asked
+   * again. invalidJson: a tool input the SDK could not parse was answered with INVALID_JSON, or its
+   * request re-issued when the response could not be sent back. input: a turn-2 response whose calls
+   * were all refused for their input (INVALID_INPUT, UNTRIGGERED_FOLLOWUP, UNKNOWN_TOOL) kept turn 2
+   * open for one more response.
+   */
+  repairs: { plan: boolean; report: boolean; truncated: boolean; invalidJson: boolean; input: boolean };
+  /** The accepted finding-triggered turn-2 calls (afterNudge: whether the follow-up nudge preceded each); planned steps are not pivots. */
   pivots: AnalystPivot[];
   /** Calls the loop answered with is_error itself, e.g. UNTRIGGERED_FOLLOWUP. */
   rejections: AnalystRejection[];

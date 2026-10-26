@@ -31,6 +31,8 @@ eval/raw
 docs
 design
 tools
+e2e
+playwright.config.ts
 coverage
 test-results
 playwright-report

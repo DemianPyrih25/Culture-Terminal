@@ -243,6 +243,7 @@ export function validDraft(): ReportDraft {
   return {
     headline: "Brand Alpha shares its taste pool with Brand Beta {{M1}}",
     signal: "mixed",
+    verdict_tag: "Shared taste pool",
     thesis:
       "Brand Alpha sits next to Brand Beta {{M1}} [E1] and ranks {{M2}} for distinctiveness. Its audience tilts young {{M3}} [E2].",
     hypothesis_verdicts: [

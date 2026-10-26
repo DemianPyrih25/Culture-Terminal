@@ -1,6 +1,6 @@
 // Home (A01): the question field, the starters by desk (the showcase questions word for word, opening
 // a stored showcase brief when there is one), the recent briefs from fixtures, and the status line's
-// request count. Invented briefs and run ids only.
+// request count. The Launchpad's own parts are in ../launchpad. Invented briefs and run ids only.
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -23,6 +23,9 @@ vi.mock("../../server/run-list", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../server/run-list")>()),
   showcaseRunsByQuestion: showcases.byQuestion,
 }));
+// A pinned showcase's tile reads its run's events; here no run has any, and no showcase is pinned.
+vi.mock("../../server/event-store", () => ({ readAllEvents: async () => [] }));
+vi.mock("@ct/db", async (importOriginal) => ({ ...(await importOriginal<typeof import("@ct/db")>()), listPinnedShowcases: async () => [] }));
 
 const { default: Home } = await import("../../app/page");
 const { STARTER_DESKS } = await import("../../components/home/starters");
@@ -48,7 +51,8 @@ describe("Home", () => {
     showcases.byQuestion.mockResolvedValue(new Map());
     const html = renderToStaticMarkup(await Home());
     expect(html).toContain('aria-label="Main"');
-    expect(html).toMatch(/<h1[^>]*>Taste intelligence for investors<\/h1>/);
+    expect(html).toMatch(/<p[^>]*>Taste intelligence for investors<\/p>/);
+    expect(html).toMatch(/<h1[^>]*>Taste is a market. Now it has a terminal.<\/h1>/);
     expect(html).toContain('placeholder="Ask about a brand, an artist, a place or an audience"');
     expect(html).toContain("to ask");
     // The top bar keeps ⌘K; the big field takes /.
@@ -72,8 +76,9 @@ describe("Home", () => {
     const html = renderToStaticMarkup(await Home());
     expect(html).toContain(`href="/run/run-showcase-0001"`);
     expect(html).toContain(`>${escaped(first!.label)}<span class="sr-only"> (stored brief)</span></a>`);
-    expect(html).not.toContain(`href="${escaped(askHref(first!.question))}"`);
-    expect(html).toContain(`href="${escaped(askHref(second!.question))}"`);
+    // The starter opens the brief; its showcase tile still offers [Run live].
+    expect(html).not.toContain(`href="${escaped(askHref(first!.question))}">${escaped(first!.label)}</a>`);
+    expect(html).toContain(`href="${escaped(askHref(second!.question))}">${escaped(second!.label)}</a>`);
   });
 
   it("asks every starter when the showcases cannot be read", async () => {

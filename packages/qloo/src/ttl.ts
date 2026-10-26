@@ -17,7 +17,7 @@ export const ERROR_TTL_MS = DAY_MS;
 export const STALE_TTL_MULTIPLE = 4;
 
 export interface TtlOptions {
-  /** Metro locality ids whose `urn:tag` fingerprints are pinned (city sides of Block DNA). */
+  /** Metro locality ids whose city fingerprints are pinned: urn:tag lists and the Block DNA city brand list. */
   pinnedLocalities?: ReadonlySet<string>;
 }
 
@@ -34,6 +34,13 @@ export function isPinnedRequest(request: CanonicalRequest, options: TtlOptions =
   if (request.filterType === "urn:tag") {
     const location = q["signal.location"];
     return location !== undefined && options.pinnedLocalities?.has(location) === true;
+  }
+  if (request.filterType === "urn:entity:brand") {
+    // The Block DNA city brand list (D25): a pinned locality under the popularity cap and nothing else,
+    // so tenant-fit rank calls with a city context (filter.results.entities) stay at 14 days.
+    const location = q["signal.location"];
+    const rest = Object.keys(q).filter((k) => k !== "filter.type" && k !== "take" && k !== "signal.location");
+    return location !== undefined && options.pinnedLocalities?.has(location) === true && rest.length === 1 && rest[0] === "filter.popularity.max";
   }
   return false;
 }

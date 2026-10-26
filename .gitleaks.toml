@@ -1,7 +1,11 @@
-# gitleaks config: the default rules plus one narrow allowlist.
+# gitleaks config: the default rules plus narrow allowlists for identifiers that are never credentials.
 [extend]
 useDefault = true
 
 [[allowlists]]
 description = "Picker keys: pk_ plus 16 hex digits of a SHA-256 of an entity id (packages/agent/src/run/picker.ts). They are opaque choice keys, never credentials."
 regexes = ['''^pk_[0-9a-f]{16}$''']
+
+[[allowlists]]
+description = "Dotted metric keys (mom.delta_26w) and snake_case enum keys (24_and_younger) that look random to the entropy rule."
+regexes = ['''^[a-z]+\.[a-z0-9_]+$''', '''^[a-z0-9]+(?:_[a-z0-9]+)+$''']

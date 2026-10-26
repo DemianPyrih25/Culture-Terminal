@@ -1,4 +1,4 @@
-import { isTaxonomyTag, type QlooParams } from "@ct/contracts";
+import type { QlooParams } from "@ct/contracts";
 import { PROBE_FACTS } from "../../allowlist";
 import { distanceKm, geohashCellSize, geohashEncode, type LatLon } from "../geo";
 import { clamp, round, unit } from "../hash";
@@ -10,7 +10,8 @@ import { MockBadRequest, readList, readString } from "../params";
  * `/v2/insights` with filter.type=urn:heatmap: a few hundred cells inside the metro at the metro's
  * geohash precision. Popularity is a fixed surface per metro; affinity mostly tracks it, and every
  * concept other than the pinned baseline plants two pockets of extra affinity, so lift has
- * something to find (D18).
+ * something to find (D18). Genre tags give the full grid; entity analogs alone give its most
+ * popular fifth (P5).
  */
 
 interface BaseCell {
@@ -62,6 +63,13 @@ function percentRanks(values: readonly number[]): number[] {
   return ranks;
 }
 
+/** The most popular fifth of the cells, with a little jitter at the edge, in grid order. */
+function analogFootprint(cells: readonly BaseCell[], key: string): BaseCell[] {
+  const score = (c: BaseCell) => c.popularity + 0.08 * unit("cell-analog", key, c.geohash);
+  const top = new Set([...cells].sort((a, b) => score(b) - score(a)).slice(0, Math.max(1, Math.round(cells.length / 5))));
+  return cells.filter((c) => top.has(c));
+}
+
 function pocketsFor(metro: Metro, key: string): Neighborhood[] {
   return [...metro.neighborhoods].sort((a, b) => unit("pocket", key, a.name) - unit("pocket", key, b.name)).slice(0, 2);
 }
@@ -77,15 +85,19 @@ export function heatmapInsights(params: QlooParams): MockReply {
   }
   if (tags.length + entities.length === 0) throw new MockBadRequest("urn:heatmap needs signal.interests.tags or signal.interests.entities");
 
-  const signalTags = tags.filter(isTaxonomyTag).sort();
-  // Descriptive *:qloo:* tags alone produced no cells live (G6).
+  // Only urn:tag:genre:* tags shaped a map live: descriptive *:qloo:* tags (G6) and urn:tag:category:place:*
+  // tags (P5) alone produced no cells.
+  const signalTags = tags.filter((tag) => tag.startsWith("urn:tag:genre:")).sort();
   if (signalTags.length === 0 && entities.length === 0) return ok({ success: true, results: { heatmap: [] } });
 
-  const key = [signalTags.join(","), [...entities].sort().join(","), signalTags.length > 1 ? (operator ?? "union") : ""].join("|");
+  // The operator is accepted and ignored: union, intersection and none gave identical maps live (P5).
+  const key = [signalTags.join(","), [...entities].sort().join(",")].join("|");
   const isBaseline = entities.length === 0 && signalTags.length === 1 && signalTags[0] === PROBE_FACTS.heatmapBaselineTag;
   const pockets = isBaseline ? [] : pocketsFor(metro, key);
 
-  const cells = metroCells(metro).filter((c) => unit("cell-dropped", key, c.geohash) >= 0.03);
+  const kept = metroCells(metro).filter((c) => unit("cell-dropped", key, c.geohash) >= 0.03);
+  // An entity-only map covered about a fifth of the cells live, almost all among the most popular (P5).
+  const cells = signalTags.length > 0 ? kept : analogFootprint(kept, key);
   const affinities = cells.map((c) => {
     // A sliver of zero-affinity cells, which lift excludes (D18).
     if (unit("cell-zero", key, c.geohash) < 0.01) return 0;

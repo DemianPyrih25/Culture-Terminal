@@ -8,7 +8,7 @@ import { RunStreamClient, type ConnectionStatus, type RunStreamClientOptions, ty
  * reducer, so a replay ends in exactly the state the live run ended in.
  */
 
-export const REPLAY_SPEEDS = [1, 4, 16, "instant"] as const;
+export const REPLAY_SPEEDS = [1, 4, 8, 16, "instant"] as const;
 export type ReplaySpeed = (typeof REPLAY_SPEEDS)[number];
 
 /** Accelerated replays cap each pause at this much wall time, so a long model turn does not stall the show (SPEC §4.7). 1× stays true to time. */
@@ -47,7 +47,7 @@ export interface ReplayPlayerOptions {
 const tsOf = (event: RunEvent | undefined) => (event ? Date.parse(event.ts) : Number.NaN);
 
 /**
- * Plays recorded events into a RunState at 1×, 4×, 16× or instantly: each event waits for the gap
+ * Plays recorded events into a RunState at 1×, 4×, 8×, 16× or instantly: each event waits for the gap
  * since the one before it divided by the speed. Events that share a moment apply together, with one
  * notification. Pausing keeps what is left of the current wait; changing speed rescales it.
  */

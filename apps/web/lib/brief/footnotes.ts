@@ -1,6 +1,7 @@
-import { tokenizeProse, type DatasetId, type EvidenceId, type MetricId, type ProseSegment } from "@ct/contracts";
+import { CONFIDENCE_PENALTY, tokenizeProse, type DatasetId, type EvidenceId, type MetricId, type ProseSegment } from "@ct/contracts";
 import { capitalize, formatTrendWindow, plural, TOOL_LABEL } from "./format";
 import { buildLedger, metricView, requestHead, requestsForEvidence, requestTrace, shortRequestTrace, type Ledger } from "./ledger";
+import { areaReads } from "./location";
 import type { CiteSection, Footnote, FigureLegend, Inline, MetricView } from "./types";
 
 /**
@@ -74,6 +75,11 @@ export class FootnoteRegistry {
     return this.assign("evidence", id, section);
   }
 
+  /** A CODE FALLBACK step, by its index in the run's fallbacks: what code did and why (A06 note 5). */
+  fallback(index: number, section: CiteSection): number {
+    return this.assign("fallback", String(index), section);
+  }
+
   /** A figure's own footnote: its requests, and the codes its plot uses. */
   figure(id: DatasetId, section: CiteSection, context: FigureNoteContext): number {
     this.figures.set(id, context);
@@ -134,7 +140,7 @@ export class FootnoteRegistry {
         const metric = ledger.state.metrics[entry.key as MetricId];
         if (!metric) {
           const text = `${entry.key} was not streamed.`;
-          return { ...base, text, trace: "no request", short: { text, trace: "no request" }, metric: null, evidenceIds: [], requests: [], computed: null, unavailable: null };
+          return { ...base, text, trace: "no request", short: { text, trace: "no request" }, metric: null, evidenceIds: [], requests: [], computed: null, unavailable: null, fallback: null };
         }
         const view = metricView(metric, ledger.window);
         const requests = requestsForEvidence(ledger, metric.evidenceIds);
@@ -154,6 +160,7 @@ export class FootnoteRegistry {
             requests,
             computed: null,
             unavailable: { reason: metric.reason, label: view.reasonLabel ?? "not measured" },
+            fallback: null,
           };
         }
         if (view.derived) {
@@ -172,6 +179,7 @@ export class FootnoteRegistry {
             requests,
             computed: { formulaId: metric.formulaId, label },
             unavailable: null,
+            fallback: null,
           };
         }
         return {
@@ -188,6 +196,7 @@ export class FootnoteRegistry {
           requests,
           computed: null,
           unavailable: null,
+          fallback: null,
         };
       }
       case "evidence": {
@@ -214,6 +223,7 @@ export class FootnoteRegistry {
           requests,
           computed: null,
           unavailable: null,
+          fallback: null,
         };
       }
       case "figure": {
@@ -236,10 +246,57 @@ export class FootnoteRegistry {
           requests,
           computed: null,
           unavailable: null,
+          fallback: null,
         };
       }
+      case "fallback":
+        return { ...base, ...fallbackNote(ledger, Number(entry.key)) };
     }
   }
+}
+
+/** The margin's trace for a fallback: "code fallback · POLYGON → POINT", whole on one line. */
+export function fallbackTrace(from: string, to: string): string {
+  return `code fallback · ${from} → ${to}`;
+}
+
+/**
+ * A CODE FALLBACK note (A06 note 5): the step code took and why, what it costs the conviction, and the
+ * receipts of the rungs that came back empty (the tool call's "Location ladder" bundle) when there are any.
+ */
+function fallbackNote(ledger: Ledger, index: number): Omit<Footnote, "n" | "key" | "kind" | "firstCitedIn"> {
+  const step = ledger.state.fallbacks[index];
+  if (!step) {
+    const text = `Fallback ${index + 1} was not streamed.`;
+    return { text, trace: "no request", short: { text, trace: "no request" }, metric: null, evidenceIds: [], requests: [], computed: null, unavailable: null, fallback: null };
+  }
+  const tool = step.toolCallId ? ledger.toolCalls.get(step.toolCallId) : undefined;
+  const ladder = (tool?.evidenceIds ?? []).filter((id) => /ladder/i.test(ledger.state.evidence[id]?.purpose ?? ""));
+  const requests = requestsForEvidence(ledger, ladder);
+  const reason = capitalize(stripStop(step.reason));
+  const cost = `Costs ${CONFIDENCE_PENALTY.code_fallback} conviction points.`;
+  const trace = fallbackTrace(step.from, step.to);
+  // The area the step read, when a Block DNA call made it (A06: "Zilker … read as a point").
+  const area = areaReads(ledger.state).find((r) => r.toolCallId === step.toolCallId)?.name ?? "it";
+  return {
+    text: `Code fell back from ${step.from} to ${step.to} to read ${area}: ${stripStop(step.reason)}. ${cost}`,
+    trace: requests.length > 0 ? `${trace} · ${requestTrace(requests)}` : trace,
+    short: {
+      text: firstThatFits(
+        `${reason}, so code read ${area} by ${step.to}. ${cost}`,
+        `${reason}, so code read ${area} by ${step.to}.`,
+        `Code read ${area} by ${step.to}, not ${step.from}.`,
+        `Read by ${step.to}, not ${step.from}.`,
+      ),
+      trace,
+    },
+    metric: null,
+    evidenceIds: ladder,
+    requests,
+    computed: null,
+    unavailable: null,
+    fallback: { from: step.from, to: step.to, reason: step.reason },
+  };
 }
 
 /**

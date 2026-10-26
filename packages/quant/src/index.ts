@@ -7,4 +7,5 @@ export * from "./findings";
 export * from "./confidence";
 export * from "./badges";
 export * from "./limitations";
+export * from "./position";
 export * from "./skills/index";

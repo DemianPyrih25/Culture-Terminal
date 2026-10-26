@@ -132,6 +132,42 @@ export function estimateRequestUsd(model: string, promptChars: number, maxTokens
 }
 
 /**
+ * A ceiling on output speed, in tokens a second. tools/llm-bench measured about 120 (Sonnet 5.5) and
+ * 190 (Haiku 5.5) averaged over whole runs, time to first token included (docs/LLM_BENCH.md), so
+ * generation itself runs faster than that; this ceiling leaves room above it.
+ */
+export const ESTIMATE_OUTPUT_TOKENS_PER_SECOND = 500;
+/** How long generation may go on after the client aborts a stream, until the API sees the abort. */
+export const ESTIMATE_ABORT_LAG_MS = 2000;
+
+/** What a stream showed before it ended without its final usage. */
+export interface StreamedSoFar {
+  /** From the request to the failure. */
+  ms: number;
+  /** Characters of every text, thinking and tool-input delta it streamed. */
+  chars: number;
+}
+
+/**
+ * An upper bound on the output tokens a stream generated beyond what its usage reported, for a stream
+ * that ended without its final usage (message_delta's count never arrived): what it could generate in
+ * the time it ran plus the abort lag at the speed ceiling, or the characters it streamed when those
+ * count for more, and never more than the rest of max_tokens. Hidden thinking streams no characters,
+ * so the time bound is what covers it.
+ */
+export function unreportedOutputTokens(usage: UsageLike, maxTokens: number, streamed: StreamedSoFar): number {
+  const byTime = Math.ceil(((streamed.ms + ESTIMATE_ABORT_LAG_MS) / 1000) * ESTIMATE_OUTPUT_TOKENS_PER_SECOND);
+  const byChars = Math.ceil(streamed.chars / ESTIMATE_CHARS_PER_TOKEN);
+  const rest = maxTokens - usage.output_tokens;
+  return Math.max(0, Math.min(rest, Math.max(byTime, byChars) - usage.output_tokens));
+}
+
+/** USD for `tokens` of output a stream did not report, at the output rate of its reported prompt. */
+export function unreportedOutputUsd(model: string, usage: UsageLike, tokens: number): number {
+  return (tokens * rateCardFor(model, promptTokens(usage)).output) / 1_000_000;
+}
+
+/**
  * The largest max_tokens (at most `cap`) whose worst case fits in `remainingUsd`, or 0 when not even
  * the prompt fits. Used to keep a request under the per-run hard cap instead of refusing it outright.
  */

@@ -1,74 +1,135 @@
-import type { Job, Metric, MetricId, Report } from "@ct/contracts";
-import type { FormulaId } from "@ct/quant";
+import { AgeBucket, type EntityRef, type Job, type Metric, type MetricId, type Report } from "@ct/contracts";
 
 /**
- * The KPI strip per job (SPEC §7.2), picked by formula id so it does not depend on metric labels.
- * Each slot takes up to `count` metrics with a value from the first formula that has any, preferring
- * metrics the note cites. Audience discovery has no strip.
+ * The KPI strip per job (SPEC §7.2): each job's key figures, picked by metric key (Metric.key), so
+ * the strip does not depend on labels and tells apart metrics that share a formula (a slate's best
+ * fits from its other fits, a lift map's precision from its neighbourhood confidence). Each slot
+ * takes up to `count` metrics with a value from its first alternative that has any. Within a slot,
+ * metrics the note cites come first, then the subject's own (the question's primary target), then
+ * ledger order; a `top` slot ranks by value instead, highest first, for figures such as the top
+ * climbers or the top three lifts.
  */
+
+interface KpiPick {
+  key: string;
+  /** Only metrics of this formula (the slate's best fits share slate.fit with every other fit). */
+  formula?: string;
+  /** Only metrics that pass, e.g. a share percentile in a market context rather than an age one. */
+  where?: (m: Metric) => boolean;
+  /**
+   * Only a metric between the subject and one of the question's named peers: head_to_head's
+   * similarity is the duel's, not the subject's nearest audience, which may be a discovered brand.
+   */
+  pair?: boolean;
+}
+
+/** What the strip is about: the question's primary target and the peers it names (the gate's). */
+export interface KpiFocus {
+  subject?: EntityRef | null;
+  peers?: readonly EntityRef[];
+}
 
 interface KpiSlot {
   /** Alternatives in preference order. */
-  formulas: readonly FormulaId[];
+  picks: readonly KpiPick[];
   count: number;
+  /** Rank by value, highest first, rather than by citation and subject. */
+  top?: boolean;
 }
 
-const LOCATION_DNA: readonly KpiSlot[] = [
-  { formulas: ["tenant.rank_shift"], count: 1 },
-  { formulas: ["block.new_tag"], count: 1 },
-  { formulas: ["block.rank_delta"], count: 1 },
-];
+const one = (key: string, extra: Omit<KpiPick, "key"> = {}): KpiPick => ({ key, ...extra });
+
+/** A share percentile read in a market context: its second subject ref is a market, not an age bucket or audience. */
+const inMarket = (m: Metric): boolean => {
+  const context = m.subjectRefs[1];
+  return context !== undefined && !AgeBucket.safeParse(context).success && !context.startsWith("urn:");
+};
+
+const NEXT_GEN: readonly KpiPick[] = [one("share.youth_tilt"), one("dna.youth_index")];
 
 export const KPI_SLOTS: Readonly<Record<Job, readonly KpiSlot[]>> = {
-  // Nearest audience, distinctiveness rank, next-gen rank, metros won.
+  // Nearest audience, distinctiveness rank, next-gen rank, metros won (else the momentum label).
   brand_health: [
-    { formulas: ["subs.similarity"], count: 1 },
-    { formulas: ["subs.distinctiveness"], count: 1 },
-    { formulas: ["share.youth_tilt", "dna.youth_index"], count: 1 },
-    { formulas: ["share.metros_won"], count: 1 },
+    { picks: [one("subs.similarity")], count: 1 },
+    { picks: [one("subs.distinctiveness")], count: 1 },
+    { picks: NEXT_GEN, count: 1 },
+    { picks: [one("share.metros_won"), one("mom.label")], count: 1 },
   ],
-  // Similarity, metros won A/B, youth tilt A/B.
+  // The pair's similarity (else its fit), metros won A/B, youth tilt A/B.
   head_to_head: [
-    { formulas: ["subs.similarity"], count: 1 },
-    { formulas: ["share.metros_won"], count: 2 },
-    { formulas: ["share.youth_tilt", "dna.youth_index"], count: 2 },
+    { picks: [one("subs.similarity", { pair: true }), one("rank.fit")], count: 1 },
+    { picks: [one("share.metros_won")], count: 2 },
+    { picks: NEXT_GEN, count: 2 },
   ],
-  // Top-3 neighbourhood lifts, precision.
+  // Top-3 neighbourhood lifts, the map's precision, the best white space.
   site_selection: [
-    { formulas: ["lift.area"], count: 3 },
-    { formulas: ["lift.confidence"], count: 1 },
+    { picks: [one("lift.area")], count: 3, top: true },
+    { picks: [one("lift.precision")], count: 1 },
+    { picks: [one("lift.white_space")], count: 1, top: true },
   ],
-  // Top climbers, NEW tags, over-represented categories.
-  tenant_mix: LOCATION_DNA,
-  area_profile: LOCATION_DNA,
-  // Best fit per category, UNDER-THE-RADAR count.
+  // The best tenant fit, the top climber, NEW tags, the most over-represented tag.
+  tenant_mix: [
+    { picks: [one("tenant.fit")], count: 1, top: true },
+    { picks: [one("tenant.rank_shift")], count: 1, top: true },
+    { picks: [one("block.new_tag")], count: 1 },
+    { picks: [one("block.rank_delta")], count: 1, top: true },
+  ],
+  // NEW tags, the two biggest rank gains vs the city, the block's top climber when tenants were ranked.
+  area_profile: [
+    { picks: [one("block.new_tag")], count: 1 },
+    { picks: [one("block.rank_delta")], count: 2, top: true },
+    { picks: [one("tenant.rank_shift"), one("xdom.under_the_radar")], count: 1, top: true },
+  ],
+  // Best fit per category, the UNDER-THE-RADAR count, the strongest market.
   sponsorship: [
-    { formulas: ["slate.best_fit"], count: 3 },
-    { formulas: ["slate.under_the_radar"], count: 1 },
+    { picks: [one("slate.fit", { formula: "slate.best_fit" })], count: 3 },
+    { picks: [one("slate.utr_count")], count: 1 },
+    { picks: [one("slate.market_alignment")], count: 1, top: true },
   ],
-  // Metros won, top-3 markets.
+  // Metros won, the top-3 markets, the best hidden-pocket destination.
   market_selection: [
-    { formulas: ["share.metros_won"], count: 1 },
-    { formulas: ["share.pct", "slate.market_alignment"], count: 3 },
+    { picks: [one("share.metros_won")], count: 1 },
+    { picks: [one("share.pct", { where: inMarket }), one("slate.market_alignment")], count: 3, top: true },
+    { picks: [one("trvl.hidden_pocket")], count: 1, top: true },
   ],
-  audience_discovery: [],
+  // Youth index, distinctive facet tags, under-the-radar picks, the best hidden-pocket destination.
+  audience_discovery: [
+    { picks: [one("dna.youth_index")], count: 1 },
+    { picks: [one("dna.distinctive_tags")], count: 1 },
+    { picks: [one("xdom.under_the_radar")], count: 2 },
+    { picks: [one("trvl.hidden_pocket")], count: 1, top: true },
+  ],
 };
 
 /** When a job's slots find nothing, the strip shows this many of the note's cited metrics instead. */
 const FALLBACK_KPIS = 4;
 
-export function pickKpis(job: Job, metrics: readonly Metric[], cited: readonly MetricId[]): Report["kpis"] {
-  const slots = KPI_SLOTS[job];
-  if (slots.length === 0) return [];
+/** A two-subject metric between the subject and a named peer, in either order. */
+function isPair(m: Metric, focus: KpiFocus): boolean {
+  const [a, b] = m.subjectRefs;
+  const { subject = null, peers = [] } = focus;
+  if (m.subjectRefs.length !== 2 || subject === null || a === undefined || b === undefined) return false;
+  return (a === subject && peers.includes(b as EntityRef)) || (b === subject && peers.includes(a as EntityRef));
+}
+
+const matches = (m: Metric, pick: KpiPick, focus: KpiFocus): boolean =>
+  m.key === pick.key &&
+  (pick.formula === undefined || m.formulaId === pick.formula) &&
+  (pick.where?.(m) ?? true) &&
+  (pick.pair !== true || isPair(m, focus));
+
+export function pickKpis(job: Job, metrics: readonly Metric[], cited: readonly MetricId[], focus: KpiFocus = {}): Report["kpis"] {
+  const subject = focus.subject ?? null;
   const citedRank = new Map(cited.map((id, i) => [id, i]));
-  const rank = (m: Metric) => citedRank.get(m.id) ?? cited.length + metrics.indexOf(m);
+  const order = (m: Metric) => citedRank.get(m.id) ?? cited.length + (m.subjectRefs[0] === subject ? 0 : metrics.length) + metrics.indexOf(m);
   const valued = metrics.filter((m) => m.value !== null);
 
   const picked: Metric[] = [];
-  for (const slot of slots) {
-    for (const formula of slot.formulas) {
-      const hits = valued.filter((m) => m.formulaId === formula && !picked.includes(m)).sort((a, b) => rank(a) - rank(b));
+  for (const slot of KPI_SLOTS[job]) {
+    for (const pick of slot.picks) {
+      const hits = valued.filter((m) => matches(m, pick, focus) && !picked.includes(m));
       if (hits.length === 0) continue;
+      hits.sort(slot.top ? (a, b) => (b.value ?? 0) - (a.value ?? 0) || order(a) - order(b) : (a, b) => order(a) - order(b));
       picked.push(...hits.slice(0, slot.count));
       break;
     }

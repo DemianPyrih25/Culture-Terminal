@@ -20,7 +20,8 @@ import { pickerKey } from "./picker";
  * run with a picker; any other mention that is not exact is dropped with a limitation. A pinned
  * mention (a picker answer or a showcase pin) uses its pinned entity. Gate calls belong to no tool
  * call and the receipt counts them from the call log; they become evidence only when a mention was
- * dropped (gateEvidence), so the report carries SECONDARY_ENTITY_DROPPED as resolve_entities would.
+ * dropped (gateEvidence), so the report carries SECONDARY_ENTITY_DROPPED as resolve_entities would,
+ * or when the Taste Position card cites the primary's popularity as its reach (recordPosition).
  */
 
 export interface GateInput {
@@ -45,6 +46,8 @@ export interface GateResolved {
   limitations: string[];
   /** Every gate call that answered (/search, and /entities for a pin), for gateEvidence. */
   calls: QlooCallMeta[];
+  /** The calls that resolved the primary target; the Taste Position card cites them for its reach. */
+  primaryCalls: QlooCallMeta[];
 }
 
 export interface GateNeedsInput {
@@ -214,12 +217,14 @@ export async function runResolutionGate(input: GateInput): Promise<GateOutcome> 
   const entities: ResolvedMention[] = [];
   let primary: RegisteredEntity | null = null;
   let primaryMiss: { mention: Mention; match: Miss; alternatives: readonly MatchAlternative[] } | null = null;
+  let primaryCalls: QlooCallMeta[] = [];
   const peers: RegisteredEntity[] = [];
 
   for (const [i, target] of targets.entries()) {
     const { mention } = target;
     const settled = searches[i];
     if (settled === undefined) continue;
+    const callsBefore = calls.length;
     let resolution: Resolution;
     try {
       if (settled.status === "rejected" && target.pin === null) throw settled.reason;
@@ -251,6 +256,7 @@ export async function runResolutionGate(input: GateInput): Promise<GateOutcome> 
       else drop(unmatchedLimitation(clip(mention.text), resolution.match === "ambiguous" ? "ambiguous" : "not_found"));
     } else if (target.isPrimary) {
       primary = registered;
+      primaryCalls = calls.slice(callsBefore);
     } else if (mention.role === "peer" && registered !== null) {
       peers.push(registered);
     }
@@ -265,7 +271,7 @@ export async function runResolutionGate(input: GateInput): Promise<GateOutcome> 
     const { mention, match, alternatives } = primaryMiss;
     return { kind: "needs_input", entities, reason: notExactReason(mention, match), picker: picker(mention, match, alternatives) };
   }
-  return { kind: "resolved", entities, primary, peers, dropped, limitations, calls };
+  return { kind: "resolved", entities, primary, peers, dropped, limitations, calls, primaryCalls };
 }
 
 /**

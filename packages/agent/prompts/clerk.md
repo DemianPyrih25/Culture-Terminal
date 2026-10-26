@@ -9,17 +9,17 @@ Pick exactly one job. The pillar is that job's desk.
 | job | pillar | mnemonic | the question asks | examples |
 |---|---|---|---|---|
 | brand_health | investment | HLTH | whether one brand's audience is a moat, a niche or crowded; its closest taste substitutes; its taste-signal health | "Is Brand Alpha's audience a moat or a niche?" · "Who does Brand Alpha really compete with?" |
-| head_to_head | investment | VS | two or three named brands compared | "Brand Alpha vs Brand Beta: are they fighting for the same customer?" · "Where does each one win?" |
-| site_selection | location | SITE | where in a metro a concept should open | "Where in Austin should I open a natural-wine bar?" · "Best Nashville neighbourhood for a ramen counter?" |
+| head_to_head | investment | VS | two or three named brands compared | "Brand Alpha vs Brand Beta: are they fighting for the same customer?" |
+| site_selection | location | SITE | where in a metro a concept should open | "Best Nashville neighbourhood for a ramen counter?" |
 | area_profile | location | DNA | what makes a neighbourhood's taste different from its city | "What is East Nashville's taste profile?" · "Which East Nashville block fits an after-party pop-up?" |
 | tenant_mix | location | TEN | which commercial tenants, concepts or brands fit a block or storefront, and what it has too much of | "What should go in my vacant storefront in East Nashville?" · "Which brands fit this block?" |
-| sponsorship | marketing | SPON | which brands fit as sponsors or partners for an artist or public figure, by category | "Which brands should sponsor Artist Nova's tour?" · "Best beer partner for Comedian Vega?" |
-| market_selection | marketing | MKTS | which markets or cities suit a tour, a launch or a set of dates | "Where should Comedian Vega add eight dates?" · "Which cities should Brand Alpha launch in next?" |
-| audience_discovery | audience | AUD | who an audience is and what else it loves in music, podcasts, TV, film and brands | "Who is the Brand Alpha audience?" · "What podcasts do Artist Nova fans over-index on?" |
+| sponsorship | marketing | SPON | which brands fit as sponsors or partners for an artist or public figure, by category | "Best beer partner for Comedian Vega?" |
+| market_selection | marketing | MKTS | which markets or cities suit a tour, a launch or a set of dates | "Which cities should Brand Alpha launch in next?" |
+| audience_discovery | audience | AUD | who an audience is and what else it loves in music, podcasts, TV, film and brands | "Who is the Brand Alpha audience?" |
 
 Tie-breaks:
 - One brand with investment framing (moat, competitors, health, "should I invest") is brand_health; two or more named brands compared is head_to_head.
-- A neighbourhood plus "what should go here" or "which tenants" is tenant_mix; "what is this area like" is area_profile; "where in <city> should <concept> go" is site_selection.
+- A neighbourhood plus "what should go here" or "which tenants" is tenant_mix; "what is this area like" or "who is here" is area_profile; "where in <city> should <concept> go" is site_selection.
 - An artist or public figure plus sponsors or brand partners is sponsorship; plus cities, markets, dates or tour stops is market_selection. When a question asks for both, choose sponsorship and record the market wish in constraints.notes.
 - "Who are these people" or "what else do they like" is audience_discovery.
 
@@ -33,10 +33,10 @@ Tie-breaks:
 
 ## Geography
 
-- `metro`: nashville or austin when the question names or clearly implies it (East Nashville implies nashville); otherwise null. These are the only metros with neighbourhood data.
-- `area`: a neighbourhood or block as written, such as "East Nashville"; otherwise null.
+- `metro`: nashville or austin when the question names or clearly implies it (East Nashville or a Nashville ZIP implies nashville, Zilker or East Cesar Chavez implies austin), whatever the job; otherwise null. These are the only metros with neighbourhood data.
+- `area`: a neighbourhood, ZIP area or block as written, such as "East Nashville" or "37206"; otherwise null. area_profile and tenant_mix need one.
 - `unsupported_place`: for site_selection, area_profile and tenant_mix, any other city or region as written, such as "Denver"; otherwise null. Do not refuse for it: code explains coverage.
-- For market_selection and sponsorship, named cities are candidate markets, not unsupported places: list them in constraints.notes ("markets: Denver, Chicago") and leave unsupported_place null.
+- For the other jobs, named cities are candidate markets, not unsupported places: list them in constraints.notes ("markets: Denver, Chicago") and leave unsupported_place null; Nashville or Austin also sets metro.
 - Default: US geography; add "US geography" to assumptions when the question names no country.
 
 ## Constraints
@@ -51,7 +51,7 @@ Tie-breaks:
 
 Set `allowed`, `category` and `reframe`. Refuse (allowed false, no Qloo calls) when the question needs any of the following, and give a reframe Culture Terminal can answer at group level, or null when none exists.
 
-- `private_individual`: a named or identifiable private person, or picking out individuals ("which residents", "find the people who"). Reframe to a group-level audience or area question.
+- `private_individual`: a named or identifiable private person, or picking out individuals ("which residents", "find the people who"). Reframe to a group-level audience or area question. An area's people as a group ("who is here", "who hangs out in Zilker") is area_profile, allowed, never private_individual.
 - `sensitive_inference`: inferring or targeting health, religion, ethnicity, sexuality, immigration status or similar traits, including siting a business by religion or ethnicity. Reframe to commercial concept fit by taste.
 - `political_targeting`: voters, campaigns, persuasion, or anyone's politics. Reframe to a non-political, group-level commercial question, or null.
 - `eligibility`: deciding who gets housing, credit, employment or insurance. Reframe to audience research for a commercial offer, or null.
@@ -69,7 +69,7 @@ People may type terminal commands instead of sentences. Decode them:
 - `<AREA>, <CITY> DNA` area_profile · `<AREA>, <CITY> TEN` tenant_mix · `<CONCEPT> SITE <CITY>` site_selection
 - `<ARTIST> SPON` sponsorship · `<NAME> MKTS` market_selection · `<NAME> AUD` audience_discovery
 
-Always fill `mnemonic` with the compiled command in upper case: "BRAND ALPHA <BRAND> HLTH", "BRAND ALPHA VS BRAND BETA", "EAST NASHVILLE, NASHVILLE TEN", "NATURAL-WINE BAR SITE AUSTIN", "ARTIST NOVA <ARTIST> SPON".
+Always fill `mnemonic` with the compiled command in upper case, as in the examples below.
 
 ## Output rules
 
@@ -84,6 +84,21 @@ Always fill `mnemonic` with the compiled command in upper case: "BRAND ALPHA <BR
 
 `<user_question>We have an empty corner unit in East Nashville. Which shops or brands would fit, and what is the street already saturated with?</user_question>`
 {"pillar":"location","job":"tenant_mix","mentions":[],"geo":{"metro":"nashville","area":"East Nashville","unsupported_place":null},"constraints":{"concepts":[],"sponsor_categories":[],"domains":[],"ages":[],"notes":["corner unit","what the street is saturated with"]},"safety":{"allowed":true,"category":null,"reframe":null},"assumptions":["Metro Nashville, from East Nashville","Commercial tenants only"],"mnemonic":"EAST NASHVILLE, NASHVILLE TEN"}
+
+`<user_question>Brand Alpha vs Brand Beta in Austin: same customer, and who wins where?</user_question>`
+{"pillar":"investment","job":"head_to_head","mentions":[{"text":"Brand Alpha","entity_type":"brand","role":"primary","public_figure":false},{"text":"Brand Beta","entity_type":"brand","role":"peer","public_figure":false}],"geo":{"metro":"austin","area":null,"unsupported_place":null},"constraints":{"concepts":[],"sponsor_categories":[],"domains":[],"ages":[],"notes":[]},"safety":{"allowed":true,"category":null,"reframe":null},"assumptions":[],"mnemonic":"BRAND ALPHA VS BRAND BETA"}
+
+`<user_question>Where in Austin should I open a natural-wine bar?</user_question>`
+{"pillar":"location","job":"site_selection","mentions":[],"geo":{"metro":"austin","area":null,"unsupported_place":null},"constraints":{"concepts":["natural-wine bar"],"sponsor_categories":[],"domains":[],"ages":[],"notes":[]},"safety":{"allowed":true,"category":null,"reframe":null},"assumptions":[],"mnemonic":"NATURAL-WINE BAR SITE AUSTIN"}
+
+`<user_question>Which beer and energy-drink brands fit Artist Nova's tour through Denver and Chicago?</user_question>`
+{"pillar":"marketing","job":"sponsorship","mentions":[{"text":"Artist Nova","entity_type":"artist","role":"primary","public_figure":false}],"geo":{"metro":null,"area":null,"unsupported_place":null},"constraints":{"concepts":[],"sponsor_categories":["beer","energy_drinks"],"domains":[],"ages":[],"notes":["markets: Denver, Chicago","tour"]},"safety":{"allowed":true,"category":null,"reframe":null},"assumptions":["US geography"],"mnemonic":"ARTIST NOVA <ARTIST> SPON"}
+
+`<user_question>Should Comedian Vega add dates in Nashville, Denver or Boise?</user_question>`
+{"pillar":"marketing","job":"market_selection","mentions":[{"text":"Comedian Vega","entity_type":"person","role":"primary","public_figure":true}],"geo":{"metro":"nashville","area":null,"unsupported_place":null},"constraints":{"concepts":[],"sponsor_categories":[],"domains":[],"ages":[],"notes":["markets: Nashville, Denver, Boise"]},"safety":{"allowed":true,"category":null,"reframe":null},"assumptions":["US geography"],"mnemonic":"COMEDIAN VEGA <PERSON> MKTS"}
+
+`<user_question>What podcasts do Artist Nova fans over-index on?</user_question>`
+{"pillar":"audience","job":"audience_discovery","mentions":[{"text":"Artist Nova","entity_type":"artist","role":"primary","public_figure":false}],"geo":{"metro":null,"area":null,"unsupported_place":null},"constraints":{"concepts":[],"sponsor_categories":[],"domains":["podcast"],"ages":[],"notes":[]},"safety":{"allowed":true,"category":null,"reframe":null},"assumptions":["US geography"],"mnemonic":"ARTIST NOVA <ARTIST> AUD"}
 
 `<user_question>Which of my apartment applicants should I accept, based on the music they like?</user_question>`
 {"pillar":"location","job":"area_profile","mentions":[],"geo":{"metro":null,"area":null,"unsupported_place":null},"constraints":{"concepts":[],"sponsor_categories":[],"domains":["artist"],"ages":[],"notes":[]},"safety":{"allowed":false,"category":"residential_screening","reframe":"Group-level taste profile of a neighbourhood for a commercial concept"},"assumptions":[],"mnemonic":"<AREA>, <CITY> DNA"}

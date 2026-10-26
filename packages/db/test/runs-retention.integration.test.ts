@@ -1,10 +1,21 @@
-// Rolling counts, retention purges and the run row lock, against a real Postgres in a throwaway
-// database. Skips only when no database is reachable; in CI with DATABASE_URL set it never skips.
+// Rolling counts (per visitor and lane too), run ages, retention purges, the visitor hash's retention
+// and the run row lock, against a real Postgres in a throwaway database. Skips only when no database
+// is reachable; in CI with DATABASE_URL set it never skips. Invented visitor hashes only.
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Db } from "../src/client";
 import { appendEvents, listEvents } from "../src/repos/runEvents";
-import { countRunsSince, createRun, getRun, lockRun, purgeRuns, setStatus } from "../src/repos/runs";
+import {
+  clearIpHashes,
+  countRunsSince,
+  createRun,
+  getRun,
+  lockRun,
+  purgeRuns,
+  RUN_AGES_MAX,
+  runAgesSince,
+  setStatus,
+} from "../src/repos/runs";
 import { type NewRun, type RunStatus, runs } from "../src/schema";
 import { createTestDatabase, probeTestDatabase, type TestDatabase } from "./support/testDb";
 
@@ -59,6 +70,55 @@ describe.skipIf(!probe.ok)("run retention against Postgres", () => {
     await seed("pctZ:1", "completed", 0);
     expect(await countRunsSince(db, { hashPrefix: "lit_x:", sinceMs: HOUR })).toBe(1);
     expect(await countRunsSince(db, { hashPrefix: "pct%:", sinceMs: HOUR })).toBe(1);
+  });
+
+  it("counts one visitor's runs on one lane by the hash of its address", async () => {
+    await seed("visit:1", "completed", 0, { ipHash: "visitor-hash-a" });
+    await seed("visit:2", "cancelled", 0.5, { ipHash: "visitor-hash-a" });
+    await seed("visit:3", "completed", 2, { ipHash: "visitor-hash-a" });
+    await seed("visit:4", "completed", 0, { ipHash: "visitor-hash-a", lane: "judge" });
+    await seed("visit:5", "completed", 0, { ipHash: "visitor-hash-b" });
+    await seed("visit:6", "completed", 0);
+    await seed("other:9", "completed", 0, { ipHash: "visitor-hash-a" });
+    const a = { hashPrefix: "visit:", ipHash: "visitor-hash-a" };
+    expect(await countRunsSince(db, { ...a, sinceMs: HOUR })).toBe(3);
+    expect(await countRunsSince(db, { ...a, lane: "public", sinceMs: HOUR })).toBe(2);
+    expect(await countRunsSince(db, { ...a, lane: "public", sinceMs: 3 * HOUR })).toBe(3);
+    expect(await countRunsSince(db, { hashPrefix: "visit:", lane: "judge", sinceMs: HOUR })).toBe(1);
+    expect(await countRunsSince(db, { hashPrefix: "visit:", ipHash: "visitor-hash-none", sinceMs: HOUR })).toBe(0);
+    // No ipHash filter counts every visitor, and runs without one.
+    expect(await countRunsSince(db, { hashPrefix: "visit:", sinceMs: HOUR })).toBe(5);
+    await expect(countRunsSince(db, { hashPrefix: "visit:", ipHash: " ", sinceMs: HOUR })).rejects.toThrow(RangeError);
+  });
+
+  it("says how long ago a visitor's newest runs started, newest first", async () => {
+    await seed("ages:1", "completed", 0.25, { ipHash: "visitor-hash-c" });
+    await seed("ages:2", "completed", 0.5, { ipHash: "visitor-hash-c" });
+    await seed("ages:3", "completed", 0.75, { ipHash: "visitor-hash-c" });
+    await seed("ages:4", "completed", 0.1, { ipHash: "visitor-hash-d" });
+    const ages = await runAgesSince(db, { hashPrefix: "ages:", ipHash: "visitor-hash-c", sinceMs: HOUR, limit: 2 });
+    expect(ages).toHaveLength(2);
+    // Seeded a quarter and a half hour back; the database clock moved on a little since.
+    expect(ages[0]).toBeGreaterThanOrEqual(0.25 * HOUR);
+    expect(ages[0]).toBeLessThan(0.25 * HOUR + 60_000);
+    expect(ages[1]).toBeGreaterThanOrEqual(0.5 * HOUR);
+    expect(ages[1]).toBeLessThan(0.5 * HOUR + 60_000);
+    expect(await runAgesSince(db, { hashPrefix: "ages:", ipHash: "visitor-hash-c", sinceMs: 0.6 * HOUR, limit: 5 })).toHaveLength(2);
+    await expect(runAgesSince(db, { hashPrefix: "ages:", sinceMs: HOUR, limit: 0 })).rejects.toThrow(RangeError);
+    await expect(runAgesSince(db, { hashPrefix: "ages:", sinceMs: HOUR, limit: RUN_AGES_MAX + 1 })).rejects.toThrow(RangeError);
+  });
+
+  it("clears the visitor hash of runs past the window and keeps the runs and their updated_at", async () => {
+    const old = await seed("forget:1", "completed", 30, { ipHash: "visitor-hash-e" });
+    const recent = await seed("forget:2", "completed", 1, { ipHash: "visitor-hash-e" });
+    const before = await getRun(db, old);
+    expect(await clearIpHashes(db, { olderThanMs: 25 * HOUR })).toBeGreaterThanOrEqual(1);
+    const after = await getRun(db, old);
+    expect(after).toMatchObject({ ipHash: null, status: "completed" });
+    expect(after?.updatedAt.getTime()).toBe(before?.updatedAt.getTime());
+    expect((await getRun(db, recent))?.ipHash).toBe("visitor-hash-e");
+    expect(await clearIpHashes(db, { olderThanMs: 25 * HOUR })).toBe(0);
+    await expect(clearIpHashes(db, { olderThanMs: 0 })).rejects.toThrow(RangeError);
   });
 
   it("purges old runs with the prefix and their events, and keeps the rest", async () => {

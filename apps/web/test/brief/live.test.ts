@@ -8,6 +8,7 @@ import {
   type RunEvent,
   type RunState,
 } from "@ct/contracts";
+import { jobRunEvents } from "../../app/dev/brief/job-runs";
 import { buildBriefModel, draftNumbers, stageStrip, traceNote, type StageState } from "../../lib/brief";
 import { endedAs, FAKE_RUN, FAKE_STARTED_AT, fakeRunEvents, fixtureReport, fullRunInputs, statesAlong, upTo, upToCall } from "./support";
 
@@ -21,9 +22,13 @@ const live = (evs: readonly RunEvent[], extraMs = 0) => {
   return buildBriefModel(state, at(state, extraMs));
 };
 
-/** The test run's tool calls: the opening scan, then the plan's name-matching step and the ANALYST's pivot. */
+/** The test run's tool calls: the opening scan (its Substitution Map first), then the plan's name-matching step and the ANALYST's pivot. */
 const SCAN = "scan-1";
 const PIVOT = "toolu_sample_pivot";
+/** The opening scan's estimated calls: the Substitution Map, Audience DNA and travel taste together. */
+const SCAN_CALLS = events.reduce((n, e) => n + (e.type === "tool.start" && e.phase === "scan" ? (e.estimatedCalls ?? 0) : 0), 0);
+/** Where the last scan tool ends: the scan's band is full from there. */
+const SCAN_DONE = events.findLastIndex((e) => e.type === "tool.end" && e.toolCallId.startsWith("scan-"));
 
 const RANK: Record<StageState, number> = { queued: 0, active: 1, idle: 1, done: 2, failed: 2 };
 
@@ -38,9 +43,11 @@ describe("live brief: the stage strip", () => {
     expect(text(indexOf("clerk"))).toBe("Clerk ✓ · Analyst queued · Quant queued · Checker queued");
     expect(text(indexOf("resolve"))).toBe("Clerk ✓ · Analyst planning · Quant queued · Checker queued");
     expect(text(indexOf("tool.start"))).toBe("Clerk ✓ · Analyst planning · Quant computing · Checker queued");
-    expect(text(indexOf("tool.end"))).toBe("Clerk ✓ · Analyst planning · Quant waiting · Checker queued");
+    // Quant computes while any scan tool runs, and waits once the last of them ends.
+    expect(text(indexOf("tool.end"))).toBe("Clerk ✓ · Analyst planning · Quant computing · Checker queued");
+    expect(text(SCAN_DONE)).toBe("Clerk ✓ · Analyst planning · Quant waiting · Checker queued");
     expect(text(indexOf("plan"))).toBe("Clerk ✓ · Analyst writing · Quant waiting · Checker queued");
-    expect(text(indexOf("tool.start", 2))).toBe("Clerk ✓ · Analyst writing · Quant computing · Checker queued");
+    expect(text(events.findIndex((e) => e.type === "tool.start" && e.phase !== "scan"))).toBe("Clerk ✓ · Analyst writing · Quant computing · Checker queued");
     expect(text(indexOf("report.draft"))).toBe("Clerk ✓ · Analyst drafted · Quant ✓ · Checker checking");
     expect(text(indexOf("validation"))).toBe("Clerk ✓ · Analyst ✓ · Quant ✓ · Checker ✓");
     expect(text(states.length - 1)).toBe("Clerk ✓ · Analyst ✓ · Quant ✓ · Checker ✓");
@@ -77,9 +84,10 @@ describe("live brief: progress, meters and incoming requests", () => {
   it("counts sources without an estimate before the plan, fills the scan's band and shows the clock", () => {
     const model = live(upToCall(events, SCAN, 2), 4000);
     expect(model.mode).toBe("live");
-    // The name search before the scan, plus 2 of the scan's 5 estimated calls: the scan band is 2/5 full.
+    // The name search before the scan, plus 2 of the scan's estimated calls (its three tools together).
+    expect(SCAN_CALLS).toBe(8);
     expect(model.live?.progress).toMatchObject({ label: "Gathering evidence", sourcesIn: 3, sourcesExpected: null, count: "· 3 sources" });
-    expect(model.live?.progress.fraction).toBeCloseTo(0.1 + 0.15 * (2 / 5));
+    expect(model.live?.progress.fraction).toBeCloseTo(0.1 + 0.15 * (2 / SCAN_CALLS));
     expect(model.live?.progress.clock).toMatch(/^\d\d:\d\d$/);
     expect(model.live?.since).toBe("Being written · since 09:12:00");
     expect(model.live?.cancellable).toBe(true);
@@ -92,7 +100,7 @@ describe("live brief: progress, meters and incoming requests", () => {
     const fractionAfter = (i: number) => lives[i]?.progress.fraction;
     expect(fractionAfter(indexOf("clerk"))).toBe(0.05);
     expect(fractionAfter(indexOf("resolve"))).toBe(0.1);
-    expect(fractionAfter(indexOf("tool.end"))).toBeCloseTo(0.25);
+    expect(fractionAfter(SCAN_DONE)).toBeCloseTo(0.25);
     expect(fractionAfter(indexOf("plan"))).toBe(0.3);
     expect(fractionAfter(lastIndexOf("tool.end"))).toBeCloseTo(0.75);
     expect(fractionAfter(indexOf("report.draft"))).toBe(0.85);
@@ -167,13 +175,22 @@ describe("live brief: progress, meters and incoming requests", () => {
   it("shows the request in flight, the queue behind it and what just arrived", () => {
     const model = live(upToCall(events, SCAN, 2), 4000);
     const rows = model.live?.incoming ?? [];
-    expect(rows.map((r) => r.state)).toEqual(["fetching", "queued", "received", "received", "received"]);
-    expect(rows[0]).toMatchObject({ toolCallId: SCAN, text: "Qloo /v2/insights · similarity data ← R1 Juniper Cola · fetching", trace: "fetching · 00:04" });
-    expect(rows[1]).toMatchObject({ trace: "2 more queued", count: 2 });
+    // Newest tool first: each scan tool in flight, with the rest of its estimate queued behind it.
+    expect(rows.map((r) => [r.toolCallId, r.state])).toEqual([
+      ["scan-3", "fetching"],
+      ["scan-2", "fetching"],
+      ["scan-2", "queued"],
+      [SCAN, "fetching"],
+      [SCAN, "queued"],
+      [SCAN, "received"],
+    ]);
+    // A tool with no call in yet names no endpoint.
+    expect(rows[0]).toMatchObject({ text: "Qloo · travel data ← R1 Juniper Cola · fetching" });
+    expect(rows[3]).toMatchObject({ text: "Qloo /v2/insights · similarity data ← R1 Juniper Cola · fetching", trace: "fetching · 00:04" });
+    expect(rows[4]).toMatchObject({ trace: "2 more queued", count: 2 });
     // A call that arrived is complete: no in-flight word, even while its tool still runs.
-    expect(rows[2]).toMatchObject({ toolCallId: SCAN, text: "Qloo /v2/insights · brand ← R1 Juniper Cola", sourceIndex: 2 });
-    expect(rows[2]?.trace).toMatch(/^req .{4}….{4} · 20 rows · reused from #[0-9A-Z]{4}$/);
-    expect(rows[4]).toMatchObject({ state: "received", toolCallId: null, text: "Qloo /search", sourceIndex: 0 });
+    expect(rows[5]).toMatchObject({ text: "Qloo /v2/insights · brand ← R1 Juniper Cola", sourceIndex: 2 });
+    expect(rows[5]?.trace).toMatch(/^req .{4}….{4} · 20 rows · reused from #[0-9A-Z]{4}$/);
     for (const r of rows.filter((r) => r.state !== "fetching")) expect(r.text).not.toMatch(/receiving|fetching/);
   });
 
@@ -217,26 +234,52 @@ describe("live brief: priors, key figures and the trace note", () => {
     for (const k of early.evidence.keyFigures) expect(k.metric).toBeNull();
     expect(early.evidence.aside).toBe("0 of 4 key figures in · exhibits drafted last");
 
-    // The first similarity and the first distinctiveness metric fill their slots, matched by formula id.
+    // The first similarity, distinctiveness and youth metrics fill their slots, matched by formula id.
     const state = stateAfter(upTo(events, "plan"));
     const later = buildBriefModel(state, at(state));
     const first = (formula: string) => Object.values(state.metrics).find((m) => m.formulaId === formula);
     expect(later.evidence.keyFigures.map((k) => [k.state, k.key, k.metric?.text ?? null])).toEqual([
       ["ready", first("subs.similarity")?.id, first("subs.similarity")?.display],
       ["ready", first("subs.distinctiveness")?.id, first("subs.distinctiveness")?.display],
-      ["pending", "pending-2", null],
+      ["ready", first("dna.youth_index")?.id, first("dna.youth_index")?.display],
       ["pending", "pending-3", null],
     ]);
-    // A figure keeps its slot's short label when its metric arrives; the metric's own label is the inspector's.
-    expect(later.evidence.keyFigures.map((k) => k.label)).toEqual(early.evidence.keyFigures.map((k) => k.label));
+    // An arrived figure is named as the finished brief names it: a youth index is not the slot's share
+    // tilt. The metric's own label is the inspector's.
+    expect(later.evidence.keyFigures.map((k) => k.label)).toEqual(["Nearest audience", "Distinctiveness", "Youth index", "Metros won"]);
     expect(later.evidence.keyFigures[0]?.metric?.label).toBe(first("subs.similarity")?.label);
-    expect(later.evidence.keyFigures.map((k) => k.comparator)).toEqual(["with Granite Outfitters", "vs peers", null, null]);
-    expect(later.evidence.aside).toBe("2 of 4 key figures in · exhibits drafted last");
+    expect(later.evidence.keyFigures.map((k) => k.comparator)).toEqual(["with Granite Outfitters", "vs peers", "0 = average", null]);
+    expect(later.evidence.aside).toBe("3 of 4 key figures in · exhibits drafted last");
   });
 
-  it("matches key-figure slots on exact formula ids only", () => {
+  it("names a lift by its neighbourhood once it arrives, as the finished brief does", () => {
+    const site = jobRunEvents("site_selection");
+    const run = site[0]?.runId ?? "dev-site";
+    const model = (evs: readonly RunEvent[]) => {
+      const state = reduceRunEvents(run, evs);
+      return buildBriefModel(state, Date.parse(state.updatedAt ?? "") + 1000);
+    };
+    const labels = (evs: readonly RunEvent[]) => model(evs).evidence.keyFigures.map((k) => [k.state, k.label]);
+    // Before the map: the slots hold their places under their own labels.
+    const start = site.findIndex((e) => e.type === "tool.start" && e.tool === "geo_lift");
+    expect(labels(site.slice(0, start + 1)).slice(0, 3)).toEqual([
+      ["pending", "Area lift"],
+      ["pending", "Area lift"],
+      ["pending", "Area lift"],
+    ]);
+    // Once its metrics are in, each lift names its neighbourhood, live and final alike.
+    const drafted = labels(site.slice(0, site.findIndex((e) => e.type === "report.final")));
+    expect(drafted.slice(0, 3)).toEqual([
+      ["ready", "East Cesar Chavez"],
+      ["ready", "Holly"],
+      ["ready", "Central East Austin"],
+    ]);
+    expect(model(site).evidence.keyFigures.slice(0, 3).map((k) => [k.state, k.label])).toEqual(drafted.slice(0, 3));
+  });
+
+  it("matches key-figure slots on exact metric keys only", () => {
     const state = stateAfter(upTo(events, "plan"));
-    const bare = Object.fromEntries(Object.entries(state.metrics).map(([id, m]) => [id, { ...m, formulaId: m.formulaId.split(".").at(-1) ?? m.formulaId }]));
+    const bare = Object.fromEntries(Object.entries(state.metrics).map(([id, m]) => [id, { ...m, key: m.key.split(".").at(-1) ?? m.key }]));
     const model = buildBriefModel({ ...state, metrics: bare }, at(state));
     expect(model.evidence.keyFigures.every((k) => k.state === "pending")).toBe(true);
   });
@@ -252,18 +295,19 @@ describe("live brief: priors, key figures and the trace note", () => {
     expect(seqs.every(Number.isFinite)).toBe(true);
     expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
     expect(model.footnotes.map((f) => f.n)).toEqual(model.footnotes.map((_, i) => i + 1));
-    expect(model.footnotes.filter((f) => f.kind === "figure").map((f) => f.key)).toEqual(["D1", "D2", "D3"]);
+    // Every dataset so far is a live figure, in arrival order.
+    const datasets = Object.values(state.datasets).map((d) => d.id);
+    expect(datasets.length).toBeGreaterThan(1);
+    expect(model.footnotes.filter((f) => f.kind === "figure").map((f) => f.key)).toEqual(datasets);
     // Live figures are provisional: title from the dataset, no caption yet.
-    expect(model.evidence.figures.map((f) => [f.number, f.datasetId, f.provisional, f.caption.length])).toEqual([
-      [1, "D1", true, 0],
-      [2, "D2", true, 0],
-      [3, "D3", true, 0],
-    ]);
+    expect(model.evidence.figures.map((f) => [f.number, f.datasetId, f.provisional, f.caption.length])).toEqual(datasets.map((id, i) => [i + 1, id, true, 0]));
 
     const final = buildBriefModel(stateAfter(upTo(events, "report.final")), at(state));
     expect(final.mode).toBe("final");
     expect(final.footnotes[0]?.firstCitedIn).toBe("answer");
-    expect(final.footnotes.find((f) => f.key === "D1")?.n).not.toBe(model.footnotes.find((f) => f.key === "D1")?.n);
+    const figure = final.footnotes.find((f) => f.kind === "figure")?.key;
+    expect(figure).toBeDefined();
+    expect(final.footnotes.find((f) => f.key === figure)?.n).not.toBe(model.footnotes.find((f) => f.key === figure)?.n);
     expect(final.footnotes.map((f) => f.n)).toEqual(final.footnotes.map((_, i) => i + 1));
   });
 
@@ -271,8 +315,9 @@ describe("live brief: priors, key figures and the trace note", () => {
     const state = stateAfter(upTo(events, "plan"));
     const before = buildBriefModel(state, at(state));
     const cited = before.sources.items.filter((s) => s.footnotes.length > 0).length;
-    // Three footnotes (two key figures and the Substitution Map) cite more requests than that.
-    expect(before.footnotes).toHaveLength(3);
+    // The footnotes (the key figures in and the scan's figures) cite more requests than that.
+    const ready = before.evidence.keyFigures.filter((k) => k.state === "ready").length;
+    expect(before.footnotes).toHaveLength(ready + Object.keys(state.datasets).length);
     expect(cited).toBeGreaterThan(before.footnotes.length);
     // Before the draft nothing says which numbers the prose will cite, so there is no count to guess.
     expect(before.trace).toEqual({
@@ -301,8 +346,9 @@ describe("live brief: priors, key figures and the trace note", () => {
     const base = draftNumbers(state);
     expect(base).toBeGreaterThan(0);
     // A repeated token counts twice; a token of a metric that arrived without a value does not count.
-    const metric = Object.values(state.metrics).find((m) => m.value !== null);
-    if (!metric) throw new Error("no metric with a value in the test run");
+    const cited = new Set([...JSON.stringify(draft).matchAll(/\{\{(M\d+)\}\}/g)].map((m) => m[1]));
+    const metric = Object.values(state.metrics).find((m) => m.value !== null && cited.has(m.id));
+    if (!metric) throw new Error("the test run's draft cites no metric with a value");
     const twice: RunState = { ...state, draft: { ...draft, thesis: `${draft.thesis} {{${metric.id}}} and {{${metric.id}}}` } };
     expect(draftNumbers(twice)).toBe(base + 2);
     const empty: RunState = { ...twice, metrics: { ...twice.metrics, [metric.id]: { ...metric, value: null } } };
@@ -405,10 +451,10 @@ describe("terminal states", () => {
       expect(model.evidence.keyFigures.map((k) => [k.state, k.pendingNote])).toEqual([
         ["ready", null],
         ["ready", null],
-        ["pending", "not measured · run stopped"],
+        ["ready", null],
         ["pending", "not measured · run stopped"],
       ]);
-      expect(model.evidence.aside).toBe("2 of 4 key figures in · run stopped");
+      expect(model.evidence.aside).toBe("3 of 4 key figures in · run stopped");
       expect(model.trace).toEqual({ state: "stopped", headline: "Not checked", detail: "Checker did not run" });
       expect(model.method.checker).toMatchObject({ state: "stopped", line: null });
       // The calls in flight stopped with the run; the plan steps it never reached did not run.

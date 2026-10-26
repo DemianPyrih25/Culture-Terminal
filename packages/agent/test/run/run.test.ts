@@ -23,6 +23,7 @@ import {
   plan,
   planCall,
   reportCall,
+  reportWithoutFollowup,
   respond,
   run,
   seenIds,
@@ -139,7 +140,7 @@ describe("runAgent: a brand_health run", () => {
     // The report: valid, Scorecard first, every number traced.
     const report = Report.parse(result.report);
     expect(report.incomplete).toBe(false);
-    expect(report.verdict.signal).toBe("mixed");
+    expect(report.verdict).toMatchObject({ signal: "mixed", tag: "Distinct niche" });
     expect(report.exhibits[0]?.kind).toBe("Scorecard");
     expect(report.scorecard.map((r) => r.hypothesisId)).toEqual(["H1", "H2"]);
     expect(report.receipt.numbersTraced.total).toBeGreaterThan(0);
@@ -158,7 +159,9 @@ describe("runAgent: a brand_health run", () => {
     const lastUsage = ofType(events, "usage").at(-1);
     expect(lastUsage).toMatchObject({ llmUsd: result.usd, tokens: result.usage, qloo: result.qloo });
     expect(result.ledger.evidence.filter((e) => e.status === "ok").length).toBeGreaterThanOrEqual(3);
-    expect(result.ledger.datasets[result.ledger.datasets.length - 1]?.kind).toBe("Scorecard");
+    // Recorded after the CHECKER: the Scorecard, then the Taste Position card, which follows it in the note.
+    expect(result.ledger.datasets.slice(-2).map((d) => d.kind)).toEqual(["Scorecard", "Position"]);
+    expect(report.exhibits[1]).toMatchObject({ kind: "Position", viz: "PositionCard" });
 
     // The model saw labelled blocks in order, the scan's digests with turn 1's results, and no Qloo ids.
     const first = fake.streamRequests[0];
@@ -232,7 +235,7 @@ describe("runAgent: the resolution gate", () => {
       intent,
       runId: "run-test-0003",
       pins: { [normaliseName(mention.text)]: picked.entity_id },
-      stream: [respond([planCall()]), (req: AnalystRequest) => respond([reportCall("toolu_report", draftFrom(seenIds(req)))])],
+      stream: [respond([planCall()]), ...reportWithoutFollowup()],
     });
     expect(result.status).toBe("completed");
     expect(ofType(events, "resolve")[0]?.entities[0]).toMatchObject({ match: "exact", ref: "R1", name: choice.name, source: "gate" });
@@ -305,7 +308,7 @@ describe("runAgent: fail-closed and stop paths", () => {
     expect(ofType(events, "tool.start").map((e) => e.toolCallId)).toEqual(["toolu_peer"]);
     expect(ofType(events, "tool.end")[0]).toMatchObject({ ok: false, status: "error" });
     const report = Report.parse(result.report);
-    expect(report.verdict.signal).toBe("insufficient_evidence");
+    expect(report.verdict).toMatchObject({ signal: "insufficient_evidence", tag: null });
     expect(report.disclaimers).toContain(NO_DATA_DISCLAIMER);
     expect(report.receipt.qlooNetwork + report.receipt.qlooCached + report.receipt.qlooReused).toBe(0);
     expect(result.validation?.issues.some((i) => i.rule === "V7" && i.action === "forced")).toBe(true);
@@ -353,6 +356,8 @@ describe("runAgent: fail-closed and stop paths", () => {
     const { result, events, fake } = await run({
       stream: [
         respond([planCall()]),
+        // The follow-up nudge answers the first report before any review.
+        (req: AnalystRequest) => respond([reportCall("toolu_report_early", draftFrom(seenIds(req)))]),
         (req: AnalystRequest) =>
           respond([reportCall("toolu_report", draftFrom(seenIds(req), { thesis: "Brand Alpha sits apart {{M99}} [E1]." }))]),
         (req: AnalystRequest) => respond([reportCall("toolu_report_2", draftFrom(seenIds(req)))]),
@@ -366,7 +371,7 @@ describe("runAgent: fail-closed and stop paths", () => {
     ]);
     expect(validations[0]?.issues.some((i) => i.action === "reject" && i.subjects.includes("M99"))).toBe(true);
     expect(ofType(events, "report.draft").map((d) => d.attempt)).toEqual([1, 2]);
-    const repair = fake.streamRequests[2];
+    const repair = fake.streamRequests[3];
     expect(repair && userTexts(repair).join("\n")).toContain("CHECKER rejected the report");
     expect(result.report?.verdict.thesis).not.toContain("M99");
     parseAll(events);
@@ -393,7 +398,13 @@ describe("runAgent: fail-closed and stop paths", () => {
     const report = (req: AnalystRequest) => respond([reportCall("toolu_report", draftFrom(seenIds(req)))]);
     const evidenceLine = (texts: readonly string[]) => texts.find((t) => t.startsWith("EVIDENCE:"));
 
-    const early = await run({ stream: [respond([planCall()]), report] });
+    // Only the Substitution Map answers: the scan's Audience DNA and travel taste fail, so evidence stays thin.
+    const thinScan = () =>
+      mockQloo([
+        { match: "filter.type=urn:demographics", status: 400 },
+        { match: "filter.type=urn:entity:destination", status: 400 },
+      ]);
+    const early = await run({ qloo: thinScan(), stream: [respond([planCall()]), report] });
     const turn2 = early.fake.streamRequests[1];
     const earlyTexts = turn2 ? userTexts(turn2) : [];
     expect(evidenceLine(earlyTexts)).toContain("follow up on the finding");
@@ -402,6 +413,7 @@ describe("runAgent: fail-closed and stop paths", () => {
     // Wave 1 finishes past the wrap-up time: the same thin evidence, but submit_report is the only call left.
     const clock = new ManualClock();
     const late = await run({
+      qloo: thinScan(),
       now: clock.now,
       stream: [{ message: respond([planCall()]), onSend: () => clock.advance(125_000) }, report],
     });
@@ -433,7 +445,9 @@ describe("runAgent: fail-closed and stop paths", () => {
     const report = Report.parse(result.report);
     expect(report).toMatchObject({ incomplete: true, arguments: [] });
     expect(report.verdict).toMatchObject({ headline: INCOMPLETE_HEADLINE, signal: "insufficient_evidence" });
-    expect(report.exhibits.map((x) => x.kind)).toEqual(["Scorecard", "Matrix"]);
+    // The brand_health scan: travel taste (Quadrant), the Substitution Map (Matrix), Audience DNA (Bars,
+    // Ranked), after the Scorecard and the Taste Position card.
+    expect(report.exhibits.map((x) => x.kind)).toEqual(["Scorecard", "Position", "Quadrant", "Matrix", "Bars", "Ranked"]);
     expect(report.limitations.some((l) => l.flag === "INCOMPLETE_RUN")).toBe(true);
     expect(typesOf(events).slice(-2)).toEqual(["report.final", "usage"]);
     parseAll(events);
@@ -564,7 +578,7 @@ describe("runAgent: budgets and the gate's drops", () => {
             step_id: "S2",
           }),
         ]),
-        (req: AnalystRequest) => respond([reportCall("toolu_report", draftFrom(seenIds(req)))]),
+        ...reportWithoutFollowup(),
       ],
     });
     expect(result.status).toBe("completed");

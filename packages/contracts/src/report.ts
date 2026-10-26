@@ -74,7 +74,7 @@ function buildSubmitPlan<Lim extends Limits>(limits: Lim) {
   });
 }
 
-/** submit_plan input as the API guarantees it (strict, no limits, ids as plain strings). */
+/** submit_plan input in its structural form (no limits, ids as plain strings); the loop checks it in code, since the tool is not strict. */
 export const SubmitPlanInputShape = buildSubmitPlan(false);
 /** The structural plan, as the `plan` event and RunState carry it. */
 export type SubmitPlanInputShape = z.infer<typeof SubmitPlanInputShape>;
@@ -103,12 +103,64 @@ export const REPORT_LIMITS = {
   openQuestionsMax: 5,
 } as const;
 
+/** The verdict tag (Report.verdict.tag): two to five words, at most 32 characters, no digits or tokens (CHECKER V9). */
+export const VERDICT_TAG_LIMITS = { wordsMin: 2, wordsMax: 5, chars: 32 } as const;
+
+/** The words of a verdict tag: runs of non-space characters. */
+export function verdictTagWords(tag: string): string[] {
+  return tag.split(/\s+/).filter((w) => w !== "");
+}
+
+/**
+ * How a verdict tag breaks its rule, one predicate per problem ("has 7 words, not 2 to 5"); empty when
+ * it keeps it. Surrounding spaces do not count.
+ */
+export function verdictTagProblems(tag: string): string[] {
+  const L = VERDICT_TAG_LIMITS;
+  const trimmed = tag.trim();
+  if (trimmed === "") return ["is empty"];
+  const out: string[] = [];
+  const words = verdictTagWords(trimmed).length;
+  if (words < L.wordsMin || words > L.wordsMax) {
+    out.push(`has ${words} ${words === 1 ? "word" : "words"}, not ${L.wordsMin} to ${L.wordsMax}`);
+  }
+  if (trimmed.length > L.chars) out.push(`has ${trimmed.length} characters, more than ${L.chars}`);
+  if (/\d/.test(trimmed)) out.push("contains digits");
+  // {{WINDOW}} has no digits; a list row or the running head would print any token raw.
+  if (/[{}[\]]/.test(trimmed)) out.push("contains tokens");
+  return out;
+}
+
+/** True when the tag keeps its rule, so a list row or the running head may print it. */
+export function isVerdictTag(tag: unknown): tag is string {
+  return typeof tag === "string" && verdictTagProblems(tag).length === 0;
+}
+
+const VERDICT_TAG_DESCRIPTION =
+  "The verdict in two to five words, at most 32 characters, no digits or tokens: the finding a reader " +
+  "scans in a list of briefs, e.g. 'Taste island', 'Clear lead', 'Strong fit'. Sentence case. Not a Qloo tag.";
+
+/**
+ * verdict_tag: limited, the rule as custom issues (V9). Structural, it defaults to empty so a draft
+ * stored before the tag existed still parses; the strict tool schema lists it as required all the same.
+ */
+const verdictTag = <Lim extends Limits>(limits: Lim): Lim extends true ? z.ZodString : z.ZodDefault<z.ZodString> =>
+  (limits
+    ? z
+        .string()
+        .superRefine((tag, ctx) => {
+          for (const message of verdictTagProblems(tag)) ctx.addIssue({ code: "custom", message });
+        })
+        .describe(VERDICT_TAG_DESCRIPTION)
+    : z.string().default("").describe(VERDICT_TAG_DESCRIPTION)) as Lim extends true ? z.ZodString : z.ZodDefault<z.ZodString>;
+
 function buildReportDraft<Lim extends Limits>(limits: Lim) {
   const L = REPORT_LIMITS;
   const ids = <T extends z.ZodType<string>>(id: T, what: string) => z.array(idOf(limits, id)).describe(what);
   return z.strictObject({
     headline: text(limits, L.headline, "One line; tokens allowed (≤120 chars)."),
     signal: Signal.describe("The signal for this question. insufficient_evidence when fewer than three bundles are ok."),
+    verdict_tag: verdictTag(limits),
     thesis: text(limits, L.thesis, "Two or three sentences with {{M#}} and [E#] tokens (≤600 chars)."),
     hypothesis_verdicts: list(
       limits,
@@ -188,7 +240,10 @@ function buildReportDraft<Lim extends Limits>(limits: Lim) {
   });
 }
 
-/** submit_report input as the API guarantees it (strict, every field required, no unions or optionals, ids as plain strings). */
+/**
+ * submit_report input as the API guarantees it (strict, every field required, no unions or optionals,
+ * ids as plain strings). Only verdict_tag defaults, to "", for drafts stored before it existed.
+ */
 export const ReportDraftShape = buildReportDraft(false);
 /** The structural draft, as the `report.draft` event and RunState carry it. */
 export type ReportDraftShape = z.infer<typeof ReportDraftShape>;
@@ -245,7 +300,10 @@ export type ValidationRule = z.infer<typeof ValidationRule>;
 
 export const ValidationIssue = z.object({
   rule: ValidationRule,
-  /** reject: triggers the repair turn; warn: accepted, costs confidence; forced/injected: code fixed it (V7, V8). */
+  /**
+   * reject: triggers the repair turn; warn: accepted, costs confidence; forced/injected: code fixed it
+   * (V7, V8, and V9 trimming the verdict tag on the last attempt).
+   */
   action: z.enum(["reject", "warn", "forced", "injected"]),
   message: z.string(),
   /** Where in the draft, e.g. "arguments[2].our_read"; null for whole-report issues. */
@@ -399,6 +457,12 @@ export const Report = z.object({
   verdict: z.object({
     headline: z.string(),
     signal: Signal,
+    /**
+     * The verdict in two to five words ("Taste island") for list rows and the running head. Null when
+     * the note has none that keeps the rule, absent in notes stored before it existed: readers then
+     * print the signal label.
+     */
+    tag: z.string().nullable().optional(),
     thesis: z.string(),
     confidence: Confidence,
     /** Evidence bundles with status ok, out of all bundles (V7). */

@@ -1,15 +1,5 @@
 import "server-only";
-import { isSkillAvailable, SCAN_TABLE } from "@ct/agent";
-import {
-  TOOL_MNEMONIC,
-  unstampEvent,
-  type EventInput,
-  type EventInputOf,
-  type Report,
-  type RunEvent,
-  type SkillId,
-} from "@ct/contracts";
-import { computeConfidence } from "@ct/quant";
+import { unstampEvent, type EventInput, type Report, type RunEvent } from "@ct/contracts";
 import { FAKE_MODEL } from "../lib/test-run";
 import { sampleEvents } from "./samples";
 
@@ -19,10 +9,8 @@ export { FAKE_MODEL };
  * The test run ({ fake: true }): a replay of the synthetic brand-health sample (server/samples,
  * written by tools/dev/sample-run.ts from the real agent with a scripted model and mock Qloo data),
  * paced over the run's duration. It shows what a live run shows: CLERK, the resolution gate, the
- * opening scan, an ANALYST PIVOT, the CHECKER and the finished brief, plus a CODE FALLBACK for the
- * scan skills this build cannot run, so the trace exercises every event type a run takes. No Qloo or
- * model call is made, so the usage events report zero LLM spend and the receipt says the data is
- * synthetic.
+ * opening scan, an ANALYST PIVOT, the CHECKER and the finished brief. No Qloo or model call is
+ * made, so the usage events report zero LLM spend and the receipt says the data is synthetic.
  */
 
 export const FAKE_QUESTION = "Test run: is the Juniper Cola audience a moat or a niche?";
@@ -58,33 +46,6 @@ const GAP_CAP = 4;
 const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/;
 const UTC_MINUTE = /\b(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}) UTC\b/g;
 
-const toolNames = (tools: readonly SkillId[]): string => tools.map((t) => `${t} (${TOOL_MNEMONIC[t]})`).join(" and ");
-
-/**
- * The step the test run adds after the opening scan starts: the job's scan skills (SCAN_TABLE) that
- * this build cannot run, which left the sample's scan to the ones it did run. Null when the sample's
- * scan ran every skill in the table, or left one out that this build has: then no fallback is true.
- */
-export function scanFallback(sample: readonly RunEvent[]): EventInputOf<"fallback"> | null {
-  const clerk = sample.find((e) => e.type === "clerk");
-  const scan = sample.filter((e) => e.type === "tool.start" && e.phase === "scan");
-  const first = scan[0];
-  if (clerk?.type !== "clerk" || first?.type !== "tool.start") return null;
-  const planned = SCAN_TABLE[clerk.intent.job].map((entry) => entry.tool);
-  const started = new Set<string>(scan.flatMap((e) => (e.type === "tool.start" ? [e.tool] : [])));
-  const ran = planned.filter((tool) => started.has(tool));
-  const missing = planned.filter((tool) => !started.has(tool));
-  if (ran.length === 0 || missing.length === 0 || missing.some(isSkillAvailable)) return null;
-  return {
-    type: "fallback",
-    from: planned.map((t) => TOOL_MNEMONIC[t]).join(" + "),
-    to: ran.map((t) => TOOL_MNEMONIC[t]).join(" + "),
-    reason: `${toolNames(missing)} ${missing.length === 1 ? "is" : "are"} not in this build, so the opening scan ran ${toolNames(ran)} alone.`,
-    toolCallId: first.toolCallId,
-    findingId: null,
-  };
-}
-
 /** Maps a sample time onto the test run: in-run times follow the pacing, earlier ones (cached data) keep their age. */
 type TimeMap = (sampleMs: number) => number;
 
@@ -118,25 +79,12 @@ function retime<T>(value: T, map: TimeMap): T {
   }) as T;
 }
 
-/** The sample's report as the test run's: this run's id and question, one more CODE FALLBACK, and a zero-spend synthetic receipt. */
-function testRunReport(report: Report, ctx: FakeScriptContext, fallbacks: number): Report {
-  const count = (rule: Report["verdict"]["confidence"]["breakdown"][number]["rule"]) =>
-    report.verdict.confidence.breakdown.find((line) => line.rule === rule)?.count ?? 0;
-  const confidence = computeConfidence({
-    droppedEntities: count("dropped_entity"),
-    codeFallbacks: count("code_fallback") + fallbacks,
-    coarseGeohash: count("coarse_geohash") > 0,
-    staleMomentumCited: count("stale_momentum") > 0,
-    thinResults: count("thin_result"),
-    qualityGateDrops: count("quality_gate_drop"),
-    checkerWarnings: count("checker_warning"),
-    insufficientEvidence: count("insufficient_evidence") > 0,
-  });
+/** The sample's report as the test run's: this run's id and question, and a zero-spend synthetic receipt. */
+function testRunReport(report: Report, ctx: FakeScriptContext): Report {
   return {
     ...report,
     runId: ctx.runId,
     question: FAKE_QUESTION,
-    verdict: { ...report.verdict, confidence },
     disclaimers: [...report.disclaimers.filter((line) => !line.startsWith("Data: ")), SYNTHETIC_DATA_LINE],
     receipt: {
       ...report.receipt,
@@ -154,20 +102,13 @@ export function buildFakeScript(ctx: FakeScriptContext): FakeScript {
   const end = sample.at(-1);
   if (end?.type !== "run.end") throw new Error(`sample ${SAMPLE} does not end with run.end`);
   const body = sample.slice(0, -1);
-  const fallback = scanFallback(sample);
-
-  // The events to replay, with the added fallback right after the scan starts; it waits no time of its own.
-  const replay: { event: RunEvent; input: EventInput }[] = [];
-  for (const event of body) {
-    replay.push({ event, input: unstampEvent(event).input });
-    if (fallback !== null && event.type === "tool.start" && event.toolCallId === fallback.toolCallId) replay.push({ event, input: fallback });
-  }
+  const replay: { event: RunEvent; input: EventInput }[] = body.map((event) => ({ event, input: unstampEvent(event).input }));
 
   const positions: number[] = [];
   let pos = 0;
   replay.forEach(({ event }, i) => {
     const previous = replay[i - 1]?.event;
-    const waited = previous === undefined || previous === event ? 0 : Date.parse(event.ts) - Date.parse(previous.ts);
+    const waited = previous === undefined ? 0 : Date.parse(event.ts) - Date.parse(previous.ts);
     if (i > 0) pos += 1 + Math.min(Math.max(0, waited) / GAP_UNIT_MS, GAP_CAP);
     positions.push(pos);
   });
@@ -181,7 +122,6 @@ export function buildFakeScript(ctx: FakeScriptContext): FakeScript {
     ctx,
   );
 
-  const fallbacks = replay.filter((r) => r.input.type === "fallback").length;
   const steps = replay.map(({ input }, i): FakeStep => {
     const at = ats[i] ?? 0;
     switch (input.type) {
@@ -193,7 +133,7 @@ export function buildFakeScript(ctx: FakeScriptContext): FakeScript {
           input: { ...input, llmUsd: 0, tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 }, elapsedMs: Math.round(at * ctx.durationMs) },
         };
       case "report.final":
-        return { at, input: { ...input, report: testRunReport(retime(input.report, map), ctx, fallbacks) } };
+        return { at, input: { ...input, report: testRunReport(retime(input.report, map), ctx) } };
       default:
         return { at, input: retime(input, map) };
     }

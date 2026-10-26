@@ -1,9 +1,8 @@
-import { FIXED_DISCLAIMERS, VIZ_COMPAT, type Comparator, type Job, type Metric, type Report, type RunState } from "@ct/contracts";
+import { FIXED_DISCLAIMERS, isVerdictTag, VIZ_COMPAT, type Metric, type Report, type RunState } from "@ct/contracts";
 import { figureLegend, figureSource, methodHrefFor } from "./figures";
 import { FootnoteRegistry, inlineText } from "./footnotes";
 import {
   capitalize,
-  COMPARATOR_TEXT,
   CONVICTION_BAND_LABEL,
   convictionRuleLabel,
   countWord,
@@ -14,7 +13,6 @@ import {
   formatUtcTime,
   JOB_HEAD_LABEL,
   MATCH_LABEL,
-  metricShortLabel,
   plural,
   PRIORITY_LABEL,
   SAFETY_LABEL,
@@ -23,10 +21,13 @@ import {
   STRENGTH_LABEL,
   TOOL_DATA_LABEL,
 } from "./format";
-import { KPI_SLOTS, skillForFormula } from "./kpi-slots";
+import { keyFigureText } from "./key-figures";
+import { KPI_SLOTS, pickMatches, skillForFormula } from "./kpi-slots";
 import { arrivedAt, buildLedger, firstTs, metricView, requestsForEvidence, type Ledger } from "./ledger";
 import { buildLive, stoppedEarly, traceNote } from "./live";
+import { areaReads, buildLocation, datasetPlace, type AreaRead } from "./location";
 import { buildMethod, buildSources } from "./method";
+import { buildNextMoves } from "./next-moves";
 import type {
   BriefAnswer,
   BriefArgument,
@@ -73,6 +74,16 @@ function signalTag(report: Report | null): SignalTag | null {
   return report ? { signal: report.verdict.signal, label: SIGNAL_LABEL[report.verdict.signal] } : null;
 }
 
+/**
+ * The finding in a few words: the report's verdict tag ("Taste island"), else its signal label, for
+ * notes stored before the tag existed and notes without one (an evidence digest, a forced signal).
+ */
+export function findingOf(report: Report | null): string | null {
+  if (!report) return null;
+  const tag = report.verdict.tag?.trim();
+  return isVerdictTag(tag) ? tag : SIGNAL_LABEL[report.verdict.signal];
+}
+
 function convictionSummary(report: Report | null): ConvictionSummary | null {
   if (!report) return null;
   const { score, band } = report.verdict.confidence;
@@ -81,45 +92,11 @@ function convictionSummary(report: Report | null): ConvictionSummary | null {
 
 // Key figures -----------------------------------------------------------------------------------------
 
-/** A/Key figure labels are short: a report label longer than this gives way to the slot's or the metric's short label. */
-const KEY_FIGURE_LABEL_MAX = 24;
-
-/** The job's slot label for a metric's formula ("Nearest audience" on a brand-health brief), or null. */
-function slotLabel(job: Job | null | undefined, metric: Metric): string | null {
-  if (!job) return null;
-  return KPI_SLOTS[job].find((slot) => slot.formulas.includes(metric.formulaId))?.label ?? null;
-}
-
-/** "Audience overlap": the report's KPI label when short, else the job's slot label, else the metric's short label. */
-function keyFigureLabel(job: Job | null | undefined, metric: Metric, given: string | null): string {
-  const label = given?.trim() ?? "";
-  if (label !== "" && label.length <= KEY_FIGURE_LABEL_MAX) return capitalize(label);
-  return slotLabel(job, metric) ?? metricShortLabel(metric);
-}
-
-/** Pair measures read "with" the other brand; any other measure of two subjects reads "vs" it. */
-const PAIR_FORMULAS: ReadonlySet<string> = new Set(["subs.similarity", "subs.near_substitutes"]);
-
 /**
- * The line under a key figure: who it is measured with or against, the comparator and a historical
- * window. "with Granite Outfitters", "vs peers", "Apr–Sep 2025 only"; null when there is nothing to say.
+ * One entry of the live strip: a metric that has arrived, which its key's spec names as the finished
+ * brief will (a pending "Area lift" becomes "East Cesar Chavez"), or a slot still pending under its label.
  */
-function keyFigureComparator(ledger: Ledger, metric: Metric, comparator: Comparator | null): string | null {
-  const others = metric.subjectRefs.slice(1).flatMap((ref) => ledger.refNames.get(ref) ?? []).slice(0, 2);
-  const window = metricView(metric, ledger.window).window;
-  const parts = [
-    others.length > 0 ? `${PAIR_FORMULAS.has(metric.formulaId) ? "with" : "vs"} ${others.join(", ")}` : null,
-    comparator ? COMPARATOR_TEXT[comparator] : null,
-    window ? `${window} only` : null,
-  ].filter((p): p is string => p !== null);
-  return parts.length > 0 ? parts.join(" · ") : null;
-}
-
-interface LiveKeyFigure {
-  label: string;
-  metric: Metric | null;
-  pendingNote: string | null;
-}
+type LiveKeyFigure = { metric: Metric } | { metric: null; label: string; pendingNote: string };
 
 /** What a pending key figure says once the run has stopped: it will not arrive, and it is not 0. */
 const STOPPED_FIGURE_NOTE = "not measured · run stopped";
@@ -130,24 +107,29 @@ function liveKeyFigures(ledger: Ledger): LiveKeyFigure[] {
   const job = state.intent?.job;
   if (!job) return [];
   const stopped = stoppedEarly(state);
+  // As the agent picks (packages/agent/src/report/kpis.ts), with nothing cited yet: the subject's own
+  // metrics first, then arrival order; a `top` slot by value, highest first.
+  const subject = state.resolves.find((r) => r.role === "primary" && r.ref !== null)?.ref ?? null;
+  const focus = { subject, peers: state.resolves.flatMap((r) => (r.role === "peer" && r.ref !== null ? [r.ref] : [])) };
+  const order = (m: Metric) => (m.subjectRefs[0] === subject ? 0 : 1);
   const metrics = Object.values(state.metrics)
     .filter((m) => m.value !== null)
-    .sort((a, b) => arrivedAt(ledger, "metric", a.id) - arrivedAt(ledger, "metric", b.id));
+    .sort((a, b) => order(a) - order(b) || arrivedAt(ledger, "metric", a.id) - arrivedAt(ledger, "metric", b.id));
   const picked = new Set<string>();
   const out: LiveKeyFigure[] = [];
   for (const slot of KPI_SLOTS[job]) {
     let hits: Metric[] = [];
-    for (const formula of slot.formulas) {
-      hits = metrics.filter((m) => !picked.has(m.id) && m.formulaId === formula);
+    for (const pick of slot.picks) {
+      hits = metrics.filter((m) => !picked.has(m.id) && pickMatches(m, pick, focus));
       if (hits.length > 0) break;
     }
+    if (slot.top) hits = [...hits].sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
     const take = hits.slice(0, slot.count);
     for (const m of take) {
       picked.add(m.id);
-      // The slot's label, so a figure keeps its name when its metric arrives.
-      out.push({ label: slot.label, metric: m, pendingNote: null });
+      out.push({ metric: m });
     }
-    const skill = skillForFormula(slot.formulas[0] ?? "");
+    const skill = skillForFormula(slot.picks[0]?.key ?? "");
     const calls = skill ? state.toolCalls.filter((t) => t.tool === skill) : [];
     const note = stopped
       ? STOPPED_FIGURE_NOTE
@@ -307,6 +289,7 @@ function buildPriors(ledger: Ledger, notes: FootnoteRegistry): BriefPriors {
 function figureFor(
   ledger: Ledger,
   notes: FootnoteRegistry,
+  reads: readonly AreaRead[],
   number: number,
   input: { datasetId: BriefFigure["datasetId"]; title: string; caption: string | null; badges: BriefFigure["badges"]; sourceLine: string | null; evidenceIds: BriefFigure["evidenceIds"]; provisional: boolean },
 ): BriefFigure | null {
@@ -319,6 +302,9 @@ function figureFor(
   const legend = figureLegend(dataset);
   const caption = input.caption ? notes.prose(input.caption, "figures") : [];
   const footnote = notes.figure(input.datasetId, "figures", { title: input.title, evidenceIds, legend });
+  // A location figure's fallback steps are cited right after its own note (A06 notes 4 and 5).
+  const place = datasetPlace(state, input.datasetId, reads);
+  const fallbackNotes = (place?.fallbacks ?? []).map((i) => notes.fallback(i, "figures"));
   const formulaIds = dataset?.formulaIds ?? [];
   return {
     number,
@@ -333,11 +319,12 @@ function figureFor(
     needsFetch: dataset === null,
     datasetUrl: `/api/runs/${encodeURIComponent(state.runId)}/datasets/${input.datasetId}`,
     legend,
-    source: figureSource(ledger, evidenceIds, input.sourceLine),
+    source: figureSource(ledger, evidenceIds, input.sourceLine, place),
     evidenceIds,
     formulaIds,
     methodHref: methodHrefFor(formulaIds),
     provisional: input.provisional,
+    location: place ? { place: place.place, method: place.method, text: place.method ? `read by ${place.method}` : null, fallbackNotes } : null,
   };
 }
 
@@ -354,38 +341,37 @@ function buildEvidence(ledger: Ledger, notes: FootnoteRegistry, live: LiveKeyFig
   const total = state.qloo.chips.length;
 
   const job = report?.job ?? state.intent?.job;
+  const readyFigure = (metric: Metric, label: string | null, comparator: Metric["comparator"]): BriefKeyFigure => {
+    const text = keyFigureText(ledger, job, metric, label, comparator);
+    return {
+      key: metric.id,
+      state: "ready",
+      metric: metricView(metric, ledger.window),
+      value: text.value,
+      footnote: notes.metric(metric.id, "key_figures"),
+      label: text.label,
+      comparator: text.comparator,
+      pendingNote: null,
+    };
+  };
   const keyFigures: BriefKeyFigure[] = report
     ? report.kpis.map((k) => {
         const metric = state.metrics[k.metricId];
-        if (!metric) return { key: k.metricId, state: "pending", metric: null, footnote: null, label: capitalize(k.label), comparator: null, pendingNote: "not streamed" };
-        return {
-          key: k.metricId,
-          state: "ready",
-          metric: metricView(metric, ledger.window),
-          footnote: notes.metric(k.metricId, "key_figures"),
-          label: keyFigureLabel(job, metric, k.label),
-          comparator: keyFigureComparator(ledger, metric, k.comparator),
-          pendingNote: null,
-        };
+        if (!metric) return { key: k.metricId, state: "pending", metric: null, value: null, footnote: null, label: capitalize(k.label), comparator: null, pendingNote: "not streamed" };
+        return readyFigure(metric, k.label, k.comparator);
       })
     : (live ?? []).map((k, i) => {
-        if (!k.metric) return { key: `pending-${i}`, state: "pending", metric: null, footnote: null, label: k.label, comparator: null, pendingNote: k.pendingNote };
-        return {
-          key: k.metric.id,
-          state: "ready",
-          metric: metricView(k.metric, ledger.window),
-          footnote: notes.metric(k.metric.id, "key_figures"),
-          label: k.label,
-          comparator: keyFigureComparator(ledger, k.metric, k.metric.comparator),
-          pendingNote: null,
-        };
+        if (!k.metric) return { key: `pending-${i}`, state: "pending", metric: null, value: null, footnote: null, label: k.label, comparator: null, pendingNote: k.pendingNote };
+        // Named by its key's spec, as the finished brief names it: the slot's label held only its place.
+        return readyFigure(k.metric, null, k.metric.comparator);
       });
 
+  const reads = areaReads(state);
   const figures: BriefFigure[] = [];
   if (report) {
     for (const ex of report.exhibits) {
       if (ex.kind === "Scorecard") continue;
-      const figure = figureFor(ledger, notes, figures.length + 1, {
+      const figure = figureFor(ledger, notes, reads, figures.length + 1, {
         datasetId: ex.datasetId,
         title: ex.title,
         caption: ex.caption,
@@ -398,7 +384,7 @@ function buildEvidence(ledger: Ledger, notes: FootnoteRegistry, live: LiveKeyFig
     }
   } else {
     for (const d of liveDatasets(state)) {
-      const figure = figureFor(ledger, notes, figures.length + 1, {
+      const figure = figureFor(ledger, notes, reads, figures.length + 1, {
         datasetId: d.id,
         title: d.title,
         caption: null,
@@ -562,6 +548,7 @@ export function buildBriefModel(state: RunState, now: number): BriefModel {
   const evidence = buildEvidence(ledger, notes, live);
   const risks = buildRisks(ledger, notes);
   const footnotes = notes.list();
+  const fallbackNotes = new Map(footnotes.filter((f) => f.kind === "fallback").map((f) => [Number(f.key), f.n]));
 
   const sources = buildSources(ledger);
   for (const note of footnotes) {
@@ -588,6 +575,7 @@ export function buildBriefModel(state: RunState, now: number): BriefModel {
     mnemonic: state.intent?.mnemonic ?? null,
     question: report?.question ?? state.question,
     signal: signalTag(report),
+    finding: findingOf(report),
     conviction: convictionSummary(report),
     briefId,
     briefLabel: `Brief ${briefId}`,
@@ -641,7 +629,8 @@ export function buildBriefModel(state: RunState, now: number): BriefModel {
     trace: traceNote(state, citedSources),
     live: liveBlock,
     terminal: buildTerminal(state),
-    nextMoves: report?.nextMoves.map((m) => ({ label: m.label, question: m.question })) ?? [],
+    location: buildLocation(state, fallbackNotes),
+    nextMoves: buildNextMoves(report?.nextMoves ?? [], state.runId, pillar),
     disclaimers: report?.disclaimers ?? [...FIXED_DISCLAIMERS],
     statusLine,
   };

@@ -16,6 +16,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@ct/qloo": "workspace:*",
     "@types/ngeohash": "0.6.8"
   }
 }

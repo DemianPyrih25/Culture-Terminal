@@ -1,0 +1,33 @@
+{
+  "description": "Code points every share-card font has a glyph for (hex ranges, inclusive). build-fonts.mjs fails when a font misses one; lib/og/text.ts drops every other character, so next/og never fetches a fallback font. Closed under upper case, as the card sets its labels in capitals: no micro sign (U+00B5), whose capital is Greek.",
+  "ranges": [
+    "0020-007E",
+    "00A0-00AC",
+    "00AE-00B4",
+    "00B6-00FF",
+    "0100-012B",
+    "012E-0131",
+    "0134-0148",
+    "014A-0165",
+    "0168-017F",
+    "0218-021B",
+    "02C6",
+    "02DA",
+    "02DC",
+    "0394",
+    "2013-2014",
+    "2018-201A",
+    "201C-201E",
+    "2020",
+    "2022",
+    "2026",
+    "2032-2033",
+    "2039-203A",
+    "20AC",
+    "2122",
+    "2191",
+    "2193",
+    "2212",
+    "2264-2265"
+  ]
+}

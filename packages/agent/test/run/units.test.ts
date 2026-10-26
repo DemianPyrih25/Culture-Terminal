@@ -1,7 +1,7 @@
 // Small run pieces: the unavailable-skill list, picker keys, CLERK refusals, the meters and one skill call.
 import { DEFAULT_RUN_LIMITS, SkillId, type EventInput, type SafetyCategory, type Skill, type SkillCtx } from "@ct/contracts";
 import { createGeo } from "@ct/geo";
-import { SKILL_LIMITATIONS, SKILLS } from "@ct/quant";
+import { SKILL_LIMITATIONS, SKILLS, unavailableSkill } from "@ct/quant";
 import type { QlooCallRecord } from "@ct/qloo";
 import { describe, expect, it } from "vitest";
 import { createRunBudget } from "../../src/budget";
@@ -10,6 +10,7 @@ import { createEntityRegistry } from "../../src/registry";
 import { analystLimits, refusalOf } from "../../src/run/agentRun";
 import { isSkillAvailable, UNAVAILABLE_SKILLS } from "../../src/run/catalogue";
 import { createFollowupDeadline } from "../../src/run/followup";
+import { MARKET_CATALOGUE, unknownMarketIssues } from "../../src/run/markets";
 import { RunEvents, RunMeter } from "../../src/run/meter";
 import { findPickerChoice, pickerKey } from "../../src/run/picker";
 import { QLOO_DISABLED_NOTICE, runSkillCall, shortError, SkillsRan, type SkillRunnerDeps } from "../../src/run/tools";
@@ -28,8 +29,8 @@ describe("UNAVAILABLE_SKILLS", () => {
 
   it("matches what @ct/quant SKILLS actually ships", async () => {
     for (const id of SkillId.options) expect(await answersUnavailable(id), id).toBe(!isSkillAvailable(id));
-    expect(UNAVAILABLE_SKILLS).not.toContain("resolve_entities");
-    expect(UNAVAILABLE_SKILLS).not.toContain("peer_landscape");
+    // Every skill ships in this build.
+    expect(UNAVAILABLE_SKILLS).toEqual([]);
   });
 });
 
@@ -134,6 +135,7 @@ describe("runSkillCall", () => {
       ledger: createRunLedger({ emit: runEvents.emit, provenanceOf: (id) => runQloo.provenance(id) }),
       registry,
       geo: createGeo(),
+      localities: null,
       budget: createRunBudget({
         limits: DEFAULT_RUN_LIMITS,
         qlooNetworkUsed: () => runQloo.networkUsed(),
@@ -179,11 +181,18 @@ describe("runSkillCall", () => {
   });
 
   it("reports an unavailable skill as a failed step with its digest", async () => {
-    const { d, events } = deps();
-    const unavailable = { ...call, tool: "momentum" as const, input: { entities: ["R1"], type: "brand", trigger_finding_id: null, step_id: null }, stepId: null };
-    const outcome = await runSkillCall(d, unavailable, new AbortController().signal);
-    expect(outcome.content).toContain("not available in this build");
-    expect(events.find((e) => e.type === "tool.end")).toMatchObject({ ok: false, status: "error", error: null });
+    // Every skill ships, so a placeholder stands in for momentum during this test.
+    const shipped = SKILLS.momentum;
+    SKILLS.momentum = unavailableSkill("momentum");
+    try {
+      const { d, events } = deps();
+      const unavailable = { ...call, tool: "momentum" as const, input: { entities: ["R1"], type: "brand", trigger_finding_id: null, step_id: null }, stepId: null };
+      const outcome = await runSkillCall(d, unavailable, new AbortController().signal);
+      expect(outcome.content).toContain("not available in this build");
+      expect(events.find((e) => e.type === "tool.end")).toMatchObject({ ok: false, status: "error", error: null });
+    } finally {
+      SKILLS.momentum = shipped;
+    }
   });
 
   it("uses the abort code for a call whose signal already fired", async () => {
@@ -238,7 +247,7 @@ describe("SkillsRan", () => {
     ran.add("resolve_entities", []);
     ran.add("peer_landscape", ["BUDGET_TRUNCATED"]);
     ran.add("momentum", []);
-    expect(ran.limitations()).toEqual([...SKILL_LIMITATIONS.resolve_entities, ...SKILL_LIMITATIONS.peer_landscape]);
+    expect(ran.limitations()).toEqual([...SKILL_LIMITATIONS.resolve_entities, ...SKILL_LIMITATIONS.peer_landscape, ...SKILL_LIMITATIONS.momentum]);
   });
 });
 
@@ -251,5 +260,34 @@ describe("analystLimits", () => {
     const spent = analystLimits(DEFAULT_RUN_LIMITS, 5);
     expect(spent.usdHard).toBeGreaterThan(0);
     expect(spent.usdHard).toBeLessThan(1e-300);
+  });
+});
+
+describe("unknownMarketIssues", () => {
+  const markets = MARKET_CATALOGUE.filter((m) => ["nashville", "austin", "dallas"].includes(m.id));
+  const meta = { trigger_finding_id: null, step_id: null };
+
+  it("names each market id outside the run's MARKETS, by field, in INVALID_INPUT's form", () => {
+    const share = { type: "brand", set: ["R1", "R2"], ages: ["25_to_29"], audiences: [], metros: ["dallas", "coastal_placeholder"], ...meta };
+    expect(unknownMarketIssues("share_of_taste", share, markets)).toEqual([
+      'metros.1: expected a market id from MARKETS, such as "nashville"; got "coastal_placeholder"',
+    ]);
+    const slate = { seed: "R1", categories: ["beer"], shortlist: [], markets: ["denver"], ...meta };
+    expect(unknownMarketIssues("sponsor_slate", slate, markets)).toEqual(['markets.0: expected a market id from MARKETS, such as "nashville"; got "denver"']);
+    const rank = {
+      type: "brand",
+      candidates: ["R1", "R2"],
+      signal_entities: [],
+      signal_tags: [],
+      contexts: [{ kind: "city", metro: "austin" }, { kind: "metro", market: "atlantis" }],
+      ...meta,
+    };
+    expect(unknownMarketIssues("rank_candidates", rank, markets)).toEqual(['contexts.1.market: expected a market id from MARKETS, such as "nashville"; got "atlantis"']);
+  });
+
+  it("passes the run's own markets and tools that take none", () => {
+    const share = { type: "brand", set: ["R1", "R2"], ages: [], audiences: [], metros: ["nashville", "dallas"], ...meta };
+    expect(unknownMarketIssues("share_of_taste", share, markets)).toEqual([]);
+    expect(unknownMarketIssues("audience_dna", { set: ["R1"], compare_with: null, ...meta }, markets)).toEqual([]);
   });
 });

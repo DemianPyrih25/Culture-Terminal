@@ -37,9 +37,21 @@ export const FIXTURE_PREVIEW: PreviewResponse = {
   },
   alreadyHave: null,
   estimate: { networkCalls: 12, cachedCalls: 7, seconds: 45, quotaShare: 0.0063 },
+  mode: "live",
+  modeNote: null,
 };
 
 export const FIXTURE_PREVIEW_HAVE: PreviewResponse = { ...FIXTURE_PREVIEW, alreadyHave: FIXTURE_HAVE };
+
+/** The economy breaker has tripped: the brief would run on the economy ANALYST. */
+export const FIXTURE_PREVIEW_ECONOMY: PreviewResponse = {
+  ...FIXTURE_PREVIEW,
+  mode: "economy",
+  modeNote: "Live briefs run on the economy analyst until 00:00 UTC: today's live budget is nearly used.",
+};
+
+/** What a paused lane says (the LLM spend breaker's message). */
+export const FIXTURE_PAUSED_MESSAGE = "Live analysis is paused: today's budget is used up. It resumes at 00:00 UTC.";
 
 export const FIXTURE_PREVIEW_UNMATCHED: PreviewResponse = {
   ...FIXTURE_PREVIEW,
@@ -118,6 +130,8 @@ export const FIXTURE_REFUSAL: PreviewResponse = {
   },
   alreadyHave: null,
   estimate: { networkCalls: 0, cachedCalls: 0, seconds: 0, quotaShare: 0 },
+  mode: "live",
+  modeNote: null,
 };
 
 export const FIXTURE_PARENT: AskParent = { runId: "run-fixture-c3d4", question: "Who really competes with Juniper Cola?", blocked: null };
@@ -169,6 +183,19 @@ export const ASK_GALLERY: ReadonlyArray<{ name: string; draft: string; state: As
     name: "Refusal, with a reframe",
     draft: "Which Riverside residents vote, and how?",
     state: { phase: { kind: "ready", question: "Which Riverside residents vote, and how?", preview: FIXTURE_REFUSAL, at }, run: { kind: "idle" } },
+  },
+  {
+    name: "Economy: today's live budget is nearly used",
+    draft: FIXTURE_QUESTION,
+    state: { phase: { kind: "ready", question: FIXTURE_QUESTION, preview: FIXTURE_PREVIEW_ECONOMY, at }, run: { kind: "idle" } },
+  },
+  {
+    name: "Paused by a breaker (503): showcases and replays still work",
+    draft: FIXTURE_QUESTION,
+    state: {
+      phase: { kind: "paused", question: FIXTURE_QUESTION, message: FIXTURE_PAUSED_MESSAGE, alreadyHave: FIXTURE_HAVE, at },
+      run: { kind: "idle" },
+    },
   },
   {
     name: "Paused (503): live analysis off or out of budget",

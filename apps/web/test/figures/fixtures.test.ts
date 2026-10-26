@@ -1,21 +1,88 @@
 // The figure fixtures are invented (D29) and must stay valid contract data: every one parses with
 // the DatasetEnvelope schema, each kind maps to a built family, and values sit on the scale of the
 // formula each fixture cites.
-import { DatasetEnvelope, RankedPayload, VIZ_COMPAT } from "@ct/contracts";
+import { DatasetEnvelope, RankedPayload, VIZ_COMPAT, VizComponent } from "@ct/contracts";
 import { describe, expect, it } from "vitest";
 import { abbreviateRequestId, slateToRanked } from "../../components/figures";
-import { ALL_FIXTURES, FIXTURE_SOURCES, sponsorQuadrant, sponsorSlate } from "../../components/figures/fixtures";
+import {
+  ALL_FIXTURES,
+  FIXTURE_SOURCES,
+  austinLiftMap,
+  marketSlope,
+  momentumStrip,
+  sponsorQuadrant,
+  sponsorSlate,
+  tastePosition,
+  tenantSlope,
+} from "../../components/figures/fixtures";
 
 describe("figure fixtures", () => {
   it.each(ALL_FIXTURES.map((f) => [`${f.id} ${f.kind}`, f] as const))("%s parses with DatasetEnvelope", (_, fixture) => {
     expect(() => DatasetEnvelope.parse(fixture)).not.toThrow();
   });
 
-  it("covers every Part 4 family", () => {
+  it("covers every figure family", () => {
     const families = new Set(ALL_FIXTURES.map((f) => VIZ_COMPAT[f.kind]));
-    for (const family of ["MatrixGrid", "RankedTable", "DivergingBars", "QuadrantScatter", "ScorecardTable"]) {
-      expect(families.has(family as never)).toBe(true);
+    for (const family of VizComponent.options) expect(families.has(family), family).toBe(true);
+  });
+
+  it("uses unique dataset ids", () => {
+    const ids = ALL_FIXTURES.map((f) => f.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("follows the S6 arithmetic in the lift map: gate, cell lift, geometric mean over 5+ gated cells", () => {
+    const { cells, neighbourhoods, precisionFactor } = austinLiftMap.payload;
+    for (const c of cells) expect(c.conf).toBe(precisionFactor);
+    expect(cells.filter((c) => c.gated).length).toBe(Math.ceil(cells.length / 2));
+    for (const n of neighbourhoods) {
+      const gated = cells.filter((c) => c.neighbourhood === n.id && c.gated);
+      expect(n.n).toBe(gated.length);
+      if (n.lift === null) {
+        expect(gated.length).toBeLessThan(5);
+        expect(n.reason).toBe("insufficient_n");
+        continue;
+      }
+      const mean = Math.exp(gated.reduce((s, c) => s + Math.log(c.lift!), 0) / gated.length);
+      expect(n.lift).toBeCloseTo(mean, 2);
+      expect(n.conf).toBeCloseTo(Math.min(1, n.n / 12) * precisionFactor, 2);
+      expect(n.whiteSpace).toBeCloseTo(n.demandPct! * (1 - n.supplyPct!), 2);
     }
+    // Lifts highest first, then the rest.
+    const lifts = neighbourhoods.flatMap((n) => (n.lift === null ? [] : [n.lift]));
+    expect(lifts).toEqual([...lifts].sort((a, b) => b - a));
+  });
+
+  it("follows tenant.fit and the slope delta (last axis minus first)", () => {
+    for (const line of [...tenantSlope.payload.lines, ...marketSlope.payload.lines]) {
+      const first = line.points[0]!.value;
+      const last = line.points.at(-1)!.value;
+      expect(line.delta).toBe(first === null || last === null ? null : last - first);
+    }
+    for (const line of tenantSlope.payload.lines) {
+      if (line.score === null) continue;
+      const site = line.points[1]!.value!;
+      const expected = 100 * (0.6 * site + 0.4 * Math.min(1, Math.max(0, line.delta! + 0.5)));
+      expect(line.score).toBeCloseTo(expected, 1);
+    }
+  });
+
+  it("keeps momentum weekly, inside the window, on percentiles", () => {
+    const { window, series } = momentumStrip.payload;
+    for (const s of series) {
+      for (const p of s.points) {
+        expect(p.date >= window.start && p.date <= window.end).toBe(true);
+        expect(new Date(`${p.date}T00:00:00Z`).getUTCDay()).toBe(1);
+        expect(p.pct).toBeGreaterThanOrEqual(0);
+        expect(p.pct).toBeLessThanOrEqual(1);
+      }
+    }
+    expect(momentumStrip.payload.badgeText).toContain(`${window.start}..${window.end}`);
+  });
+
+  it("gives the position card no composite: five axes, each with its own badge", () => {
+    expect(tastePosition.payload.axes.map((a) => a.badge)).toEqual(["MEASURED", "MEASURED", "DERIVED", "DERIVED", "STALE"]);
+    expect(Object.keys(tastePosition.payload)).toEqual(["subject", "peerCount", "axes"]);
   });
 
   it("gives every not-measured value a reason and never a number", () => {

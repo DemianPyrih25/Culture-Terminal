@@ -124,6 +124,7 @@ export const FindingKind = z.enum([
   "NO_TREND_SIGNAL",
   "POPULARITY_DOMINANCE",
   "LOCATION_FALLBACK",
+  "WEAK_CATEGORY_FIT",
 ]);
 export type FindingKind = z.infer<typeof FindingKind>;
 

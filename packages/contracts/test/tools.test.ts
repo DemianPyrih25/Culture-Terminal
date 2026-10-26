@@ -68,8 +68,8 @@ describe("ANALYST tools", () => {
     expect(JSON.stringify(toAnthropicTools())).toBe(JSON.stringify(tools));
   });
 
-  it("marks only submit_plan and submit_report strict", () => {
-    expect(tools.filter((t) => t.strict === true).map((t) => t.name)).toEqual(["submit_plan", "submit_report"]);
+  it("marks only submit_report strict (a strict submit_plan too exceeds the API's grammar limit)", () => {
+    expect(tools.filter((t) => t.strict === true).map((t) => t.name)).toEqual(["submit_report"]);
     for (const t of tools.filter((x) => x.strict !== true)) expect("strict" in t).toBe(false);
   });
 
@@ -193,26 +193,37 @@ describe("parseToolInput", () => {
       step_id: null,
     };
     expect(parseToolInput("rank_candidates", rank).ok).toBe(true);
-    for (const type of ["artist", "place", "podcast", "tv_show", "movie"]) {
+    for (const type of ["podcast", "tv_show", "movie"]) {
       expect(parseToolInput("rank_candidates", { ...rank, type }).ok, type).toBe(false);
     }
     const person = { ...rank, type: "person", signal_entities: [], contexts: [city, { kind: "metro", market: "denver" }] };
     expect(parseToolInput("rank_candidates", person).ok).toBe(true);
-    expect(parseToolInput("rank_candidates", { ...person, contexts: [city, { kind: "age", age: "25_to_29" }] }).ok).toBe(false);
+    expect(parseToolInput("rank_candidates", { ...person, contexts: [city, { kind: "age", age: "25_to_29" }] }).ok).toBe(true);
+    expect(parseToolInput("rank_candidates", { ...person, contexts: [city, { kind: "audience", audience: "urn:audience:leisure:fixture" }] }).ok).toBe(false);
     expect(parseToolInput("rank_candidates", { ...person, signal_tags: ["T1"] }).ok).toBe(false);
+    const artist = { ...rank, type: "artist", signal_tags: ["T1"], contexts: [{ kind: "none" }] };
+    expect(parseToolInput("rank_candidates", artist).ok).toBe(true);
+    expect(parseToolInput("rank_candidates", { ...artist, contexts: [{ kind: "none" }, city] }).ok).toBe(false);
+    const place = { ...rank, type: "place", signal_entities: [], contexts: [{ kind: "site", area: { kind: "nbhd", ref: "fixture_area", metro: "nashville" } }, city] };
+    expect(parseToolInput("rank_candidates", place).ok).toBe(true);
+    expect(parseToolInput("rank_candidates", { ...place, signal_entities: ["R3"] }).ok).toBe(false);
+    expect(parseToolInput("rank_candidates", { ...place, signal_entities: ["R3"], contexts: [{ kind: "none" }] }).ok).toBe(true);
+    expect(parseToolInput("rank_candidates", { ...place, signal_tags: ["T1"], contexts: [{ kind: "none" }] }).ok).toBe(false);
+    expect(parseToolInput("rank_candidates", { ...place, contexts: [{ kind: "age", age: "25_to_29" }] }).ok).toBe(false);
     const destination = { ...rank, type: "destination", contexts: [{ kind: "none" }] };
     expect(parseToolInput("rank_candidates", destination).ok).toBe(true);
     expect(parseToolInput("rank_candidates", { ...destination, contexts: [city] }).ok).toBe(false);
     expect(parseToolInput("rank_candidates", { ...destination, signal_entities: [], signal_tags: ["T1"] }).ok).toBe(false);
   });
 
-  it("restricts share_of_taste to brands, and persons by metro", () => {
+  it("restricts share_of_taste to brands, and persons by age and metro", () => {
     const share = { type: "brand", set: ["R1", "R2"], ages: ["25_to_29"], audiences: [], metros: [], trigger_finding_id: null, step_id: null };
     expect(parseToolInput("share_of_taste", share).ok).toBe(true);
     for (const type of ["artist", "destination", "place"]) {
       expect(parseToolInput("share_of_taste", { ...share, type }).ok, type).toBe(false);
     }
-    expect(parseToolInput("share_of_taste", { ...share, type: "person" }).ok).toBe(false);
+    expect(parseToolInput("share_of_taste", { ...share, type: "person" }).ok).toBe(true);
+    expect(parseToolInput("share_of_taste", { ...share, type: "person", audiences: ["urn:audience:leisure:fixture"] }).ok).toBe(false);
     expect(parseToolInput("share_of_taste", { ...share, type: "person", ages: [], metros: ["denver"] }).ok).toBe(true);
   });
 

@@ -1,23 +1,12 @@
 import { SkillId, TOOL_MNEMONIC } from "@ct/contracts";
 
 /**
- * The skills this build answers with "not available in this build" (the @ct/quant SKILLS
+ * The skills this build answers with "not available in this build" (@ct/quant unavailableSkill
  * placeholders). The run context lists them as UNAVAILABLE TOOLS and the opening scan skips them;
- * a test keeps this list equal to what SKILLS actually does, so a skill that lands fails it until
- * it is removed here.
+ * a test keeps this list equal to what SKILLS actually does. Every skill ships, so it is empty; a
+ * skill switched off with unavailableSkill is listed here again.
  */
-export const UNAVAILABLE_SKILLS: readonly SkillId[] = [
-  "find_tags",
-  "rank_candidates",
-  "share_of_taste",
-  "audience_dna",
-  "momentum",
-  "destination_affinity",
-  "geo_lift",
-  "block_dna",
-  "cross_domain",
-  "sponsor_slate",
-];
+export const UNAVAILABLE_SKILLS: readonly SkillId[] = [];
 
 const UNAVAILABLE: ReadonlySet<SkillId> = new Set(UNAVAILABLE_SKILLS);
 

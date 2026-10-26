@@ -41,6 +41,7 @@ export function validReport(): ReportDraft {
   return {
     headline: "Juniper Cola: a distinct niche with a young tilt",
     signal: "mixed",
+    verdict_tag: "Distinct niche",
     thesis: "Juniper Cola's audience sits apart from its category {{M1}} [E1].",
     hypothesis_verdicts: [
       { hypothesis_id: "H1", verdict: "confirmed", metric_ids: ["M1"], note: "Nearest neighbour is outside the category {{M1}}." },

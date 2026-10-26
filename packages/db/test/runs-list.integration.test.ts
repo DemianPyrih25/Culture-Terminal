@@ -25,12 +25,17 @@ const FINISHED: readonly RunStatus[] = ["completed", "incomplete"];
 const SHOWCASES = { showcases: true, ids: [] } as const;
 
 /** The report fields a list reads; the rest of a Report is irrelevant to the repo. */
-function report(score: unknown, extra: { signal?: string; headline?: string; traced?: [number, number]; reused?: number } = {}) {
+function report(
+  score: unknown,
+  extra: { signal?: string; headline?: string; tag?: string; traced?: [number, number]; reused?: number } = {},
+) {
   const [traced, total] = extra.traced ?? [4, 4];
   return {
     verdict: {
       headline: extra.headline ?? "Juniper Cola reads as a distinct niche",
       signal: extra.signal ?? "mixed",
+      // Reports stored before the verdict tag existed have no key.
+      ...(extra.tag === undefined ? {} : { tag: extra.tag }),
       confidence: { score, band: typeof score === "number" && score >= 75 ? "HIGH" : "MED", breakdown: [] },
     },
     receipt: { numbersTraced: { traced, total }, ...(extra.reused === undefined ? {} : { qlooReused: extra.reused }) },
@@ -80,7 +85,7 @@ describe.skipIf(!probe.ok)("listing runs against Postgres", () => {
 
   it("lists finished runs of one prefix newest first, with what their reports say", async () => {
     const done = await seed("ls1:", "2026-10-20T10:00:00Z", {
-      report: report(85, { signal: "strong", headline: "Brand Alpha holds its niche", reused: 5 }),
+      report: report(85, { signal: "strong", headline: "Brand Alpha holds its niche", tag: "Holds its niche", reused: 5 }),
       qlooNetwork: 12,
       qlooCached: 7,
     });
@@ -105,6 +110,7 @@ describe.skipIf(!probe.ok)("listing runs against Postgres", () => {
       status: "completed",
       signal: "strong",
       headline: "Brand Alpha holds its niche",
+      tag: "Holds its niche",
       confidenceScore: 85,
       confidenceBand: "HIGH",
       numbersTraced: { traced: 4, total: 4 },
@@ -118,6 +124,7 @@ describe.skipIf(!probe.ok)("listing runs against Postgres", () => {
       status: "incomplete",
       signal: null,
       headline: null,
+      tag: null,
       confidenceScore: null,
       confidenceBand: null,
       numbersTraced: { traced: 2, total: 3 },
@@ -167,6 +174,8 @@ describe.skipIf(!probe.ok)("listing runs against Postgres", () => {
     const one = await listRuns(db, { hashPrefix: "ls4:", statuses: FINISHED, visible: SHOWCASES, limit: 10, sort: "conviction" });
     expect(one.rows.map((r) => r.id)).toEqual(expected);
     expect(one.rows.at(-1)?.confidenceScore).toBeNull();
+    // Reports stored before the verdict tag existed list none.
+    expect(one.rows.map((r) => r.tag)).toEqual(expected.map(() => null));
     for (const size of [1, 2, 4]) {
       const pages = await allPages({ hashPrefix: "ls4:", statuses: FINISHED, visible: SHOWCASES, limit: size, sort: "conviction" });
       expect(pages.flat().map((r) => r.id)).toEqual(expected);

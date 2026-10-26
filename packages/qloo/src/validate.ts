@@ -66,6 +66,14 @@ export function validateRequest(path: QlooPath, params: QlooParams, ctx: Validat
     checkValue(path, filterType, param, value, ctx);
   }
 
+  // Probe P5: in a heatmap sent with both, the analog's cells took the top 160 places of the map.
+  if (filterType === "urn:heatmap" && params["signal.interests.tags"] !== undefined && params["signal.interests.entities"] !== undefined) {
+    throw new QlooParamError(
+      "urn:heatmap takes signal.interests.tags or signal.interests.entities, not both: the analog's cells set the top of a combined map (probe P5)",
+      "signal.interests.entities",
+    );
+  }
+
   if (path === "/v2/insights") requireSignal(filterType ?? "", params);
 }
 
@@ -158,6 +166,11 @@ function checkList(filterType: string | null, param: string, value: QlooParamVal
         `${param} takes taxonomy tags only (urn:tag:genre:… or urn:tag:category:…); "${bad}" gives no signal (probe G1, G6)`,
         param,
       );
+    }
+    // Probe P5: a urn:tag:category:place:* concept tag returned an empty heatmap; genre tags shape one.
+    const flat = filterType === "urn:heatmap" ? items.find((tag) => !tag.startsWith("urn:tag:genre:")) : undefined;
+    if (flat !== undefined) {
+      throw new QlooParamError(`${param} on urn:heatmap takes urn:tag:genre:… tags only; "${flat}" returned no cells (probe P5)`, param);
     }
   }
   if (

@@ -10,6 +10,7 @@ import {
   type Metric,
   type ModelDigest,
   type RegisteredEntity,
+  type RegisteredTag,
   type SkillResult,
   type SkillStatus,
   type StepId,
@@ -30,8 +31,8 @@ export interface DigestParts {
   rows: readonly DigestRow[];
   findings: readonly Finding[];
   flags: Iterable<Flag>;
-  /** Entities this call added to the registry (not ones it found already registered). */
-  registered: readonly RegisteredEntity[];
+  /** Entities and tags this call added to the registry (not ones it found already registered). */
+  registered: readonly (RegisteredEntity | RegisteredTag)[];
   notices: readonly string[];
 }
 

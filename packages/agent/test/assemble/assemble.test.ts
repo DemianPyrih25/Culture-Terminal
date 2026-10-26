@@ -14,6 +14,7 @@ import {
   assembleReport,
   NO_DATA_DISCLAIMER,
   ReportAssemblyError,
+  reportTag,
   SCORECARD_CAPTION,
   type ReportContext,
 } from "../../src/assemble";
@@ -53,7 +54,7 @@ describe("assembleReport", () => {
       investmentBanner: true,
       ghost: null,
       warnings: [],
-      verdict: { signal: "mixed", coverage: { evidenceOk: 4, evidenceTotal: 5 } },
+      verdict: { signal: "mixed", tag: validDraft().verdict_tag, coverage: { evidenceOk: 4, evidenceTotal: 5 } },
       dataFreshness: { fetchedFrom: "2026-10-20T09:00:00.000Z", fetchedTo: "2026-10-21T08:59:00.000Z", trendWindow: WINDOW },
     });
     expect(report.nextMoves).toEqual(validDraft().next_moves);
@@ -95,8 +96,9 @@ describe("assembleReport", () => {
     const draft = validDraft();
     draft.thesis = "Brand Alpha sits next to Brand Beta at 0.62 {{M1}} [E1].";
     draft.arguments[2] = { ...draft.arguments[2]!, qloo_fact: "Momentum is history [E3].", metric_ids: ["M2"] };
-    const { report } = assemble(draft, { overrides: { codeFallbacks: 2 } });
-    expect(report.warnings.map((w) => w.rule)).toEqual(["V3"]);
+    // A bare number rejects the first attempt; left in the repair, it is accepted as a warning.
+    const { report } = assemble(draft, { attempt: 2, overrides: { codeFallbacks: 2 } });
+    expect(report.warnings.map((w) => [w.rule, w.action])).toEqual([["V3", "warn"]]);
     expect(report.verdict.confidence.breakdown).toEqual([
       expect.objectContaining({ rule: "dropped_entity", count: 1 }),
       expect.objectContaining({ rule: "code_fallback", count: 2 }),
@@ -105,7 +107,7 @@ describe("assembleReport", () => {
     ]);
   });
 
-  it("picks the brand-health KPI strip by formula id", () => {
+  it("picks the brand-health KPI strip by metric key", () => {
     const { report } = assemble();
     expect(report.kpis).toEqual([
       { metricId: "M1", label: "Similarity to Brand Beta", comparator: "WITHIN_CALL" },
@@ -113,8 +115,9 @@ describe("assembleReport", () => {
       { metricId: "M3", label: "Youth tilt", comparator: "WITHIN_CALL" },
       { metricId: "M4", label: "Metros won", comparator: null },
     ]);
+    // Audience discovery's strip: of its key figures, only the under-the-radar count is in this ledger.
     const audience = assemble(validDraft(), { overrides: { job: "audience_discovery" } }).report;
-    expect(audience.kpis).toEqual([]);
+    expect(audience.kpis).toEqual([{ metricId: "M10", label: "Under-the-radar artists", comparator: null }]);
     expect(audience.investmentBanner).toBe(false);
   });
 
@@ -281,6 +284,25 @@ describe("assembleReport", () => {
       points: -CONFIDENCE_PENALTY.checker_warning,
     });
     expect(report.verdict.confidence.score).toBe(assemble().report.verdict.confidence.score - CONFIDENCE_PENALTY.checker_warning);
+  });
+
+  it("copies the verdict tag as checked: cut on the last attempt, dropped with a forced signal", () => {
+    const long = { ...validDraft(), verdict_tag: "Shared taste pool, with the brand next door" };
+    const cut = assemble(long, { attempt: 2 }).report;
+    expect(cut.verdict.tag).toBe("Shared taste pool");
+    expect(cut.warnings).toEqual([]);
+    expect(cut.verdict.confidence.score).toBe(assemble().report.verdict.confidence.score);
+    // No clean cut: the tag is dropped and the brief prints the signal label.
+    const uncut = { ...validDraft(), verdict_tag: "Shared taste pool with the brand next door" };
+    expect(assemble(uncut, { attempt: 2 }).report.verdict.tag).toBeNull();
+    expect(assemble(validDraft(), { qlooEnabled: false }).report.verdict).toMatchObject({ signal: "insufficient_evidence", tag: null });
+  });
+
+  it("reportTag: spaces collapsed, null for a tag that breaks its rule", () => {
+    expect(reportTag("  Clear   lead ")).toBe("Clear lead");
+    expect(reportTag("")).toBeNull();
+    expect(reportTag("Island")).toBeNull();
+    expect(reportTag("Top 3 pick")).toBeNull();
   });
 
   it("keeps code fixes out of the warnings", () => {

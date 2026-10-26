@@ -15,17 +15,9 @@ describe("SKILLS", () => {
     }
   });
 
-  it("ships S0 and S1; every other tool is a placeholder that costs nothing", async () => {
+  it("ships every skill: none is an unavailableSkill placeholder", () => {
     const built = SkillId.options.filter((id) => SKILLS[id].limitations(["BUDGET_TRUNCATED"]).length > 0);
-    expect(built.sort()).toEqual(["peer_landscape", "resolve_entities"]);
-    const probe = fakeProbe(() => false);
-    const input = SKILLS.find_tags.input.parse({
-      concepts: [{ text: "listening bar", scope: "place" }],
-      trigger_finding_id: null,
-      step_id: null,
-    });
-    expect(await SKILLS.find_tags.estimateCalls(input, probe, {} as EntityRegistry)).toBe(0);
-    expect(probe.asked).toHaveLength(0);
+    expect(built.sort()).toEqual([...SkillId.options].sort());
   });
 });
 
@@ -42,6 +34,14 @@ describe("unavailableSkill", () => {
     expect(run.ledger.evidences).toHaveLength(0);
     expect(run.events).toHaveLength(0);
     expect(skill.limitations(["BUDGET_TRUNCATED"])).toEqual([]);
+  });
+
+  it("costs nothing to estimate", async () => {
+    const probe = fakeProbe(() => false);
+    const skill = unavailableSkill("find_tags");
+    const input = skill.input.parse({ concepts: [{ text: "listening bar", scope: "place" }], trigger_finding_id: null, step_id: null });
+    expect(await skill.estimateCalls(input, probe, {} as EntityRegistry)).toBe(0);
+    expect(probe.asked).toHaveLength(0);
   });
 });
 

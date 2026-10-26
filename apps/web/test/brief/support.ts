@@ -142,6 +142,7 @@ export function readingOrder(model: BriefModel): number[] {
   for (const f of model.evidence.figures) {
     walk(f.caption);
     meet(f.footnote);
+    for (const n of f.location?.fallbackNotes ?? []) meet(n);
   }
   for (const a of model.evidence.arguments) {
     walk(a.qlooFact);

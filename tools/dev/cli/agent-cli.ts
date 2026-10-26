@@ -13,7 +13,7 @@ import {
   type AnalystMode,
   type AnthropicLike,
 } from "@ct/agent";
-import { DEFAULT_RUN_LIMITS, Lane, QUESTION_MAX_CHARS, type EventInput, type EventInputOf, type MetroId } from "@ct/contracts";
+import { DEFAULT_RUN_LIMITS, Lane, QUESTION_MAX_CHARS, type EventInput, type EventInputOf, type LocalityApi, type MetroId } from "@ct/contracts";
 import { closeDb, getDb, type Queryable } from "@ct/db";
 import type { QlooClient, QlooStore } from "@ct/qloo";
 import { searchParams } from "@ct/quant";
@@ -21,6 +21,7 @@ import { choiceOption, parseCli, pinsOption, UsageError } from "./args";
 import { formatUsd } from "./format";
 import { EXIT, safeIo, type CliIo } from "./io";
 import { createRunPersistence, type RunPersistence } from "./persist";
+import { kvLocalityApi, localitiesKvKey, pgKv, type KvStore } from "./localities";
 import { CliError, openCliQloo, stderrLogger, type CliQloo } from "./qloo-setup";
 import { renderAgentResult } from "./report-view";
 import { cliRunId } from "./skill-cli";
@@ -102,6 +103,8 @@ export interface AgentCliDeps {
   createAnthropic?: (apiKey: string) => AnthropicLike;
   /** Replaces the Postgres or memory Qloo store (tests). */
   store?: QlooStore;
+  /** Replaces the database kv the pinned market localities are read from (tests); null reads none. */
+  kv?: KvStore | null;
   /** The database for --persist (default: the shared pool from DATABASE_URL, closed at the end). */
   openDb?: () => CliDatabase;
   /** The local spend tally; null keeps none. */
@@ -112,6 +115,48 @@ export interface AgentCliDeps {
 }
 
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/** What a run reads Qloo through: the client over its cache, and the pinned market localities. */
+export interface AgentQloo {
+  qloo: CliQloo;
+  localities: LocalityApi | null;
+}
+
+export interface AgentQlooOptions {
+  env: NodeJS.ProcessEnv;
+  io: CliIo;
+  /** Forces QLOO_MOCK=1. */
+  mock: boolean;
+  /** Overrides QLOO_TAG. */
+  tag: string | null;
+  /** Cache Qloo answers in memory (synthetic data only). */
+  memory: boolean;
+  /** Replaces the Postgres or memory Qloo store (tests). */
+  store?: QlooStore;
+  /** Replaces the database kv the localities are read from (tests); null reads none. */
+  kv?: KvStore | null;
+  /** Replaces the live transport's fetch (tests). */
+  fetch?: typeof fetch;
+}
+
+/**
+ * The Qloo client and the pinned market localities exactly as run-agent opens them for a run (the
+ * offline eval, tools/eval, shares it). Without the localities (tools/dev/localities.ts), metro, city
+ * and market contexts and the lift map's city filter are not measured, as in the web run manager.
+ * Throws CliError when Qloo cannot be configured or Postgres is not reachable.
+ */
+export async function openAgentQloo(options: AgentQlooOptions): Promise<AgentQloo> {
+  const qloo = await openCliQloo({
+    env: options.env,
+    mock: options.mock,
+    tag: options.tag,
+    store: options.store ?? (options.memory ? "memory" : "pg"),
+    logger: stderrLogger(options.io.err),
+    fetch: options.fetch,
+  });
+  const kv = options.kv !== undefined ? options.kv : options.store === undefined && !options.memory ? pgKv(getDb()) : null;
+  return { qloo, localities: kv === null ? null : kvLocalityApi(kv, localitiesKvKey(qloo.client.env)) };
+}
 
 function exitCodeFor(result: AgentRunResult): number {
   if (result.status === "completed") return EXIT.ok;
@@ -203,20 +248,15 @@ export async function runAgentCommand(argv: readonly string[], deps: AgentCliDep
   }
   if (args.question.length > QUESTION_MAX_CHARS) io.err(`note: the agent reads only the first ${QUESTION_MAX_CHARS} characters of the question`);
 
-  let qloo: CliQloo;
+  let opened: AgentQloo;
   try {
-    qloo = await openCliQloo({
-      env,
-      mock: args.mockQloo,
-      tag: args.tag,
-      store: deps.store ?? (args.memory ? "memory" : "pg"),
-      logger: stderrLogger(io.err),
-    });
+    opened = await openAgentQloo({ env, io, mock: args.mockQloo, tag: args.tag, memory: args.memory, store: deps.store, kv: deps.kv });
   } catch (err) {
     if (!(err instanceof CliError)) throw err;
     io.err(err.message);
     return EXIT.failed;
   }
+  const { qloo, localities } = opened;
 
   const runId = cliRunId(now());
   const pins = Object.keys(args.pins).length > 0 ? args.pins : undefined;
@@ -295,6 +335,7 @@ export async function runAgentCommand(argv: readonly string[], deps: AgentCliDep
       signal,
       pins,
       parent: null,
+      localities,
     });
   } catch (err) {
     io.err(`run-agent failed: ${errorText(err)}`);

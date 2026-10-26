@@ -7,7 +7,8 @@ import { clamp, fitText, linear, niceDomain, px, textWidth, ticksBetween } from 
 /**
  * RankedTable (kinds Ranked and Slate). Four variants share one payload:
  * - lollipop (A05 figure 1): rank, name, a dot on a guide line, the value; the target highlighted,
- *   comparison rows in data-2 grey, an optional "TOP FIVE ABOVE" divider and axis ticks;
+ *   comparison rows (RankedRow.comparison, or the comparisonKeys option) in data-2 grey, an optional
+ *   "TOP FIVE ABOVE" divider and axis ticks;
  * - table (A07 figure 1): # · category · best fit · value with a bar and a reference tick · flag;
  * - lists (A08 figure 2): one short ranked list per group, side by side;
  * - bars (A08 figure 3, margin): name and category, a bar from 0 with a baseline tick, the value.
@@ -25,7 +26,7 @@ export interface RankedTableOptions {
   columnKey?: string;
   /** Rows drawn bold in ink. Default: rows flagged TARGET, else the top row. */
   highlightKeys?: readonly string[];
-  /** Rows drawn in data-2 grey, e.g. the rivals the priors expected. */
+  /** Rows drawn in data-2 grey besides those the payload marks `comparison`, e.g. the rivals the priors expected. */
   comparisonKeys?: readonly string[];
   /** A divider under the row ranked `after`, e.g. { after: 5, label: "TOP FIVE ABOVE" }. */
   cut?: { after: number; label: string } | null;
@@ -130,6 +131,11 @@ function pickColumn(data: RankedPayload, key?: string) {
   return data.columns[index] ? { ...data.columns[index], index } : null;
 }
 
+/** Rows drawn for contrast: those the payload marks `comparison`, plus the caller's keys. */
+export function comparisonSet(data: RankedPayload, keys?: readonly string[]): Set<string> {
+  return new Set([...data.groups.flatMap((g) => g.rows.filter((r) => r.comparison === true).map((r) => r.key)), ...(keys ?? [])]);
+}
+
 function highlightSet(data: RankedPayload, keys?: readonly string[]): Set<string> {
   if (keys) return new Set(keys);
   const rows = data.groups.flatMap((g) => g.rows);
@@ -169,7 +175,7 @@ function Lollipop(props: RankedTableProps & { label: string; style: NumberStyle 
   const ci = column?.index ?? 0;
   const unit = column?.unit ?? "score";
   const highlight = highlightSet(data, props.highlightKeys);
-  const comparison = new Set(props.comparisonKeys ?? []);
+  const comparison = comparisonSet(data, props.comparisonKeys);
   const rows = data.groups.flatMap((g) => g.rows);
   const values = rows.flatMap((r) => (r.cells[ci]?.value == null ? [] : [r.cells[ci]!.value!]));
   const domain = valueDomain(values, unit, props.domain);
@@ -305,7 +311,7 @@ function SlateStyleTable(props: RankedTableProps & { style: NumberStyle }) {
   const unit = column?.unit ?? "score";
   const rows = data.groups.flatMap((g) => g.rows);
   const highlight = highlightSet(data, props.highlightKeys);
-  const comparison = new Set(props.comparisonKeys ?? []);
+  const comparison = comparisonSet(data, props.comparisonKeys);
   const values = rows.flatMap((r) => (r.cells[ci]?.value == null ? [] : [r.cells[ci]!.value!]));
   const domain = valueDomain(values, unit, props.domain, true);
   const bar = linear([domain.min, domain.max], [0, 120]);
@@ -435,6 +441,7 @@ function RankedLists(props: RankedTableProps & { style: NumberStyle }) {
   // The value column fits its head ("PERCENTILE"), so the head never runs into the next list.
   const head = column?.label ?? "Value";
   const valueW = clamp(Math.ceil(textWidth(head.toUpperCase(), 10, { weight: 500, tracking: 0.8 })) + 6, 48, 96);
+  const comparison = comparisonSet(data, props.comparisonKeys);
   return (
     <div
       className="grid items-start gap-6 pt-3.5 pb-1"
@@ -463,12 +470,13 @@ function RankedLists(props: RankedTableProps & { style: NumberStyle }) {
               const first = i === 0;
               const value = cell?.value ?? null;
               const missing = value === null;
+              const grey = comparison.has(row.key);
               return (
-                <tr key={row.key} data-row={row.key} className="h-[24.5px] border-b border-line">
+                <tr key={row.key} data-row={row.key} data-tone={grey ? "comparison" : "default"} className="h-[24.5px] border-b border-line">
                   <td className="text-[11px] text-dim tabular-nums">{row.rank ?? ""}</td>
                   <th
                     scope="row"
-                    className={`truncate text-left text-[13px] ${first ? "font-medium text-ink" : "font-normal text-text-2"}`}
+                    className={`truncate text-left text-[13px] ${grey ? "font-normal text-dim" : first ? "font-medium text-ink" : "font-normal text-text-2"}`}
                     title={row.label}
                   >
                     {row.label}
@@ -503,6 +511,7 @@ function RankedBars(props: RankedTableProps & { label: string; style: NumberStyl
   const unit = column?.unit ?? "score";
   const rows = data.groups.flatMap((g) => g.rows);
   const highlight = highlightSet(data, props.highlightKeys);
+  const comparison = comparisonSet(data, props.comparisonKeys);
   const values = rows.flatMap((r) => (r.cells[ci]?.value == null ? [] : [r.cells[ci]!.value!]));
   const domain = valueDomain(values, unit, props.domain);
   const baseline =
@@ -533,15 +542,16 @@ function RankedBars(props: RankedTableProps & { label: string; style: NumberStyl
         {rows.map((row, i) => {
           const y = i * BAR_ROW_H;
           const strong = highlight.has(row.key);
+          const grey = !strong && comparison.has(row.key);
           const cell = row.cells[ci];
           const name = fitText(row.label, labelW, 12, { weight: strong ? 500 : 400 });
           const nameW = textWidth(name, 12, { weight: strong ? 500 : 400 });
           const sub = row.sublabel ? fitText(row.sublabel, Math.max(0, labelW - nameW - 6), 11) : "";
           const text = cell?.value == null ? null : formatNumber(cell.value, unit, style);
           return (
-            <g key={row.key} data-row={row.key}>
+            <g key={row.key} data-row={row.key} data-tone={strong ? "highlight" : grey ? "comparison" : "default"}>
               <title>{`${row.label}: ${text ?? reasonLabel(cell?.reason ?? null)}`}</title>
-              <text x={0} y={y + 13} fontSize={12} fontWeight={strong ? 500 : 400} className={strong ? "fill-ink" : "fill-text-2"}>
+              <text x={0} y={y + 13} fontSize={12} fontWeight={strong ? 500 : 400} className={strong ? "fill-ink" : grey ? "fill-dim" : "fill-text-2"}>
                 {name}
               </text>
               {sub && sub !== "…" ? (
@@ -559,7 +569,7 @@ function RankedBars(props: RankedTableProps & { label: string; style: NumberStyl
                   y={y + 6}
                   width={px(Math.abs(x(cell.value) - zero))}
                   height={6}
-                  className={cell.value < 0 ? "fill-negative" : "fill-data"}
+                  className={cell.value < 0 ? "fill-negative" : grey ? "fill-data-2" : "fill-data"}
                   data-sign={cell.value < 0 ? "negative" : "positive"}
                 />
               )}
@@ -594,7 +604,7 @@ export function rankedTableSpec(
   style: NumberStyle,
   opts: Pick<RankedTableOptions, "labelHeader" | "sublabelHeader" | "comparisonKeys"> = {},
 ) {
-  const expected = new Set(opts.comparisonKeys ?? []);
+  const expected = comparisonSet(data, opts.comparisonKeys);
   const flagsOf = (row: RankedRow) => [...(expected.has(row.key) ? ["expected"] : []), ...row.flags.map((f) => FLAG_LABEL[f])];
   const withSub = data.groups.some((g) => g.rows.some((r) => r.sublabel !== null));
   const withFlags = data.groups.some((g) => g.rows.some((r) => flagsOf(r).length > 0));

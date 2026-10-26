@@ -4,8 +4,9 @@ import { AGE_LABEL_RE } from "./numerals";
 
 /**
  * CHECKER V10 (SPEC §6.2): audience demographics (age, gender, generation) are claimed only where the
- * same part cites a metric that measures them: an audience_dna index, the share_of_taste youth tilt,
- * or a share_of_taste percentile in an age context. A sentence that states a limitation ("age was not
+ * same part cites a metric that measures them: an audience_dna index, the share_of_taste youth tilt
+ * (the metric behind GENERATIONAL_SPLIT), or a share_of_taste percentile in an age context; an exhibit
+ * caption may rest on its dataset instead. A sentence that states a limitation ("age was not
  * measured") claims nothing and passes. Registered entity and tag names are masked first, so a name
  * such as "Young Adult Fiction" is never read as a claim.
  */
@@ -31,9 +32,25 @@ export function measuresDemographics(m: Pick<Metric, "formulaId" | "key" | "subj
   return m.formulaId === SHARE_PCT && [m.key, ...m.subjectRefs].some((s) => AgeBucket.options.some((b) => s.includes(b)));
 }
 
-/** True when the dataset was computed with a demographic formula (an exhibit caption cites its dataset). */
-export function datasetMeasuresDemographics(d: Pick<DatasetEnvelope, "formulaIds">): boolean {
-  return d.formulaIds.some((f) => (DEMOGRAPHIC_FORMULAS as readonly string[]).includes(f));
+/** The evidence bundles behind the metrics that measure audience age or gender: the calls that measured it. */
+export function demographicEvidence(
+  metrics: Iterable<Pick<Metric, "formulaId" | "key" | "subjectRefs" | "value" | "evidenceIds">>,
+): Set<string> {
+  const out = new Set<string>();
+  for (const m of metrics) if (measuresDemographics(m)) for (const e of m.evidenceIds) out.add(e);
+  return out;
+}
+
+/**
+ * True when the dataset shows audience age or gender (an exhibit caption cites its dataset): it was
+ * computed with a demographic formula, or drawn from a call that measured it (`calls`, from
+ * demographicEvidence), as a pair's who-wins-where split over age contexts is.
+ */
+export function datasetMeasuresDemographics(
+  d: Pick<DatasetEnvelope, "formulaIds" | "evidenceIds">,
+  calls: ReadonlySet<string> = new Set(),
+): boolean {
+  return d.formulaIds.some((f) => (DEMOGRAPHIC_FORMULAS as readonly string[]).includes(f)) || d.evidenceIds.some((e) => calls.has(e));
 }
 
 /** Nouns that make "young", "older" and the like describe a brand or the data, not an audience. */

@@ -50,8 +50,9 @@ describe("run-skill peer_landscape", () => {
     expect(text).toContain("SUBSTITUTION MAP · BRAND ALPHA · D1");
     expect(text).toMatch(/▸ R1 Brand Alpha/);
     expect(text).toMatch(/hub score\s+distinct/);
+    expect(text).toMatch(/DATASETS \(1\)\n.+\n {2}D1\s+Matrix\s+Substitution Map · Brand Alpha\s+5×5 similarity/);
     expect(text).toContain("METRICS");
-    expect(text).toMatch(/M\d+\s+.+\s+DERIVED\s+subs\.distinctiveness/);
+    expect(text).toMatch(/M\d+\s+.+\s+DERIVED\s+subs\.distinctiveness\s+subs\.\w+/);
     expect(text).toContain("FINDINGS");
     expect(text).toContain("QUOTA");
     expect(text).toContain("month left    49,000 of 50,000");
@@ -236,7 +237,7 @@ describe("run-skill arguments", () => {
     [["resolve_entities", "Some Cafe", "--type", "place"], /needs --metro/],
     [["resolve_entities", "A".repeat(81)], /81 characters; resolve_entities takes at most 80/],
     [["peer_landscape", "Brand Alpha", "--peers", `Brand Beta,${"B".repeat(90)}`], /a --peers name is 90 characters/],
-    [["find_tags", "x"], /not available in run-skill/],
+    [["find_tags", "x"], /find_tags runs from its tool input/],
     [["no_such_skill", "x"], /unknown skill/],
     [[], /name a skill/],
   ])("refuses %j", (argv, message) => {

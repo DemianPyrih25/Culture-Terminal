@@ -162,7 +162,8 @@ describe("failed and cancelled", () => {
     expect(attrValues(html, "data-state").filter((s) => s === "not_scored").length).toBe(model.priors.items.length);
     expect(text(html)).toContain("not measured · run stopped");
     // The run has ended, so a figure that never came says why in full, not lighter as while it was written.
-    const pendingFigure = slice(html, 'data-key-figure="pending"', "data-key-figure=");
+    // The pending figure up to the end of its note (it may be the strip's last slot).
+    const pendingFigure = slice(html, 'data-key-figure="pending"', "</p></div>");
     expect(pendingFigure).toContain("font-semibold");
     expect(pendingFigure).not.toContain("font-medium");
     expect(pendingFigure).not.toContain("text-faint");

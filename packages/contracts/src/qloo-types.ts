@@ -88,7 +88,7 @@ export const QlooEntity = z.looseObject({
   name: z.string(),
   type: z.string().optional(),
   subtype: z.string().nullish(),
-  popularity: z.number().optional(),
+  popularity: z.number().nullish(),
   disambiguation: z.string().nullish(),
   properties: z
     .looseObject({
@@ -296,4 +296,19 @@ export type AudienceKey = z.infer<typeof AudienceKey>;
 /** The parent category of an audience key (`leisure` for urn:audience:leisure:…), checked against D21. */
 export function audienceParent(key: AudienceKey): string {
   return key.split(":")[2] ?? "";
+}
+
+/** Audience families refused on every desk (D21): communities, politics, beliefs and global issues. */
+export const DENIED_AUDIENCE_FAMILIES = ["communities", "political_preferences", "lifestyle_preferences_beliefs", "global_issues"] as const;
+/** Single audiences refused on every desk although their family is allowed (D21). */
+export const DENIED_AUDIENCES = ["urn:audience:leisure:political_junkie"] as const;
+
+/**
+ * Whether an audience key is a sensitive segment the Qloo client refuses on every desk (D21), as
+ * opposed to a family one desk's list leaves out. Skills read it to raise SENSITIVE_SEGMENT_BLOCKED.
+ */
+export function isDeniedAudience(key: string): boolean {
+  const family = /^urn:audience:([a-z][a-z0-9_]*)(?::|$)/.exec(key)?.[1];
+  if (family === undefined) return false;
+  return (DENIED_AUDIENCE_FAMILIES as readonly string[]).includes(family) || (DENIED_AUDIENCES as readonly string[]).includes(key);
 }

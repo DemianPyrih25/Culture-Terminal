@@ -55,7 +55,7 @@ function spearman(xs: readonly number[], ys: readonly number[]): number {
 }
 
 const BASELINE = PROBE_FACTS.heatmapBaselineTag;
-const CONCEPT = ["urn:tag:genre:place:mock_ramen", "urn:tag:category:place:cafe"];
+const CONCEPT = ["urn:tag:genre:place:mock_ramen", "urn:tag:genre:place:restaurant:bar"];
 
 describe("mock heatmap", () => {
   it("covers Nashville at geohash-6 and Austin at geohash-7 with a few hundred cells inside each metro", async () => {
@@ -87,7 +87,7 @@ describe("mock heatmap", () => {
   it("tracks popularity for the baseline and plants pockets that set a concept apart", async () => {
     const id = await locality("Nashville");
     const baseline = await heatmap(id, [BASELINE]);
-    const concept = await heatmap(id, CONCEPT, { "operator.signal.interests.tags": "union" });
+    const concept = await heatmap(id, CONCEPT);
     const nonZero = baseline.filter((c) => c.query.affinity > 0);
     expect(spearman(nonZero.map((c) => c.query.affinity), nonZero.map((c) => c.query.popularity ?? 0))).toBeGreaterThan(0.6);
 
@@ -101,8 +101,29 @@ describe("mock heatmap", () => {
     expect(concept.some((c) => c.query.affinity === 0)).toBe(true);
   });
 
-  it("returns no cells for descriptive *:qloo:* tags alone (G6)", async () => {
-    expect(await heatmap(await locality("Austin"), ["urn:tag:cuisine:qloo:mock_ramen", "urn:tag:amenity:qloo:mock_patio"])).toEqual([]);
+  it("returns no cells for descriptive *:qloo:* tags (G6) or category tags (P5) alone", async () => {
+    const austin = await locality("Austin");
+    expect(await heatmap(austin, ["urn:tag:cuisine:qloo:mock_ramen", "urn:tag:amenity:qloo:mock_patio"])).toEqual([]);
+    expect(await heatmap(austin, ["urn:tag:category:place:cafe"])).toEqual([]);
+  });
+
+  it("ignores operator.signal.interests.tags (P5)", async () => {
+    const id = await locality("Nashville");
+    const none = await heatmap(id, CONCEPT);
+    expect(await heatmap(id, CONCEPT, { "operator.signal.interests.tags": "union" })).toEqual(none);
+    expect(await heatmap(id, CONCEPT, { "operator.signal.interests.tags": "intersection" })).toEqual(none);
+  });
+
+  it("covers about a fifth of the cells, the most popular ones, for entity analogs alone (P5)", async () => {
+    const id = await locality("Nashville");
+    const baseline = await heatmap(id, [BASELINE]);
+    const params = { "filter.type": "urn:heatmap", "filter.location": id, "signal.interests.entities": ["ent-analog-01"] };
+    const analog = QlooHeatmapResponse.parse(await body("/v2/insights", params)).results.heatmap;
+    expect(analog.length).toBeGreaterThan(baseline.length * 0.15);
+    expect(analog.length).toBeLessThan(baseline.length * 0.25);
+    const byPopularity = [...baseline].sort((a, b) => (b.query.popularity ?? 0) - (a.query.popularity ?? 0));
+    const popular = new Set(byPopularity.slice(0, analog.length).map((c) => c.location.geohash));
+    expect(analog.filter((c) => popular.has(c.location.geohash)).length).toBeGreaterThan(analog.length * 0.7);
   });
 });
 

@@ -24,6 +24,8 @@ export interface AskComposerProps {
   onRetry?: () => void;
   onAsk?: (question: string) => void;
   onDropParent?: () => void;
+  /** The reading waits for the human check, which needs the visitor (AskPanel). */
+  waitingForCheck?: boolean;
   autoFocus?: boolean;
   /** Binds / to the field (default true); off in the gallery, which shows several. */
   slashShortcut?: boolean;
@@ -83,6 +85,7 @@ export function AskComposer({
   onRetry,
   onAsk,
   onDropParent,
+  waitingForCheck = false,
   autoFocus = false,
   slashShortcut = true,
   showFocus = false,
@@ -127,9 +130,10 @@ export function AskComposer({
         onRetry={onRetry}
         onAsk={onAsk}
         onDropParent={onDropParent}
+        waitingForCheck={waitingForCheck}
       />
       <p role="status" aria-live="polite" className="sr-only">
-        {askStatusText(state, draft)}
+        {askStatusText(state, draft, waitingForCheck)}
       </p>
     </div>
   );

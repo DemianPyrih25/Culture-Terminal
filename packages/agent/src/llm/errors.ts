@@ -11,8 +11,9 @@ export interface LlmErrorInfo {
   maybeBilled: boolean;
   /**
    * A client-side SDK error: tool input JSON it could not parse at all (eager input streaming), or a
-   * stream cut mid-SSE, which the SDK wraps the same way. No tool_use block exists to answer, so the
-   * documented fix is to re-issue the turn.
+   * stream cut mid-SSE, which the SDK wraps the same way. Without a tool_use block to answer, the
+   * documented fix is to re-issue the turn; the loop answers an unparsed input whose block the
+   * stream still holds itself (llm/unparsed.ts).
    */
   retryTurn: boolean;
 }

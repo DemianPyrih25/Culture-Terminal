@@ -76,7 +76,7 @@ export function sourceRequestView(source: BriefSource): RequestView {
   };
 }
 
-const KIND_WORD: Readonly<Record<Footnote["kind"], string>> = { metric: "Number", evidence: "Evidence", figure: "Figure" };
+const KIND_WORD: Readonly<Record<Footnote["kind"], string>> = { metric: "Number", evidence: "Evidence", figure: "Figure", fallback: "Code fallback" };
 
 function Label({ children }: { children: ReactNode }) {
   return <p className="m-0 text-[10px] leading-[14px] font-semibold tracking-[1.1px] text-dim uppercase">{children}</p>;

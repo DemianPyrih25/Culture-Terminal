@@ -6,6 +6,7 @@ import {
   type FindingId,
   type Flag,
   type GeoApi,
+  type LocalityApi,
   type Phase,
   type Pillar,
   type RunBudget,
@@ -61,6 +62,8 @@ export interface SkillRunnerDeps {
   ledger: RunLedger;
   registry: RunRegistry;
   geo: GeoApi;
+  /** The run's pinned market localities (kv); null when it has none, so metro and city contexts are unavailable. */
+  localities: LocalityApi | null;
   budget: RunBudget;
   /** False answers every call with an error digest and makes no Qloo call (V7 fail-closed path). */
   qlooEnabled: boolean;
@@ -109,9 +112,13 @@ function skillOf(id: SkillId): Skill<unknown> {
 }
 
 /** Network calls the input would cost now, or null when the estimate itself fails. */
-export async function estimateSkillCalls(deps: Pick<SkillRunnerDeps, "qloo" | "registry">, tool: SkillId, input: unknown): Promise<number | null> {
+export async function estimateSkillCalls(
+  deps: Pick<SkillRunnerDeps, "qloo" | "registry" | "localities" | "geo">,
+  tool: SkillId,
+  input: unknown,
+): Promise<number | null> {
   try {
-    const n = await skillOf(tool).estimateCalls(input, deps.qloo.forTool(null), deps.registry);
+    const n = await skillOf(tool).estimateCalls(input, deps.qloo.forTool(null), deps.registry, { localities: deps.localities, geo: deps.geo });
     return Number.isInteger(n) && n >= 0 ? n : null;
   } catch {
     return null;
@@ -207,6 +214,7 @@ export async function runSkillCall(deps: SkillRunnerDeps, call: SkillCall, signa
         qloo: deadline === null ? qloo : deadline.qloo(qloo),
         ledger: deps.ledger.forToolCall(toolCallId),
         geo: deps.geo,
+        localities: deps.localities,
         registry: deps.registry,
         emit: events.emit,
         budget: deadline === null ? deps.budget : deadline.budget(deps.budget),

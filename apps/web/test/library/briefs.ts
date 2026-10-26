@@ -11,6 +11,7 @@ export function brief(over: Partial<BriefSummary> = {}): BriefSummary {
     jobLabel: "Compare two brands",
     status: "completed",
     signal: "mixed",
+    tag: null,
     headline: "Same customer, different turf {{M3}}; Brand Beta leads the young {{M5}} [E2], the South is {{M7}}.",
     metrics: {
       M3: { label: "Audience overlap", display: "0.64", badge: "MEASURED" },

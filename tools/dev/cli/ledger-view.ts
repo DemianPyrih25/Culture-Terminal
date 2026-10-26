@@ -9,11 +9,21 @@ import { displayWidth, renderTable } from "./table";
 
 const WIDTH = 110;
 
+/** One row per metric: its value, badge, key and FORMULAS id (the /method link), sample size, evidence and label. */
 export function renderMetrics(metrics: readonly Metric[], indent = "  "): string[] {
   if (metrics.length === 0) return [`${indent}(none)`];
   return renderTable(
-    [{ header: "id" }, { header: "value", max: 32 }, { header: "badge" }, { header: "key" }, { header: "evidence" }, { header: "label", max: 90 }],
-    metrics.map((m) => [m.id, metricValue(m), m.badge, m.key, idList(m.evidenceIds), m.label]),
+    [
+      { header: "id" },
+      { header: "value", max: 32 },
+      { header: "badge" },
+      { header: "key" },
+      { header: "formula" },
+      { header: "n", align: "right" },
+      { header: "evidence" },
+      { header: "label", max: 90 },
+    ],
+    metrics.map((m) => [m.id, metricValue(m), m.badge, m.key, m.formulaId, m.n === null ? NONE : String(m.n), idList(m.evidenceIds), m.label]),
     { indent },
   );
 }

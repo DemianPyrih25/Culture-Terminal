@@ -41,6 +41,8 @@ export default defineConfig([
     "**/build/**",
     "**/dist/**",
     "**/coverage/**",
+    "playwright-report/**",
+    "test-results/**",
     "apps/web/next-env.d.ts",
     "packages/db/drizzle/**",
     ".probe/**",

@@ -139,6 +139,7 @@ export function draftFrom(ids: SeenIds, overrides: Partial<ReportDraftShape> = {
   return {
     headline: "Brand Alpha reads as a distinct niche among its taste neighbours",
     signal: "mixed",
+    verdict_tag: "Distinct niche",
     thesis: `Brand Alpha sits apart from most of its peers {{${m(0)}}} [${e(0)}].`,
     hypothesis_verdicts: [
       { hypothesis_id: "H1", verdict: "confirmed", metric_ids: [m(0)], note: `The nearest neighbour is measured {{${m(0)}}}.` },
@@ -160,6 +161,21 @@ export function draftFrom(ids: SeenIds, overrides: Partial<ReportDraftShape> = {
 export const planCall = (input: unknown = plan()) => toolUse("toolu_plan", "submit_plan", input);
 export const reportCall = (id: string, draft: ReportDraftShape) => toolUse(id, "submit_report", draft);
 export { respond, text, thinking, toolUse };
+
+/** The one line the follow-up nudge asks for when no listed follow-up is run. */
+export const NO_FOLLOWUP_REASON = "No listed follow-up could change the signal: the opening scan already decided both priors.";
+
+/**
+ * Turn 2 for a model that reports without a follow-up. The opening scan's finding is listed, so the
+ * first submit_report meets the follow-up nudge (FOLLOWUP_EXPECTED) and the report goes in again
+ * with the line the nudge asks for. `draft` writes each report from what the model has seen.
+ */
+export function reportWithoutFollowup(draft: (req: AnalystRequest) => ReportDraftShape = (req) => draftFrom(seenIds(req))): StreamScript[] {
+  return [
+    (req: AnalystRequest) => respond([reportCall("toolu_report_early", draft(req))]),
+    (req: AnalystRequest) => respond([reportCall("toolu_report", { ...draft(req), open_questions: [NO_FOLLOWUP_REASON] })]),
+  ];
+}
 
 // Running ----------------------------------------------------------------------------------------------
 

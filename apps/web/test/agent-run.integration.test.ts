@@ -51,6 +51,7 @@ import {
   TOTAL_USD,
   waitingAgent,
 } from "./support/agent";
+import { testModes } from "./support/protection";
 import { createTestDatabase, databaseAvailable, type TestDatabase } from "./support/test-db";
 
 vi.mock("server-only", () => ({}));
@@ -562,7 +563,11 @@ describe.skipIf(!available)("agent runs against Postgres", () => {
     await runs.whenDone(runId);
     expect(received?.parent?.runId).toBe(parent.runId);
     expect(received?.parent?.caseSummary).toContain(`CASE SUMMARY from run ${parent.runId}`);
-    expect((await getRun(db, runId))?.parentRunId).toBe(parent.runId);
+    const child = await getRun(db, runId);
+    expect(child?.parentRunId).toBe(parent.runId);
+    // Keyed on its parent: the follow-up never answers the same words asked on their own.
+    expect(child?.questionHash).toBe(questionHash("Where does that audience travel?", undefined, "live", parent.runId));
+    expect(child?.questionHash).not.toBe(questionHash("Where does that audience travel?", undefined, "live"));
     expect((await readAllEvents(db, runId))[0]).toMatchObject({ type: "run.created", parentRunId: parent.runId });
 
     await expect(runs.startAgentRun({ question: QUESTION, lane: "public", parentRunId: "no-such-run-0000" })).rejects.toSatisfy(
@@ -618,7 +623,7 @@ describe.skipIf(!available)("agent runs against Postgres", () => {
       expect(received).toMatchObject({ question: TWIN_QUESTION, pins, parent: { runId: parent.runId } });
       const run = await getRun(db, runId);
       expect(run).toMatchObject({ status: "completed", question: TWIN_QUESTION, pins, parentRunId: parent.runId });
-      expect(run?.questionHash).toBe(questionHash(TWIN_QUESTION, pins, "live"));
+      expect(run?.questionHash).toBe(questionHash(TWIN_QUESTION, pins, "live", parent.runId));
     }, 30_000);
 
     it("refuses a key the run did not offer, a key no longer in the search, a run not waiting, and a Qloo failure", async () => {
@@ -744,12 +749,18 @@ describe.skipIf(!available)("agent runs against Postgres", () => {
     it("POST {question} starts an agent run that streams to its end; an empty body still starts a test run", async () => {
       const { db, bus, runs } = setup({ fakeRunSeconds: 1 });
       const http = await import("../server/http");
-      await withContainer({ db, bus, runs }, async () => {
-        const res = await http.startRun(post({ question: QUESTION }));
+      // Live whatever this file has spent today; the answer cache is this database's.
+      await withContainer({ db, bus, runs, modes: testModes() }, async () => {
+        const res = await http.startRun(post({ question: QUESTION, fresh: true }));
         expect(res.status).toBe(201);
         const { runId } = (await res.json()) as { runId: string };
         await runs.whenDone(runId);
         expect(await getRun(db, runId)).toMatchObject({ status: "completed", lane: "public", question: QUESTION });
+
+        // The same question again: the completed brief answers it from the answer cache (D26), at once.
+        const again = await http.startRun(post({ question: `  ${QUESTION.toUpperCase()} ` }));
+        expect(again.status).toBe(200);
+        expect(await again.json()).toEqual({ runId, cached: true });
 
         const fake = await http.startRun(new Request("http://test.local/api/runs", { method: "POST" }));
         expect(fake.status).toBe(201);
@@ -762,8 +773,9 @@ describe.skipIf(!available)("agent runs against Postgres", () => {
     it("answers 503 without retry when today's budget is spent, with Retry-After until midnight UTC", async () => {
       const { db, bus, runs } = setup({ llmDailyUsdCap: 0 });
       const http = await import("../server/http");
-      await withContainer({ db, bus, runs }, async () => {
-        const res = await http.startRun(post({ question: QUESTION }));
+      // The breakers say live; the run manager's own pre-run check refuses.
+      await withContainer({ db, bus, runs, modes: testModes() }, async () => {
+        const res = await http.startRun(post({ question: QUESTION, fresh: true }));
         expect(res.status).toBe(503);
         expect(await res.json()).toMatchObject({ retry: false });
         const retryAfter = Number(res.headers.get("retry-after"));
@@ -776,7 +788,9 @@ describe.skipIf(!available)("agent runs against Postgres", () => {
       const { db, bus, runs } = setup();
       await writeMode(db, "economy", "test");
       await incrementQlooUsage(db, { day: today(), lanes: ["public", "all"], by: 0.01, metric: LLM_USD_METRIC });
-      vi.stubEnv("LLM_DAILY_USD_CAP", "2.5");
+      // Thresholds far above what this file spends, so the stored mode is the one that shows.
+      vi.stubEnv("LLM_DAILY_USD_CAP", "900");
+      vi.stubEnv("LLM_ECONOMY_USD", "900");
       const http = await import("../server/http");
       try {
         await withContainer({ db, bus, runs, qloo: mockQlooClient(), anthropic: NO_MODEL_CALLS }, async () => {
@@ -788,7 +802,8 @@ describe.skipIf(!available)("agent runs against Postgres", () => {
             mode: "economy",
             db: { ok: true },
             qloo: { env: "mock", today_network: 0, floor: 38_000, last_success: null, auth_errors: 0 },
-            llm: { cap: 2.5, configured: true },
+            llm: { cap: 900, configured: true },
+            lanes: { public: { mode: "economy", breaker: "stored" }, judge: { mode: "economy", breaker: "stored" } },
           });
           expect(body.qloo).toHaveProperty("month_remaining");
           const spent = await todayLlmUsd(db);

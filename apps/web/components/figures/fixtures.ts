@@ -1,6 +1,13 @@
 import type { AxisItem, DatasetOf, MatrixCell, NoValueReason, QuadrantName, QuadrantPoint, ValueCell } from "@ct/contracts";
+import type { TasteMapPayload } from "./category-map";
 import type { FigureSource } from "./figure-frame";
+import { marketSlope, momentumStrip, tastePosition, tastePositionNoSignal, tenantSlope } from "./fixtures-desks";
+import { austinLiftMap, coarseLiftMap } from "./fixtures-geo";
 import type { ProseBindings } from "./prose";
+import type { TwinCandidate, TwinPayload } from "./twin-cards";
+
+export { MOMENTUM_WINDOW, marketSlope, momentumStrip, tastePosition, tastePositionNoSignal, tenantSlope } from "./fixtures-desks";
+export { austinLiftMap, coarseLiftMap } from "./fixtures-geo";
 
 /**
  * Invented figure fixtures for the /dev/figures gallery and the figure tests (D29: no Qloo values,
@@ -675,6 +682,333 @@ export const priorsScorecard: DatasetOf<"Scorecard"> = {
   },
 };
 
+// Optional contract fields: codes, comparison rows and a payload that says how to draw itself ---------
+
+/** The similarity map with its own short codes (AxisItem.code), which MatrixGrid prints instead of derived ones. */
+export const codedSimilarityMap: DatasetOf<"Matrix"> = {
+  ...similarityMap,
+  id: "D22",
+  payload: {
+    ...similarityMap.payload,
+    rows: similarityMap.payload.rows.map((r, i) => ({ ...r, code: ["JNP", "ALF", "BET", "SLT", "KRT", "GHA"][i] })),
+    cols: similarityMap.payload.cols.map((c, i) => ({ ...c, code: ["JNP", "ALF", "BET", "SLT", "KRT", "GHA"][i] })),
+  },
+};
+
+/** Nearest audiences with the expected rivals marked in the payload (RankedRow.comparison), not by the caller. */
+export const nearestWithRivals: DatasetOf<"Ranked"> = {
+  ...nearestAudiences,
+  id: "D23",
+  payload: {
+    ...nearestAudiences.payload,
+    groups: nearestAudiences.payload.groups.map((g) => ({
+      ...g,
+      rows: g.rows.map((r) => ((EXPECTED_RIVALS as readonly string[]).includes(r.key) ? { ...r, comparison: true } : r)),
+    })),
+  },
+};
+
+/** The metro split that names its own display, baseline and even band (BarsPayload.display, baseline, evenBand). */
+export const metroSplitSelfDescribed: DatasetOf<"Bars"> = {
+  ...metroSplit,
+  id: "D24",
+  payload: { ...metroSplit.payload, display: "split", baseline: 0.5, evenBand: 0.03 },
+};
+
+/** The age pair as a dumbbell around 0, said by the payload. */
+export const ageDumbbellSelfDescribed: DatasetOf<"Bars"> = {
+  ...ageIndexPair,
+  id: "D25",
+  payload: { ...ageIndexPair.payload, display: "dumbbell", baseline: 0 },
+};
+
+// Constellation · cultural neighbourhood of two seeds (S9 in P1) ---------------------------------------
+
+type DomainKey = "artist" | "podcast" | "tv_show" | "movie" | "brand";
+
+/** The two seeds at the centre of the constellation, by the refs their edges name. */
+export const NEIGHBOURHOOD_SEEDS = [
+  { ref: "R1", label: "Juniper Cola" },
+  { ref: "R5", label: "Kettle Ridge Tonic" },
+] as const;
+
+/** The S9 halo: top tags per domain, printed under each domain name. */
+export const NEIGHBOURHOOD_HALO: Readonly<Record<string, readonly string[]>> = {
+  artist: ["indie folk", "slowcore", "americana"],
+  podcast: ["slow radio", "food culture"],
+  tv_show: ["quiet drama", "coastal"],
+  brand: ["outdoor", "clean beauty"],
+};
+
+/**
+ * A result as S9 writes it: FIT, popularity and U = FIT − popularity, the two seeds' explainability
+ * shares, and an edge to a seed whose share·K reaches 1.1 (K = 2, so a share of at least .55).
+ */
+const neighbour = (
+  domain: DomainKey,
+  rank: number,
+  label: string,
+  fit: number,
+  popularity: number,
+  shares: readonly [number, number],
+  utr = false,
+): RankedRowFixture => {
+  const seedShares = NEIGHBOURHOOD_SEEDS.map((s, i) => ({ seedRef: s.ref, share: shares[i]! }));
+  return rankedRow(`${domain}-${rank}`, rank, label, v(fit), {
+    type: domain,
+    cells: [v(fit), v(popularity), v(round2(fit - popularity))],
+    flags: utr ? ["UTR"] : [],
+    explain: seedShares.filter((s) => s.share * seedShares.length >= 1.1),
+    shares: seedShares,
+  });
+};
+
+const XDOM_COLUMNS: DatasetOf<"Ranked">["payload"]["columns"] = [
+  { key: "fit", label: "Fit", unit: "pct", comparator: "WITHIN_CALL" },
+  { key: "popularity", label: "Popularity", unit: "popularity", comparator: null },
+  { key: "utr", label: "Under the radar (fit − popularity)", unit: "score", comparator: null },
+];
+
+export const neighbourhood: DatasetOf<"Ranked"> = {
+  id: "D26",
+  kind: "Ranked",
+  title: "Cultural neighbourhood · Juniper Cola and Kettle Ridge Tonic",
+  evidenceIds: ["E7"],
+  formulaIds: ["xdom.under_the_radar", "xdom.edge"],
+  payload: {
+    columns: XDOM_COLUMNS,
+    groups: [
+      {
+        key: "artist",
+        label: "Music · artists",
+        rows: [
+          neighbour("artist", 1, "Low Orchard", 1, 0.62, [0.52, 0.48]),
+          neighbour("artist", 2, "Marigold Static", 0.93, 0.41, [0.71, 0.29]),
+          neighbour("artist", 3, "Saint Ferro", 0.86, 0.18, [0.36, 0.64], true),
+          neighbour("artist", 4, "Harbor & Pine", 0.79, 0.55, [0.5, 0.5]),
+          neighbour("artist", 5, "The Copper Wires", 0.71, 0.33, [0.58, 0.42]),
+          neighbour("artist", 6, "Nadia Vell", 0.64, 0.12, [0.47, 0.53]),
+          neighbour("artist", 7, "Glass Meridian", 0.57, 0.47, [0.61, 0.39]),
+        ],
+      },
+      {
+        key: "podcast",
+        label: "Podcasts",
+        rows: [
+          neighbour("podcast", 1, "Field Notes Weekly", 1, 0.58, [0.56, 0.44]),
+          neighbour("podcast", 2, "The Long Table", 0.93, 0.22, [0.44, 0.56], true),
+          neighbour("podcast", 3, "Quiet Hours", 0.86, 0.47, [0.5, 0.5]),
+          neighbour("podcast", 4, "Small Print Radio", 0.79, 0.31, [0.62, 0.38]),
+          neighbour("podcast", 5, "Northbound", 0.71, 0.09, [0.48, 0.52]),
+          neighbour("podcast", 6, "Tin Roof Talks", 0.64, 0.38, [0.39, 0.61]),
+          neighbour("podcast", 7, "Ledger & Lamp", 0.57, 0.26, [0.53, 0.47]),
+        ],
+      },
+      {
+        key: "tv_show",
+        label: "TV · series",
+        rows: [
+          neighbour("tv_show", 1, "Harbor Lights", 1, 0.71, [0.66, 0.34]),
+          neighbour("tv_show", 2, "The Night Kitchen", 0.93, 0.64, [0.51, 0.49]),
+          neighbour("tv_show", 3, "Westerly", 0.86, 0.66, [0.43, 0.57]),
+          rankedRow("tv_show-4", null, "Paper Moons", none("quality_gate"), {
+            type: "tv_show",
+            cells: [none("quality_gate"), none("quality_gate"), none("quality_gate")],
+          }),
+          neighbour("tv_show", 5, "Slow Tide", 0.79, 0.44, [0.6, 0.4]),
+          neighbour("tv_show", 6, "Coastline Diaries", 0.71, 0.52, [0.49, 0.51]),
+          neighbour("tv_show", 7, "Ironwood", 0.64, 0.61, [0.5, 0.5]),
+        ],
+      },
+      {
+        key: "movie",
+        label: "Movies",
+        rows: [
+          rankedRow("movie-gap", null, "Not measured", none("budget_truncated"), {
+            type: "movie",
+            sublabel: "call not made: run budget reached",
+            cells: [none("budget_truncated"), none("budget_truncated"), none("budget_truncated")],
+          }),
+        ],
+      },
+      {
+        key: "brand",
+        label: "Brands",
+        rows: [
+          neighbour("brand", 1, "Northwind Outfitters", 1, 0.49, [0.7, 0.3]),
+          neighbour("brand", 2, "Fernleaf Apothecary", 0.93, 0.27, [0.35, 0.65], true),
+          neighbour("brand", 3, "Pale Harbor", 0.86, 0.52, [0.5, 0.5]),
+          neighbour("brand", 4, "Stonecrop Goods", 0.79, 0.16, [0.57, 0.43]),
+          neighbour("brand", 5, "Driftline", 0.71, 0.38, [0.46, 0.54]),
+          neighbour("brand", 6, "Thistle & Sons", 0.64, 0.08, [0.52, 0.48]),
+          neighbour("brand", 7, "Copperline Coffee", 0.57, 0.31, [0.4, 0.6]),
+        ],
+      },
+    ],
+    caption:
+      "FIT is the within-call percentile in each domain; popularity capped at 0.75; under the radar = FIT − popularity, not price. Explainability is attribution inside Qloo's model, not causation.",
+  },
+};
+
+// Category Taste Map (S1 in P1: triangular calls, classical MDS) ----------------------------------------
+
+/** The entities of the taste map in matrix order, with their invented clusters. */
+const TASTE_MAP_ENTITIES = [
+  ["R1", "Juniper Cola", "Colas"],
+  ["R2", "Brand Alpha", "Colas"],
+  ["R3", "Brand Beta", "Colas"],
+  ["R9", "Ember Root Beer", "Colas"],
+  ["R4", "Saltmarsh Seltzer", "Waters"],
+  ["R8", "Tidewell Water", "Waters"],
+  ["R15", "Wildmint Soda", "Waters"],
+  ["R5", "Kettle Ridge Tonic", "Tonics"],
+  ["R7", "Larkspur Kombucha", "Tonics"],
+  ["R16", "Bramble Shrub Co.", "Tonics"],
+  ["R6", "Granite Hollow Ale", "Ales"],
+  ["R11", "Blackfern Rye", "Ales"],
+  ["R12", "Copper Still Ginger", "Ales"],
+] as const;
+
+/** The invented pairwise similarity behind the map (symmetric; the diagonal is null). */
+export const TASTE_MAP_SIMILARITY: readonly (readonly (number | null)[])[] = [
+  [null, 0.82, 0.8, 0.77, 0.48, 0.39, 0.49, 0.58, 0.45, 0.44, 0.53, 0.47, 0.63],
+  [0.82, null, 0.83, 0.72, 0.57, 0.5, 0.58, 0.57, 0.42, 0.49, 0.41, 0.38, 0.51],
+  [0.8, 0.83, null, 0.75, 0.63, 0.51, 0.6, 0.49, 0.36, 0.39, 0.4, 0.32, 0.54],
+  [0.77, 0.72, 0.75, null, 0.47, 0.36, 0.41, 0.41, 0.27, 0.28, 0.51, 0.42, 0.7],
+  [0.48, 0.57, 0.63, 0.47, null, 0.77, 0.75, 0.26, 0.15, 0.24, 0.07, 0.02, 0.24],
+  [0.39, 0.5, 0.51, 0.36, 0.77, null, 0.71, 0.22, 0.11, 0.26, 0.02, 0.02, 0.12],
+  [0.49, 0.58, 0.6, 0.41, 0.75, 0.71, null, 0.38, 0.29, 0.39, 0.07, 0.03, 0.19],
+  [0.58, 0.57, 0.49, 0.41, 0.26, 0.22, 0.38, null, 0.78, 0.73, 0.41, 0.45, 0.35],
+  [0.45, 0.42, 0.36, 0.27, 0.15, 0.11, 0.29, 0.78, null, 0.66, 0.33, 0.37, 0.24],
+  [0.44, 0.49, 0.39, 0.28, 0.24, 0.26, 0.39, 0.73, 0.66, null, 0.21, 0.29, 0.17],
+  [0.53, 0.41, 0.4, 0.51, 0.07, 0.02, 0.07, 0.41, 0.33, 0.21, null, 0.74, 0.71],
+  [0.47, 0.38, 0.32, 0.42, 0.02, 0.02, 0.03, 0.45, 0.37, 0.29, 0.74, null, 0.55],
+  [0.63, 0.51, 0.54, 0.7, 0.24, 0.12, 0.19, 0.35, 0.24, 0.17, 0.71, 0.55, null],
+];
+
+/** classicalMds(tasteDistances(TASTE_MAP_SIMILARITY).d) from @ct/quant, rounded to 3 places (the subject up and left). */
+const TASTE_MAP_COORDS: readonly (readonly [number, number])[] = [
+  [-0.035, 0.084],
+  [0.08, 0.042],
+  [0.118, 0.126],
+  [-0.027, 0.263],
+  [0.46, 0.133],
+  [0.501, 0.059],
+  [0.434, -0.071],
+  [-0.133, -0.301],
+  [-0.178, -0.419],
+  [0, -0.439],
+  [-0.457, 0.168],
+  [-0.486, 0.036],
+  [-0.277, 0.32],
+];
+
+function nearestPeer(i: number): { key: string; value: number } | null {
+  let best: number | null = null;
+  TASTE_MAP_SIMILARITY[i]!.forEach((s, j) => {
+    if (s !== null && (best === null || s > TASTE_MAP_SIMILARITY[i]![best]!)) best = j;
+  });
+  return best === null ? null : { key: TASTE_MAP_ENTITIES[best]![0], value: TASTE_MAP_SIMILARITY[i]![best]! };
+}
+
+export const categoryTasteMap: { id: string; title: string; formulaIds: readonly string[]; payload: TasteMapPayload } = {
+  id: "D27",
+  title: "Category Taste Map",
+  formulaIds: ["subs.similarity", "subs.near_substitutes"],
+  payload: {
+    valueLabel: "Audience similarity",
+    unit: "similarity",
+    points: TASTE_MAP_ENTITIES.map(([key, label, group], i) => ({
+      key,
+      label,
+      ref: key,
+      x: TASTE_MAP_COORDS[i]![0],
+      y: TASTE_MAP_COORDS[i]![1],
+      target: i === 0,
+      group,
+      nearest: nearestPeer(i),
+    })),
+    links: [
+      { a: "R2", b: "R3", value: 0.83 },
+      { a: "R4", b: "R8", value: 0.77 },
+      { a: "R5", b: "R7", value: 0.78 },
+    ],
+    omitted: [{ label: "Brand Gamma", ref: "R10", reason: "not_scored" }],
+    stress: 0.091,
+    explained: 0.876,
+    imputed: 0,
+    caption: "Audience taste similarity, not switching, share or sales. A flat map bends some distances; the stress says how much.",
+  },
+};
+
+// TwinCards · East Nashville against six Austin neighbourhoods (S11 in P1) -------------------------------
+
+const TWIN_TAGS = [
+  ["natural-wine", "natural wine", "WHAT"],
+  ["vinyl", "vinyl records", "SOUND"],
+  ["live-music", "live music", "SOUND"],
+  ["roasters", "coffee roasters", "WHAT"],
+  ["vintage", "vintage clothing", "WHO"],
+  ["brunch", "brunch", "WHAT"],
+  ["cocktails", "craft cocktails", "VIBE"],
+  ["bookshops", "bookshops", "WHO"],
+  ["tacos", "tacos", "WHAT"],
+  ["dive-bars", "dive bars", "VIBE"],
+  ["yoga", "yoga studios", "WHO"],
+  ["sports-bars", "sports bars", "VIBE"],
+  ["fine-dining", "fine dining", "WHAT"],
+  ["big-box", "big-box retail", "WHAT"],
+] as const;
+
+/** d(t) in the source area, aligned with TWIN_TAGS: ranks gained over Nashville, clipped at ±25. */
+export const TWIN_SOURCE_D = [21, 18, 15, 12, 11, 17, 8, 6, 3, 9, -4, -14, -9, -18] as const;
+
+/** A candidate as S11 writes it: shared traits by the rule (d ≥ 10 in both), the key difference given. */
+function twinCandidate(key: string, label: string, rho: number, d: readonly number[], difference: readonly number[]): TwinCandidate {
+  return {
+    area: { key, label, metro: "austin" },
+    rho: v(rho),
+    n: d.length,
+    tags: TWIN_TAGS.map(([tagKey, tagLabel, family], i) => ({
+      key: tagKey,
+      label: tagLabel,
+      tagRef: null,
+      family,
+      source: v(TWIN_SOURCE_D[i]!),
+      target: v(d[i]!),
+    })),
+    shared: TWIN_TAGS.flatMap(([tagKey], i) => (TWIN_SOURCE_D[i]! >= 10 && d[i]! >= 10 ? [tagKey] : [])),
+    difference: difference.map((i) => TWIN_TAGS[i]![0]),
+  };
+}
+
+export const tasteTwins: { id: string; title: string; formulaIds: readonly string[]; payload: TwinPayload } = {
+  id: "D28",
+  title: "Taste Twins · East Nashville in Austin",
+  formulaIds: ["block.rank_delta"],
+  payload: {
+    source: { key: "east-nashville", label: "East Nashville", metro: "nashville" },
+    candidates: [
+      twinCandidate("holly", "Holly", 0.75, [16, 14, 19, 10, 7, -12, 11, 4, 5, 6, -2, -16, -11, -20], [5]),
+      twinCandidate("govalle", "Govalle", 0.51, [9, 4, 12, 14, -3, 6, 2, -6, 18, 13, 5, -10, -15, -4], [4]),
+      twinCandidate("east-cesar-chavez", "East Cesar Chavez", 0.27, [12, -5, 8, 3, 14, -8, 16, 2, 11, -2, -12, -3, 6, -9], [5, 1]),
+      twinCandidate("mueller", "Mueller", -0.12, [-6, 3, -9, 11, 2, 14, -4, 9, -11, -13, 17, 5, 8, -2], [0]),
+      twinCandidate("zilker", "Zilker", -0.55, [-10, -8, 4, -12, -3, 15, 7, -6, -2, -14, 19, 12, 16, 9], [0]),
+      {
+        area: { key: "rosedale", label: "Rosedale", metro: "austin" },
+        rho: none("budget_truncated"),
+        n: 0,
+        tags: [],
+        shared: [],
+        difference: [],
+      },
+    ],
+    clip: 25,
+    sharedMin: 10,
+    caption: "Similarity of taste signals, not rent, footfall or census.",
+  },
+};
+
 /** Display text and footnotes for the scorecard prose. */
 export const SCORECARD_BINDINGS: ProseBindings = {
   metrics: {
@@ -712,6 +1046,25 @@ export const FIXTURE_SOURCES: Readonly<Record<string, FigureSource>> = {
     href: null,
   },
   brands: { text: "Source: Qloo /v2/insights · brands · 1 request", requestId: "0007abab0000f007", href: null },
+  heatmap: {
+    text: "Source: Qloo /v2/insights · heatmap ← Austin · 2 maps + places sample · lift computed in code",
+    requestId: "0008acac0000f008",
+    href: null,
+  },
+  trending: { text: "Source: Qloo /v2/trending · 4 requests · trend computed in code", requestId: "0009bdbd0000f009", href: null },
+  tenant: { text: "Source: Qloo /v2/insights · brands at the site and in the city · 2 requests · computed in code", requestId: "0001aaaa0000f001", href: null },
+  position: { text: "Source: Culture Terminal analysis · five metrics from four exhibits", requestId: null, href: null },
+  neighbourhood: {
+    text: "Source: Qloo /v2/insights · 4 domains with explainability · 4 requests · edges computed in code",
+    requestId: "0002abab0000f002",
+    href: null,
+  },
+  tasteMap: {
+    text: "Source: Qloo /v2/insights · 12 triangular calls · MDS computed in code",
+    requestId: "0005acac0000f005",
+    href: null,
+  },
+  twins: { text: "Source: Qloo /v2/insights · tags · 9 requests · computed in code", requestId: "0008bdbd0000f008", href: null },
   priors: { text: "Source: ANALYST priors recorded before any data", requestId: null, href: null },
 };
 
@@ -731,4 +1084,16 @@ export const ALL_FIXTURES = [
   blockDna,
   sponsorQuadrant,
   priorsScorecard,
+  austinLiftMap,
+  coarseLiftMap,
+  tenantSlope,
+  marketSlope,
+  momentumStrip,
+  tastePosition,
+  tastePositionNoSignal,
+  codedSimilarityMap,
+  nearestWithRivals,
+  metroSplitSelfDescribed,
+  ageDumbbellSelfDescribed,
+  neighbourhood,
 ] as const;

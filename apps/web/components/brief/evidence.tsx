@@ -18,6 +18,8 @@ import { Prose } from "./prose";
 function KeyFigure({ figure, live }: { figure: BriefKeyFigure; live: boolean }) {
   const item = "flex min-w-[132px] flex-1 flex-col gap-1.5 border-l border-line px-4 py-0.5 first:border-l-0 first:pl-0";
   const metric = figure.metric;
+  // The head of the metric's display; the rest of it prints on the line underneath (lib/brief key-figures).
+  const value = figure.value ?? metric?.text ?? "";
   if (figure.state === "pending" || !metric || figure.footnote === null) {
     return (
       <div className={item} data-key-figure="pending">
@@ -34,7 +36,7 @@ function KeyFigure({ figure, live }: { figure: BriefKeyFigure; live: boolean }) 
     <div className={item} data-key-figure={metric.id}>
       <NoteTrigger
         n={figure.footnote}
-        label={`${metric.unavailable ? "Not measured" : metric.text}, note ${figure.footnote}: open its source`}
+        label={`${metric.unavailable ? "Not measured" : value}, note ${figure.footnote}: open its source`}
         className="group flex items-start gap-0.5 self-start rounded-brief text-left"
       >
         {metric.unavailable ? (
@@ -42,7 +44,9 @@ function KeyFigure({ figure, live }: { figure: BriefKeyFigure; live: boolean }) 
             Not measured
           </span>
         ) : (
-          <span className="type-key-figure text-ink decoration-1 underline-offset-4 group-hover:underline">{metric.text}</span>
+          <span className="type-key-figure text-ink decoration-1 underline-offset-4 group-hover:underline" title={value === metric.text ? undefined : metric.text}>
+            {value}
+          </span>
         )}
         <span className="text-[11px] leading-4 font-semibold text-accent">{figure.footnote}</span>
       </NoteTrigger>

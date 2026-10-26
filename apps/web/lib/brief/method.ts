@@ -152,6 +152,7 @@ export function interpretation(state: RunState): Interpretation | null {
     reframe: intent.safety.reframe,
     resolves: state.resolves.map((r) => ({
       mention: r.mention,
+      entityType: r.entityType,
       match: r.match,
       matchLabel: MATCH_LABEL[r.match],
       name: r.name,

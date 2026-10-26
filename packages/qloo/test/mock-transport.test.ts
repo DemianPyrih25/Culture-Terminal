@@ -46,6 +46,7 @@ async function allowlistCases(): Promise<Case[]> {
   const artist = await firstId("Artist Nova", "urn:entity:artist");
   const nashville = await firstId("Nashville", "urn:entity:locality");
   const austin = await firstId("Austin", "urn:entity:locality");
+  const place = await firstId("Lantern Row Coffee", "urn:entity:place");
   const insights = (type: string, params: QlooParams): Case => ({ path: "/v2/insights", type, params: { "filter.type": type, ...params } });
   const media = (type: string): Case =>
     insights(type, {
@@ -73,21 +74,21 @@ async function allowlistCases(): Promise<Case[]> {
     }),
     insights("urn:entity:brand", { "signal.location.query": "Austin", "filter.results.entities": [brand, brandB, artist] }),
     media("urn:entity:artist"),
+    insights("urn:entity:artist", { "signal.interests.entities": [brand], "filter.results.entities": [artist] }),
     media("urn:entity:podcast"),
     media("urn:entity:tv_show"),
     media("urn:entity:movie"),
     insights("urn:entity:person", { "signal.location": austin, take: 10 }),
     insights("urn:entity:person", { "signal.location": nashville, "filter.results.entities": ["ent-person-01", "ent-person-02", "ent-person-03"] }),
+    insights("urn:entity:person", { "signal.demographics.age": ["24_and_younger"], "filter.results.entities": ["ent-person-01", "ent-person-02", "ent-person-03"] }),
     insights("urn:entity:destination", { "signal.interests.entities": [artist], "filter.geocode.country_code": "US", take: 50, page: 2 }),
     insights("urn:entity:destination", { "signal.interests.entities": [artist], "filter.results.entities": ["ent-dest-01", "ent-dest-02"] }),
     insights("urn:entity:place", { "filter.location": austin, "filter.tags": ["urn:tag:category:place:cafe"], take: 50, page: 1 }),
+    insights("urn:entity:place", { "signal.interests.entities": [artist], "filter.results.entities": [place] }),
+    insights("urn:entity:place", { "signal.location": austin, "filter.results.entities": [place] }),
     insights("urn:heatmap", { "filter.location": nashville, "signal.interests.tags": [PROBE_FACTS.heatmapBaselineTag] }),
-    insights("urn:heatmap", {
-      "filter.location": austin,
-      "signal.interests.tags": ["urn:tag:genre:place:mock_ramen", "urn:tag:category:place:cafe"],
-      "operator.signal.interests.tags": "union",
-      "signal.interests.entities": [brand],
-    }),
+    insights("urn:heatmap", { "filter.location": austin, "signal.interests.tags": ["urn:tag:genre:place:mock_ramen", "urn:tag:genre:place:restaurant:bar"] }),
+    insights("urn:heatmap", { "filter.location": austin, "signal.interests.entities": [brand] }),
     insights("urn:tag", { "signal.location": POLYGON, take: 50 }),
     insights("urn:tag", { "signal.location.query": "East Nashville, Nashville", "filter.tag.types": ["urn:tag:customer_identity:qloo"], take: 50 }),
     insights("urn:demographics", { "signal.interests.entities": [brand, brandB, artist], take: 50 }),

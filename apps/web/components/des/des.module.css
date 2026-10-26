@@ -1,0 +1,11 @@
+/*
+ * The tearsheet's figure rule (Concept A, D36), as the brief page has it: a figure keeps its natural
+ * width on a narrow window and scrolls sideways rather than shrink its text.
+ */
+.figure [data-view="plot"] {
+  overflow-x: auto;
+}
+
+.figure [data-view="plot"] svg[width="100%"] {
+  min-width: var(--plot-min, 0px);
+}

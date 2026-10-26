@@ -8,3 +8,4 @@ export * from "./repos/runEvents";
 export * from "./repos/kv";
 export * from "./repos/qloo";
 export * from "./repos/ledger";
+export * from "./repos/showcases";

@@ -1,0 +1,356 @@
+{
+  "$comment": "Pre-registered Reality Check cases (SPEC §6.6, D27); eval/README.md has the rule. Twelve public, verifiable real-world choices, three of each kind and no seed twice within a kind: a brand's collaboration partner, an artist's tour sponsor, the secondary markets a comedian's tour booked, and the neighbourhood of a brand's own direct-to-consumer store in Austin or Nashville. Each case names a seed and the real choice, states the fact in one line with the date it became public, and cites the public sources it was checked against on the accessed date. Names and sources only (D29): no Qloo values, ids or request ids. A comedian choice is the tour and every config/metros.json secondary market its cited sources list; a neighbourhood choice keeps the name its source uses, the source's street address, and the gazetteer area that address falls in, fixed here before any run. public_date is the announcement or opening date a source states, else the earliest source's date. showcase names the config/showcases.json question that names the seed, or null. scoring holds the scoring rules, fixed with the cases.",
+  "registered": "2026-10-23",
+  "caveats": [
+    "Leakage: co-engagement after a choice became public may already be in Qloo's data and flatter the real choice; cases made public later leak less, and renewed or repeated partnerships leak more.",
+    "Small n: twelve cases, three per kind; report medians with n, not significance.",
+    "Real choices also reflect money, routing, venue and lease availability, not only taste fit.",
+    "A case whose seed or choice does not resolve exactly in Qloo is reported as unresolved, never replaced.",
+    "Showcase seed: rc07's seed is the seed of showcase S6, whose output was seen during development (SPEC plans this check); medians are reported with and without it."
+  ],
+  "scoring": [
+    "Brand collaboration and tour sponsor: a GHOST hit is a pick that resolves to the same Qloo entity as the registered choice. A pick of another real partner of the seed is not a hit and is scored as a distractor like any other pick.",
+    "Neighbourhood: a GHOST pick is a hit when it resolves to the registered area_id, so a pick naming another neighbourhood in the same gazetteer area counts.",
+    "Comedian: candidates are config/metros.json secondary markets only, and distractors are drawn only from those the tour did not book. Each booked market's percentile is taken among the distractors, and the case score is the median across its booked markets. A GHOST hit is any booked market among its top 5, reported beside the chance of a hit given the booked share of the secondary markets.",
+    "Sponsor choice: a carrier, payment or ticketing programme that sponsors many unrelated tours is not registered as the choice; when a source names one beside a category sponsor, the category sponsor is registered.",
+    "Showcase seeds: SUMMARY.md reports each median with and without the cases whose showcase is set."
+  ],
+  "cases": [
+    {
+      "id": "rc01",
+      "kind": "brand_collaboration",
+      "context": "brand collaboration",
+      "showcase": null,
+      "seed": { "name": "Rare Beauty", "entity_type": "brand" },
+      "choice": { "name": "Béis", "entity_type": "brand" },
+      "claim": "Rare Beauty and Béis released a limited-edition collection of three travel makeup accessories on 3 November 2025.",
+      "public_date": "2025-10-29",
+      "sources": [
+        {
+          "url": "https://remezcla.com/beauty/beis-rare-beauty-on-the-go-travel-collab/",
+          "publisher": "Remezcla",
+          "published": "2025-11-03",
+          "accessed": "2026-10-23"
+        },
+        {
+          "url": "https://www.glossy.co/beauty/glossy-pop-newsletter-inside-rare-beautys-big-year-of-collaborations/",
+          "publisher": "Glossy",
+          "published": "2025-11-14",
+          "accessed": "2026-10-23"
+        }
+      ],
+      "note": "Remezcla says the collection was teased at an event on 29 October 2025, the date registered. A second Béis and Rare Beauty collection followed on 12 October 2026, a leakage risk. Rare Beauty ran other brand collaborations in 2025; only Béis is registered."
+    },
+    {
+      "id": "rc02",
+      "kind": "brand_collaboration",
+      "context": "brand collaboration",
+      "showcase": null,
+      "seed": { "name": "Crocs", "entity_type": "brand" },
+      "choice": { "name": "McDonald's", "entity_type": "brand" },
+      "claim": "McDonald's and Crocs released a McDonaldland footwear collaboration with Grimace, Birdie and Hamburglar designs.",
+      "public_date": "2023-11-13",
+      "sources": [
+        {
+          "url": "https://www.hawaiinewsnow.com/2023/11/13/mcdonalds-announces-collab-with-crocs/",
+          "publisher": "Hawaii News Now (Gray News)",
+          "published": "2023-11-13",
+          "accessed": "2026-10-23"
+        }
+      ],
+      "note": null
+    },
+    {
+      "id": "rc03",
+      "kind": "brand_collaboration",
+      "context": "brand collaboration",
+      "showcase": null,
+      "seed": { "name": "Oreo", "entity_type": "brand" },
+      "choice": { "name": "Coca-Cola", "entity_type": "brand" },
+      "claim": "Oreo and Coca-Cola announced two limited-edition co-branded products, the Oreo Coca-Cola Sandwich Cookie and Coca-Cola Oreo Zero Sugar, on sale from September 2024.",
+      "public_date": "2024-08-13",
+      "sources": [
+        {
+          "url": "https://www.fooddive.com/news/oreo-coca-cola-mondelez-partnership-limited-time-snacking/723614/",
+          "publisher": "Food Dive",
+          "published": "2024-08-13",
+          "accessed": "2026-10-23"
+        }
+      ],
+      "note": null
+    },
+    {
+      "id": "rc04",
+      "kind": "tour_sponsor",
+      "context": "tour presenting sponsor",
+      "showcase": null,
+      "seed": { "name": "Zach Top", "entity_type": "artist" },
+      "choice": { "name": "Coors Banquet", "entity_type": "brand" },
+      "sponsor_category": "beer",
+      "claim": "Coors Banquet presents the fall 2026 dates of Zach Top's Cold Beer & Country Music Tour, announced on 4 June 2026.",
+      "public_date": "2026-06-04",
+      "sources": [
+        {
+          "url": "https://www.broadwayworld.com/bwwmusic/article/Zach-Top-Extends-2026-Cold-Beer-Country-Music-Tour-20260604",
+          "publisher": "BroadwayWorld",
+          "published": "2026-06-04",
+          "accessed": "2026-10-23"
+        },
+        {
+          "url": "https://musicpressbox.antimusic.com/26/c0604zach_top_extends_2026_cold_beer___country_music_tour.shtml",
+          "publisher": "antiMusic",
+          "published": "2026-06-04",
+          "accessed": "2026-10-23"
+        }
+      ],
+      "note": "The tour's June 2025 and April 2026 extensions named no presenting sponsor (Music Row, 2025-06-20; Grateful Web, 2026-04-11). Top named Coors Banquet on his rider in a July 2025 interview (Wide Open Country, 2025-07-24), so the affinity was public before the deal."
+    },
+    {
+      "id": "rc05",
+      "kind": "tour_sponsor",
+      "context": "tour sponsor",
+      "showcase": null,
+      "seed": { "name": "Lainey Wilson", "entity_type": "artist" },
+      "choice": { "name": "Wrangler", "entity_type": "brand" },
+      "sponsor_category": "apparel_footwear",
+      "claim": "Lainey Wilson's 2024 Country's Cool Again Tour is sponsored by T-Mobile and Wrangler.",
+      "public_date": "2023-10-20",
+      "sources": [
+        {
+          "url": "https://www.bbrmusicgroup.com/lainey-wilson-announces-2024-countrys-cool-north-american-tour/",
+          "publisher": "BBR Music Group",
+          "published": "2023-10-20",
+          "accessed": "2026-10-23"
+        }
+      ],
+      "note": "The source names two sponsors. Wrangler is registered under the sponsor rule in scoring: T-Mobile's deal is a ticket-access programme that recurs across unrelated tours. A multi-year Wrangler apparel partnership with Wilson followed, with a debut collection in September 2024 (FashionUnited), so post-event co-engagement is especially likely for this pair."
+    },
+    {
+      "id": "rc06",
+      "kind": "tour_sponsor",
+      "context": "tour presenting sponsor",
+      "showcase": null,
+      "seed": { "name": "Alabama", "entity_type": "artist" },
+      "choice": { "name": "Kenworth", "entity_type": "brand" },
+      "sponsor_category": "auto",
+      "claim": "Kenworth sponsors Alabama's Roll On II North America Tour: the deal was reported in June 2023, and the band's 2024 dates are presented by Kenworth.",
+      "public_date": "2023-06-09",
+      "sources": [
+        {
+          "url": "https://fleetowner.com/perspectives/five-good-things/blog/21267571/five-good-things-rocking-and-rolling-down-the-road",
+          "publisher": "FleetOwner",
+          "published": "2023-06-09",
+          "accessed": "2026-10-23"
+        },
+        {
+          "url": "https://www.thealabamaband.com/news/Announces-2024-Roll-On-II-North-America-Tour",
+          "publisher": "Alabama (official site)",
+          "published": "2024-03-21",
+          "accessed": "2026-10-23"
+        }
+      ],
+      "note": "The seed is the country band, not the state. The deal renews a tie from 1988 to 2003, when Kenworth sponsored the band's annual Truckers Appreciation Concert (FleetOwner), so leakage is likely strongest in this case."
+    },
+    {
+      "id": "rc07",
+      "kind": "comedian_market",
+      "context": "comedian's secondary-market stops",
+      "showcase": "S6",
+      "seed": { "name": "Nate Bargatze", "entity_type": "person" },
+      "choice": {
+        "entity_type": "locality",
+        "tour": "Big Dumb Eyes World Tour",
+        "markets": [
+          "chattanooga",
+          "richmond",
+          "raleigh",
+          "columbus",
+          "kansas_city",
+          "little_rock",
+          "louisville",
+          "oklahoma_city",
+          "tulsa",
+          "cincinnati",
+          "charlotte",
+          "greenville",
+          "salt_lake_city",
+          "boise"
+        ]
+      },
+      "claim": "Nate Bargatze announced his Big Dumb Eyes World Tour on 2 December 2024, with 2025 dates in the 14 secondary markets listed, among them Tulsa's BOK Center on 19 October 2025.",
+      "public_date": "2024-12-02",
+      "sources": [
+        {
+          "url": "https://news.pollstar.com/2024/12/02/nate-bargatze-announces-big-dumb-eyes-world-tour/",
+          "publisher": "Pollstar",
+          "published": "2024-12-02",
+          "accessed": "2026-10-23"
+        },
+        {
+          "url": "https://fox23.com/news/comedian-nate-bargatze-to-stop-in-tulsa-as-part-of-his-big-dumb-eyes-world-tour",
+          "publisher": "FOX23 Tulsa",
+          "published": "2024-12-02",
+          "accessed": "2026-10-23"
+        }
+      ],
+      "note": "The Pollstar list is the booking. The North Little Rock date is registered as little_rock. Dates added after the announcement are not registered."
+    },
+    {
+      "id": "rc08",
+      "kind": "comedian_market",
+      "context": "comedian's secondary-market stops",
+      "showcase": null,
+      "seed": { "name": "Taylor Tomlinson", "entity_type": "person" },
+      "choice": {
+        "entity_type": "locality",
+        "tour": "Nobody Asked You To Do That Tour",
+        "markets": [
+          "spokane",
+          "salt_lake_city",
+          "boise",
+          "raleigh",
+          "columbus",
+          "charlotte",
+          "richmond",
+          "des_moines",
+          "indianapolis",
+          "cincinnati"
+        ]
+      },
+      "claim": "Taylor Tomlinson's Nobody Asked You To Do That Tour announced 2027 theatre dates on 16 September 2026 in the 10 secondary markets listed, from Spokane on 4 February to Cincinnati on 22 May 2027.",
+      "public_date": "2026-09-16",
+      "sources": [
+        {
+          "url": "https://news.pollstar.com/2026/09/16/taylor-tomlinson-announces-2027-dates-for-nobody-asked-you-to-do-that-tour/",
+          "publisher": "Pollstar",
+          "published": "2026-09-16",
+          "accessed": "2026-10-23"
+        }
+      ],
+      "note": "The tour's 2026 dates in the same list are club shows, none in a secondary market. The 2027 shows fall after registration; the bookings are the choice."
+    },
+    {
+      "id": "rc09",
+      "kind": "comedian_market",
+      "context": "comedian's secondary-market stops",
+      "showcase": null,
+      "seed": { "name": "Leanne Morgan", "entity_type": "person" },
+      "choice": {
+        "entity_type": "locality",
+        "tour": "The Time of Our Lives Tour",
+        "markets": [
+          "omaha",
+          "richmond",
+          "memphis",
+          "birmingham",
+          "chattanooga",
+          "greenville",
+          "oklahoma_city",
+          "louisville",
+          "charlotte",
+          "raleigh",
+          "cincinnati",
+          "knoxville"
+        ]
+      },
+      "claim": "Leanne Morgan announced The Time of Our Lives Tour on 24 March 2026 as a 32-market run from June to December 2026, booking the 12 secondary markets listed.",
+      "public_date": "2026-03-24",
+      "sources": [
+        {
+          "url": "https://www.313presents.com/news/detail/comedian-leanne-morgan-brings-the-time-of-our-lives-tour-to-the-fox-theatre-friday-october-16",
+          "publisher": "313 Presents",
+          "published": "2026-03-24",
+          "accessed": "2026-10-23"
+        },
+        {
+          "url": "https://www.foxcarolina.com/2026/03/24/comedian-leanne-morgan-brings-2026-tour-greenville/",
+          "publisher": "FOX Carolina",
+          "published": "2026-03-24",
+          "accessed": "2026-10-23"
+        }
+      ],
+      "note": "The 313 Presents release lists all 32 dates. The Cedar Park date is in the Austin metro, a major market, so it is not registered. Shows from 25 October 2026 on fall after registration; the bookings are the choice."
+    },
+    {
+      "id": "rc10",
+      "kind": "dtc_neighbourhood",
+      "context": "DTC store neighbourhood in Austin",
+      "showcase": null,
+      "seed": { "name": "Skims", "entity_type": "brand" },
+      "choice": {
+        "name": "Domain Northside",
+        "entity_type": "neighbourhood",
+        "metro": "austin",
+        "area_id": "north_burnet",
+        "address": "3121 Palm Way, Suite 124, Austin, TX"
+      },
+      "claim": "Skims opened a permanent store at Domain Northside in North Austin on 28 August 2024.",
+      "public_date": "2024-08-28",
+      "sources": [
+        {
+          "url": "https://www.cbsaustin.com/news/local/skims-opens-store-in-the-domain-northside-next-to-apple",
+          "publisher": "CBS Austin",
+          "published": "2024-08-28",
+          "accessed": "2026-10-23"
+        },
+        {
+          "url": "https://communityimpact.com/austin/north-northwest-austin/business/2024/09/03/skims-opens-permanent-domain-northside-store",
+          "publisher": "Community Impact",
+          "published": "2024-09-03",
+          "accessed": "2026-10-23"
+        }
+      ],
+      "note": "Community Impact says Skims ran a pop-up at Domain Northside in November 2023, so the district was public as its choice before the store opened. The address lies well inside the North Burnet planning area."
+    },
+    {
+      "id": "rc11",
+      "kind": "dtc_neighbourhood",
+      "context": "DTC store neighbourhood in Nashville",
+      "showcase": null,
+      "seed": { "name": "Jones Road", "entity_type": "brand" },
+      "choice": {
+        "name": "12 South",
+        "entity_type": "neighbourhood",
+        "metro": "nashville",
+        "area_id": "zcta_37204",
+        "address": "2306 12th Ave S, Nashville, TN 37204"
+      },
+      "claim": "Jones Road opened its first Tennessee store in Nashville's 12 South neighbourhood, officially on 12 January 2026.",
+      "public_date": "2026-01-12",
+      "sources": [
+        {
+          "url": "https://whatnow.com/nashville/retail/cult-favorite-beauty-brand-opens-first-tennessee-store-in-nashville/",
+          "publisher": "What Now Nashville",
+          "published": "2026-01-13",
+          "accessed": "2026-10-23"
+        }
+      ],
+      "note": "The store soft-opened during the 2025 holiday season, before the official opening. The area is a ZIP area that also holds Berry Hill."
+    },
+    {
+      "id": "rc12",
+      "kind": "dtc_neighbourhood",
+      "context": "DTC store neighbourhood in Nashville",
+      "showcase": null,
+      "seed": { "name": "Eberjey", "entity_type": "brand" },
+      "choice": {
+        "name": "Wedgewood-Houston",
+        "entity_type": "neighbourhood",
+        "metro": "nashville",
+        "area_id": "zcta_37203",
+        "address": "1209 Brown Street, Nashville, TN"
+      },
+      "claim": "Eberjey opened a Nashville store at 1209 Brown Street in the Wedgewood-Houston neighbourhood.",
+      "public_date": "2026-06-03",
+      "sources": [
+        {
+          "url": "https://www.wsmv.com/2026/06/03/eberjey-opens-nashville-store-wedgewood-houston/",
+          "publisher": "WSMV 4",
+          "published": "2026-06-03",
+          "accessed": "2026-10-23"
+        }
+      ],
+      "note": "The area is a ZIP area that also holds the Gulch, Music Row and part of Midtown, so a pick of any of them resolves to the same area."
+    }
+  ]
+}

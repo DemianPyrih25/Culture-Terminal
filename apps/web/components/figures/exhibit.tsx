@@ -1,15 +1,20 @@
-import { VIZ_COMPAT, type DatasetEnvelope } from "@ct/contracts";
+import type { DatasetEnvelope } from "@ct/contracts";
 import type { ReactNode } from "react";
 import { DivergingBars, type DivergingBarsOptions } from "./diverging-bars";
 import { FigureFrame, type FigureMeta } from "./figure-frame";
+import { LiftMap, type LiftMapOptions } from "./lift-map";
 import { MatrixGrid, type MatrixGridOptions } from "./matrix-grid";
+import { MomentumStrip, type MomentumStripOptions } from "./momentum-strip";
+import { PositionCard, type PositionCardOptions } from "./position-card";
 import { QuadrantScatter, type QuadrantScatterOptions } from "./quadrant-scatter";
 import { RankedTable, slateToRanked, type RankedTableOptions } from "./ranked-table";
 import { ScorecardTable, type ScorecardOptions } from "./scorecard-table";
+import { SlopeChart, type SlopeChartOptions } from "./slope-chart";
 
 /**
  * One exhibit from its dataset envelope: code picks the family by VIZ_COMPAT[kind] (PLAN §10.1),
- * never the model. Families not built yet render a framed placeholder that names them.
+ * never the model. Every DatasetKind has its family; the switch is exhaustive, so a new kind fails
+ * the type check until it is drawn.
  */
 
 /** Display options per dataset kind, e.g. { Bars: { display: "split" } } for a head-to-head. */
@@ -20,6 +25,10 @@ export interface ExhibitDisplay {
   Bars?: DivergingBarsOptions;
   Quadrant?: QuadrantScatterOptions;
   Scorecard?: ScorecardOptions;
+  Slope?: SlopeChartOptions;
+  GeoLift?: LiftMapOptions;
+  Momentum?: MomentumStripOptions;
+  Position?: PositionCardOptions;
 }
 
 export type ExhibitProps = Omit<FigureMeta, "title"> & {
@@ -57,12 +66,23 @@ export function Exhibit({ dataset, display = {}, ...rest }: ExhibitProps) {
       return <QuadrantScatter {...meta} {...display.Quadrant} data={dataset.payload} />;
     case "Scorecard":
       return <ScorecardTable {...meta} {...display.Scorecard} data={dataset.payload} />;
-    default:
-      return <FigurePending {...meta} note={`${VIZ_COMPAT[dataset.kind]} · this figure family is not built yet`} />;
+    case "Slope":
+      return <SlopeChart {...meta} {...display.Slope} data={dataset.payload} />;
+    case "GeoLift":
+      return <LiftMap {...meta} {...display.GeoLift} data={dataset.payload} />;
+    case "Momentum":
+      return <MomentumStrip {...meta} {...display.Momentum} data={dataset.payload} />;
+    case "Position":
+      return <PositionCard {...meta} {...display.Position} data={dataset.payload} />;
+    default: {
+      // Exhaustive: a new DatasetKind fails the type check here. At run time (a newer server) it frames a note.
+      const unknown: never = dataset;
+      return <FigurePending {...meta} note={`${(unknown as DatasetEnvelope).kind} · no figure family for this kind`} />;
+    }
   }
 }
 
-/** A framed figure whose plot is not drawable yet: a dataset still computing, or a later family. */
+/** A framed figure whose plot is not drawable yet: a dataset still computing or still loading. */
 export function FigurePending({ note, ...meta }: FigureMeta & { note: string }) {
   const box = (
     <div className="flex h-[120px] items-center justify-center bg-canvas" role="status">

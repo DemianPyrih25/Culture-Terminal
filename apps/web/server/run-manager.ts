@@ -9,7 +9,6 @@ import {
   type EventInput,
   type Intent,
   type Lane,
-  type Mode,
   type QlooSearchEntity,
   type RunState,
   type TerminalRunStatus,
@@ -27,6 +26,7 @@ import {
   type AnthropicLike,
 } from "@ct/agent";
 import {
+  clearIpHashes,
   countRunsSince,
   createRun,
   getRun,
@@ -44,12 +44,16 @@ import {
 import type { QlooClient } from "@ct/qloo";
 import { normaliseName, searchParams } from "@ct/quant";
 import { z } from "zod";
+import { laneModeOf, type LaneMode } from "./breakers";
 import type { EventBus } from "./event-bus";
 import { appendRunEvent, readAllEvents, readEventAt, readLastEvent, sameEvent } from "./event-store";
 import { buildFakeScript, FAKE_MODEL, FAKE_QUESTION } from "./fake-script";
-import { PRE_RUN_USD, SpendMeter, todayLlmUsd } from "./llm-spend";
+import { preRunUsd, SpendMeter, todayLlmUsd } from "./llm-spend";
+import { kvLocalities } from "./localities";
 import { log } from "./log";
 import { QUESTION_HASH_PREFIX, questionHash } from "./question-hash";
+import { countLaneRunsSince } from "./run-counts";
+import { DEFAULT_VISITOR_LIMITS, VISITOR_HASH_RETENTION_MS, visitorWait, visitorWaitMessage, type VisitorLimits } from "./visitor-limits";
 
 /**
  * not_accepting: draining for a restart (503, retry). busy: no free slot (429, retry soon). limited:
@@ -109,7 +113,8 @@ export function isActiveStatus(status: string): boolean {
 /** Every fake run's question_hash starts with this, so they can be counted and purged together. */
 export const FAKE_HASH_PREFIX = "fake:";
 const HOUR_MS = 3_600_000;
-// startFakeRun purges old fake runs at most this often.
+const DAY_MS = 24 * HOUR_MS;
+// startFakeRun purges old fake runs, and a visitor's live run clears old visitor hashes, at most this often.
 const PURGE_EVERY_MS = 10 * 60_000;
 
 /** Another writer stored a different event at the seq a run loop was about to write. */
@@ -147,7 +152,20 @@ const PARENT_STATUSES: ReadonlySet<string> = new Set<RunStatus>(["completed", "i
 const STORED_PINS = z.record(z.string(), z.string()).nullable();
 const BUSY_REASON = "Too many runs are active. Try again shortly.";
 const NOT_ACCEPTING_REASON = "The server is restarting. Try again in a moment.";
-const PAUSED_REASON = "Live analysis is paused. Recorded runs are still available.";
+const PAUSED_REASON = "Live analysis is paused. Showcases and replays still work.";
+const VISITOR_ACTIVE_REASON = "Your last live brief is still running. Ask again once it ends.";
+const DAILY_REASON = "Today's limit for live runs is reached. Showcases and replays still work.";
+const JUDGE_DAILY_REASON = "The judge lane's daily limit for live runs is reached. Showcases and replays still work.";
+
+/**
+ * Agent-run slots per lane in one process (SPEC §10.4: 3 in all, the judge lane's 1 among them):
+ * `total` in all, of which `judge` are held for the judge lane, never every one. Pass 0 for `judge`
+ * while the judge lane is closed, so no slot waits for it. A judge run also needs the total to have room.
+ */
+export function laneSlots(total: number, judge: number): Record<Lane, number> {
+  const held = Math.max(0, Math.min(judge, total - 1));
+  return { public: total - held, judge: Math.max(0, Math.min(judge, total)) };
+}
 
 /** What agent runs take from the process. Getters, so a missing key refuses live runs and nothing else. */
 export interface AgentDeps {
@@ -155,8 +173,11 @@ export interface AgentDeps {
   qloo: () => QlooClient;
   /** Null when ANTHROPIC_API_KEY is unset. */
   anthropic: () => AnthropicLike | null;
-  /** The current service mode (kv "mode"). */
-  mode: () => Promise<Mode>;
+  /**
+   * The lane's mode as the breakers decide it (breakers.ts), or a bare mode. replay_only refuses
+   * the run with the decision's message.
+   */
+  mode: (lane: Lane) => Promise<LaneMode>;
 }
 
 export type RunAgentFn = (options: AgentRunOptions) => Promise<AgentRunResult>;
@@ -177,6 +198,12 @@ export interface AgentRunRequest {
    * The caller vouches that it belongs to this question; it never comes from the browser.
    */
   intent?: Intent;
+  /**
+   * The visitor (client-ip.ts clientKey: a salted hash, never the address), recorded on the run as
+   * ip_hash and counted by the public lane's per-visitor limits; null or absent for a trusted caller
+   * (showcases, dev tools) and when the address is unknown.
+   */
+  client?: string | null;
 }
 
 /** A needs_input picker answer (D20): the waiting run and the opaque key of the chosen candidate. */
@@ -184,6 +211,8 @@ export interface PickerAnswer {
   runId: string;
   key: string;
   lane: Lane;
+  /** As AgentRunRequest.client. */
+  client?: string | null;
 }
 
 export interface RunManagerOptions {
@@ -203,18 +232,32 @@ export interface RunManagerOptions {
   agent?: AgentDeps;
   /** The agent entry point (default: runAgent from @ct/agent); tests inject a scripted one. */
   runAgent?: RunAgentFn;
-  /** Agent runs any process may start per rolling hour, counted in the database. */
+  /** Public-lane agent runs any process may start per rolling hour, counted in the database. */
   agentHourlyCap?: number;
+  /** Judge-lane agent runs any process may start per rolling hour, counted apart (default 20, SPEC §10.4). */
+  judgeHourlyCap?: number;
+  /** Agent runs of both lanes any process may start per rolling 24 hours (default 200, SPEC §10.4 global). */
+  agentDailyCap?: number;
+  /** Judge-lane agent runs any process may start per rolling 24 hours (default 60, SPEC §10.4). */
+  judgeDailyCap?: number;
   /**
-   * Agent runs this process holds at once (default 3, PLAN §10.4). They never share fakeMaxActive:
-   * anyone may start a test run, and test runs must not be able to take a live run's slot.
+   * Agent runs of both lanes this process holds at once (default 3, PLAN §10.4 global concurrency),
+   * judgeMaxActive of them held for the judge lane (laneSlots). They never share fakeMaxActive: anyone
+   * may start a test run, and test runs must not be able to take a live run's slot.
    */
   agentMaxActive?: number;
+  /** Of agentMaxActive, the slots held for judge-lane runs (default 1, SPEC §10.4); 0 while the judge lane is closed. */
+  judgeMaxActive?: number;
+  /** The public lane's per-visitor limits (default 1 at once, 3 an hour, 8 a day, SPEC §10.4). */
+  visitorLimits?: VisitorLimits;
   /**
-   * The daily LLM breaker in USD. A run starts only while today's spend, plus PRE_RUN_USD for it and
-   * for each run in flight here (less what each has recorded), stays within it.
+   * The daily LLM breaker in USD. A run starts only while today's spend, plus its pre-run reserve
+   * (PRE_RUN_USD, or PRE_RUN_ECONOMY_USD on the economy ANALYST) and that of each run in flight here
+   * (less what each has recorded), stays within its lane's cap: llmLaneUsdCap's, else this.
    */
   llmDailyUsdCap?: number;
+  /** Per-lane caps (breakers.ts laneBudget): the public lane's leaves the judge lane its reserve. */
+  llmLaneUsdCap?: Partial<Record<Lane, number>>;
   /** How long an agent run may go before the manager stops it (default: its hard stop plus a minute). */
   agentWatchdogMs?: number;
   /** After a stop, how long runAgent gets to return before the run ends without it. */
@@ -234,8 +277,14 @@ interface ActiveRun {
   controller: AbortController;
   done: Promise<void>;
   kind: "fake" | "agent";
+  /** An agent run's lane; null for a test run. */
+  lane: Lane | null;
+  /** The visitor a public run counts against while it runs (visitor-limits.ts); null when none does. */
+  visitor: string | null;
   /** An agent run's spend meter, set once admission passes: from then on its reserve counts. */
   spend: SpendMeter | null;
+  /** What the run holds of today's budget until it records its own spend (preRunUsd of its ANALYST). */
+  reserveUsd: number;
 }
 
 type Settled<T> = { kind: "result"; value: T } | { kind: "threw"; error: unknown } | { kind: "abandoned" };
@@ -424,6 +473,7 @@ interface AgentLaunch {
   pins: Record<string, string> | undefined;
   parent: { runId: string; caseSummary: string } | null;
   intent?: Intent;
+  client: string | null;
 }
 
 interface AgentClients {
@@ -555,8 +605,14 @@ export class RunManager {
   private readonly agent: AgentDeps | undefined;
   private readonly runAgentFn: RunAgentFn;
   private readonly agentHourlyCap: number;
+  private readonly judgeHourlyCap: number;
+  private readonly agentDailyCap: number;
+  private readonly judgeDailyCap: number;
   private readonly agentMaxActive: number;
+  private readonly slots: Record<Lane, number>;
+  private readonly visitorLimits: VisitorLimits;
   private readonly llmDailyUsdCap: number;
+  private readonly llmLaneUsdCap: Partial<Record<Lane, number>>;
   private readonly agentWatchdogMs: number;
   private readonly agentStopGraceMs: number;
   private readonly qlooEnabled: boolean;
@@ -566,6 +622,7 @@ export class RunManager {
   /** Tail of the admission queue: the hourly count and the insert run one start at a time. */
   private admission: Promise<unknown> = Promise.resolve();
   private lastPurgeAt = 0;
+  private lastForgetAt = 0;
   private accepting = true;
 
   constructor(options: RunManagerOptions) {
@@ -579,8 +636,14 @@ export class RunManager {
     this.agent = options.agent;
     this.runAgentFn = options.runAgent ?? runAgent;
     this.agentHourlyCap = options.agentHourlyCap ?? 20;
+    this.judgeHourlyCap = options.judgeHourlyCap ?? 20;
+    this.agentDailyCap = options.agentDailyCap ?? 200;
+    this.judgeDailyCap = options.judgeDailyCap ?? 60;
     this.agentMaxActive = options.agentMaxActive ?? 3;
+    this.slots = laneSlots(this.agentMaxActive, options.judgeMaxActive ?? 1);
+    this.visitorLimits = options.visitorLimits ?? DEFAULT_VISITOR_LIMITS;
     this.llmDailyUsdCap = options.llmDailyUsdCap ?? 1.4;
+    this.llmLaneUsdCap = options.llmLaneUsdCap ?? {};
     this.agentWatchdogMs = options.agentWatchdogMs ?? AGENT_WATCHDOG_MS;
     this.agentStopGraceMs = options.agentStopGraceMs ?? AGENT_STOP_GRACE_MS;
     this.qlooEnabled = options.qlooEnabled ?? true;
@@ -603,7 +666,8 @@ export class RunManager {
     await this.active.get(runId)?.done;
   }
 
-  async startFakeRun(options: { seconds?: number } = {}): Promise<{ runId: string }> {
+  /** A test run; `client` (as AgentRunRequest.client) is recorded on its row and limits nothing. */
+  async startFakeRun(options: { seconds?: number; client?: string | null } = {}): Promise<{ runId: string }> {
     if (!this.accepting) throw new RunManagerError("not_accepting", NOT_ACCEPTING_REASON);
     if (this.activeCountOf("fake") >= this.fakeMaxActive) {
       throw new RunManagerError("busy", "Too many test runs are active. Try again shortly.");
@@ -614,7 +678,7 @@ export class RunManager {
     let release: () => void = () => {};
     const done = new Promise<void>((resolve) => (release = resolve));
     // Reserve the slot before the first await so concurrent starts respect fakeMaxActive and drain sees it.
-    this.active.set(runId, { controller, done, kind: "fake", spend: null });
+    this.active.set(runId, { controller, done, kind: "fake", lane: null, visitor: null, spend: null, reserveUsd: 0 });
     try {
       await this.admit(async () => {
         // Counted in the database, so started-then-cancelled runs count too: every run leaves rows.
@@ -633,6 +697,7 @@ export class RunManager {
           mode: "live",
           lane: "public",
           model: FAKE_MODEL,
+          ipHash: options.client ?? null,
         });
       });
     } catch (err) {
@@ -652,8 +717,9 @@ export class RunManager {
 
   /**
    * Starts an agent run (PLAN §4.1) on the agent slots, which fake runs never take. Admission checks
-   * the mode, the hourly cap and today's LLM budget, then creates the runs row; runAgent goes on in
-   * the background. A preview's intent skips CLERK; everything else runs as without it.
+   * the mode, the visitor's, hourly and daily limits and today's LLM budget, then creates the runs
+   * row; runAgent goes on in the background. A preview's intent skips CLERK; everything else runs as
+   * without it.
    */
   async startAgentRun(request: AgentRunRequest): Promise<{ runId: string }> {
     if (!this.accepting) throw new RunManagerError("not_accepting", NOT_ACCEPTING_REASON);
@@ -661,7 +727,7 @@ export class RunManager {
     if (question === "") throw new RunManagerError("invalid", "The question is empty.");
     const clients = this.agentClients();
     const parent = request.parentRunId ? await this.parentContext(request.parentRunId) : null;
-    const launch: AgentLaunch = { question, lane: request.lane, pins: normalisePins(request.pins), parent };
+    const launch: AgentLaunch = { question, lane: request.lane, pins: normalisePins(request.pins), parent, client: request.client ?? null };
     return this.launchAgent(request.intent ? { ...launch, intent: request.intent } : launch, clients);
   }
 
@@ -675,42 +741,65 @@ export class RunManager {
     if (!this.accepting) throw new RunManagerError("not_accepting", NOT_ACCEPTING_REASON);
     const clients = this.agentClients();
     // Checked again at admission; checked here too so a paused service makes no Qloo call.
-    if ((await clients.deps.mode()) === "replay_only") throw new RunManagerError("unavailable", PAUSED_REASON);
+    const paused = laneModeOf(await clients.deps.mode(answer.lane));
+    if (paused.mode === "replay_only") throw new RunManagerError("unavailable", paused.message ?? PAUSED_REASON);
     const picked = await this.resolvePick(answer, clients.qloo);
     const parent = picked.parentRunId ? await this.parentContext(picked.parentRunId) : null;
-    return this.launchAgent({ question: picked.question, lane: answer.lane, pins: picked.pins, parent }, clients);
+    return this.launchAgent(
+      { question: picked.question, lane: answer.lane, pins: picked.pins, parent, client: answer.client ?? null },
+      clients,
+    );
   }
 
   private async launchAgent(launch: AgentLaunch, clients: AgentClients): Promise<{ runId: string }> {
     const { question, lane, pins, parent, intent } = launch;
     if (!this.accepting) throw new RunManagerError("not_accepting", NOT_ACCEPTING_REASON);
-    if (this.activeCountOf("agent") >= this.agentMaxActive) {
+    // Each lane has slots of its own inside the total: public runs can never take the judge lane's.
+    if (this.activeAgentRuns(lane) >= this.slots[lane] || this.activeCountOf("agent") >= this.agentMaxActive) {
       throw new RunManagerError("busy", BUSY_REASON);
+    }
+    // The public lane's per-visitor limits (SPEC §10.4); the judge lane's are the lane's own.
+    const visitor = lane === "public" ? launch.client : null;
+    if (visitor !== null && this.activeVisitorRuns(visitor) >= this.visitorLimits.maxActive) {
+      throw new RunManagerError("limited", VISITOR_ACTIVE_REASON, Math.ceil(DEFAULT_RUN_LIMITS.hardMs / 1000));
     }
     const runId = randomUUID();
     const controller = new AbortController();
     let release: () => void = () => {};
     const done = new Promise<void>((resolve) => (release = resolve));
     // Checked and reserved with no await in between, so concurrent starts respect the slots and drain sees it.
-    const slot: ActiveRun = { controller, done, kind: "agent", spend: null };
+    const slot: ActiveRun = { controller, done, kind: "agent", lane, visitor, spend: null, reserveUsd: 0 };
     this.active.set(runId, slot);
     const spend = new SpendMeter(this.db, lane);
     let mode: AnalystMode;
     try {
       mode = await this.admit(async () => {
-        const current = await clients.deps.mode();
-        if (current === "replay_only") throw new RunManagerError("unavailable", PAUSED_REASON);
-        // Counted in the database, whatever the status: every started run may have spent.
-        const lastHour = await countRunsSince(this.db, { hashPrefix: QUESTION_HASH_PREFIX, sinceMs: HOUR_MS });
-        if (lastHour >= this.agentHourlyCap) {
+        const { mode: current, message } = laneModeOf(await clients.deps.mode(lane));
+        if (current === "replay_only") throw new RunManagerError("unavailable", message ?? PAUSED_REASON);
+        if (visitor !== null) {
+          // Counted in the database from the runs' ip_hash, so a restart forgets no start.
+          const wait = await visitorWait(this.db, visitor, this.visitorLimits);
+          if (wait) throw new RunManagerError("limited", visitorWaitMessage(wait, this.visitorLimits), wait.retryAfterS);
+        }
+        // Counted in the database per lane, whatever the status: every started run may have spent.
+        const lastHour = await countLaneRunsSince(this.db, lane, HOUR_MS);
+        if (lastHour >= (lane === "judge" ? this.judgeHourlyCap : this.agentHourlyCap)) {
           throw new RunManagerError("limited", "The hourly limit for live runs is reached. Try again later.", HOUR_MS / 1000);
         }
+        if (lane === "judge" && (await countLaneRunsSince(this.db, "judge", DAY_MS)) >= this.judgeDailyCap) {
+          throw new RunManagerError("limited", JUDGE_DAILY_REASON, HOUR_MS / 1000);
+        }
+        if ((await countRunsSince(this.db, { hashPrefix: QUESTION_HASH_PREFIX, sinceMs: DAY_MS })) >= this.agentDailyCap) {
+          throw new RunManagerError("limited", DAILY_REASON, HOUR_MS / 1000);
+        }
+        const cap = this.llmLaneUsdCap[lane] ?? this.llmDailyUsdCap;
+        const reserve = preRunUsd(current);
         const today = await todayLlmUsd(this.db);
-        if (today + PRE_RUN_USD > this.llmDailyUsdCap) {
+        if (today + reserve > cap) {
           throw new RunManagerError("budget", "Today's budget for live analysis is used up. Live runs resume at 00:00 UTC.");
         }
-        // Runs in flight have spent little of what they will: each holds PRE_RUN_USD until it records more.
-        if (today + this.reservedUsd() + PRE_RUN_USD > this.llmDailyUsdCap) {
+        // Runs in flight have spent little of what they will: each holds its reserve until it records more.
+        if (today + this.reservedUsd() + reserve > cap) {
           throw new RunManagerError(
             "limited",
             "Live runs in progress hold the rest of today's budget. Try again in a few minutes.",
@@ -718,11 +807,13 @@ export class RunManager {
           );
         }
         // Admissions run one at a time, so the next one already counts this run's reserve.
+        slot.reserveUsd = reserve;
         slot.spend = spend;
         await createRun(this.db, {
           id: runId,
           question,
-          questionHash: questionHash(question, pins, current),
+          // A follow-up's key carries its parent, so it never answers (or is answered by) the bare question.
+          questionHash: questionHash(question, pins, current, parent?.runId ?? null),
           status: "running",
           mode: current,
           lane,
@@ -730,6 +821,8 @@ export class RunManager {
           effort: ANALYST_CONFIGS[current].effort,
           pins: pins ?? null,
           parentRunId: parent?.runId ?? null,
+          // Every run keeps its visitor, judge runs too; only public runs count against it.
+          ipHash: launch.client,
         });
         return current;
       });
@@ -738,6 +831,7 @@ export class RunManager {
       release();
       throw err;
     }
+    if (launch.client !== null) this.forgetSoon();
     const { qloo, anthropic } = clients;
     const run: AgentRunContext = { runId, question, lane, mode, pins, parent, intent, qloo, anthropic, startedAt: Date.now(), spend };
     void this.driveAgent(run, controller.signal).finally(() => {
@@ -758,10 +852,24 @@ export class RunManager {
     return n;
   }
 
-  /** USD the admitted agent runs in flight here still hold: PRE_RUN_USD each, less what each has recorded. */
+  /** Agent runs in flight here on this lane. */
+  private activeAgentRuns(lane: Lane): number {
+    let n = 0;
+    for (const run of this.active.values()) if (run.kind === "agent" && run.lane === lane) n += 1;
+    return n;
+  }
+
+  /** Public runs in flight here for this visitor. */
+  private activeVisitorRuns(visitor: string): number {
+    let n = 0;
+    for (const run of this.active.values()) if (run.visitor === visitor) n += 1;
+    return n;
+  }
+
+  /** USD the admitted agent runs in flight here still hold: each one's reserve, less what it has recorded. */
   private reservedUsd(): number {
     let usd = 0;
-    for (const run of this.active.values()) if (run.spend) usd += Math.max(PRE_RUN_USD - run.spend.recorded, 0);
+    for (const run of this.active.values()) if (run.spend) usd += Math.max(run.reserveUsd - run.spend.recorded, 0);
     return usd;
   }
 
@@ -870,6 +978,23 @@ export class RunManager {
     if (Date.now() - this.lastPurgeAt < PURGE_EVERY_MS) return;
     this.lastPurgeAt = Date.now();
     void this.purgeFakeRuns().catch((err: unknown) => log.warn({ err }, "fake run purge failed"));
+  }
+
+  /**
+   * Clears the visitor hash of runs past every per-visitor window (VISITOR_HASH_RETENTION_MS): it
+   * counts toward nothing any more, so it is not kept. Returns how many runs were cleared.
+   */
+  async forgetVisitors(): Promise<number> {
+    this.lastForgetAt = Date.now();
+    const cleared = await clearIpHashes(this.db, { olderThanMs: VISITOR_HASH_RETENTION_MS });
+    if (cleared > 0) log.info({ cleared }, "visitor hashes of old runs cleared");
+    return cleared;
+  }
+
+  private forgetSoon(): void {
+    if (Date.now() - this.lastForgetAt < PURGE_EVERY_MS) return;
+    this.lastForgetAt = Date.now();
+    void this.forgetVisitors().catch((err: unknown) => log.warn({ err }, "clearing old visitor hashes failed"));
   }
 
   // One admission at a time in this process, so concurrent starts cannot all pass the same count.
@@ -1080,6 +1205,8 @@ export class RunManager {
         signal: abort.signal,
         pins: run.pins,
         parent: run.parent,
+        // A missing or partial metro_localities is logged with the run id on the first lookup.
+        localities: kvLocalities(this.db, { runId }),
         ...(run.intent ? { intent: run.intent } : {}),
         ...(this.qlooEnabled ? {} : { qlooEnabled: false }),
       }))();

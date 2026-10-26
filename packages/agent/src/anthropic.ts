@@ -54,15 +54,33 @@ export type AnalystRequest = Anthropic.Beta.Messages.MessageCreateParamsNonStrea
 export type ClerkRequest = Anthropic.MessageCreateParamsNonStreaming;
 
 export interface LlmRequestOptions {
-  /** Aborting it cancels the request or stream; the SDK then rejects with APIUserAbortError. */
+  /**
+   * Aborting it cancels the request or stream; the SDK then rejects with APIUserAbortError. The
+   * ANALYST also aborts a stream that already failed, since the SDK keeps reading one it gave up on.
+   */
   signal?: AbortSignal;
 }
 
+type ThinkingListener = (delta: string, snapshot: string) => void;
+type RawEventListener = (event: Anthropic.Beta.BetaRawMessageStreamEvent) => void;
+
 /** The part of the SDK's BetaMessageStream the ANALYST loop reads. */
 export interface AnalystStream {
-  on(event: "thinking", listener: (delta: string, snapshot: string) => void): unknown;
+  on(event: "thinking", listener: ThinkingListener): unknown;
+  /**
+   * Every raw event as it arrives ("streamEvent"), the deltas of a stream that then fails included.
+   * The event and listener unions only let a scripted stream that plays "thinking" alone still fit
+   * this interface; such a stream never calls a "streamEvent" listener.
+   */
+  on(event: "streamEvent" | "thinking", listener: RawEventListener | ThinkingListener): unknown;
   /** Rejects on API errors, on aborts, and when eager tool-input JSON cannot be parsed at all. */
   finalMessage(): Promise<Anthropic.Beta.BetaMessage>;
+  /**
+   * The message streamed so far, from message_start on, which stops growing when the stream fails:
+   * the usage a failed request reported and the response up to a tool input the SDK could not parse
+   * (llm/unparsed.ts). Optional, so a scripted stream may leave it out.
+   */
+  readonly currentMessage?: Anthropic.Beta.BetaMessage | undefined;
 }
 
 /**

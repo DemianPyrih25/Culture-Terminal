@@ -19,7 +19,7 @@ export interface MatrixGridOptions {
   showValues?: boolean;
   /** "rank" adds each cell's rank within its row (1 = top). Default "none". */
   glyph?: "none" | "rank";
-  /** Codes per axis key, overriding the generated ones. */
+  /** Codes per axis key, overriding the payload's AxisItem.code and the generated ones. */
   codes?: Readonly<Record<string, string>>;
   /** Row heads as codes (similarity default) or full labels (share default). */
   rowLabels?: "code" | "label";
@@ -67,6 +67,16 @@ export function MatrixGrid(props: MatrixGridProps) {
   );
 }
 
+/**
+ * Short codes for the axes, unique across rows and columns: the caller's `codes` first, then each
+ * item's own AxisItem.code, then codes derived from the labels.
+ */
+export function matrixCodes(data: MatrixPayload, codes?: Readonly<Record<string, string>>): Map<string, string> {
+  const items = [...data.cols, ...data.rows.filter((r) => !data.cols.some((c) => c.key === r.key))];
+  const own = Object.fromEntries(items.flatMap((i) => (i.code ? [[i.key, i.code]] : [])));
+  return axisCodes(items, { ...own, ...codes });
+}
+
 /** The 0–1 ink share of the data colour for a value, and the matching domain for the legend. */
 export function matrixRamp(
   data: MatrixPayload,
@@ -92,7 +102,7 @@ function MatrixPlot(props: MatrixGridProps & { label: string; style: NumberStyle
   const { data, style } = props;
   const showValues = props.showValues ?? true;
   const rankGlyph = props.glyph === "rank";
-  const codes = axisCodes([...data.cols, ...data.rows.filter((r) => !data.cols.some((c) => c.key === r.key))], props.codes);
+  const codes = matrixCodes(data, props.codes);
   const rowMode = props.rowLabels ?? (data.mode === "similarity" ? "code" : "label");
   const annotations = resolveAnnotations(data);
   const rowNoteW = annotations.some((a) => a.kind === "row") ? ROW_NOTE_W : 0;

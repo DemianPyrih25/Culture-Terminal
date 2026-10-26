@@ -2,14 +2,17 @@ import {
   dataDisclaimer,
   FIXED_DISCLAIMERS,
   isId,
+  isVerdictTag,
   JOB_PILLAR,
   makeId,
   Report,
+  verdictTagWords,
   vizFor,
   type ArgumentId,
   type Badge,
   type Confidence,
   type DatasetEnvelope,
+  type EntityRef,
   type Evidence,
   type Flag,
   type GhostAnswer,
@@ -40,12 +43,14 @@ import { MIN_OK_EVIDENCE, type CheckResult } from "./checker";
 import { indexSnapshot, type LedgerSnapshot } from "./ledger";
 import { formatUtcDate, timeRange } from "./report/format";
 import { pickKpis } from "./report/kpis";
+import { POSITION_JOBS } from "./report/position";
 import { buildReceipt, type ReceiptQlooCall, type ReceiptUsage } from "./report/receipt";
 import { exhibitSourceLine } from "./report/sourceLine";
 import { buildScorecard } from "./scorecard";
 import { citedIds, draftProse, plainProse } from "./tokens";
 
 export { buildCaseSummary, type CaseSummaryContext } from "./report/caseSummary";
+export { POSITION_FAILED, POSITION_JOBS, recordPosition, type PositionContext } from "./report/position";
 export type { ReceiptQlooCall, ReceiptUsage } from "./report/receipt";
 
 /**
@@ -74,7 +79,8 @@ export interface ReportContext {
    * The run's ledger, with the Scorecard recorded: `recordScorecard(ledger, plan, check.patchedDraft)`
    * before assembleReport, `recordScorecard(ledger, plan, null)` before buildIncompleteReport. A plan
    * with hypotheses and no Scorecard dataset throws ReportAssemblyError (it is always the first
-   * exhibit, SPEC §7.2).
+   * exhibit, SPEC §7.2). On the investment desk, recordPosition adds the Taste Position card, which
+   * follows the Scorecard.
    */
   ledger: LedgerSnapshot;
   /** Every Qloo call of the run, e.g. `RunState.qloo.chips`; `rows` counts thin results per call. */
@@ -88,6 +94,10 @@ export interface ReportContext {
   ghost?: { answer: GhostAnswer; diff: GhostDiff } | null;
   /** Skill.limitations of the skills that ran; defaults to the fixed SKILL_LIMITATIONS of the skills in the ledger. */
   skillLimitations?: readonly string[];
+  /** The question's primary target: the KPI strip prefers its own metrics. */
+  subject?: EntityRef | null;
+  /** The peers the question names (the gate's): head_to_head's similarity figure is the pair's. */
+  peers?: readonly EntityRef[];
 }
 
 export interface AssembleInput extends ReportContext {
@@ -105,6 +115,11 @@ export interface IncompleteInput extends ReportContext {
 
 export const INCOMPLETE_HEADLINE = "Evidence digest: the analysis did not finish";
 export const SCORECARD_CAPTION = "Priors the ANALYST wrote before any data, each judged against cited metrics.";
+export const POSITION_CAPTION =
+  "Where the subject stands against its peers on five axes, each with its peer rank and exhibit; no total is given.";
+
+/** Exhibits code places itself, ahead of the draft's: the Scorecard, then the Taste Position card. */
+const isLeadKind = (kind: DatasetEnvelope["kind"]): boolean => kind === "Scorecard" || kind === "Position";
 /** The data line of a note that rests on no Qloo evidence (Qloo disabled, or nothing came back). */
 export const NO_DATA_DISCLAIMER = "Data: Qloo hackathon dataset; this run collected no Qloo evidence.";
 /** A call with fewer rows than this is a thin result (THIN_RESULT, SPEC §6.4). */
@@ -161,6 +176,22 @@ const strengthOf = (metrics: readonly Metric[], asOf: string): Strength =>
     ),
   );
 
+/**
+ * Metric ids a draft cites, in order: its id lists, then the tokens in its prose. The KPI strip and
+ * the Taste Position card read these first, so both show the figure the note argues from.
+ */
+export function draftCitedMetrics(draft: ReportDraftShape): MetricId[] {
+  return citedIds(
+    "M",
+    [
+      ...draft.hypothesis_verdicts.flatMap((v) => v.metric_ids),
+      ...draft.arguments.flatMap((a) => a.metric_ids),
+      ...draft.bear_case.flatMap((b) => b.metric_ids),
+    ],
+    draftProse(draft).map((f) => f.text),
+  );
+}
+
 // Report builders ---------------------------------------------------------------------------------------
 
 export function assembleReport(input: AssembleInput): Report {
@@ -194,20 +225,12 @@ export function assembleReport(input: AssembleInput): Report {
   const seen = new Set<string>();
   const draftExhibits = draft.exhibits.flatMap((e) => {
     const dataset = isId("D", e.dataset_id) ? lookup.dataset(e.dataset_id) : undefined;
-    if (!dataset || dataset.kind === "Scorecard" || seen.has(dataset.id)) return [];
+    if (!dataset || isLeadKind(dataset.kind) || seen.has(dataset.id)) return [];
     seen.add(dataset.id);
     return [{ dataset, title: e.title, caption: e.caption }];
   });
 
-  const prose = draftProse(draft);
-  const cited = knownMetrics(
-    [
-      ...draft.hypothesis_verdicts.flatMap((v) => v.metric_ids),
-      ...draft.arguments.flatMap((a) => a.metric_ids),
-      ...draft.bear_case.flatMap((b) => b.metric_ids),
-    ],
-    prose.map((f) => f.text),
-  );
+  const cited = draftCitedMetrics(draft).filter((id) => lookup.metric(id) !== undefined);
   const warnings = acceptedWarnings(check.issues);
   const confidence = scoreConfidence({
     ...run.counts,
@@ -224,12 +247,13 @@ export function assembleReport(input: AssembleInput): Report {
     verdict: {
       headline: draft.headline,
       signal: draft.signal,
+      tag: reportTag(draft.verdict_tag),
       thesis: draft.thesis,
       confidence,
       coverage: run.coverage,
     },
     scorecard: buildScorecard(input.plan, draft, ledger).rows,
-    kpis: pickKpis(input.job, ledger.metrics, cited),
+    kpis: pickKpis(input.job, ledger.metrics, cited, { subject: input.subject ?? null, peers: input.peers ?? [] }),
     exhibits: run.exhibits(draftExhibits),
     arguments: reportArguments,
     bearCase: draft.bear_case.map((b) => ({ text: b.text, metricIds: knownMetrics(b.metric_ids, [b.text]) })),
@@ -270,15 +294,17 @@ export function buildIncompleteReport(input: IncompleteInput): Report {
     verdict: {
       headline: INCOMPLETE_HEADLINE,
       signal: "insufficient_evidence",
+      // A digest names no finding: the brief prints the signal.
+      tag: null,
       thesis,
       confidence,
       coverage: run.coverage,
     },
     scorecard: buildScorecard(input.plan, null, ledger).rows,
-    kpis: pickKpis(input.job, ledger.metrics, []),
+    kpis: pickKpis(input.job, ledger.metrics, [], { subject: input.subject ?? null, peers: input.peers ?? [] }),
     exhibits: run.exhibits(
       ledger.datasets
-        .filter((d) => d.kind !== "Scorecard")
+        .filter((d) => !isLeadKind(d.kind))
         .map((dataset) => ({
           dataset,
           title: dataset.title,
@@ -295,6 +321,15 @@ export function buildIncompleteReport(input: IncompleteInput): Report {
     warnings: [],
     receipt: run.receipt({ traced: 0, total: 0 }),
   });
+}
+
+/**
+ * The verdict tag as the Report carries it: the checked draft's, spaces collapsed, or null when none
+ * keeps its rule (V7 or the last attempt's CHECKER dropped it), so readers print the signal label.
+ */
+export function reportTag(tag: string): string | null {
+  const text = verdictTagWords(tag).join(" ");
+  return isVerdictTag(text) ? text : null;
 }
 
 /**
@@ -329,6 +364,8 @@ function runFacts(ctx: ReportContext) {
       )
     : NO_DATA_DISCLAIMER;
   const scorecard = ledger.datasets.findLast((d) => d.kind === "Scorecard");
+  // The investment desk's card follows the Scorecard (SPEC §7.2); recordPosition makes one only there.
+  const position = POSITION_JOBS.has(ctx.job) ? ledger.datasets.findLast((d) => d.kind === "Position") : undefined;
   if (!scorecard && (ctx.plan?.hypotheses.length ?? 0) > 0) {
     throw new ReportAssemblyError(
       "the plan has hypotheses but the ledger holds no Scorecard dataset; call recordScorecard before assembling",
@@ -370,9 +407,15 @@ function runFacts(ctx: ReportContext) {
         window,
         asOf: ctx.createdAt,
       }),
-    /** The Scorecard dataset first (absent only without hypotheses), then the given exhibits in order. */
+    /**
+     * The Scorecard dataset first (absent only without hypotheses), then the Taste Position card on the
+     * investment desk, then the given exhibits in order.
+     */
     exhibits: (entries: readonly { dataset: DatasetEnvelope; title: string; caption: string }[]): ReportExhibit[] => {
-      const lead = scorecard ? [{ dataset: scorecard, title: scorecard.title, caption: SCORECARD_CAPTION }] : [];
+      const lead = [
+        ...(scorecard ? [{ dataset: scorecard, title: scorecard.title, caption: SCORECARD_CAPTION }] : []),
+        ...(position ? [{ dataset: position, title: position.title, caption: POSITION_CAPTION }] : []),
+      ];
       return [...lead, ...entries].map(({ dataset, title, caption }) => {
         const evidence = dataset.evidenceIds.flatMap((id) => lookup.evidence(id) ?? []);
         return {

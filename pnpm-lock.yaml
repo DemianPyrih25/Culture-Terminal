@@ -276,6 +276,9 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
     devDependencies:
+      '@ct/qloo':
+        specifier: workspace:*
+        version: link:../qloo
       '@types/ngeohash':
         specifier: 0.6.8
         version: 0.6.8

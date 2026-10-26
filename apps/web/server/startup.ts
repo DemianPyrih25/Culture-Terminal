@@ -3,12 +3,18 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { closeDb, isConnectionError, migrateUrl, resolveDatabaseUrl } from "@ct/db";
 import { shutdownGraceMsFromEnv } from "./config";
-import { getRunManager, peekQlooClient } from "./container";
+import { getDatabase, getRunManager, peekQlooClient } from "./container";
+import { logLocalityCoverage, readLocalityCoverage } from "./localities";
 import { log } from "./log";
 
 const STARTED = "__ctServerStarted";
 const MIGRATED = "__ctMigrationsApplied";
-type GlobalWithFlags = typeof globalThis & { [STARTED]?: boolean; [MIGRATED]?: boolean };
+const SWEEPING = "__ctHousekeeping";
+type GlobalWithFlags = typeof globalThis & {
+  [STARTED]?: boolean;
+  [MIGRATED]?: boolean;
+  [SWEEPING]?: ReturnType<typeof setInterval>;
+};
 
 /** Background migration retries after startup gave up: 5 s, doubling, then every minute. */
 const RETRY_FIRST_MS = 5000;
@@ -18,6 +24,12 @@ const RETRY_MAX_MS = 60_000;
  * (SHUTDOWN_GRACE_MS plus an agent's stop grace) and closing the pool, it stays inside Railway's 200 s.
  */
 const QLOO_FLUSH_MS = 3000;
+/**
+ * The housekeeping after migrations runs again this often while the process lives, so old visitor
+ * hashes are cleared within an hour of leaving every window even when no live run starts (replay
+ * only after judging).
+ */
+export const HOUSEKEEPING_EVERY_MS = 3_600_000;
 
 /**
  * Whether this process may serve requests that touch the schema: its migrations ran, or
@@ -99,14 +111,40 @@ function retryMigrationsInBackground(delayMs: number = RETRY_FIRST_MS): void {
   (timer as { unref?: () => void }).unref?.();
 }
 
-/** Housekeeping that needs the schema: drop fake runs past their retention. */
-function afterMigrations(): void {
+/** Drops fake runs past their retention and clears visitor hashes past the per-visitor windows. */
+function sweep(): void {
   try {
-    void getRunManager()
-      .purgeFakeRuns()
-      .catch((err: unknown) => log.warn({ err }, "fake run purge failed"));
+    const runs = getRunManager();
+    void runs.purgeFakeRuns().catch((err: unknown) => log.warn({ err }, "fake run purge failed"));
+    void runs.forgetVisitors().catch((err: unknown) => log.warn({ err }, "clearing old visitor hashes failed"));
   } catch (err) {
     log.warn({ err }, "fake run purge skipped");
+  }
+}
+
+/** The sweep every HOUSEKEEPING_EVERY_MS: one timer per process, which never keeps it alive. */
+function sweepEveryHour(): void {
+  const g = globalThis as GlobalWithFlags;
+  if (g[SWEEPING] !== undefined) return;
+  const timer = setInterval(sweep, HOUSEKEEPING_EVERY_MS);
+  (timer as { unref?: () => void }).unref?.();
+  g[SWEEPING] = timer;
+}
+
+/**
+ * Housekeeping that needs the schema: drop fake runs past their retention and clear visitor hashes
+ * past the per-visitor windows, now and every hour after, and say in the log when the market
+ * locality pins are missing or partial.
+ */
+export function afterMigrations(): void {
+  sweep();
+  sweepEveryHour();
+  try {
+    void readLocalityCoverage(getDatabase())
+      .then((coverage) => logLocalityCoverage(coverage, { at: "startup" }))
+      .catch((err: unknown) => log.warn({ err }, "the market locality pins could not be read"));
+  } catch (err) {
+    log.warn({ err }, "the market locality check skipped");
   }
 }
 

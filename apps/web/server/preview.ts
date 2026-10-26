@@ -1,17 +1,15 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
 import {
-  ConfidenceBand,
   DEFAULT_RUN_LIMITS,
   METRO_LABEL,
-  Signal,
   type CacheProbe,
   type EntityType,
   type Intent,
   type Job,
+  type Lane,
   type MatchClass,
   type MentionRole,
-  type Mode,
   type Pillar,
   type ResolvedMention,
   type SafetyCategory,
@@ -31,10 +29,9 @@ import {
   type GateOutcome,
   type RunRegistry,
 } from "@ct/agent";
-import { findAnswerCache, type Queryable } from "@ct/db";
+import type { Queryable } from "@ct/db";
 import type { QlooClient } from "@ct/qloo";
 import { SKILLS } from "@ct/quant";
-import { z } from "zod";
 import {
   llmDailyUsdCapFromEnv,
   previewHourlyCapFromEnv,
@@ -42,11 +39,14 @@ import {
   qlooDisabledFromEnv,
 } from "./config";
 import { DESK_LABEL, JOB_LABEL } from "../lib/brief/format";
-import { getAnthropic, getDatabase, getMode, getQlooClient } from "./container";
+import { findAlreadyHave, type AlreadyHave } from "./answer-cache";
+import { laneModeOf, type LaneMode } from "./breakers";
+import { getAnthropic, getDatabase, getQlooClient, laneMode } from "./container";
 import { SpendMeter, todayLlmUsd } from "./llm-spend";
 import { log } from "./log";
-import { questionHash } from "./question-hash";
 import type { RunManagerErrorCode } from "./run-manager";
+
+export { findAlreadyHave, type AlreadyHave };
 
 /**
  * POST /api/preview: the A02 "Understood as" panel. CLERK reads the question (Haiku, as a run
@@ -86,8 +86,7 @@ const SECONDS_PER_NETWORK_CALL = 1;
 const PICKER_SECONDS = 5;
 /** D24: finding-triggered follow-ups share this many network calls; the estimate assumes a run uses them. */
 const FOLLOWUP_ALLOWANCE = DEFAULT_RUN_LIMITS.followupCalls;
-const ANALYST_MODES: readonly AnalystMode[] = ["live", "economy"];
-const PAUSED_REASON = "Live analysis is paused. Recorded runs are still available.";
+const PAUSED_REASON = "Live analysis is paused. Showcases and replays still work.";
 const NO_KEY_REASON = "Live analysis is unavailable: this server has no Anthropic API key.";
 const NO_QLOO_REASON = "Live analysis is unavailable: the Qloo client is not configured.";
 const CAPPED_REASON = "Question previews are paused for a while. You can still run the brief.";
@@ -132,15 +131,6 @@ export interface PreviewRefusal {
   reframe: string | null;
 }
 
-/** A recent completed brief for the same question (the answer cache, D26). */
-export interface AlreadyHave {
-  runId: string;
-  question: string;
-  createdAt: string;
-  signal: Signal | null;
-  confidence: { score: number; band: ConfidenceBand } | null;
-}
-
 export interface PreviewEstimate {
   /** Qloo requests expected on the network: the opening scan as the cache stands now, plus the follow-up allowance. */
   networkCalls: number;
@@ -163,6 +153,10 @@ export interface PreviewResponse {
   refusal?: PreviewRefusal;
   alreadyHave: AlreadyHave | null;
   estimate: PreviewEstimate;
+  /** The ANALYST a brief started now would get: economy once today's live budget is nearly used. */
+  mode: AnalystMode;
+  /** Why a brief would run in economy (the breaker's message); null in live mode. */
+  modeNote: string | null;
 }
 
 export type PreviewOutcome =
@@ -179,11 +173,12 @@ export interface PreviewDeps {
   qloo: () => QlooClient;
   /** Null without ANTHROPIC_API_KEY. */
   anthropic: () => AnthropicLike | null;
-  mode: () => Promise<Mode>;
+  /** The lane's mode as the breakers decide it, or a bare mode. */
+  mode: (lane: Lane) => Promise<LaneMode>;
   /** Today's LLM spend across lanes, in USD. */
   todayUsd: () => Promise<number>;
-  /** Adds a CLERK call's spend to today's accounting (the run manager's usage_daily metric). */
-  recordUsd: (usd: number) => Promise<void>;
+  /** Adds a CLERK call's spend to today's accounting under the lane (the run manager's usage_daily metric). */
+  recordUsd: (usd: number, lane: Lane) => Promise<void>;
   /** The newest completed brief that answers this (sanitized) question, or null. */
   findAnswer: (question: string) => Promise<AlreadyHave | null>;
 }
@@ -202,32 +197,11 @@ export interface PreviewServiceOptions {
   now?: () => number;
 }
 
-const StoredVerdict = z.object({
-  verdict: z.object({ signal: Signal, confidence: z.object({ score: z.int().min(0).max(100), band: ConfidenceBand }) }),
-});
-
-/** The answer-cache hit for a question under either ANALYST mode, the newest (no pins: the browser never sends any). */
-export async function findAlreadyHave(db: Queryable, question: string): Promise<AlreadyHave | null> {
-  const hits = await Promise.all(ANALYST_MODES.map((mode) => findAnswerCache(db, questionHash(question, undefined, mode))));
-  const newest = hits
-    .flatMap((r) => (r === undefined ? [] : [r]))
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
-  if (newest === undefined) return null;
-  const stored = StoredVerdict.safeParse(newest.report);
-  return {
-    runId: newest.id,
-    question: newest.question,
-    createdAt: newest.createdAt.toISOString(),
-    signal: stored.success ? stored.data.verdict.signal : null,
-    confidence: stored.success ? { score: stored.data.verdict.confidence.score, band: stored.data.verdict.confidence.band } : null,
-  };
-}
-
 /** The database half of PreviewDeps: the answer cache and the run manager's daily LLM accounting. */
 export function databasePreviewDeps(db: () => Queryable): Pick<PreviewDeps, "todayUsd" | "recordUsd" | "findAnswer"> {
   return {
     todayUsd: () => todayLlmUsd(db()),
-    recordUsd: (usd) => new SpendMeter(db(), "public").upTo(usd),
+    recordUsd: (usd, lane) => new SpendMeter(db(), lane).upTo(usd),
     findAnswer: (question) => findAlreadyHave(db(), question),
   };
 }
@@ -236,6 +210,12 @@ export function databasePreviewDeps(db: () => Queryable): Pick<PreviewDeps, "tod
 
 /** What CLERK made of a question: an intent, or the model's own refusal to read it. */
 type Reading = { kind: "intent"; intent: Intent } | { kind: "declined"; reason: string };
+
+/** Who previews: the lane, and its mode when the caller already decided it (the route does, for the human check). */
+export interface PreviewRequest {
+  lane?: Lane;
+  mode?: LaneMode;
+}
 
 interface Entry {
   token: string;
@@ -430,19 +410,22 @@ export class PreviewService {
    * Previews a question. Never throws for refusals or CLERK failures (see PreviewOutcome); a
    * database failure (the answer cache, the spend) is thrown for the route to answer 503.
    */
-  async preview(raw: string): Promise<PreviewOutcome> {
+  async preview(raw: string, request: PreviewRequest = {}): Promise<PreviewOutcome> {
     const question = sanitizeQuestion(raw);
     if (question === "") {
       return { kind: "refused", code: "invalid", message: "The question is empty.", retryAfterS: null, alreadyHave: null };
     }
+    const lane = request.lane ?? "public";
     const alreadyHave = await this.deps.findAnswer(question);
     try {
-      if ((await this.deps.mode()) === "replay_only") throw new Refused("unavailable", PAUSED_REASON);
+      const { mode, message } = laneModeOf(request.mode ?? (await this.deps.mode(lane)));
+      if (mode === "replay_only") throw new Refused("unavailable", message ?? PAUSED_REASON);
       const anthropic = this.deps.anthropic();
       if (!anthropic) throw new Refused("unavailable", NO_KEY_REASON);
       const qloo = this.qlooEnabled ? this.qlooClient() : null;
-      const entry = await this.entryFor(question, anthropic);
-      return { kind: "ok", body: await this.describe(entry, qloo, alreadyHave) };
+      const entry = await this.entryFor(question, anthropic, lane);
+      const body = await this.describe(entry, qloo, alreadyHave);
+      return { kind: "ok", body: { ...body, mode, modeNote: mode === "economy" ? message : null } };
     } catch (err) {
       if (err instanceof Refused) {
         return { kind: "refused", code: err.code, message: err.message, retryAfterS: err.retryAfterS, alreadyHave };
@@ -480,13 +463,13 @@ export class PreviewService {
   }
 
   /** The live reading of this question, the one CLERK is producing for it, or a new one. */
-  private entryFor(question: string, anthropic: AnthropicLike): Promise<Entry> {
+  private entryFor(question: string, anthropic: AnthropicLike, lane: Lane): Promise<Entry> {
     const key = questionKey(question);
     const held = this.live(key);
     if (held) return Promise.resolve(held);
     const pending = this.reading.get(key);
     if (pending) return pending;
-    const read = this.read(question, key, anthropic).finally(() => this.reading.delete(key));
+    const read = this.read(question, key, anthropic, lane).finally(() => this.reading.delete(key));
     this.reading.set(key, read);
     return read;
   }
@@ -511,7 +494,7 @@ export class PreviewService {
     return entry;
   }
 
-  private async read(question: string, key: string, anthropic: AnthropicLike): Promise<Entry> {
+  private async read(question: string, key: string, anthropic: AnthropicLike, lane: Lane): Promise<Entry> {
     // The slot and the budget reserve are taken in the tick of their checks: concurrent readings of
     // different questions each see the others' share.
     const slot = this.takeHourlySlot();
@@ -528,7 +511,7 @@ export class PreviewService {
       if (clerk.usd > 0) {
         // The spend is real whatever CLERK answered; a failed write is logged, never shown.
         await this.deps
-          .recordUsd(clerk.usd)
+          .recordUsd(clerk.usd, lane)
           .catch((err: unknown) => log.error({ err, usd: clerk.usd }, "could not record a preview's CLERK spend"));
       }
       let reading: Reading;
@@ -589,8 +572,15 @@ export class PreviewService {
     if (this.byQuestion.get(entry.key) === entry.token) this.byQuestion.delete(entry.key);
   }
 
-  /** The answer for a reading: matching and estimate are made afresh, from the cache where they can be. */
-  private async describe(entry: Entry, qloo: QlooClient | null, alreadyHave: AlreadyHave | null): Promise<PreviewResponse> {
+  /**
+   * The answer for a reading: matching and estimate are made afresh, from the cache where they can be.
+   * The analyst is added by the caller.
+   */
+  private async describe(
+    entry: Entry,
+    qloo: QlooClient | null,
+    alreadyHave: AlreadyHave | null,
+  ): Promise<Omit<PreviewResponse, "mode" | "modeNote">> {
     const expiresAt = new Date(entry.expiresAt).toISOString();
     const nothing: PreviewEstimate = { networkCalls: 0, cachedCalls: 0, seconds: 0, quotaShare: 0 };
     if (entry.reading.kind === "declined") {
@@ -651,6 +641,11 @@ export class PreviewService {
       network += await skillCalls(step.tool, step.input, probe, registry);
       cold += await skillCalls(step.tool, step.input, NOTHING_CACHED, registry);
     }
+    // A chained scan step (site_selection's geo_lift) has no input until find_tags returns: its typical cost stands in.
+    for (const step of scan.chained) {
+      network += step.estimate;
+      cold += step.estimate;
+    }
     return this.estimateOf(network + FOLLOWUP_ALLOWANCE, Math.max(0, cold - network) + lookups);
   }
 
@@ -672,7 +667,7 @@ type GlobalWithPreview = typeof globalThis & { [KEY]?: PreviewService };
 export function getPreviewService(): PreviewService {
   const g = globalThis as GlobalWithPreview;
   return (g[KEY] ??= new PreviewService(
-    { qloo: getQlooClient, anthropic: getAnthropic, mode: getMode, ...databasePreviewDeps(getDatabase) },
+    { qloo: getQlooClient, anthropic: getAnthropic, mode: laneMode, ...databasePreviewDeps(getDatabase) },
     {
       hourlyCap: previewHourlyCapFromEnv(),
       llmDailyUsdCap: llmDailyUsdCapFromEnv(),

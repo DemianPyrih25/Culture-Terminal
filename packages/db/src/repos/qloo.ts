@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, sql } from "drizzle-orm";
+import { and, count, eq, gte, inArray, sql } from "drizzle-orm";
 import type { Queryable } from "../client";
 import { type CacheStatus, type QlooCacheRow, qlooCache, qlooCalls, usageDaily } from "../schema";
 
@@ -145,4 +145,16 @@ export async function getQlooUsage(db: Queryable, query: QlooUsageQuery): Promis
     .where(and(eq(usageDaily.day, day), eq(usageDaily.metric, metric), eq(usageDaily.lane, lane)))
     .limit(1);
   return row?.value ?? 0;
+}
+
+/** Calls logged in an environment since a time, and how many of them reached the network (/status). */
+export async function countQlooCallsByCache(db: Queryable, filter: { env: string; since: Date }): Promise<{ total: number; network: number }> {
+  const [row] = await db
+    .select({
+      total: count(),
+      network: sql<number>`count(*) filter (where ${inArray(qlooCalls.cacheStatus, [...QLOO_NETWORK_CACHE_STATUSES])})`.mapWith(Number),
+    })
+    .from(qlooCalls)
+    .where(and(eq(qlooCalls.env, filter.env), gte(qlooCalls.ts, filter.since)));
+  return { total: row?.total ?? 0, network: row?.network ?? 0 };
 }

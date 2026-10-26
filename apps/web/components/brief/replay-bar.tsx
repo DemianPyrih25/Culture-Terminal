@@ -7,10 +7,11 @@ import { cx, SortToggle } from "../ui";
 
 /**
  * The replay controls (D26: a replay makes 0 Qloo calls and costs $0): a REPLAY marker so a replay is
- * never taken for a live run, play and pause, 1× 4× 16×, restart, the progress bar and the clock.
+ * never taken for a live run, play and pause, 1× 4× 8× 16× (PLAN Part 6: 8× replay), restart, the
+ * progress bar and the clock.
  */
 
-export const REPLAY_BAR_SPEEDS = [1, 4, 16] as const satisfies readonly ReplaySpeed[];
+export const REPLAY_BAR_SPEEDS = [1, 4, 8, 16] as const satisfies readonly ReplaySpeed[];
 
 const SPEED_OPTIONS = REPLAY_BAR_SPEEDS.map((s) => ({ value: String(s), label: `${s}×` }));
 

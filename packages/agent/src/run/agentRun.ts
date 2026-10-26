@@ -1,26 +1,27 @@
 import {
   DEFAULT_RUN_LIMITS,
   FindingIdSchema,
+  isId,
   normalizeIntent,
   RunLimits,
   SkillId,
   StepIdSchema,
   type ErrorCode,
   type EventInputOf,
-  type GeoApi,
   type Intent,
   type Phase,
+  type RegisteredEntity,
+  type RegisteredTag,
   type Report,
   type SafetyCategory,
   type StepId,
   type SubmitPlanInputShape,
   type TerminalRunStatus,
 } from "@ct/contracts";
-import { createGeo } from "@ct/geo";
 import { qlooErrorCode, qlooEventFrom } from "@ct/qloo";
 import { runAnalyst, type AnalystOutcome, type AnalystToolCall, type AnalystToolEnd } from "../analyst";
 import { ANALYST_MODELS, CLERK_MODEL } from "../anthropic";
-import { assembleReport, buildIncompleteReport, type ReportContext } from "../assemble";
+import { assembleReport, buildIncompleteReport, draftCitedMetrics, type ReportContext } from "../assemble";
 import { createRunBudget } from "../budget";
 import { checkReport, repairMessage, type CheckResult } from "../checker";
 import { runClerk, sanitizeQuestion } from "../clerk";
@@ -28,14 +29,17 @@ import { createRunLedger, type RunLedger } from "../ledger";
 import { DIRECTOR_PROMPT } from "../prompts";
 import { createEntityRegistry } from "../registry";
 import type { AgentRunOptions, AgentRunResult } from "../run";
+import { POSITION_FAILED, recordPosition } from "../report/position";
 import { recordScorecard } from "../scorecard";
-import { ALL_SKILLS, UNAVAILABLE_SKILLS } from "./catalogue";
-import { buildRunContext, evidenceStatus } from "./context";
+import { ALL_SKILLS, toolLabel, UNAVAILABLE_SKILLS } from "./catalogue";
+import { buildRunContext, evidenceStatus, findingLeads, type RanCall } from "./context";
 import { createFollowupDeadline, type FollowupDeadline } from "./followup";
+import { gazetteer } from "./gazetteer";
 import { gateEvidence, privatePersonNames, privatePersonRefusal, runResolutionGate, type GateResolved } from "./gate";
 import { RunEvents, RunMeter } from "./meter";
-import { planScan, type ScanPlan } from "./scan";
-import { estimateSkillCalls, runSkillCall, shortError, SkillsRan, type SkillRunnerDeps } from "./tools";
+import { runMarkets, unknownMarketIssues } from "./markets";
+import { emptyScan, planScan, type ScanPlan } from "./scan";
+import { estimateSkillCalls, runSkillCall, shortError, SkillsRan, type SkillCallOutcome, type SkillRunnerDeps } from "./tools";
 
 /**
  * runAgent's body (PLAN §4.1 A–H, SPEC §4.1): CLERK → resolution gate → opening scan in parallel
@@ -122,10 +126,6 @@ export function analystLimits(limits: RunLimits, spentUsd: number): RunLimits {
   const left = (cap: number): number => Math.max(cap - spentUsd, Number.MIN_VALUE);
   return { ...limits, usdNudge: left(limits.usdNudge), usdHard: left(limits.usdHard) };
 }
-
-/** The gazetteer is static data: indexed once per process, shared by every run. */
-let sharedGeo: GeoApi | null = null;
-const gazetteer = (): GeoApi => (sharedGeo ??= createGeo());
 
 export async function executeRun(options: AgentRunOptions): Promise<AgentRunResult> {
   const now = options.now ?? Date.now;
@@ -230,8 +230,10 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
     const runLedger = createRunLedger({ emit: events.emit, provenanceOf: (id) => runQloo.provenance(id) });
     ledger = runLedger;
     const geo = gazetteer();
+    // The AREAS list the model sees: prose may name these areas, digits and all (V3).
+    const areas = read.geo.metro === null ? [] : geo.neighbourhoods(read.geo.metro).map((n) => n.name);
 
-    let gate: GateResolved = { kind: "resolved", entities: [], primary: null, peers: [], dropped: 0, limitations: [], calls: [] };
+    let gate: GateResolved = { kind: "resolved", entities: [], primary: null, peers: [], dropped: 0, limitations: [], calls: [], primaryCalls: [] };
     if (qlooEnabled) {
       const outcome = await runResolutionGate({ intent: read, qloo: runQloo.forTool(null), registry, pins: options.pins ?? {} });
       if (options.signal.aborted) return cancelled();
@@ -265,6 +267,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       ledger: runLedger,
       registry,
       geo,
+      localities: options.localities ?? null,
       budget: createRunBudget({
         limits,
         qlooNetworkUsed: () => runQloo.networkUsed(),
@@ -283,9 +286,10 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         if (result.evidenceIds.length > 0) skillsRan.add(tool, result.flags);
       },
     };
+    const markets = await runMarkets(deps.localities, geo);
     const scan: ScanPlan = qlooEnabled
-      ? planScan(job, { intent: read, primary: gate.primary, peers: gate.peers })
-      : { steps: [], unavailable: [], skipped: [] };
+      ? planScan(job, { intent: read, primary: gate.primary, peers: gate.peers, geo, markets })
+      : emptyScan();
     // Estimated before the scan starts: once its requests are in flight the probe counts them as cached.
     const scanEstimates = new Map(
       await Promise.all(scan.steps.map(async (s) => [s.toolCallId, await estimateSkillCalls(deps, s.tool, s.input)] as const)),
@@ -299,24 +303,69 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       );
       return p;
     };
+    /** Every skill call that ran, with the findings it issued, so a listed follow-up never repeats one. */
+    const ranCalls: RanCall[] = [];
+    /** The tool of every opening-scan call, so the loop never calls a plan step naming one still to run. */
+    const scanTools: SkillId[] = [];
+    const scanCall = async (toolCallId: string, tool: SkillId, input: unknown, estimatedCalls: number | null) => {
+      const outcome = await runSkillCall(
+        deps,
+        { toolCallId, tool, input, phase: "scan", stepId: null, triggerFindingId: null, estimatedCalls },
+        runAbort.signal,
+      );
+      ranCalls.push({ tool, input, findingIds: outcome.result?.findingIds ?? [] });
+      scanTools.push(tool);
+      return outcome;
+    };
+    /** Entities wave-1 resolve_entities calls matched exactly: the peers a deferred scan step waits for. */
+    const wavePeers: RegisteredEntity[] = [];
+    const notePeers = (outcome: SkillCallOutcome): void => {
+      const digest = outcome.result?.forModel;
+      const refs = [...(digest?.top_rows ?? []).map((row) => row.ref), ...(digest?.registered ?? []).map((r) => r.ref)];
+      for (const ref of refs) {
+        const entity = ref !== null && isId("R", ref) ? registry.entity(ref) : null;
+        if (entity !== null && !wavePeers.includes(entity)) wavePeers.push(entity);
+      }
+    };
+    /**
+     * The deferred scan steps, once wave 1 has returned, on the peers it resolved: each digest, or a
+     * note when it found none to use. They run before turn 1 closes, so what they find is listed for
+     * turn 2 and their calls stay out of turn 2's allowance.
+     */
+    const deferredDigests = async (): Promise<string[]> => {
+      const digests: string[] = [];
+      for (const step of scan.deferred) {
+        const input = step.input(wavePeers);
+        if (input === null) {
+          digests.push(`SCAN NOTE: ${toolLabel(step.tool)} did not run: wave 1 resolved no peer of the primary's type to compare.`);
+          continue;
+        }
+        const outcome = await track(scanCall(step.toolCallId, step.tool, input, await estimateSkillCalls(deps, step.tool, input)));
+        digests.push(outcome.content);
+      }
+      return digests;
+    };
     const scanDigests = track(
-      Promise.all(
-        scan.steps.map((s) =>
-          runSkillCall(
-            deps,
-            {
-              toolCallId: s.toolCallId,
-              tool: s.tool,
-              input: s.input,
-              phase: "scan",
-              stepId: null,
-              triggerFindingId: null,
-              estimatedCalls: scanEstimates.get(s.toolCallId) ?? null,
-            },
-            runAbort.signal,
-          ),
-        ),
-      ).then((outcomes) => outcomes.map((o) => o.content)),
+      (async () => {
+        const outcomes = await Promise.all(scan.steps.map((s) => scanCall(s.toolCallId, s.tool, s.input, scanEstimates.get(s.toolCallId) ?? null)));
+        const digests = outcomes.map((o) => o.content);
+        // Chained steps read the tags their scan step returned (geo_lift on find_tags' rows), not the
+        // whole registry, which wave-1 calls running alongside may already have added to.
+        const tagsFrom = (tool: SkillId): RegisteredTag[] =>
+          outcomes
+            .flatMap((o, i) => (scan.steps[i]?.tool === tool ? (o.result?.forModel.top_rows ?? []) : []))
+            .flatMap((row) => (row.ref !== null && isId("T", row.ref) ? (registry.tag(row.ref) ?? []) : []));
+        for (const step of scan.chained) {
+          const input = step.input(tagsFrom(step.after));
+          if (input === null) {
+            digests.push(`SCAN NOTE: ${toolLabel(step.tool)} did not run: ${toolLabel(step.after)} returned nothing it can use.`);
+            continue;
+          }
+          const outcome = await scanCall(step.toolCallId, step.tool, input, await estimateSkillCalls(deps, step.tool, input));
+          digests.push(outcome.content);
+        }
+        return digests;
+      })(),
     );
 
     // D–G: the ANALYST with the CHECKER as its report review ------------------------------------------
@@ -328,6 +377,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       registry,
       geo,
       scan: { plan: scan, estimates: scanEstimates },
+      markets,
       unavailable: qlooEnabled ? UNAVAILABLE_SKILLS : ALL_SKILLS,
       qlooEnabled,
       caseSummary: options.parent?.caseSummary ?? null,
@@ -335,6 +385,9 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
     });
     const planEvent = new PlanEvent(events);
     analystModel = model;
+    /** Network calls turn 2 could still make: its own allowance, within what the run has left. */
+    const followupCallsLeft = (): number =>
+      Math.min(limits.qlooCalls - runQloo.networkUsed(), limits.followupCalls - runQloo.followupNetworkUsed());
     /** Started by the first turn-2 tool call; every later follow-up shares it. */
     let followup: FollowupDeadline | null = null;
     const followupDeadline = (): FollowupDeadline =>
@@ -369,16 +422,22 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
               calls.map(async (call) => {
                 const meta = { ...callMeta(call.input), estimatedCalls: estimates.get(call.id) ?? null, deadline };
                 const o = await runSkillCall(deps, { toolCallId: call.id, tool: call.name, input: call.input, phase, ...meta }, signal);
+                ranCalls.push({ tool: call.name, input: call.input, findingIds: o.result?.findingIds ?? [] });
+                if (turn === 1 && call.name === "resolve_entities") notePeers(o);
                 return { tool_use_id: call.id, content: o.content, ...(o.isError ? { is_error: true } : {}) };
               }),
             );
           })(),
         ),
       findingExists: (id) => runLedger.finding(id) !== undefined,
+      findings: () => runLedger.snapshot().findings,
+      // A market id outside MARKETS parses (MarketId is a format) but could only come back as an unavailable row.
+      checkInput: (tool, input) => unknownMarketIssues(tool, input, markets),
+      scanTools: () => scanTools,
       turnContext: async (closed) => {
         if (closed !== 1) return [];
         planEvent.flush();
-        const digests = await scanDigests;
+        const digests = [...(await scanDigests), ...(await deferredDigests())];
         return digests.length === 0 ? [] : [SCAN_RESULTS_HEADER, ...digests];
       },
       // Written once the loop knows whether follow-ups are still allowed, so it never contradicts TURN 3.
@@ -387,6 +446,13 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         const status = evidenceStatus(runLedger.snapshot().evidence, qlooEnabled, next === 2);
         return status === null ? [] : [status];
       },
+      // With no network call left for turn 2 (its allowance or the run's), or its time spent, a listed
+      // lead could only come back BUDGET_TRUNCATED. The TURN 2 guide covers planned steps sharing what is left.
+      followupLeads: () => {
+        if (followupCallsLeft() <= 0 || followup?.signal.aborted === true) return [];
+        const { findings, metrics } = runLedger.snapshot();
+        return findingLeads({ findings, metrics, qlooEnabled, primary: gate.primary?.ref ?? null, ran: ranCalls });
+      },
       reviewReport: (draft, context) => {
         const check = checkReport({
           draft,
@@ -394,6 +460,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
           ledger: runLedger.snapshot(),
           qlooEnabled,
           registry,
+          areas,
           attempt: context.final ? 2 : 1,
         });
         lastCheck = check;
@@ -405,7 +472,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
           numbersTraced: check.numbersTraced,
           adviceTerms: check.adviceTerms,
         });
-        return check.reject ? { ok: false, feedback: repairMessage(check.issues) } : { ok: true };
+        return check.reject ? { ok: false, feedback: repairMessage(check.issues, draft) } : { ok: true };
       },
       onThinking: (text) => events.emit({ type: "note", text }),
       onToolEnd: (toolEnd) => emitRejectedCall(events, toolEnd),
@@ -443,11 +510,19 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
     // The accepted draft is the one the CHECKER saw last; checking it again is only a fallback.
     const check =
       outcome.status === "completed" && outcome.draft !== null
-        ? (lastCheck ?? checkReport({ draft: outcome.draft, plan, ledger: runLedger.snapshot(), qlooEnabled, registry, attempt: 2 }))
+        ? (lastCheck ?? checkReport({ draft: outcome.draft, plan, ledger: runLedger.snapshot(), qlooEnabled, registry, areas, attempt: 2 }))
         : null;
     let report: Report;
     try {
       recordScorecard(runLedger, plan, check?.patchedDraft ?? null);
+      // The card is optional: if it cannot be built the note ships without it, and says so.
+      const cardLimitations: string[] = [];
+      try {
+        const cited = check === null ? [] : draftCitedMetrics(check.patchedDraft);
+        recordPosition({ job, ledger: runLedger, registry, subject: gate.primary, resolution: gate.primaryCalls, cited });
+      } catch (err) {
+        cardLimitations.push(`${POSITION_FAILED}: ${shortError(err)}`);
+      }
       const snapshot = runLedger.snapshot();
       const context: ReportContext = {
         runId: options.runId,
@@ -462,7 +537,9 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         models: { clerk: CLERK_MODEL, analyst: outcome.model, ghost: null },
         droppedEntities: gate.dropped,
         codeFallbacks: events.fallbacks,
-        skillLimitations: [...skillsRan.limitations(), ...gate.limitations],
+        skillLimitations: [...skillsRan.limitations(), ...gate.limitations, ...cardLimitations],
+        subject: gate.primary?.ref ?? null,
+        peers: gate.peers.map((p) => p.ref),
       };
       report = check !== null ? assembleReport({ ...context, check }) : buildIncompleteReport({ ...context, reason });
     } catch (err) {

@@ -1,8 +1,8 @@
 // MatrixGrid (A05 figure 2): the heatmap, its accessible name, not-measured cells, annotations and
 // the table view.
 import { describe, expect, it, vi } from "vitest";
-import { MatrixGrid, formatNumber } from "../../components/figures";
-import { FIXTURE_SOURCES, annotatedSimilarityMap, shareGrid, similarityMap } from "../../components/figures/fixtures";
+import { MatrixGrid, formatNumber, matrixCodes } from "../../components/figures";
+import { FIXTURE_SOURCES, annotatedSimilarityMap, codedSimilarityMap, shareGrid, similarityMap } from "../../components/figures/fixtures";
 import { groupByTitle, plotView, render, tableHeads, tableRows, tableView, text } from "./markup";
 
 // /method ships in Part 7; these tests pin the link each figure will carry then.
@@ -146,5 +146,18 @@ describe("MatrixGrid · annotations", () => {
     expect(glyphX - markX).toBeGreaterThan(20);
     const plain = plotView(render(<MatrixGrid data={data} title="Plain" width={680} />));
     expect(marks(plain).get(2)!).toBeGreaterThan(cellX + 50);
+  });
+});
+
+describe("MatrixGrid · codes from the payload", () => {
+  it("prints AxisItem.code instead of a derived code, and the caller's codes win over both", () => {
+    const coded = render(<MatrixGrid data={codedSimilarityMap.payload} title="Coded" />);
+    expect(text(plotView(coded))).toContain("JNP");
+    expect(text(plotView(coded))).toContain("KRT");
+    expect(text(plotView(coded))).not.toContain("JC ");
+    const codes = matrixCodes(codedSimilarityMap.payload, { R1: "ZZ" });
+    expect(codes.get("R1")).toBe("ZZ");
+    expect(codes.get("R2")).toBe("ALF");
+    expect(matrixCodes(similarityMap.payload).get("R1")).toBe("JC");
   });
 });
