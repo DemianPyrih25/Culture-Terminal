@@ -53,7 +53,7 @@ export interface OgCard {
   honesty: string;
 }
 
-/** The status line's short honesty line (components/chrome/status-line.tsx, HONESTY_SHORT), on every card. */
+/** The short honesty line, on every card. */
 export const OG_HONESTY = "Not financial advice · Group-level · No individuals";
 
 /** The longest question a card prints; a longer one ends in an ellipsis at a word boundary. */

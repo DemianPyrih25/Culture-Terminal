@@ -1,7 +1,7 @@
 import type { SlopeLine, SlopePayload, SlopePoint } from "@ct/contracts";
 import { FigureFrame, figureLabel, type FigureMeta } from "./figure-frame";
 import { FigureTable, type TableCell, type TableColumn, type TableRow } from "./figure-table";
-import { formatNumber, reasonLabel, type NumberStyle } from "./format";
+import { formatNumber, reasonLabel, sentenceCase, type NumberStyle } from "./format";
 import { clamp, fitText, linear, niceDomain, px, textWidth } from "./scale";
 
 /**
@@ -15,7 +15,7 @@ import { clamp, fitText, linear, niceDomain, px, textWidth } from "./scale";
  */
 
 export interface SlopeChartOptions {
-  /** Layout width in px; the SVG scales with its viewBox. Default 680. */
+  /** Layout width in px; the SVG draws at this width (a narrow box scrolls, it never shrinks the text). Default 680. */
   width?: number;
   /** Height of the plot area in px. Default: enough for every end label, at least 168. */
   plotHeight?: number;
@@ -30,10 +30,12 @@ export type SlopeChartProps = FigureMeta & SlopeChartOptions & { data: SlopePayl
 
 const HEADER_H = 26;
 const LABEL_GAP = 8;
-const LABEL_H = 13;
-const COL_W = 54;
-const NOTE_H = 18;
-const HEAD_FONT = { weight: 500, tracking: 0.8 } as const;
+const LABEL_H = 16;
+const COL_W = 64;
+const NOTE_H = 20;
+const HEAD_FONT = { weight: 500 } as const;
+/** Every label in the plot: 12 px (the design's 12/16 chart labels). */
+const FONT = 12;
 /** Above this many lines only climbers and the largest shifts are labelled; the table holds the rest. */
 const MAX_LABELLED = 24;
 
@@ -99,13 +101,13 @@ export function shiftText(line: SlopeLine, scale: SlopePayload["scale"], style: 
   return `${shift > 0 ? "▲" : "▼"} ${body}`;
 }
 
-/** The shift column head names its comparator: "Δ VS AUSTIN" (the first axis). */
+/** The shift column head names its comparator: "Δ vs Austin" (the first axis). */
 export function shiftHead(data: SlopePayload): string {
-  return `Δ vs ${data.axes[0]?.label ?? "start"}`.toUpperCase();
+  return `Δ vs ${data.axes[0]?.label ?? "start"}`;
 }
 
 function scoreHead(data: SlopePayload): string | null {
-  return data.scoreLabel ? data.scoreLabel.replace(/\s*\([^)]*\)\s*$/, "").toUpperCase() : null;
+  return data.scoreLabel ? data.scoreLabel.replace(/\s*\([^)]*\)\s*$/, "") : null;
 }
 
 /**
@@ -132,7 +134,7 @@ export function spreadLabels(wanted: readonly { key: string; y: number }[], top:
 
 /** Room for a missing end's name: the span it may use minus " · <reason>". */
 function missingRoom(span: number, reason: SlopePoint["reason"]): number {
-  return span - LABEL_GAP - textWidth(` · ${reasonLabel(reason)}`, 10.5) - 4;
+  return span - LABEL_GAP - textWidth(` · ${reasonLabel(reason)}`, FONT) - 4;
 }
 
 /** One end label: a line's value at the outer axis, or its reason when that point is missing. */
@@ -162,12 +164,12 @@ function SlopePlot(props: SlopeChartProps & { label: string; style: NumberStyle;
   const score = scoreHead(data);
   const showScore = score !== null && (props.showScore ?? !compact);
   const cols = [{ head: shiftHead(data), kind: "shift" as const }, ...(showScore ? [{ head: score!, kind: "score" as const }] : [])];
-  const colW = cols.map((c) => Math.max(COL_W, Math.ceil(textWidth(c.head, 10, HEAD_FONT)) + 6));
+  const colW = cols.map((c) => Math.max(COL_W, Math.ceil(textWidth(c.head, FONT, HEAD_FONT)) + 8));
   const colsW = colW.reduce((s, w) => s + w, 0);
 
   // End labels: name and value on both sides; a compact chart names lines on the right only.
-  const valueW = scale === "rank" ? 28 : 30;
-  const longest = Math.max(40, ...drawn.filter((l) => labelled.has(l.key)).map((l) => textWidth(l.label, 11.5, { weight: 600 })));
+  const valueW = scale === "rank" ? 30 : 32;
+  const longest = Math.max(40, ...drawn.filter((l) => labelled.has(l.key)).map((l) => textWidth(l.label, FONT, { weight: 600 })));
   const minSpan = compact ? 64 : 120;
   const leftW = compact ? valueW + LABEL_GAP * 2 : clamp(Math.ceil(longest) + valueW + LABEL_GAP * 2, 96, Math.floor((width - colsW - minSpan) / 2));
   const rightW = clamp(Math.ceil(longest) + valueW + LABEL_GAP * 2, 96, width - colsW - leftW - minSpan);
@@ -226,11 +228,10 @@ function SlopePlot(props: SlopeChartProps & { label: string; style: NumberStyle;
     <div className="pt-1">
       <svg
         viewBox={`0 0 ${width} ${px(height)}`}
-        width="100%"
+        width={width}
         role="img"
         aria-label={props.label}
-        className="block h-auto font-ui"
-        style={{ maxWidth: width }}
+        className="block h-auto max-w-none font-sans"
       >
         <title>{props.label}</title>
         <desc>{describe(data, highlight)}</desc>
@@ -244,12 +245,11 @@ function SlopePlot(props: SlopeChartProps & { label: string; style: NumberStyle;
                 x={px(axisX(i))}
                 y={15}
                 textAnchor={outer ? (i === 0 ? "end" : "start") : "middle"}
-                fontSize={10}
+                fontSize={FONT}
                 fontWeight={500}
-                letterSpacing={0.8}
-                className="fill-dim"
+                className="fill-ink-2"
               >
-                {fitText(a.label.toUpperCase(), Math.max(24, room - 4), 10, HEAD_FONT)}
+                {fitText(sentenceCase(a.label), Math.max(24, room - 4), FONT, HEAD_FONT)}
               </text>
               <line x1={px(axisX(i)) + 0.5} x2={px(axisX(i)) + 0.5} y1={top - 4} y2={bottom + 4} className="stroke-line-strong" />
             </g>
@@ -258,7 +258,7 @@ function SlopePlot(props: SlopeChartProps & { label: string; style: NumberStyle;
         {cols.map((c, k) => {
           const right = width - colW.slice(k + 1).reduce((s, w) => s + w, 0);
           return (
-            <text key={c.kind} x={right} y={15} textAnchor="end" fontSize={10} fontWeight={500} letterSpacing={0.8} className="fill-dim">
+            <text key={c.kind} x={right} y={15} textAnchor="end" fontSize={FONT} fontWeight={500} className="fill-ink-2">
               {c.head}
             </text>
           );
@@ -283,11 +283,11 @@ function SlopePlot(props: SlopeChartProps & { label: string; style: NumberStyle;
                   fill="none"
                   strokeWidth={strong ? 2 : 1.25}
                   strokeLinecap="round"
-                  className={strong ? "stroke-data" : "stroke-data-2"}
+                  className={strong ? "stroke-accent" : "stroke-chart-muted"}
                 />
               ) : null}
               {pts.map((p, i) =>
-                p ? <circle key={i} cx={px(p.x)} cy={px(p.y)} r={strong ? 3.5 : 2.5} className={strong ? "fill-data" : "fill-data-2"} /> : null,
+                p ? <circle key={i} cx={px(p.x)} cy={px(p.y)} r={strong ? 3.5 : 2.5} className={strong ? "fill-accent" : "fill-chart-muted"} /> : null,
               )}
             </g>
           );
@@ -301,8 +301,8 @@ function SlopePlot(props: SlopeChartProps & { label: string; style: NumberStyle;
             const left = side === 0 && nAxes > 1;
             const axis = axisX(side === 0 ? 0 : last);
             const anchorX = left ? axis - LABEL_GAP : axis + LABEL_GAP;
-            const name = fitText(l.line.label, nameW, 11.5, { weight: strong ? 600 : 400 });
-            const nameTone = strong ? "fill-ink" : "fill-text-2";
+            const name = fitText(l.line.label, nameW, FONT, { weight: strong ? 600 : 400 });
+            const nameTone = strong ? "fill-ink" : "fill-ink-2";
             const shift = slopeShift(l.line, scale);
             const shiftLabel = shiftText(l.line, scale, style);
             return (
@@ -321,9 +321,9 @@ function SlopePlot(props: SlopeChartProps & { label: string; style: NumberStyle;
                     x={px(anchorX)}
                     y={px(at + 4)}
                     textAnchor={left ? "end" : "start"}
-                    fontSize={11.5}
+                    fontSize={FONT}
                     fontWeight={strong ? 600 : 400}
-                    className={`tabular-nums ${strong ? "fill-ink" : "fill-dim"}`}
+                    className={`tabular-nums ${strong ? "fill-ink" : "fill-ink-2"}`}
                   >
                     {left ? (
                       <>
@@ -344,12 +344,12 @@ function SlopePlot(props: SlopeChartProps & { label: string; style: NumberStyle;
                     x={px(anchorX)}
                     y={px(at + 4)}
                     textAnchor={left ? "end" : "start"}
-                    fontSize={10.5}
+                    fontSize={FONT}
                     fontStyle="italic"
-                    className="fill-dim"
+                    className="fill-ink-2"
                     data-missing="true"
                   >
-                    {`${fitText(l.line.label, Math.max(40, missingRoom(left ? axis : width - (showScore ? colW[1]! : 0) - 18 - anchorX, l.point.reason)), 10.5)} · ${reasonLabel(l.point.reason)}`}
+                    {`${fitText(l.line.label, Math.max(40, missingRoom(left ? axis : width - (showScore ? colW[1]! : 0) - 18 - anchorX, l.point.reason)), FONT)} · ${reasonLabel(l.point.reason)}`}
                   </text>
                 )}
                 {side === 1 ? (
@@ -358,9 +358,9 @@ function SlopePlot(props: SlopeChartProps & { label: string; style: NumberStyle;
                       x={width - (showScore ? colW[1]! : 0)}
                       y={px(at + 4)}
                       textAnchor="end"
-                      fontSize={11.5}
+                      fontSize={FONT}
                       fontWeight={strong ? 600 : 400}
-                      className={`tabular-nums ${shift === null || shiftLabel?.startsWith("=") ? "fill-dim" : shift > 0 ? "fill-data" : "fill-negative"}`}
+                      className={`tabular-nums ${shift === null || shiftLabel?.startsWith("=") ? "fill-ink-2" : shift > 0 ? "fill-accent" : "fill-second"}`}
                     >
                       {shiftLabel ?? "—"}
                     </text>
@@ -369,9 +369,9 @@ function SlopePlot(props: SlopeChartProps & { label: string; style: NumberStyle;
                         x={width}
                         y={px(at + 4)}
                         textAnchor="end"
-                        fontSize={11.5}
+                        fontSize={FONT}
                         fontWeight={strong ? 600 : 400}
-                        className={`tabular-nums ${l.line.score === null ? "fill-dim" : "fill-ink"}`}
+                        className={`tabular-nums ${l.line.score === null ? "fill-ink-2" : "fill-ink"}`}
                       >
                         {l.line.score === null ? "—" : formatNumber(l.line.score, "score", { digits: 0 })}
                       </text>
@@ -384,15 +384,13 @@ function SlopePlot(props: SlopeChartProps & { label: string; style: NumberStyle;
         )}
 
         {unplaced.length > 0 ? (
-          <text x={0} y={px(noteY + 8)} fontSize={10.5} className="fill-dim" data-unplaced="true">
-            <tspan fontWeight={600} letterSpacing={0.8}>
-              NOT PLACED
-            </tspan>
+          <text x={0} y={px(noteY + 8)} fontSize={FONT} className="fill-ink-2" data-unplaced="true">
+            <tspan fontWeight={600}>Not placed</tspan>
             <tspan dx={6} fontStyle="italic">
               {fitText(
                 unplaced.map((l) => `${l.label} (${reasonLabel(l.points.find((p) => p.value === null)?.reason ?? null)})`).join(" · "),
                 width - 90,
-                10.5,
+                FONT,
               )}
             </tspan>
           </text>

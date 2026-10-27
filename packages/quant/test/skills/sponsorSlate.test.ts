@@ -19,13 +19,26 @@ import {
   type QlooResult,
   type QlooTagSearchItem,
 } from "@ct/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SKILL_LIMITATIONS } from "../../src/limitations";
 import { SKILLS } from "../../src/skills/index";
 import { DISCOVERY_TAKE, sponsorSlateSkill } from "../../src/skills/sponsorSlate";
 import { SPONSOR_CATEGORIES, TAG_LOOKUP_TAKE } from "../../src/skills/sponsorSlate/categories";
 import { MAX_SLATE_METRICS } from "../../src/skills/sponsorSlate/outputs";
+import { MAIN_LINE_MIN_TAGS, offCategoryBranch } from "../../src/skills/sponsorSlate/slate";
 import { BudgetError, FETCHED_AT, fakeProbe, fakeRun, FakeRegistry, insightEntity, registerInvented, type Invented } from "./support/fakes";
+
+// The run tests cover both S10 paths: a category with a probe-verified tag and one whose tag is
+// looked up at run time. C2 verified a tag for all but one category, so they run over the
+// pre-Part-8 map, where only beer and energy drinks carry a tag; the mirror test reads the real map.
+vi.mock("../../src/skills/sponsorSlate/categories", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/skills/sponsorSlate/categories")>();
+  const verified = new Set<string>(["beer", "energy_drinks"]);
+  const map = Object.fromEntries(
+    Object.entries(actual.SPONSOR_CATEGORIES).map(([id, spec]) => [id, verified.has(id) ? spec : { ...spec, tag: null }]),
+  );
+  return { ...actual, SPONSOR_CATEGORIES: map };
+});
 
 // Invented brands, seeds, tags and localities only (D29). The fake answers each call from a small
 // world: discovery lists by category tag, national scores for the one-scale call, and per-market
@@ -62,6 +75,8 @@ interface World {
   national: Record<string, number>;
   /** Per locality id: affinity per brand id; a missing id is dropped from that market call. */
   markets: Record<string, Record<string, number>>;
+  /** Tag ids a brand's discovery row carries besides the filter tag. */
+  rowTags?: Record<string, string[]>;
 }
 
 const tag = (id: string, name: string, type: string): QlooTagSearchItem => ({ id, name, type });
@@ -120,7 +135,13 @@ function worldQloo(world: World, budget?: number): { api: QlooApi; calls: Record
   };
   const insightsRows = (params: QlooParams): QlooEntity[] => {
     const filter = list(params["filter.tags"])[0];
-    if (filter !== undefined) return (world.discovery[filter] ?? []).map((e) => insightEntity(e, world.national[e.id]));
+    if (filter !== undefined) {
+      return (world.discovery[filter] ?? []).map((e) => {
+        const row = insightEntity(e, world.national[e.id]);
+        const tags = [filter, ...(world.rowTags?.[e.id] ?? [])].map((id) => ({ id, name: id, type: "urn:tag:genre:brand" }));
+        return { ...row, tags };
+      });
+    }
     const candidates = list(params["filter.results.entities"]);
     const location = params["signal.location"];
     const scores = typeof location === "string" ? (world.markets[location] ?? {}) : world.national;
@@ -309,6 +330,30 @@ describe("sponsor_slate: the slate", () => {
     expect(rows.spirits?.runnerUp).toMatchObject({ label: "Barrel Nine", utr: true });
     expect(rows.auto).toEqual({ category: "auto", label: "Auto", best: null, runnerUp: null, reason: "unavailable" });
     expect(result.forModel.notices).toContain("Category tags found by semantic search, not probe-verified: Spirits (Whiskey).");
+  });
+
+  it("skips a discovered brand whose main line lies in another category, and says so (ANSWER_QUALITY §9)", async () => {
+    const fashion = ["urn:tag:genre:brand:fashion", "urn:tag:genre:brand:fashion:casual", "urn:tag:genre:brand:fashion:footwear"];
+    const world = { ...baseWorld(), rowTags: { [G1.id]: fashion } };
+    world.discovery[WHISKEY_TAG] = [G1, S1, S2];
+    world.national[G1.id] = 0.9;
+    const run = setup(world);
+    const result = await sponsorSlateSkill.run(input(), run.ctx);
+    const rows = Object.fromEntries(dataset(run, "Slate").payload.rows.map((r) => [r.category, r]));
+    expect(rows.spirits?.best?.label).toBe("Ridge Rye");
+    expect(run.calls.find((c) => c.params["filter.results.entities"] !== undefined)?.params["filter.results.entities"]).not.toContain(G1.id);
+    expect(result.forModel.notices).toContain(
+      "Spirits: 1 discovery result carried the category tag only beside a main line elsewhere and was skipped: Summit Pack Co (fashion).",
+    );
+    expect(run.ledger.evidences[1]?.summary).toContain("1 skipped as outside their category");
+
+    // With every row from another line, the category says that no fitting brand is left.
+    const only = { ...baseWorld(), rowTags: { [G1.id]: fashion } };
+    only.discovery[WHISKEY_TAG] = [G1];
+    const empty = setup(only);
+    const out = await sponsorSlateSkill.run(input(), empty.ctx);
+    expect(Object.fromEntries(dataset(empty, "Slate").payload.rows.map((r) => [r.category, r])).spirits).toMatchObject({ best: null, reason: "quality_gate" });
+    expect(out.forModel.notices.find((n) => n.startsWith("Spirits:"))).toContain("No brand that fits Spirits is left, so the slate has no Spirits pick.");
   });
 
   it("records every number as a metric with its formula, badge and evidence, and absent values as UNAVAILABLE", async () => {
@@ -821,17 +866,48 @@ describe("sponsor_slate: estimateCalls", () => {
 });
 
 describe("SPONSOR_CATEGORIES", () => {
-  it("mirrors config/sponsor_categories.json: labels, semantic queries and the one verified filter tag", () => {
+  it("mirrors config/sponsor_categories.json: labels, semantic queries and the one verified filter tag", async () => {
+    const real = await vi.importActual<typeof import("../../src/skills/sponsorSlate/categories")>("../../src/skills/sponsorSlate/categories");
     const raw = readFileSync(new URL("../../../../config/sponsor_categories.json", import.meta.url), "utf8");
     const config = JSON.parse(raw) as {
       categories: Record<string, { label: string; semantic_query: string; tags: { urn: string; status: string; verified_as?: string }[] }>;
     };
-    expect(Object.keys(SPONSOR_CATEGORIES).sort()).toEqual([...SponsorCategory.options].sort());
+    expect(Object.keys(real.SPONSOR_CATEGORIES).sort()).toEqual([...SponsorCategory.options].sort());
     for (const id of SponsorCategory.options) {
       const c = config.categories[id]!;
       const verified = c.tags.filter((t) => t.status === "verified" && t.verified_as === "brand_filter");
       expect(verified.length).toBeLessThanOrEqual(1);
-      expect(SPONSOR_CATEGORIES[id]).toEqual({ label: c.label, semanticQuery: c.semantic_query, tag: verified[0]?.urn ?? null });
+      expect(real.SPONSOR_CATEGORIES[id]).toEqual({ label: c.label, semanticQuery: c.semantic_query, tag: verified[0]?.urn ?? null });
     }
+  });
+
+  it("looks a tag up at run time only for the categories on the named fallback", async () => {
+    const real = await vi.importActual<typeof import("../../src/skills/sponsorSlate/categories")>("../../src/skills/sponsorSlate/categories");
+    const raw = readFileSync(new URL("../../../../config/sponsor_categories.json", import.meta.url), "utf8");
+    const config = JSON.parse(raw) as { categories: Record<string, { fallback?: string }> };
+    const searched = SponsorCategory.options.filter((id) => real.SPONSOR_CATEGORIES[id].tag === null);
+    expect(searched).toEqual(SponsorCategory.options.filter((id) => config.categories[id]!.fallback === "semantic_tag_search"));
+    expect(searched).toEqual(["outdoor_sporting_retail"]);
+  });
+});
+
+describe("offCategoryBranch", () => {
+  const row = (...ids: string[]) => ({ tags: ids.map((id) => ({ id: `urn:tag:genre:brand:${id}`, name: id, type: "urn:tag:genre:brand" })) });
+  const BEAUTY = "urn:tag:genre:brand:health_and_beauty";
+
+  it("names the other branch when the brand carries the category tag only beside a main line elsewhere", () => {
+    expect(MAIN_LINE_MIN_TAGS).toBe(3);
+    expect(offCategoryBranch(row("health_and_beauty", "fashion", "fashion:casual", "fashion:footwear"), BEAUTY)).toBe("fashion");
+    // Two tags elsewhere are a side line, not a main line.
+    expect(offCategoryBranch(row("health_and_beauty", "mobile_app", "mobile_app:healthcare"), BEAUTY)).toBeNull();
+  });
+
+  it("keeps a brand with a tag under the category, a brand with nothing else and a non-genre filter tag", () => {
+    expect(offCategoryBranch(row("health_and_beauty", "health_and_beauty:skincare", "fashion", "fashion:casual", "fashion:jeans"), BEAUTY)).toBeNull();
+    expect(offCategoryBranch(row("health_and_beauty"), BEAUTY)).toBeNull();
+    expect(offCategoryBranch({}, BEAUTY)).toBeNull();
+    expect(offCategoryBranch(row("fashion", "fashion:casual", "fashion:jeans"), "urn:tag:product_category:qloo:invented")).toBeNull();
+    // Tags in the category's own top-level branch never count against it.
+    expect(offCategoryBranch(row("mobile_app:food_and_dining", "mobile_app", "mobile_app:games", "mobile_app:music"), "urn:tag:genre:brand:mobile_app:food_and_dining")).toBeNull();
   });
 });

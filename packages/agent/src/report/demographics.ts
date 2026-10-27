@@ -1,11 +1,12 @@
-import { AgeBucket, stripTokens, type DatasetEnvelope, type Metric } from "@ct/contracts";
+import { AgeBucket, Gender, stripTokens, type DatasetEnvelope, type Metric } from "@ct/contracts";
 import type { FormulaId } from "@ct/quant";
 import { AGE_LABEL_RE } from "./numerals";
 
 /**
  * CHECKER V10 (SPEC §6.2): audience demographics (age, gender, generation) are claimed only where the
  * same part cites a metric that measures them: an audience_dna index, the share_of_taste youth tilt
- * (the metric behind GENERATIONAL_SPLIT), or a share_of_taste percentile in an age context; an exhibit
+ * (the metric behind GENERATIONAL_SPLIT), or a share_of_taste or rank_candidates percentile in an age
+ * or gender context (C4); an exhibit
  * caption may rest on its dataset instead. A sentence that states a limitation ("age was not
  * measured") claims nothing and passes. Registered entity and tag names are masked first, so a name
  * such as "Young Adult Fiction" is never read as a claim.
@@ -20,16 +21,22 @@ export const DEMOGRAPHIC_FORMULAS = [
 ] as const satisfies readonly FormulaId[];
 
 /**
- * A share_of_taste percentile measures age only in an age context. S2 names the context in the
- * metric's key or subject refs, so an age context is one where either carries an AgeBucket id.
+ * A within-call percentile (share_of_taste SHARE, rank_candidates FIT) measures age or gender only in
+ * an age or gender context. Both skills name the context in the metric's subject refs (S2 also in
+ * older keys), so an age context is one where either carries an AgeBucket id, and a gender context
+ * one whose subject refs hold a Gender value ("female") exactly.
  */
-const SHARE_PCT: FormulaId = "share.pct";
+const CONTEXT_PCT: ReadonlySet<string> = new Set<FormulaId>(["share.pct", "pct.within_call"]);
 
 /** True when the metric has a value and measures audience age or gender. */
 export function measuresDemographics(m: Pick<Metric, "formulaId" | "key" | "subjectRefs" | "value">): boolean {
   if (m.value === null) return false;
   if ((DEMOGRAPHIC_FORMULAS as readonly string[]).includes(m.formulaId)) return true;
-  return m.formulaId === SHARE_PCT && [m.key, ...m.subjectRefs].some((s) => AgeBucket.options.some((b) => s.includes(b)));
+  if (!CONTEXT_PCT.has(m.formulaId)) return false;
+  return (
+    [m.key, ...m.subjectRefs].some((s) => AgeBucket.options.some((b) => s.includes(b))) ||
+    m.subjectRefs.some((s) => (Gender.options as readonly string[]).includes(s))
+  );
 }
 
 /** The evidence bundles behind the metrics that measure audience age or gender: the calls that measured it. */
@@ -111,13 +118,34 @@ function escapeRegExp(s: string): string {
 /** A name made of demographic words only ("Gen Z", "Millennials") is a claim when prose uses it, so it is never masked. */
 const onlyDemographic = (name: string): boolean => name.replace(TERM_RE, " ").replace(/[\s\p{P}]+/gu, "") === "";
 
+/** What separates the words of a name as prose writes it: "Young Professionals", "young-professional". */
+const NAME_GAP = String.raw`[\s\p{Pd}_]+`;
+
+/** A name's last word in either number: "Professionals" also matches "professional", and the reverse. */
+function eitherNumber(word: string): string {
+  const stem = word.length > 3 && /[^s]s$/iu.test(word) ? word.slice(0, -1) : word;
+  return /\p{L}$/u.test(stem) ? `${escapeRegExp(stem)}(?:e?s)?` : escapeRegExp(word);
+}
+
+/**
+ * One registered name as prose writes it: any case, words joined by spaces, hyphens or underscores,
+ * the last word singular or plural, and never inside a longer word. Prose that names a tag such as
+ * "Young Professionals" as "the young-professional tag" still names it.
+ */
+function namePattern(name: string): RegExp | null {
+  const words = name.split(new RegExp(NAME_GAP, "u")).filter((w) => w !== "");
+  if (words.length === 0) return null;
+  const parts = words.map((w, i) => (i === words.length - 1 ? eitherNumber(w) : escapeRegExp(w)));
+  return new RegExp(String.raw`(?<![\p{L}\p{N}])${parts.join(NAME_GAP)}(?![\p{L}\p{N}])`, "giu");
+}
+
 /**
  * Registered names, longest first, as patterns that blank them out of prose before the scan: a brand
  * such as "Young Ones Cola" or a tag such as "Young Adult" names something, it claims nothing.
  */
 export function namePatterns(names: Iterable<string>): RegExp[] {
   const unique = [...new Set([...names].map((n) => n.trim()).filter((n) => n !== "" && !onlyDemographic(n)))];
-  return unique.sort((a, b) => b.length - a.length).map((n) => new RegExp(escapeRegExp(n), "giu"));
+  return unique.sort((a, b) => b.length - a.length).flatMap((n) => namePattern(n) ?? []);
 }
 
 /**

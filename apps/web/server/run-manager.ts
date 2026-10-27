@@ -2,6 +2,7 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import {
   DEFAULT_RUN_LIMITS,
+  placeSearchMarket,
   reduceRunEvents,
   Report,
   RunEvent,
@@ -152,10 +153,10 @@ const PARENT_STATUSES: ReadonlySet<string> = new Set<RunStatus>(["completed", "i
 const STORED_PINS = z.record(z.string(), z.string()).nullable();
 const BUSY_REASON = "Too many runs are active. Try again shortly.";
 const NOT_ACCEPTING_REASON = "The server is restarting. Try again in a moment.";
-const PAUSED_REASON = "Live analysis is paused. Showcases and replays still work.";
-const VISITOR_ACTIVE_REASON = "Your last live brief is still running. Ask again once it ends.";
-const DAILY_REASON = "Today's limit for live runs is reached. Showcases and replays still work.";
-const JUDGE_DAILY_REASON = "The judge lane's daily limit for live runs is reached. Showcases and replays still work.";
+const PAUSED_REASON = "Live analysis is paused. Answers you already have still open.";
+const VISITOR_ACTIVE_REASON = "Your last live question is still running. Ask again once it ends.";
+const DAILY_REASON = "Today's limit for live runs is reached. Answers you already have still open.";
+const JUDGE_DAILY_REASON = "The judge lane's daily limit for live runs is reached. Answers you already have still open.";
 
 /**
  * Agent-run slots per lane in one process (SPEC §10.4: 3 in all, the judge lane's 1 among them):
@@ -944,7 +945,8 @@ export class RunManager {
     if (!picker?.candidates.some((c) => c.key === answer.key)) {
       throw new RunManagerError("invalid", "That choice is not one this run offered.");
     }
-    const metro = picker.entityType === "place" ? (state.intent?.geo.metro ?? null) : null;
+    // The gate's own search: a place around its map city or market (D44).
+    const metro = picker.entityType === "place" && state.intent ? placeSearchMarket(state.intent.geo) : null;
     const params = searchParams({ text: picker.mention, type: picker.entityType, metro });
     if (params === null) throw new RunManagerError("invalid", "That choice is not one this run offered.");
     let results: readonly QlooSearchEntity[];

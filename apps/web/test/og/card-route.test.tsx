@@ -30,7 +30,6 @@ vi.mock("next/navigation", () => ({
     throw new Error("NEXT_NOT_FOUND");
   },
 }));
-vi.mock("../../components/ask/top-bar-ask", () => ({ TopBarAsk: () => null }));
 vi.mock("../../server/http", () => ({ runSnapshot, runDataset }));
 
 const RUN_ID = "run-0000-og-card";

@@ -204,7 +204,7 @@ describe("the mode machine and the client", () => {
     expect(await service(paused).des.describe(request("Juniper Cola"))).toEqual({
       kind: "unavailable",
       cause: "paused",
-      message: "Live tearsheets are paused: it was paused by the operator. Tearsheets computed earlier, showcases and replays still open.",
+      message: "Live profiles are paused: it was paused by the operator. Profiles read earlier and answers you already have still open.",
       until: null,
     });
     const spent = desDeps({ mode: async () => ({ mode: "replay_only", breaker: "qloo_daily", reason: "today's Qloo requests are used up", until: MIDNIGHT }) });
@@ -349,7 +349,7 @@ describe("limits", () => {
     expect(await des.describe(request("Brand Gamma"))).toEqual({
       kind: "unavailable",
       cause: "budget",
-      message: expect.stringMatching(/used up\. Tearsheets resume at 00:00 UTC/),
+      message: expect.stringMatching(/used up\. Profiles resume at 00:00 UTC/),
       until: MIDNIGHT,
     });
     c.ms = Date.parse(MIDNIGHT) + 1_000;

@@ -135,12 +135,14 @@ describe("markets config", () => {
     expect(() => parseMarkets(config([market, market]))).toThrow(/listed twice/);
   });
 
-  it("loads config/metros.json: every gazetteer metro is a market, Austin is pinned by hand", () => {
+  it("loads config/metros.json: 51 markets with a centre each, Austin and Washington pinned by hand", () => {
     const markets = loadMarkets();
-    expect(markets.length).toBeGreaterThan(30);
+    expect(markets).toHaveLength(51);
+    for (const m of markets) expect(m.center, m.id).not.toBeNull();
     const byId = new Map(markets.map((m) => [m.id, m]));
     expect(byId.get("nashville")).toMatchObject({ query: "Nashville", stateName: "Tennessee", deliberate: false });
     expect(byId.get("nashville")?.center).not.toBeNull();
     expect(byId.get("austin")?.deliberate).toBe(true);
+    expect(byId.get("washington_dc")).toMatchObject({ query: "Washington", stateName: "District of Columbia", deliberate: true });
   });
 });

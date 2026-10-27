@@ -1,22 +1,22 @@
 import type { Metadata } from "next";
-import { AppChrome } from "../../components/home/app-chrome";
-import { qlooRequestsToday } from "../../components/home/qloo-usage";
-import { libraryHref, readLibraryParams } from "../../components/library/library-params";
-import { LibraryView } from "../../components/library/library-view";
-import { qlooDailyFreshCapFromEnv } from "../../server/config";
-import { getQlooClient, peekQlooClient } from "../../server/container";
+import { SiteShell } from "../../components/chrome/site-shell";
+import { YourAnswers } from "../../components/library/your-answers";
 
 export const metadata: Metadata = {
-  title: "Briefs · Culture Terminal",
+  title: "Your answers · Culture Terminal",
+  // Every visitor sees their own list: nothing here to index.
+  robots: { index: false, follow: true },
 };
 
-/** A09, the briefs library: /briefs?q=&sort=date|conviction&desk=. */
-export default async function BriefsPage(props: PageProps<"/briefs">) {
-  const params = readLibraryParams(await props.searchParams);
+/** Your answers (N13 row style): the questions this browser asked, newest first. */
+export default function YourAnswersPage() {
   return (
-    <AppChrome active="briefs" qlooCap={qlooDailyFreshCapFromEnv()} qlooUsed={qlooRequestsToday(peekQlooClient, getQlooClient)}>
-      {/* A link to another view (a desk, the top bar's Briefs) starts the list over. */}
-      <LibraryView key={libraryHref(params)} initial={params} />
-    </AppChrome>
+    <SiteShell active="answers" mainClassName="pt-12 pb-24 max-md:pt-8 max-md:pb-12">
+      <h1 className="m-0 type-display-m text-ink max-md:type-display-m-sm">Your answers</h1>
+      <p className="m-0 mt-3 type-lead text-ink-2 max-md:text-[16px] max-md:leading-6">
+        The questions you asked on this browser. Each one opens its answer.
+      </p>
+      <YourAnswers className="mt-8" />
+    </SiteShell>
   );
 }

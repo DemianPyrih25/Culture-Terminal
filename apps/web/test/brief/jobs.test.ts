@@ -4,7 +4,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { Job, reduceRunEvents, RunEvent, type RunState } from "@ct/contracts";
 import { jobRunEvents } from "../../app/dev/brief/job-runs";
-import { placeNotes } from "../../components/brief/plan";
 import { buildBriefModel, buildLocation, DESK_LABEL, SHORT_NOTE_MAX, SHORT_TRACE_MAX, type BriefModel } from "../../lib/brief";
 import { readingOrder } from "./support";
 
@@ -189,9 +188,7 @@ describe("the location of a location brief", () => {
     expect(note?.text).toContain("Costs 10 conviction points.");
     // The receipts of the empty rung stand behind it.
     expect(note?.requests.length).toBe(1);
-    // It sits in the margin beside its figure, and the notes still read 1, 2, 3 down the page.
-    const placed = placeNotes(model);
-    expect([...placed.entries()].find(([, numbers]) => numbers.includes(n as number))?.[0]).toBe("figures:2");
+    // The notes still read 1, 2, 3 down the page.
     expect(readingOrder(model)).toEqual(model.footnotes.map((f) => f.n));
   });
 

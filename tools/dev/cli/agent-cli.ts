@@ -13,7 +13,7 @@ import {
   type AnalystMode,
   type AnthropicLike,
 } from "@ct/agent";
-import { DEFAULT_RUN_LIMITS, Lane, QUESTION_MAX_CHARS, type EventInput, type EventInputOf, type LocalityApi, type MetroId } from "@ct/contracts";
+import { DEFAULT_RUN_LIMITS, Lane, placeSearchMarket, QUESTION_MAX_CHARS, type EventInput, type EventInputOf, type LocalityApi, type MarketId } from "@ct/contracts";
 import { closeDb, getDb, type Queryable } from "@ct/db";
 import type { QlooClient, QlooStore } from "@ct/qloo";
 import { searchParams } from "@ct/quant";
@@ -168,7 +168,7 @@ function exitCodeFor(result: AgentRunResult): number {
  * resolution gate sent it, and only when that answer is cached (free, no network call). The picker
  * carries opaque keys (D20); the id is what --pins takes. Empty when the answer is not cached.
  */
-export async function pickerPins(client: QlooClient, picker: EventInputOf<"needs_input">, metro: MetroId | null): Promise<Map<string, string>> {
+export async function pickerPins(client: QlooClient, picker: EventInputOf<"needs_input">, metro: MarketId | null): Promise<Map<string, string>> {
   const pins = new Map<string, string>();
   const params = searchParams({ text: picker.mention, type: picker.entityType, metro: picker.entityType === "place" ? metro : null });
   if (params === null) return pins;
@@ -347,7 +347,7 @@ export async function runAgentCommand(argv: readonly string[], deps: AgentCliDep
   }
 
   const picker = trace.needsInput();
-  const answers = picker === null ? new Map<string, string>() : await pickerPins(qloo.client, picker, result.intent?.geo.metro ?? null);
+  const answers = picker === null ? new Map<string, string>() : await pickerPins(qloo.client, picker, result.intent ? placeSearchMarket(result.intent.geo) : null);
   for (const line of renderAgentResult(result, picker, answers)) io.out(line);
   settle(result.usd - limits.usdHard, io.out, "  ");
   if (persistence !== null) {

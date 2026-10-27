@@ -2,8 +2,8 @@ import { distanceKm, type LatLon } from "./geo";
 import { normalizeName } from "./names";
 
 /**
- * Public US market cities outside the mock metros: the config/metros.json markets, with state and
- * public centre coordinates (D29 allows both). Locality search resolves each market offline under
+ * Public US market cities outside the mock metros: the config/metros.json markets that are no map
+ * city, with state and public centre coordinates (D29 allows both). Locality search resolves each market offline under
  * the config rule (an exact name whose disambiguation names the state), and located places and
  * destinations near or named after one carry its city and state instead of a mock metro's.
  */
@@ -18,19 +18,15 @@ export interface City {
 const city = (name: string, state: string, stateCode: string, lat: number, lon: number): City => ({ name, state, stateCode, center: { lat, lon } });
 
 export const CITIES: readonly City[] = [
-  city("Los Angeles", "California", "CA", 34.05, -118.24),
-  city("Chicago", "Illinois", "IL", 41.88, -87.63),
-  city("Houston", "Texas", "TX", 29.76, -95.37),
-  city("Dallas", "Texas", "TX", 32.78, -96.8),
-  city("Atlanta", "Georgia", "GA", 33.75, -84.39),
-  city("Denver", "Colorado", "CO", 39.74, -104.99),
-  city("Seattle", "Washington", "WA", 47.61, -122.33),
   city("Portland", "Oregon", "OR", 45.52, -122.68),
   city("Phoenix", "Arizona", "AZ", 33.45, -112.07),
-  city("Miami", "Florida", "FL", 25.76, -80.19),
   city("Philadelphia", "Pennsylvania", "PA", 39.95, -75.17),
-  city("Boston", "Massachusetts", "MA", 42.36, -71.06),
-  city("San Francisco", "California", "CA", 37.77, -122.42),
+  city("Washington", "District of Columbia", "DC", 38.91, -77.04),
+  city("Detroit", "Michigan", "MI", 42.33, -83.05),
+  city("Minneapolis", "Minnesota", "MN", 44.98, -93.27),
+  city("San Diego", "California", "CA", 32.72, -117.16),
+  city("Tampa", "Florida", "FL", 27.95, -82.46),
+  city("Baltimore", "Maryland", "MD", 39.29, -76.61),
   city("Louisville", "Kentucky", "KY", 38.25, -85.76),
   city("Kansas City", "Missouri", "MO", 39.1, -94.58),
   city("Indianapolis", "Indiana", "IN", 39.77, -86.16),
@@ -53,6 +49,14 @@ export const CITIES: readonly City[] = [
   city("Salt Lake City", "Utah", "UT", 40.76, -111.89),
   city("Boise", "Idaho", "ID", 43.62, -116.2),
   city("Spokane", "Washington", "WA", 47.66, -117.43),
+  city("San Antonio", "Texas", "TX", 29.42, -98.49),
+  city("Las Vegas", "Nevada", "NV", 36.17, -115.14),
+  city("New Orleans", "Louisiana", "LA", 29.95, -90.07),
+  // Spelled as config/metros.json queries it (the locality search knows the full spelling).
+  city("Saint Louis", "Missouri", "MO", 38.63, -90.2),
+  city("Pittsburgh", "Pennsylvania", "PA", 40.44, -80.0),
+  city("Orlando", "Florida", "FL", 28.54, -81.38),
+  city("Sacramento", "California", "CA", 38.58, -121.49),
 ];
 
 const CITY_BY_NAME: ReadonlyMap<string, City> = new Map(CITIES.map((c) => [normalizeName(c.name), c]));

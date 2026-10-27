@@ -6,6 +6,7 @@ import {
   EntityType,
   FindingKind,
   Flag,
+  Gender,
   type KitWorkflow,
   MarketId,
   MetroId,
@@ -62,14 +63,14 @@ const noDuplicates = { message: "refs must not repeat" };
 
 const LON_LAT = /^(-?\d{1,3}(?:\.\d+)?),(-?\d{1,2}(?:\.\d+)?)$/;
 
+/** A gazetteer neighbourhood id, as the AREAS list in the run context prints it. */
+const NbhdId = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/, { message: "expected a neighbourhood id from the AREAS list" });
+
 /** An area for Block DNA and site contexts: a gazetteer neighbourhood or a point, inside a gazetteer metro. */
 export const AreaArg = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("nbhd"),
-    ref: z
-      .string()
-      .regex(/^[a-z0-9][a-z0-9_-]{0,63}$/, { message: "expected a neighbourhood id from the AREAS list" })
-      .describe("Neighbourhood id from the AREAS list in the run context."),
+    ref: NbhdId.describe("Neighbourhood id from the AREAS list in the run context."),
     metro: MetroId,
   }),
   z.strictObject({
@@ -98,22 +99,30 @@ export const RankContext = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("metro"), market: MarketId }),
   z.strictObject({ kind: z.literal("audience"), audience: AudienceKey }),
   z.strictObject({ kind: z.literal("age"), age: AgeBucket }),
+  z.strictObject({ kind: z.literal("gender"), gender: Gender }),
 ]);
 export type RankContext = z.infer<typeof RankContext>;
 
 /**
  * What the frozen Qloo allowlist can score with filter.results.entities (packages/qloo allowlist,
- * PROBE "Part 5 consequences"): brands under any context, with seeds and tags riding on each;
- * persons under location and age contexts with no interest signal; artists from seeds and tags
- * alone (a none context); places under location contexts, or from seeds alone under a none context
- * (a location and a seed together are not verified for places); destinations from seeds alone.
- * share_of_taste takes brands under any context and persons under age and metro contexts.
+ * PROBE "Part 5 consequences" and the Part 8 coverage probe): brands under any context, with seeds
+ * and tags riding on each; persons under location, age, audience (C5) and gender (C4) contexts with
+ * no interest signal; artists from seeds and tags alone (a none context); places under location
+ * contexts, or from seeds alone under a none context (a location and a seed together are not
+ * verified for places); destinations from seeds alone; podcasts, TV shows and movies (C3) from seeds
+ * and tags under a none context, or under age contexts with no signal (TV shows also audience, C5).
+ * share_of_taste takes brands under any context, persons under age, audience, gender and metro
+ * contexts, and podcast, TV and movie sets under age contexts (TV shows also audience); media
+ * locations are not probed, so media sets take no metro.
  */
-const RANKABLE_TYPES: readonly EntityType[] = ["brand", "person", "artist", "place", "destination"];
-const SHAREABLE_TYPES: readonly EntityType[] = ["brand", "person"];
+const RANKABLE_TYPES: readonly EntityType[] = ["brand", "person", "artist", "place", "destination", "podcast", "tv_show", "movie"];
+const SHAREABLE_TYPES: readonly EntityType[] = ["brand", "person", "podcast", "tv_show", "movie"];
+const MEDIA_TYPES: readonly EntityType[] = ["podcast", "tv_show", "movie"];
 const LOCATION_CONTEXTS: readonly RankContext["kind"][] = ["site", "city", "metro"];
-const PERSON_CONTEXTS: readonly RankContext["kind"][] = [...LOCATION_CONTEXTS, "age"];
+const PERSON_CONTEXTS: readonly RankContext["kind"][] = [...LOCATION_CONTEXTS, "age", "audience", "gender"];
 const PLACE_CONTEXTS: readonly RankContext["kind"][] = ["none", ...LOCATION_CONTEXTS];
+/** Media rank under age contexts with no signal; TV shows also under audience contexts (C3, C5). */
+const mediaContexts = (type: EntityType): readonly RankContext["kind"][] => (type === "tv_show" ? ["age", "audience"] : ["age"]);
 
 // Inputs ---------------------------------------------------------------------------------------------------
 
@@ -123,7 +132,7 @@ export const ResolveEntitiesInput = z.strictObject({
       z.strictObject({
         text: z.string().min(1).max(80).describe("The name as written."),
         type: EntityType,
-        metro: MetroId.nullable().describe("For type place only: the metro to search in. Null otherwise."),
+        metro: MarketId.nullable().describe("For type place only: the metro or market id (MARKETS) to search in. Null otherwise."),
       }),
     )
     .min(1)
@@ -158,12 +167,24 @@ export const RankCandidatesInput = z
     (i) => !i.contexts.some((c) => c.kind === "none") || i.signal_entities.length + i.signal_tags.length > 0,
     { message: "a 'none' context needs signal_entities or signal_tags" },
   )
-  .refine((i) => RANKABLE_TYPES.includes(i.type), { message: "only brand, person, artist, place and destination can be ranked" })
+  .refine((i) => RANKABLE_TYPES.includes(i.type), {
+    message: "only brand, person, artist, place, destination, podcast, tv_show and movie can be ranked",
+  })
   .refine(
     (i) =>
       i.type !== "person" ||
       (i.contexts.every((c) => PERSON_CONTEXTS.includes(c.kind)) && i.signal_entities.length + i.signal_tags.length === 0),
-    { message: "persons rank only under site, city, metro or age contexts, with no signal_entities or signal_tags" },
+    { message: "persons rank only under site, city, metro, age, audience or gender contexts, with no signal_entities or signal_tags" },
+  )
+  .refine((i) => i.type === "brand" || i.type === "person" || i.contexts.every((c) => c.kind !== "gender"), {
+    message: "gender contexts rank brands and persons only",
+  })
+  .refine(
+    (i) =>
+      !MEDIA_TYPES.includes(i.type) ||
+      i.contexts.every((c) => c.kind === "none") ||
+      (i.contexts.every((c) => mediaContexts(i.type).includes(c.kind)) && i.signal_entities.length + i.signal_tags.length === 0),
+    { message: "podcasts, TV shows and movies rank under a 'none' context from signals, or under age contexts (TV shows also audience) with no signals" },
   )
   .refine((i) => i.type !== "artist" || i.contexts.every((c) => c.kind === "none"), {
     message: "artists rank only under a 'none' context, from signal_entities or signal_tags",
@@ -202,16 +223,20 @@ export const ShareOfTasteInput = z
     set: z.array(R).min(2).max(8),
     ages: z.array(AgeBucket).max(6),
     audiences: z.array(AudienceKey).max(4),
+    genders: z.array(Gender).max(2).default([]).describe("Audience gender contexts (male, female); brand and person sets only."),
     metros: z.array(MarketId).max(8),
     ...callMeta,
   })
-  .refine((i) => distinct(i.set) && distinct(i.ages) && distinct(i.audiences) && distinct(i.metros), noDuplicates)
-  .refine((i) => i.ages.length + i.audiences.length + i.metros.length > 0, {
-    message: "give at least one age, audience or metro context",
+  .refine((i) => distinct(i.set) && distinct(i.ages) && distinct(i.audiences) && distinct(i.genders) && distinct(i.metros), noDuplicates)
+  .refine((i) => i.ages.length + i.audiences.length + i.genders.length + i.metros.length > 0, {
+    message: "give at least one age, audience, gender or metro context",
   })
-  .refine((i) => SHAREABLE_TYPES.includes(i.type), { message: "share_of_taste takes brand or person sets only" })
-  .refine((i) => i.type !== "person" || i.audiences.length === 0, {
-    message: "person sets take age and metro contexts only",
+  .refine((i) => SHAREABLE_TYPES.includes(i.type), { message: "share_of_taste takes brand, person, podcast, tv_show or movie sets only" })
+  .refine((i) => i.type === "brand" || i.type === "person" || i.genders.length === 0, {
+    message: "gender contexts share brand and person sets only",
+  })
+  .refine((i) => !MEDIA_TYPES.includes(i.type) || (i.metros.length === 0 && (i.type === "tv_show" || i.audiences.length === 0)), {
+    message: "podcast, TV show and movie sets take age contexts (TV shows also audiences), no metros",
   });
 
 export const AudienceDnaInput = z
@@ -243,9 +268,14 @@ export const GeoLiftInput = z
     concept_tags: z.array(T).min(1).max(4).describe("Taxonomy place tags for the concept."),
     concept_entities: z.array(R).max(3).describe("Analog venues or brands that sharpen the concept; may be empty."),
     supply: z.boolean().describe("Also sample venue supply for white space (1–2 extra calls)."),
+    focus_areas: z
+      .array(NbhdId)
+      .max(3)
+      .optional()
+      .describe("Neighbourhood ids (AREAS) the question names: each gets its own lift, rank and confidence whatever its rank."),
     ...callMeta,
   })
-  .refine((i) => distinct(i.concept_tags) && distinct(i.concept_entities), noDuplicates);
+  .refine((i) => distinct(i.concept_tags) && distinct(i.concept_entities) && distinct(i.focus_areas ?? []), noDuplicates);
 
 export const BlockDnaInput = z.strictObject({
   area: AreaArg,
@@ -323,7 +353,7 @@ export const ANALYST_TOOLS = {
       "Returns per mention: the ref, the match class (exact, ambiguous, inexact, not_found) and up to 5 alternatives. " +
       "Only an exact name match of the right type gets a ref; nothing is auto-substituted, and alternatives are not " +
       "the entity, so read the match class before relying on a name. Persons resolve only when they are public " +
-      "figures. For type place, give the metro to search in. Locality contexts take market and metro ids; resolve " +
+      "figures. For type place, give the metro or market to search in. Locality contexts take market and metro ids; resolve " +
       "a city only as a destination to rank.",
   }),
 
@@ -349,14 +379,15 @@ export const ANALYST_TOOLS = {
     description:
       "Score an exact candidate set on one scale under one to three contexts. Costs 1 Qloo call per context. " +
       "Contexts: none (needs signal_entities or signal_tags), site (an area), city (a gazetteer metro), metro (a " +
-      "market), audience, age. One context returns a Ranked table with FIT percentiles; two or more return a Slope of " +
+      "market), audience, age, gender (male or female). One context returns a Ranked table with FIT percentiles; two or more return a Slope of " +
       "rank shifts among the candidates every context ranked; Tenant Fit uses [site, city] and is computed by code. " +
       "Scores are per call: compare ranks and percentiles, never raw affinity across calls. Qloo may drop candidates " +
       "in a context, and candidates tied at the row floor are not scored. Location contexts compress scores, so read " +
-      "ranks. Ranks brands under any context; persons under site, city, metro or age contexts with no signal " +
-      "entities or tags; artists only under a none context; places under site, city or metro contexts with no " +
-      "signals, or under a none context from signal_entities alone; destinations only under a none context with " +
-      "signal_entities and no signal_tags. Podcasts, TV shows and movies cannot be ranked.",
+      "ranks. Ranks brands under any context; persons under site, city, metro, age, audience or gender contexts with " +
+      "no signal entities or tags; artists only under a none context; places under site, city or metro contexts with " +
+      "no signals, or under a none context from signal_entities alone; destinations only under a none context with " +
+      "signal_entities and no signal_tags; podcasts, TV shows and movies (named lists on one scale) under a none " +
+      "context from signals, or under age contexts with no signals (TV shows also audience).",
   }),
 
   peer_landscape: defineTool({
@@ -381,13 +412,13 @@ export const ANALYST_TOOLS = {
     endpoints: ["/v2/insights"],
     input: ShareOfTasteInput,
     description:
-      "Share-of-Taste grid: rank a set of 2–8 entities within each context (age buckets, audiences, market metros). " +
+      "Share-of-Taste grid: rank a set of 2–8 entities within each context (age buckets, audiences, genders, market metros). " +
       "The first ref is the subject. Costs 1 Qloo call per context. Returns a Matrix of within-call percentiles, " +
       "youth tilt (the young buckets queried minus the old ones, at least one of each) and metros won; a pair also " +
       "gets who wins where. Ranks hold only within this set and context. A metro context is Qloo's locality signal, " +
       "not residence or sales, and compresses scores. Audiences must come from this desk's AUDIENCES list. Takes " +
-      "brand sets under any context and person sets under age and metro contexts; artists and other types cannot " +
-      "be shared.",
+      "brand and person sets under any context; podcast, TV show and movie sets under age contexts (TV shows also " +
+      "audiences), no metros or genders; artists and other types cannot be shared.",
   }),
 
   audience_dna: defineTool({
@@ -446,7 +477,9 @@ export const ANALYST_TOOLS = {
       "category:place:* tags only filter the supply sample (white space needs one); concept_entities map the concept " +
       "only when no genre tag fits. Descriptive tags return an empty map. Raw heat tracks popularity, so only lift " +
       "means anything. Neighbourhoods are ranked only when at least three have a lift. Coarse precision allows no " +
-      "neighbourhood claims. Supply is a capped sample of Qloo-indexed venues.",
+      "neighbourhood claims. Supply is a capped sample of Qloo-indexed venues, counted only with a verified category tag; " +
+      "without one the competitor count is UNAVAILABLE (unknown, never 0). focus_areas (the areas the question names) " +
+      "always get their own lift, rank among the areas with a lift, and confidence, or the reason they have none.",
   }),
 
   block_dna: defineTool({

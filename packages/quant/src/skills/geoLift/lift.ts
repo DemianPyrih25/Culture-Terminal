@@ -34,6 +34,48 @@ export const NO_CLAIM_PRECISION = 4;
  * cannot read.
  */
 export const MIN_RANKED_AREAS = 3;
+/**
+ * The evidence every supply-based label needs: a white-space quadrant, "few rivals" or "busy with rivals"
+ * on the page, and a competitor claim in the note. One rule, read by geo_lift here, by the CHECKER (V10,
+ * agent report/competition) and by the web answer (components/figures/lift-scale mirrors the numbers,
+ * and a test keeps them equal):
+ * 1. The compared set: at least MIN_RANKED_AREAS areas with a lift, holding at least MIN_SUPPLY_VENUES
+ *    counted venues between them. Below that no area's count is read and competitors are unknown.
+ * 2. A capped sample's zero is no count: the cap may have cut the area's venues, so the area gets no
+ *    supply label at all, neither open nor crowded, and its count is not a value a claim can cite.
+ * 3. A high-supply label (Proven & crowded, Saturated, "busy with rivals") needs at least
+ *    MIN_BUSY_AREA_VENUES counted venues in the area itself.
+ * An area with a lift that fails 2 or 3 reads THIN_SUPPLY_LABEL ("Not enough venue data").
+ */
+
+/**
+ * Similar venues a places sample must place in the neighbourhoods with a lift before any area's count
+ * is read (rule 1). A thinner sample says more about Qloo's index than about the street (7 coffee venues
+ * for a whole metro leaves nearly every area at 0), so the competitor count is then unknown, never 0 or few.
+ */
+export const MIN_SUPPLY_VENUES = 10;
+/**
+ * Counted venues an area needs before it can be called crowded or saturated (rule 3). With one or two,
+ * a single venue more or less moves the area's density across the median, and one venue in a small
+ * area is not a crowd; three is the smallest count that still leaves several venues after losing one.
+ */
+export const MIN_BUSY_AREA_VENUES = 3;
+/** The neutral label of an area with a lift whose venue count cannot carry a supply label (rules 2 and 3). */
+export const THIN_SUPPLY_LABEL = "Not enough venue data";
+
+/** Quadrants that claim high supply (many similar venues), the ones rule 3 guards. */
+export const BUSY_QUADRANTS: ReadonlySet<WhiteSpaceQuadrant> = new Set(["PROVEN_CROWDED", "SATURATED"]);
+
+/**
+ * Whether an area's counted venues can carry a supply label (rules 2 and 3): never a capped sample's 0,
+ * and a high-supply quadrant only with at least MIN_BUSY_AREA_VENUES venues. Rule 1 is checked over the
+ * compared set (whiteSpace, sampleGap).
+ */
+export function supplyLabelHolds(count: number | null, capped: boolean, quadrant: WhiteSpaceQuadrant): boolean {
+  if (count === null) return false;
+  if (capped && count === 0) return false;
+  return !BUSY_QUADRANTS.has(quadrant) || count >= MIN_BUSY_AREA_VENUES;
+}
 
 export interface HeatCell {
   geohash: string;
@@ -242,6 +284,12 @@ export interface AreaSupply {
   /** WhiteSpace_N = Demand_pct·(1 − Supply_pct). */
   whiteSpace: number | null;
   quadrant: WhiteSpaceQuadrant | null;
+  /**
+   * True for an area with a lift whose venues were counted but cannot carry a supply label: a capped
+   * sample's 0, a high-supply reading from fewer than MIN_BUSY_AREA_VENUES venues, or a compared set
+   * below the rule. It reads THIN_SUPPLY_LABEL, never crowded, saturated or open.
+   */
+  thin: boolean;
 }
 
 /**
@@ -257,21 +305,43 @@ export function supplyPercentiles(densities: readonly number[]): (number | null)
   return densities.map((d) => (others < 1 ? null : densities.filter((x) => x < d).length / others));
 }
 
+/** Sampled venues located in the neighbourhoods white space can rank: what MIN_SUPPLY_VENUES is checked against. */
+export function rankableVenues(areas: readonly AreaLift[], counts: ReadonlyMap<string, number>): number {
+  return supplyRankable(areas).reduce((n, a) => n + (counts.get(a.id) ?? 0), 0);
+}
+
 /**
  * Supply and white space. Supply_N is sampled venues per km² of the area, its percentile taken among
- * the areas with a lift so it shares Demand_pct's population, and only among at least
- * MIN_RANKED_AREAS of them. A sample with no venue in any of those areas measures nothing, so its
- * percentiles stay null rather than a tie of zeros reading as crowded. `counts` is null when no
- * sample was taken, and every count then stays null: a zero is a sampled area with no venue.
- * Quadrants split at the medians, a value at the median counting as high (D17).
+ * the areas with a lift so it shares Demand_pct's population. `counts` is null when no sample was
+ * taken, and every count then stays null: a zero is a sampled area with no venue.
+ * The supply-label rule (above MIN_SUPPLY_VENUES) decides what may carry a label:
+ * - The compared set must hold at least MIN_RANKED_AREAS areas and MIN_SUPPLY_VENUES venues; otherwise
+ *   no area is ranked, so a tie of zeros or a handful of venues never reads as crowded or open.
+ * - A capped sample holds only the venues Qloo returned first, so an area with none of them keeps its
+ *   0 in the sample but is not ranked, and the percentiles rank the areas that hold a sampled venue.
+ * - A high-supply quadrant from fewer than MIN_BUSY_AREA_VENUES venues is withheld.
+ * An area with a lift and a count that gets no label is `thin` (THIN_SUPPLY_LABEL), with no percentile,
+ * white space or quadrant. Quadrants split at the medians, a value at the median counting as high (D17).
  */
-export function whiteSpace(areas: readonly AreaLift[], counts: ReadonlyMap<string, number> | null): Map<string, AreaSupply> {
+export function whiteSpace(areas: readonly AreaLift[], counts: ReadonlyMap<string, number> | null, capped = false): Map<string, AreaSupply> {
   const out = new Map<string, AreaSupply>(
-    areas.map((a) => [a.id, { count: counts === null ? null : (counts.get(a.id) ?? 0), supplyPct: null, whiteSpace: null, quadrant: null }]),
+    areas.map((a) => [a.id, { count: counts === null ? null : (counts.get(a.id) ?? 0), supplyPct: null, whiteSpace: null, quadrant: null, thin: false }]),
   );
   if (counts === null) return out;
-  const eligible = supplyRankable(areas);
-  if (eligible.length < MIN_RANKED_AREAS || eligible.every((a) => (counts.get(a.id) ?? 0) === 0)) return out;
+  const rankable = supplyRankable(areas);
+  const markThin = (list: readonly AreaLift[]): void => {
+    for (const a of list) {
+      const row = out.get(a.id);
+      if (row !== undefined) row.thin = true;
+    }
+  };
+  const eligible = rankable.filter((a) => !capped || (counts.get(a.id) ?? 0) > 0);
+  const venues = eligible.reduce((n, a) => n + (counts.get(a.id) ?? 0), 0);
+  if (eligible.length < MIN_RANKED_AREAS || venues < MIN_SUPPLY_VENUES) {
+    markThin(rankable);
+    return out;
+  }
+  markThin(rankable.filter((a) => !eligible.includes(a)));
 
   const pct = supplyPercentiles(eligible.map((a) => (counts.get(a.id) ?? 0) / a.areaKm2));
   const demandSplit = median(eligible.map((a) => a.demandPct ?? 0)) ?? 0;
@@ -280,9 +350,14 @@ export function whiteSpace(areas: readonly AreaLift[], counts: ReadonlyMap<strin
     const row = out.get(a.id);
     const supplyPct = pct[i] ?? null;
     if (row === undefined || supplyPct === null || a.demandPct === null) return;
+    const quadrant = whiteSpaceQuadrant(a.demandPct, supplyPct, demandSplit, supplySplit);
+    if (!supplyLabelHolds(row.count, capped, quadrant)) {
+      row.thin = true;
+      return;
+    }
     row.supplyPct = supplyPct;
     row.whiteSpace = a.demandPct * (1 - supplyPct);
-    row.quadrant = whiteSpaceQuadrant(a.demandPct, supplyPct, demandSplit, supplySplit);
+    row.quadrant = quadrant;
   });
   return out;
 }

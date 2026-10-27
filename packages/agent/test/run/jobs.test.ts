@@ -232,7 +232,7 @@ describe("every job runs end to end with a pivot and no CHECKER issue", () => {
         { text: "Brand Alpha", entity_type: "brand", role: "primary", public_figure: false },
         { text: "Brand Beta", entity_type: "brand", role: "peer", public_figure: false },
       ],
-      geo: { metro: "austin", area: null, unsupported_place: null },
+      geo: { metro: "austin", area: null, unsupported_place: null, market: null },
       mnemonic: "BRAND ALPHA VS BRAND BETA",
     });
     const { report, events, result } = await runJob({
@@ -271,7 +271,7 @@ describe("every job runs end to end with a pivot and no CHECKER issue", () => {
       job: "site_selection",
       pillar: "location",
       mentions: [],
-      geo: { metro: "austin", area: null, unsupported_place: null },
+      geo: { metro: "austin", area: null, unsupported_place: null, market: null },
       constraints: { concepts: ["coffee shop"], sponsor_categories: [], domains: [], ages: [], notes: [] },
       mnemonic: "COFFEE SHOP SITE AUSTIN",
     });
@@ -307,7 +307,7 @@ describe("every job runs end to end with a pivot and no CHECKER issue", () => {
       job: "area_profile",
       pillar: "location",
       mentions: [],
-      geo: { metro: "austin", area: "Barton Hills", unsupported_place: null },
+      geo: { metro: "austin", area: "Barton Hills", unsupported_place: null, market: null },
       mnemonic: "BARTON HILLS, AUSTIN DNA",
     });
     await runJob({
@@ -346,7 +346,7 @@ describe("every job runs end to end with a pivot and no CHECKER issue", () => {
       job: "tenant_mix",
       pillar: "location",
       mentions: [],
-      geo: { metro: "nashville", area: "Hermitage", unsupported_place: null },
+      geo: { metro: "nashville", area: "Hermitage", unsupported_place: null, market: null },
       constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: ["vacant storefront"] },
       mnemonic: "HERMITAGE, NASHVILLE TEN",
     });
@@ -391,16 +391,17 @@ describe("every job runs end to end with a pivot and no CHECKER issue", () => {
   });
 
   it("sponsorship: the slate in the named tour markets, travel taste and expected brands in wave 1, the playbook's move on the slate's finding", async () => {
-    const question = "Which beer and energy-drink brands fit Artist Lumen's tour through Denver and Chicago?";
+    const question = "Which beer and energy-drink brands fit Artist Lumen's tour through Dallas and Miami?";
     const intent = intentFor({
       job: "sponsorship",
       pillar: "marketing",
       mentions: [{ text: "Artist Lumen", entity_type: "artist", role: "primary", public_figure: false }],
-      constraints: { concepts: [], sponsor_categories: ["beer", "energy_drinks"], domains: [], ages: [], notes: ["markets: Denver, Chicago", "tour"] },
+      constraints: { concepts: [], sponsor_categories: ["beer", "energy_drinks"], domains: [], ages: [], notes: ["markets: Dallas, Miami", "tour"] },
       mnemonic: "ARTIST LUMEN <ARTIST> SPON",
     });
     const { events } = await runJob({
       question,
+      pinned: [...PINNED, "dallas", "miami"],
       intent,
       stream: [
         respond([
@@ -430,7 +431,7 @@ describe("every job runs end to end with a pivot and no CHECKER issue", () => {
                 seed: "R1",
                 categories: ["beer", "energy_drinks"],
                 shortlist,
-                markets: ["denver", "chicago"],
+                markets: ["dallas", "miami"],
                 ...pivotOn(finding),
               }),
             ]);
@@ -446,7 +447,7 @@ describe("every job runs end to end with a pivot and no CHECKER issue", () => {
       ],
     });
     const slate = ofType(events, "tool.start").find((e) => e.tool === "sponsor_slate");
-    expect(slate).toMatchObject({ phase: "scan", args: { markets: ["denver", "chicago"], categories: ["beer", "energy_drinks"] } });
+    expect(slate).toMatchObject({ phase: "scan", args: { markets: ["dallas", "miami"], categories: ["beer", "energy_drinks"] } });
     // The pivot made the move the playbook names for its finding.
     const pivot = ofType(events, "pivot")[0];
     const kind = ofType(events, "finding").find((f) => f.finding.id === pivot?.triggerFindingId)?.finding.kind;
@@ -550,7 +551,7 @@ describe("pivots on findings a turn-2 step leaves standing or a deferred scan st
       job: "tenant_mix",
       pillar: "location",
       mentions: [],
-      geo: { metro: "nashville", area: "Hermitage", unsupported_place: null },
+      geo: { metro: "nashville", area: "Hermitage", unsupported_place: null, market: null },
       constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: ["vacant storefront"] },
       mnemonic: "HERMITAGE, NASHVILLE TEN",
     });
@@ -669,6 +670,51 @@ describe("pivots on findings a turn-2 step leaves standing or a deferred scan st
     const pivotEnd = ofType(events, "tool.end").find((e) => e.toolCallId === "toolu_pivot");
     expect(pivotEnd?.ok).toBe(true);
     expect(pivotEnd?.flags).not.toContain("BUDGET_TRUNCATED");
+  });
+
+  it("audience_discovery: with no peer from wave 1, the read by age runs on the scan's own brand neighbours", async () => {
+    const question = "Which podcasts fit Brand Delta's audience?";
+    const intent = intentFor({
+      job: "audience_discovery",
+      pillar: "audience",
+      mentions: [{ text: "Brand Delta", entity_type: "brand", role: "primary", public_figure: false }],
+      constraints: { concepts: [], sponsor_categories: [], domains: ["podcast"], ages: [], notes: [] },
+      mnemonic: "BRAND DELTA <BRAND> AUD",
+    });
+    const { events, fake } = await runJob({
+      question,
+      intent,
+      stream: [
+        respond([
+          planCall(plan(question, [{ id: "S1", tool: "destination_affinity", purpose: "Where the audience's travel taste points." }], "cross_domain")),
+          toolUse("toolu_trvl", "destination_affinity", { seeds: ["R1"], ...step("S1") }),
+        ]),
+        (req) =>
+          respond([
+            toolUse("toolu_pivot", "cross_domain", {
+              seeds: ["R1"],
+              seed_tags: [],
+              domains: ["podcast"],
+              popularity_max: 0.85,
+              ...pivotOn(findingOf(req, ["POPULARITY_DOMINANCE", "GENERATIONAL_SPLIT"])),
+            }),
+          ]),
+        reportTurn("The Brand Delta audience", [
+          ASK("Sponsor fit", "Which sponsors fit Artist Nova, whose fans overlap Brand Delta's?"),
+          ASK("Moat or niche", "Is Brand Delta's audience a moat or a niche against its peers?"),
+        ]),
+      ],
+    });
+    // The scan read the named podcasts and the target's own type, and the brand rows became the age read's set.
+    const scan = ofType(events, "tool.start").filter((e) => e.phase === "scan");
+    expect(scan.find((e) => e.tool === "cross_domain")?.args).toMatchObject({ domains: ["podcast", "brand"] });
+    const ages = scan.find((e) => e.tool === "share_of_taste");
+    expect(ages?.args).toMatchObject({ type: "brand", ages: ["24_and_younger", "35_to_44", "55_and_older"] });
+    const set = (ages?.args as { set: string[] } | undefined)?.set ?? [];
+    expect(set[0]).toBe("R1");
+    expect(set.length).toBeGreaterThan(1);
+    expect(digestsIn(fake.streamRequests[1]!, "SHARE")).toHaveLength(1);
+    expect(userTextsOf(fake.streamRequests[1]!).filter((t) => t.includes("SCAN NOTE: share_of_taste"))).toEqual([]);
   });
 
   it("market_selection: a secondary-market question gets its grid in secondary markets, and a pivot on what the grid found", async () => {

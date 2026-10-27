@@ -2,8 +2,7 @@
 // numbers only; no question, entity or request id appears anywhere in a status reading.
 import type { Lane, Mode, RunStatus } from "@ct/contracts";
 import type { LaneBudget, ModeDecision } from "../../server/breakers";
-import type { LocalityCoverage } from "../../server/localities";
-import type { QlooView, StatusLimits, StatusReport, StatusSources } from "../../server/status";
+import type { LocalityStatus, QlooView, StatusLimits, StatusReport, StatusSources } from "../../server/status";
 
 export const NOW = Date.parse("2026-10-23T12:00:00.000Z");
 export const TODAY = "2026-10-23";
@@ -53,8 +52,17 @@ export function qlooView(over: Partial<QlooView> = {}, quota: Partial<QlooView["
   };
 }
 
-/** Every market a run needs is pinned (market ids and counts only: a coverage never holds a locality id). */
-export const LOCALITIES: LocalityCoverage = { state: "complete", required: ["nashville", "austin"], missing: [], pinned: 2 };
+/**
+ * Every map city a run needs and every config market is pinned (market ids and counts only: a coverage
+ * never holds a locality id).
+ */
+export const LOCALITIES: LocalityStatus = {
+  state: "complete",
+  required: ["nashville", "austin"],
+  missing: [],
+  pinned: 3,
+  markets: { total: 3, missing: [] },
+};
 
 const LIVE_RECENT: RunStatus[] = ["completed", "completed", "failed", "incomplete", "completed"];
 const TEST_RECENT: RunStatus[] = ["running", "cancelled", "completed"];

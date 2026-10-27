@@ -4,8 +4,8 @@ import { test as base, expect, type Locator, type Page, type TestInfo } from "@p
 
 /**
  * Shared by the smoke specs. Selectors are roles and accessible names first, then the data attributes
- * the components already carry for their state (data-answer, data-replay, data-lift-map): no sleeps,
- * every wait is on something the page shows.
+ * the components already carry for their state (data-working, data-verdict, data-replay, data-lift-map):
+ * no sleeps, every wait is on something the page shows.
  */
 
 /**
@@ -82,11 +82,14 @@ export const test = base.extend<SmokeOptions & { spendGuard: void; pageErrors: v
 
 export { expect };
 
-/** The recorded brand-health brief (apps/web/server/samples, invented entities), as a finished note. */
+/** The recorded brand-health run (apps/web/server/samples, invented entities), as a finished answer. */
 export const BRIEF_SAMPLE = "/dev/brief?sample=brand-health";
 
-/** The synthetic brief of a job with a lift map (app/dev/brief/job-runs.ts: Austin, invented entities). */
+/** The synthetic answer of a job with a lift map (app/dev/brief/job-runs.ts: Austin, invented entities). */
 export const MAP_SAMPLE = "/dev/brief?job=site_selection";
+
+/** The synthetic brand_health answer (app/dev/brief/job-runs.ts, invented entities): key numbers with Source. */
+export const ANSWER_SAMPLE = "/dev/brief?job=brand_health";
 
 /** Opens a path and checks the server answered it with a page, not an error. */
 export async function open(page: Page, path: string): Promise<void> {
@@ -95,15 +98,35 @@ export async function open(page: Page, path: string): Promise<void> {
   expect(res?.status() ?? 0, `${path} answered an error`).toBeLessThan(400);
 }
 
-/** The brief's answer block: data-answer is "pending" while the run is written and "final" once the note is. */
-export function answerBlock(page: Page): Locator {
-  return page.locator("[data-answer]");
+/** The working view, shown while an answer is being made (data-working is live or replay). */
+export function workingView(page: Page): Locator {
+  return page.locator("[data-working]");
 }
 
-/** Waits for the finished note: the answer with its headline. */
-export async function expectNote(page: Page, timeout?: number): Promise<void> {
-  await expect(answerBlock(page)).toHaveAttribute("data-answer", "final", { timeout });
-  await expect(page.locator("[data-headline]")).toBeVisible();
+/** Waits for the finished answer: the verdict card with its headline. */
+export async function expectAnswer(page: Page, timeout?: number): Promise<void> {
+  await expect(page.locator("[data-verdict]").first()).toBeVisible({ timeout });
+  await expect(page.locator("[data-headline]").first()).toBeVisible();
+}
+
+/**
+ * Whether the server can store a run: GET /api/health's database check. A server without its database
+ * (Postgres not running) still serves every page, the dev samples and the replay of a recording, but
+ * cannot start or keep a run, so the specs that need one skip with this reason.
+ */
+export async function databaseDown(page: Page): Promise<string | null> {
+  const res = await page.request.get("/api/health");
+  const body = (await res.json().catch(() => null)) as { db?: { ok?: boolean } } | null;
+  return body?.db?.ok === true ? null : "the server's database is not reachable (pnpm db:up)";
+}
+
+/**
+ * The owner's rule for the redesign: no examples anywhere. No showcase or example surface, no "Try"
+ * chips, no "See all examples" link: the page's visible words never offer one.
+ */
+export async function expectNoExamples(page: Page): Promise<void> {
+  const words = await page.locator("body").innerText();
+  expect(words, "the page offers examples").not.toMatch(/\bexamples?\b|showcase|\bTry:|See all|ready answer/i);
 }
 
 /** The robots meta of the page, or null without one. */

@@ -239,7 +239,7 @@ describe("POST /api/runs: the visitor", () => {
 
   it("passes the per-visitor refusal on as 429, not to be retried by itself", async () => {
     runs.startAgentRun.mockRejectedValueOnce(
-      new RunManagerError("limited", "You have started 3 live briefs in the last hour. Try again in 20 minutes; showcases and replays still work.", 1200),
+      new RunManagerError("limited", "You have started 3 live questions in the last hour. Try again in 20 minutes; answers you already have still open.", 1200),
     );
     const res = await http.startRun(postJson("/api/runs", { question: "Something new", turnstileToken: GOOD_TOKEN }));
     expect(res.status).toBe(429);
@@ -323,7 +323,7 @@ describe("POST /api/preview: the human check", () => {
     const res = await http.previewQuestion(postJson("/api/preview", { question: QUESTION, turnstileToken: GOOD_TOKEN }));
     expect(await res.json()).toMatchObject({
       mode: "economy",
-      modeNote: "Live briefs run on the economy analyst until 00:00 UTC: today's live budget is nearly used.",
+      modeNote: "Live answers run on the economy analyst until 00:00 UTC: today's live budget is nearly used.",
     });
   });
 

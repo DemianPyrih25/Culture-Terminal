@@ -1,5 +1,5 @@
-// LiftMap (A06 figure 1): the server render is a static schematic with the RAW / BASE / LIFT control,
-// the precision badge and the boundary source; the WebGL map code is never in the server render or
+// LiftMap: the server render is a static schematic with the "Extra interest | All interest" switch,
+// numbered pins with flags, the ramp legend and the boundary source; the WebGL map code is never in the server render or
 // in the static import graph. The table view lists every neighbourhood with its lift or its reason.
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -17,7 +17,6 @@ const data = austinLiftMap.payload;
 const html = render(
   <LiftMap
     data={data}
-    number={1}
     title="The fit sits east of the interstate"
     caption="Lift vs the restaurant baseline."
     source={FIXTURE_SOURCES.heatmap}
@@ -41,19 +40,22 @@ describe("LiftMap · server render", () => {
     expect(plot).not.toContain('data-marker="holly"');
   });
 
-  it("offers RAW / BASE / LIFT on keys 1/2/3, LIFT pressed first, and badges the precision", () => {
+  it("offers Extra interest and All interest, extra interest first, with the ramp legend", () => {
     const plot = plotView(html);
-    for (const [mode, key] of [
-      ["RAW", "1"],
-      ["BASE", "2"],
-      ["LIFT", "3"],
-    ] as const) {
-      expect(plot).toMatch(new RegExp(`aria-pressed="${mode === "LIFT"}" aria-keyshortcuts="${key}"[^>]*>${mode}<`));
-    }
-    expect(plot).toContain('aria-label="Map layer: The fit sits east of the interstate"');
-    expect(text(plot)).toContain("Geohash 6 · precision 0.80");
-    expect(text(plot)).toContain("Above baseline");
-    expect(text(plot)).toContain("Venues (capped sample)");
+    expect(plot).toContain('role="radiogroup" aria-label="Map layer: The fit sits east of the interstate"');
+    expect(plot).toMatch(/aria-checked="true"[^>]*>Extra interest</);
+    expect(plot).toMatch(/aria-checked="false"[^>]*>All interest</);
+    expect(text(plot)).toContain("More interest than a typical area");
+    expect(plot).toContain('data-precision="6"');
+    expect(text(plot)).not.toContain("Rough areas only");
+  });
+
+  it("pins the three areas with the most extra interest, numbered, with flags", () => {
+    const plot = plotView(html);
+    const pins = [...plot.matchAll(/data-pin="(\d)"/g)].map((m) => m[1]);
+    expect(pins).toEqual(["1", "2", "3"].slice(0, pins.length));
+    expect(pins.length).toBeGreaterThan(0);
+    expect(text(plot)).toMatch(/\d\.\d\d× interest/);
   });
 
   it("maps keys to modes", () => {
@@ -80,16 +82,13 @@ describe("LiftMap · server render", () => {
     expect(modeForKeyEvent(key("4"), button)).toBeNull();
   });
 
-  it("starts on another mode when asked, with name-only chips", () => {
+  it("starts on all interest when asked, keeping the same pins", () => {
     const raw = plotView(render(<LiftMap data={data} title="Raw" initialMode="RAW" />));
     expect(raw).toContain('data-schematic="RAW"');
     expect(raw).toContain('data-mode="RAW"');
-    const chips = [...raw.matchAll(/<g data-chip="[^"]+">([\s\S]*?)<\/g>/g)].map((m) => m[1]!);
-    expect(chips.length).toBeGreaterThan(0);
-    // A RAW chip names its neighbourhood; the × lift (its <tspan>) is for the LIFT layer only.
-    for (const chip of chips) expect(chip).not.toContain("<tspan");
-    expect(text(raw)).not.toMatch(/\d\.\d\d×/);
-    expect(text(raw)).toContain("natural wine and vinyl heat");
+    expect(raw).toMatch(/aria-checked="true"[^>]*>All interest</);
+    expect([...raw.matchAll(/<g data-chip="[^"]+">/g)].length).toBeGreaterThan(0);
+    expect(text(raw)).toContain("More interest");
   });
 
   it("never renders the WebGL map on the server", () => {
@@ -106,10 +105,10 @@ describe("LiftMap · server render", () => {
 describe("LiftMap · coarse", () => {
   const coarse = render(<LiftMap data={coarseLiftMap.payload} title="Coarse" />);
 
-  it("badges the map as coarse and makes no neighbourhood claims", () => {
+  it("notes the map is too coarse and makes no neighbourhood claims", () => {
     const plot = plotView(coarse);
-    expect(text(plot)).toContain("coarse · no neighbourhood claims");
-    expect(plot).toContain("text-negative");
+    expect(text(plot)).toContain("Rough areas only: too coarse to compare neighbourhoods");
+    expect(plot).toContain("text-caution-ink");
     expect(plot).not.toContain("data-marker=");
     expect(plot).not.toContain("data-chip=");
   });
@@ -118,7 +117,7 @@ describe("LiftMap · coarse", () => {
     const plot = plotView(coarse);
     expect(plot).toContain('data-mode="RAW"');
     expect(plot).toContain('data-schematic="RAW"');
-    expect(plot).toMatch(/aria-pressed="true" aria-keyshortcuts="1"/);
+    expect(plot).toMatch(/aria-checked="true"[^>]*>All interest</);
   });
 
   it("still shows where lift sits when switched to LIFT", () => {
@@ -176,8 +175,8 @@ describe("geoLiftBars", () => {
     const dots = plotView(render(<DivergingBars data={bars} display="dumbbell" title="Dots" />));
     // A dot below the baseline is drawn in the negative colour, one above in the data colour.
     const low = data.neighbourhoods.filter((n) => n.lift !== null).at(-1)!;
-    expect(rowMarkup(dots, low.id)).toContain("fill-negative");
-    expect(rowMarkup(dots, data.neighbourhoods[0]!.id)).toMatch(/<circle[^>]*class="fill-data"/);
+    expect(rowMarkup(dots, low.id)).toContain("fill-second");
+    expect(rowMarkup(dots, data.neighbourhoods[0]!.id)).toMatch(/<circle[^>]*class="fill-accent"/);
     expect(text(rowMarkup(dots, "holly"))).toContain("too few cells");
   });
 });
@@ -188,16 +187,30 @@ describe("map code stays out of every static bundle", () => {
     expect(view).toContain('import("./lift-map-canvas")');
     // Only types are imported statically; they are erased.
     expect(view).not.toMatch(/^import (?!type )[^;]*from "\.\/lift-map-canvas";/m);
-    for (const file of ["index.ts", "lift-map.tsx", "exhibit.tsx", "lift-map-schematic.tsx", "lift-scale.ts"]) {
+    const area = readFileSync(path.join(FIGURES, "area-map.tsx"), "utf8");
+    expect(area).toContain('import("./area-map-canvas")');
+    expect(area).not.toMatch(/^import (?!type )[^;]*from "\.\/area-map-canvas";/m);
+    for (const file of [
+      "index.ts",
+      "lift-map.tsx",
+      "lift-map-card.tsx",
+      "lift-map-parts.tsx",
+      "area-map.tsx",
+      "area-map-shape.ts",
+      "exhibit.tsx",
+      "lift-map-schematic.tsx",
+      "lift-scale.ts",
+    ]) {
       const source = readFileSync(path.join(FIGURES, file), "utf8");
       expect(source, file).not.toMatch(/from "(maplibre-gl|@deck\.gl\/[a-z-]+)"/);
       expect(source, file).not.toMatch(/from "\.\/lift-map-canvas"/);
+      expect(source, file).not.toMatch(/^import (?!type )[^;]*from "\.\/(map-base|area-map-canvas)";/m);
     }
   });
 
-  it("names the Positron basemap and its three credits in the map module", () => {
+  it("names the Positron basemap and its three credits in the shared map module", () => {
     // The rendered attribution and when it shows are tested in lift-map-canvas.test.tsx.
-    const canvas = readFileSync(path.join(FIGURES, "lift-map-canvas.tsx"), "utf8");
+    const canvas = readFileSync(path.join(FIGURES, "map-base.tsx"), "utf8");
     expect(canvas).toContain('BASEMAP_STYLE = "https://tiles.openfreemap.org/styles/positron"');
     for (const credit of ["© OpenFreeMap", "© OpenMapTiles", "© OpenStreetMap contributors"]) expect(canvas).toContain(credit);
   });

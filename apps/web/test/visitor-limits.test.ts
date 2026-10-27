@@ -126,13 +126,13 @@ describe("visitorWait", () => {
 describe("visitorWaitMessage", () => {
   it("names the limit reached and the wait in words, never 'tomorrow' for a short one", () => {
     expect(visitorWaitMessage({ window: "hour", retryAfterS: 55 * 60 })).toBe(
-      "You have started 3 live briefs in the last hour. Try again in 55 minutes; showcases and replays still work.",
+      "You have started 3 live questions in the last hour. Try again in 55 minutes; answers you already have still open.",
     );
     expect(visitorWaitMessage({ window: "day", retryAfterS: 360 })).toBe(
-      "You have started 8 live briefs in the last day. Try again in 6 minutes; showcases and replays still work.",
+      "You have started 8 live questions in the last day. Try again in 6 minutes; answers you already have still open.",
     );
     expect(visitorWaitMessage({ window: "day", retryAfterS: 14 * 3600 - 30 }, { maxActive: 1, perHour: 1, perDay: 1 })).toBe(
-      "You have started 1 live brief in the last day. Try again in about 14 hours; showcases and replays still work.",
+      "You have started 1 live question in the last day. Try again in about 14 hours; answers you already have still open.",
     );
   });
 

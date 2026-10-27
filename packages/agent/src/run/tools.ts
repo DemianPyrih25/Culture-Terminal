@@ -7,6 +7,7 @@ import {
   type Flag,
   type GeoApi,
   type LocalityApi,
+  type MetroId,
   type Phase,
   type Pillar,
   type RunBudget,
@@ -16,11 +17,13 @@ import {
   type StepId,
   type ToolInput,
 } from "@ct/contracts";
+import { ensureMetrosIn } from "@ct/geo";
 import { qlooErrorCode, type RunQloo } from "@ct/qloo";
 import { normaliseName, SKILLS, skillErrorResult } from "@ct/quant";
 import type { RunLedger } from "../ledger";
 import { errorText } from "../llm/notices";
 import type { RunRegistry } from "../registry";
+import { unlistedAudiences } from "./audiences";
 import { escapeAngles } from "./context";
 import type { FollowupDeadline } from "./followup";
 import type { RunEvents } from "./meter";
@@ -64,6 +67,11 @@ export interface SkillRunnerDeps {
   geo: GeoApi;
   /** The run's pinned market localities (kv); null when it has none, so metro and city contexts are unavailable. */
   localities: LocalityApi | null;
+  /**
+   * The audience keys of the run's AUDIENCES list (the pinned catalogue on this desk, D21). A call
+   * that sends any other audience is refused before any Qloo call.
+   */
+  audiences: ReadonlySet<string>;
   budget: RunBudget;
   /** False answers every call with an error digest and makes no Qloo call (V7 fail-closed path). */
   qlooEnabled: boolean;
@@ -77,6 +85,24 @@ export interface SkillRunnerDeps {
   abortCode: () => ErrorCode;
   /** Every completed skill run, e.g. to collect its limitations. */
   onResult?: (tool: SkillId, result: SkillResult) => void;
+  /**
+   * The gazetteer areas the question names in its map city (scan namedAreaIds). A geo_lift call in that
+   * city that names none gets them (withQuestionFocus), so every lift map ranks the reader's own area.
+   */
+  questionAreas?: { metro: MetroId; ids: readonly string[] } | null;
+}
+
+/**
+ * The call with the question's areas as geo_lift focus_areas when it is in the question's map city
+ * and names none itself: the ANALYST's own lift maps (another concept, supply off) then still carry
+ * the named areas' lift, rank and confidence, whichever map the answer shows. Any other call as is.
+ */
+export function withQuestionFocus(deps: Pick<SkillRunnerDeps, "questionAreas">, call: SkillCall): SkillCall {
+  const areas = deps.questionAreas ?? null;
+  if (call.tool !== "geo_lift" || areas === null || areas.ids.length === 0) return call;
+  const input = call.input as ToolInput<"geo_lift">;
+  if (input.metro !== areas.metro || (input.focus_areas ?? []).length > 0) return call;
+  return { ...call, input: { ...input, focus_areas: [...areas.ids] } };
 }
 
 /**
@@ -118,6 +144,8 @@ export async function estimateSkillCalls(
   input: unknown,
 ): Promise<number | null> {
   try {
+    // The metros the input names load their neighbourhood polygons first (createGeo loads them lazily).
+    await ensureMetrosIn(deps.geo, input);
     const n = await skillOf(tool).estimateCalls(input, deps.qloo.forTool(null), deps.registry, { localities: deps.localities, geo: deps.geo });
     return Number.isInteger(n) && n >= 0 ? n : null;
   } catch {
@@ -150,9 +178,28 @@ function refusePrivatePersons(deps: SkillRunnerDeps, call: SkillCall): SkillCall
   const refused = [...new Set(searchTexts(call).filter((t) => names.has(normaliseName(t))))];
   if (refused.length === 0) return null;
   const listed = refused.map((t) => `'${escapeAngles(t)}'`).join(", ");
-  const message =
+  return refuseCall(
+    deps,
+    call,
     `${listed} ${refused.length === 1 ? "is a person" : "are persons"} the question did not name as a public figure; ` +
-    `persons are looked up only as public figures, so no Qloo call ran. Call again without ${refused.length === 1 ? "it" : "them"}.`;
+      `persons are looked up only as public figures, so no Qloo call ran. Call again without ${refused.length === 1 ? "it" : "them"}.`,
+  );
+}
+
+/**
+ * D21: every audience a call sends must be on the run's AUDIENCES list (the pinned catalogue on this
+ * desk). The call is refused before any Qloo call, so the model can call again with listed keys.
+ */
+function refuseUnlistedAudiences(deps: SkillRunnerDeps, call: SkillCall): SkillCallOutcome | null {
+  const unlisted = unlistedAudiences(call, deps.audiences);
+  if (unlisted.length === 0) return null;
+  const listed = unlisted.map((a) => `'${escapeAngles(a)}'`).join(", ");
+  const fix = deps.audiences.size === 0 ? "this run has no AUDIENCES, so call again without audiences" : "call again with keys from AUDIENCES only";
+  return refuseCall(deps, call, `${listed} ${unlisted.length === 1 ? "is" : "are"} not in the AUDIENCES list, so no Qloo call ran; ${fix}.`);
+}
+
+/** A call refused before it ran: tool.start and tool.end as invalid input, and the message for the model. */
+function refuseCall(deps: SkillRunnerDeps, call: SkillCall, message: string): SkillCallOutcome {
   const { events } = deps;
   const base = { toolCallId: call.toolCallId, tool: call.tool };
   events.emit({
@@ -180,8 +227,9 @@ function refusePrivatePersons(deps: SkillRunnerDeps, call: SkillCall): SkillCall
   return { content: errorText("INVALID_INPUT", message), isError: true, result: null };
 }
 
-export async function runSkillCall(deps: SkillRunnerDeps, call: SkillCall, signal: AbortSignal): Promise<SkillCallOutcome> {
-  const refusal = refusePrivatePersons(deps, call);
+export async function runSkillCall(deps: SkillRunnerDeps, asked: SkillCall, signal: AbortSignal): Promise<SkillCallOutcome> {
+  const call = withQuestionFocus(deps, asked);
+  const refusal = refusePrivatePersons(deps, call) ?? refuseUnlistedAudiences(deps, call);
   if (refusal !== null) return refusal;
   const { events } = deps;
   const { toolCallId } = call;
@@ -224,6 +272,7 @@ export async function runSkillCall(deps: SkillRunnerDeps, call: SkillCall, signa
         phase: call.phase,
         toolCallId,
       };
+      await ensureMetrosIn(deps.geo, call.input);
       result = await skillOf(call.tool).run(call.input, ctx);
     }
   } catch (err) {

@@ -3,7 +3,7 @@ import { formatUsd, formatUtcShortDateTime, formatUtcTime, plural } from "../../
 import type { BreakerKey, LaneDecision, LiveBlock, QlooConfigured, StatusLevel, StatusReport } from "../../server/status";
 
 /**
- * Text for /status (Concept A, D36). Pure, so the page and its tests print the same words. Times are
+ * Text for /status. Pure, so the page and its tests print the same words. Times are
  * UTC. Nothing here prints a question, an entity, a request id or a key (D31).
  */
 
@@ -28,30 +28,32 @@ export function formatUptime(seconds: number): string {
   return hours % 24 === 0 ? `${days} d` : `${days} d ${hours % 24} h`;
 }
 
+/** A state pill's tone: good, caution and danger soft pills, or a muted one. */
+export type TagTone = "good" | "caution" | "danger" | "muted";
+
 export interface Tag {
-  mark: string;
   word: string;
-  tone: string;
+  tone: TagTone;
 }
 
-/** A breaker's state, as A/Prior prints a verdict: a mark and a small caps word in its tone. */
+/** A breaker's state as a pill: Clear, Past 80%, Warning, Economy, Tripped. */
 export const LEVEL_TAG: Readonly<Record<StatusLevel, Tag>> = {
-  clear: { mark: "✓", word: "Clear", tone: "text-accent" },
-  half: { mark: "–", word: "Past 50%", tone: "text-text-2" },
-  high: { mark: "–", word: "Past 80%", tone: "text-negative" },
-  warn: { mark: "–", word: "Warning", tone: "text-negative" },
-  stepped: { mark: "–", word: "Economy", tone: "text-negative" },
-  tripped: { mark: "×", word: "Tripped", tone: "text-negative" },
-  bypassed: { mark: "–", word: "Bypassed", tone: "text-negative" },
-  off: { mark: "·", word: "Not enforced", tone: "text-dim" },
-  unknown: { mark: "·", word: "Not read", tone: "text-dim" },
+  clear: { word: "Clear", tone: "good" },
+  half: { word: "Past 50%", tone: "muted" },
+  high: { word: "Past 80%", tone: "caution" },
+  warn: { word: "Warning", tone: "caution" },
+  stepped: { word: "Economy", tone: "caution" },
+  tripped: { word: "Tripped", tone: "danger" },
+  bypassed: { word: "Bypassed", tone: "caution" },
+  off: { word: "Not enforced", tone: "muted" },
+  unknown: { word: "Not read", tone: "muted" },
 };
 
-/** A lane's mode as a tag: ✓ LIVE, – ECONOMY, × PAUSED. */
+/** A lane's mode as a pill: Live, Economy, Paused. */
 export const MODE_TAG: Readonly<Record<Mode, Tag>> = {
-  live: { mark: "✓", word: "Live", tone: "text-accent" },
-  economy: { mark: "–", word: "Economy", tone: "text-negative" },
-  replay_only: { mark: "×", word: "Paused", tone: "text-negative" },
+  live: { word: "Live", tone: "good" },
+  economy: { word: "Economy", tone: "caution" },
+  replay_only: { word: "Paused", tone: "danger" },
 };
 
 export const MODE_NAME: Readonly<Record<Mode, string>> = { live: "Live", economy: "Economy", replay_only: "Replay only" };
@@ -80,19 +82,19 @@ export const ENV_LABEL: Readonly<Record<QlooConfigured["env"], string>> = {
 const REASON_MAX = 60;
 const clip = (text: string) => (text.length > REASON_MAX ? `${text.slice(0, REASON_MAX - 1)}…` : text);
 
-/** What a lane's decision means now: who writes its briefs, or why it stepped down and until when. */
+/** What a lane's decision means now: who writes its answers, or why it stepped down and until when. */
 export function laneDetail(decision: LaneDecision): string {
   const until = decision.until ? ` until ${formatUtcTime(decision.until).slice(0, 5)} UTC` : "";
-  if (decision.mode === "live") return "Sonnet 5.5 writes each brief";
+  if (decision.mode === "live") return "Sonnet 5.5 writes each answer";
   const why = decision.reason ? `: ${decision.reason}` : "";
-  return decision.mode === "economy" ? `Haiku 5.5 writes each brief${until}${why}` : `No live runs${until}${why}`;
+  return decision.mode === "economy" ? `Haiku 5.5 writes each answer${until}${why}` : `No live runs${until}${why}`;
 }
 
 /** Blocks that keep every live run off this server, whatever the breakers decide. */
 const SERVER_BLOCKS: ReadonlySet<LiveBlock> = new Set(["no_database", "draining", "no_anthropic", "no_qloo"]);
 
-export const UNAVAILABLE_TAG: Tag = { mark: "×", word: "Unavailable", tone: "text-negative" };
-export const LIMITED_TAG: Tag = { mark: "–", word: "Limited", tone: "text-negative" };
+export const UNAVAILABLE_TAG: Tag = { word: "Unavailable", tone: "danger" };
+export const LIMITED_TAG: Tag = { word: "Limited", tone: "caution" };
 
 export interface LaneView {
   detail: string;
@@ -156,14 +158,14 @@ export function breakerDetail(key: BreakerKey, report: StatusReport): string {
   }
 }
 
-const STILL_SERVED = "Showcases, replays and cached answers still work.";
+const STILL_SERVED = "Answers already made, replays and cached answers still work.";
 const QLOO_OFF = "Qloo calls are switched off (QLOO_DISABLED): live runs answer as insufficient evidence.";
 
 const BLOCK_SENTENCE: Readonly<Record<Exclude<LiveBlock, "replay_only">, string>> = {
-  no_database: "The database is unreachable: briefs can be neither read nor written until it is back.",
+  no_database: "The database is unreachable: answers can be neither read nor saved until it is back.",
   draining: "This server is restarting and takes no new runs; runs in progress finish first.",
-  no_anthropic: "Live analysis is unavailable: this server has no Anthropic API key. Recorded briefs and test runs still work.",
-  no_qloo: "Live analysis is unavailable: Qloo is not configured on this server. Recorded briefs and test runs still work.",
+  no_anthropic: "Live analysis is unavailable: this server has no Anthropic API key. Recorded answers and test runs still work.",
+  no_qloo: "Live analysis is unavailable: Qloo is not configured on this server. Recorded answers and test runs still work.",
   live_hourly: "Live analysis is on, but this hour's public runs are used: new questions wait for the hour to turn.",
   qloo_disabled: `${QLOO_OFF} ${STILL_SERVED}`,
 };
@@ -183,8 +185,8 @@ export function leadSentence(report: StatusReport): string {
   let head: string;
   if (first === "replay_only") head = `${live.message ?? "Live analysis is paused."} ${STILL_SERVED}`;
   else if (first) head = BLOCK_SENTENCE[first];
-  else if (live.state === "economy") head = live.message ?? "Live briefs run on the economy analyst.";
-  else head = "Live analysis is on: Sonnet 5.5 writes each brief.";
+  else if (live.state === "economy") head = live.message ?? "Live answers run on the economy analyst.";
+  else head = "Live analysis is on: Sonnet 5.5 writes each answer.";
   const parts = [head];
   if (live.state !== "unavailable") {
     const judge = judgeSentence(report);

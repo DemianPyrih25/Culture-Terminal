@@ -1,22 +1,12 @@
 import type { GeoLiftPayload } from "@ct/contracts";
 import { geohashBounds, mercatorY, type Bounds } from "./geohash";
-import {
-  TOKEN_RGB,
-  cellFills,
-  chipSize,
-  focusBounds,
-  formatLift,
-  liftRadius,
-  placeChips,
-  rgbHex,
-  type LiftLabel,
-  type LiftMode,
-} from "./lift-scale";
+import { cellFills, flagName, flagSize, flagValue, focusBounds, overlayBoxes, pinRadius, placeChips, rgbHex, type LiftLabel, type LiftMode } from "./lift-scale";
 import { px } from "./scale";
 
 /**
- * The LiftMap without WebGL: the geohash cells in Web Mercator on paper, filled on the same ramps
- * as the map, with the neighbourhood markers sized by lift, their label chips and the venue sample.
+ * The LiftMap without WebGL: the geohash cells in Web Mercator on a sunken panel, filled on the same
+ * ramps as the map, with the numbered ink pins, their flags (name and "1.42× interest"), the few-rivals
+ * rings and the venue sample.
  * It is what the server renders, what a browser without WebGL keeps, and what shows while the map
  * code loads, so the figure never depends on a canvas to be read.
  */
@@ -55,15 +45,16 @@ export function LiftSchematic({
 }) {
   const { project } = schematicProjection(data, width, height);
   const fills = cellFills(data, mode);
-  const lift = mode === "LIFT";
   const placed = labels.filter((l) => l.at !== null);
-  const markers = placed.map((l) => {
+  const pins = placed.map((l) => {
     const p = project(l.at!.lat, l.at!.lon);
-    return { label: l, x: p.x, y: p.y, r: lift ? liftRadius(l.lift) : 3 };
+    return { label: l, x: p.x, y: p.y, r: pinRadius(l) };
   });
-  const chips = placeChips(
-    markers.map((m) => ({ id: m.label.id, x: m.x, y: m.y, r: m.r, ...chipSize(m.label, lift) })),
+  const flags = placeChips(
+    pins.map((m) => ({ id: m.label.id, x: m.x, y: m.y, r: m.r, ...flagSize(m.label) })),
     { w: width, h: height },
+    8,
+    overlayBoxes(width, height),
   );
   return (
     <svg
@@ -71,14 +62,14 @@ export function LiftSchematic({
       width="100%"
       role="img"
       aria-label={label}
-      className={`absolute inset-0 h-full w-full font-ui ${hidden ? "hidden" : "block"}`}
+      className={`absolute inset-0 h-full w-full font-sans ${hidden ? "hidden" : "block"}`}
       preserveAspectRatio="xMidYMid meet"
       aria-hidden={hidden || undefined}
       data-schematic={mode}
     >
       <title>{label}</title>
       <desc>{`${data.cells.length} geohash-${data.precision} cells in ${mode} mode, drawn without a basemap. The table view lists every neighbourhood.`}</desc>
-      <rect width={width} height={height} className="fill-canvas" />
+      <rect width={width} height={height} className="fill-sunken" />
       {data.cells.map((c) => {
         const fill = fills.get(c.geohash);
         const b = geohashBounds(c.geohash);
@@ -100,40 +91,29 @@ export function LiftSchematic({
       })}
       {data.supply?.points.map((p, i) => {
         const at = project(p.lat, p.lon);
-        return <circle key={`s-${i}`} cx={px(at.x)} cy={px(at.y)} r={2.25} className="fill-ink stroke-paper" strokeWidth={1} data-supply="true" />;
+        return <circle key={`s-${i}`} cx={px(at.x)} cy={px(at.y)} r={2.25} className="fill-ink-3 stroke-surface" strokeWidth={1} data-supply="true" />;
       })}
-      {markers.map((m) => {
-        const tone = rgbHex(m.label.lift >= 1 ? TOKEN_RGB.data : TOKEN_RGB.negative);
-        return (
-          <g key={`m-${m.label.id}`} data-marker={m.label.id}>
-            {lift && m.label.top ? <circle cx={px(m.x)} cy={px(m.y)} r={px(m.r + 5)} fill="none" stroke={tone} strokeWidth={1} /> : null}
-            <circle
-              cx={px(m.x)}
-              cy={px(m.y)}
-              r={px(m.r)}
-              fill={lift ? tone : rgbHex(TOKEN_RGB.ink)}
-              fillOpacity={lift ? 0.35 : 0.8}
-              stroke={lift ? tone : "none"}
-              strokeWidth={1.5}
-            />
-          </g>
-        );
-      })}
-      {markers.map((m) => {
-        const at = chips.get(m.label.id);
+      {pins.map((m) => (
+        <g key={`m-${m.label.id}`} data-marker={m.label.id} data-pin={m.label.rank ?? ""}>
+          {m.label.fewRivals ? <circle cx={px(m.x)} cy={px(m.y)} r={19} fill="#ffffff" fillOpacity={0.6} className="stroke-second" strokeWidth={2} /> : null}
+          <circle cx={px(m.x)} cy={px(m.y)} r={14} className={m.label.named && m.label.rank === undefined ? "fill-accent" : "fill-ink"} data-named-pin={m.label.named ? m.label.id : undefined} />
+          <text x={px(m.x)} y={px(m.y + 4.5)} textAnchor="middle" fontSize={13} fontWeight={600} className="fill-white">
+            {m.label.rank ?? ""}
+          </text>
+        </g>
+      ))}
+      {pins.map((m) => {
+        const at = flags.get(m.label.id);
         if (!at) return null;
-        const size = chipSize(m.label, lift);
-        const tone = m.label.lift >= 1 ? "fill-data" : "fill-negative";
+        const size = flagSize(m.label);
         return (
           <g key={`c-${m.label.id}`} data-chip={m.label.id}>
-            <rect x={px(at.x)} y={px(at.y)} width={size.w} height={size.h} rx={2} className="stroke-line" fill="#ffffff" fillOpacity={0.92} />
-            <text x={px(at.x + 6)} y={px(at.y + 12.5)} fontSize={11} fontWeight={m.label.top ? 600 : 500} className="fill-ink">
-              {m.label.name}
-              {lift ? (
-                <tspan dx={5} fontWeight={500} className={tone}>
-                  {formatLift(m.label.lift)}
-                </tspan>
-              ) : null}
+            <rect x={px(at.x)} y={px(at.y)} width={size.w} height={size.h} rx={8} className="fill-surface" filter="drop-shadow(0 6px 9px rgb(16 24 40 / 0.14))" />
+            <text x={px(at.x + 10)} y={px(at.y + 20)} fontSize={13} fontWeight={600} className="fill-ink">
+              {flagName(m.label.name)}
+            </text>
+            <text x={px(at.x + 10)} y={px(at.y + 36)} fontSize={12} className="fill-ink-2">
+              {flagValue(m.label.lift)}
             </text>
           </g>
         );

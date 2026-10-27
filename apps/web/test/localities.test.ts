@@ -2,6 +2,7 @@
 // needs, what one run's lookups resolve, and that a missing, partial or malformed value is said in the
 // logs by market id and count, never with a locality id. kv answers from memory here; no database.
 // Invented locality ids only (D29).
+import { METRO_LABEL, MetroId } from "@ct/contracts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -30,9 +31,20 @@ const {
 const { log } = await import("../server/log");
 
 const db = {} as Parameters<typeof kvLocalities>[0];
-const NASHVILLE = { entityId: "invented-locality-0001", label: "Nashville" };
-const AUSTIN = { entityId: "invented-locality-0002", label: "Austin" };
-const DENVER = { entityId: "invented-locality-0003", label: "Denver" };
+/** The 13 map cities, every run's required markets (D28). */
+const REQUIRED: readonly string[] = MetroId.options;
+/** An invented pin for each map city. */
+const MAP_CITY_PINS = Object.fromEntries(
+  MetroId.options.map((id, i) => [id, { entityId: `invented-locality-${String(i + 1).padStart(4, "0")}`, label: METRO_LABEL[id] }]),
+);
+const NASHVILLE = MAP_CITY_PINS.nashville;
+const AUSTIN = MAP_CITY_PINS.austin;
+/** A market that is no map city. */
+const PORTLAND = { entityId: "invented-locality-0101", label: "Portland" };
+/** The required markets other than these. */
+const missingBut = (...pinned: string[]): string[] => REQUIRED.filter((id) => !pinned.includes(id));
+/** How a log line lists the missing markets. */
+const missingJson = (ids: readonly string[]): string => `"missing":${JSON.stringify(ids)}`;
 
 /** Every log line written through `level`, as JSON, so a test can look for an id anywhere in it. */
 function logged(level: "warn" | "error"): string[] {
@@ -55,46 +67,47 @@ beforeEach(() => {
 });
 
 describe("localityCoverage", () => {
-  it("needs the gazetteer metros, which the run's MARKETS list names", () => {
+  it("needs the 13 map cities, the gazetteer metros the run's MARKETS list names", () => {
     expect(LOCALITIES_KV_KEY).toBe("metro_localities");
-    expect(REQUIRED_LOCALITY_MARKETS).toEqual(["nashville", "austin"]);
+    expect(REQUIRED_LOCALITY_MARKETS).toEqual(REQUIRED);
+    expect(REQUIRED).toHaveLength(13);
   });
 
   it("is complete with every required market pinned, and counts the other markets too", () => {
-    expect(localityCoverage({ nashville: NASHVILLE, austin: AUSTIN, denver: DENVER })).toEqual({
+    expect(localityCoverage({ ...MAP_CITY_PINS, portland: PORTLAND })).toEqual({
       state: "complete",
-      required: ["nashville", "austin"],
+      required: REQUIRED,
       missing: [],
-      pinned: 3,
+      pinned: 14,
     });
   });
 
   it("is partial with a required market unpinned, and names it", () => {
-    expect(localityCoverage({ nashville: NASHVILLE, denver: DENVER })).toEqual({
+    expect(localityCoverage({ nashville: NASHVILLE, portland: PORTLAND })).toEqual({
       state: "partial",
-      required: ["nashville", "austin"],
-      missing: ["austin"],
+      required: REQUIRED,
+      missing: missingBut("nashville"),
       pinned: 2,
     });
     expect(localityCoverage({}).state).toBe("partial");
-    expect(localityCoverage({}).missing).toEqual(["nashville", "austin"]);
+    expect(localityCoverage({}).missing).toEqual(REQUIRED);
   });
 
   it("is missing without a value and malformed with one that does not parse", () => {
-    expect(localityCoverage(undefined)).toEqual({ state: "missing", required: ["nashville", "austin"], missing: ["nashville", "austin"], pinned: 0 });
+    expect(localityCoverage(undefined)).toEqual({ state: "missing", required: REQUIRED, missing: REQUIRED, pinned: 0 });
     for (const bad of [null, "nashville", [NASHVILLE], { nashville: { entityId: "" , label: "Nashville" } }, { nashville: { ...NASHVILLE, extra: 1 } }, { "Not An Id": NASHVILLE }]) {
-      expect(localityCoverage(bad)).toMatchObject({ state: "malformed", missing: ["nashville", "austin"], pinned: 0 });
+      expect(localityCoverage(bad)).toMatchObject({ state: "malformed", missing: REQUIRED, pinned: 0 });
     }
   });
 
   it("never holds a locality id", () => {
-    const coverage = localityCoverage({ nashville: NASHVILLE, denver: DENVER });
+    const coverage = localityCoverage({ nashville: NASHVILLE, portland: PORTLAND });
     expect(JSON.stringify(coverage)).not.toContain("invented-locality");
   });
 
   it("reads kv for /status, and rejects when kv cannot be read", async () => {
     kv.value = { nashville: NASHVILLE };
-    expect(await readLocalityCoverage(db)).toMatchObject({ state: "partial", missing: ["austin"] });
+    expect(await readLocalityCoverage(db)).toMatchObject({ state: "partial", missing: missingBut("nashville") });
     kv.fail = true;
     await expect(readLocalityCoverage(db)).rejects.toThrow("kv is unreadable");
   });
@@ -102,7 +115,7 @@ describe("localityCoverage", () => {
 
 describe("kvLocalities", () => {
   it("reads kv once per run and resolves each market's pin, logging nothing when complete", async () => {
-    kv.value = { nashville: NASHVILLE, austin: AUSTIN };
+    kv.value = MAP_CITY_PINS;
     const api = kvLocalities(db, { runId: "run-invented-0001" });
     expect(await api.market("nashville")).toEqual(NASHVILLE);
     expect(await api.market("austin")).toEqual(AUSTIN);
@@ -112,7 +125,7 @@ describe("kvLocalities", () => {
   });
 
   it("logs a partial value once, with the run id and the market ids, never a locality id", async () => {
-    kv.value = { nashville: NASHVILLE, denver: DENVER };
+    kv.value = { nashville: NASHVILLE, portland: PORTLAND };
     const api = kvLocalities(db, { runId: "run-invented-0002" });
     expect(await api.market("austin")).toBeNull();
     expect(await api.market("nashville")).toEqual(NASHVILLE);
@@ -120,7 +133,7 @@ describe("kvLocalities", () => {
     const lines = logged("warn");
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("run-invented-0002");
-    expect(lines[0]).toContain('"missing":["austin"]');
+    expect(lines[0]).toContain(missingJson(missingBut("nashville")));
     expect(lines[0]).toContain('"pinned":2');
     expect(lines[0]).toContain("pins only some markets");
     expect(lines.join("\n")).not.toContain("invented-locality");
@@ -133,7 +146,7 @@ describe("kvLocalities", () => {
     const lines = logged("warn");
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("is not set");
-    expect(lines[0]).toContain('"missing":["nashville","austin"]');
+    expect(lines[0]).toContain(missingJson(REQUIRED));
   });
 
   it("logs a malformed value as an error, and every lookup rejects", async () => {
@@ -151,10 +164,10 @@ describe("kvLocalities", () => {
   });
 
   it("resolves other markets' pins quietly, a run asking for every market it might offer, and never a prototype key", async () => {
-    kv.value = { nashville: NASHVILLE, austin: AUSTIN, denver: DENVER };
+    kv.value = { ...MAP_CITY_PINS, portland: PORTLAND };
     const api = kvLocalities(db, { runId: "run-invented-0005" });
-    expect(await api.market("denver")).toEqual(DENVER);
-    expect(await api.market("chicago")).toBeNull();
+    expect(await api.market("portland")).toEqual(PORTLAND);
+    expect(await api.market("boise")).toBeNull();
     expect(await api.market("constructor")).toBeNull();
     expect(await api.market("hasOwnProperty")).toBeNull();
     expect(logged("warn")).toEqual([]);
@@ -175,7 +188,7 @@ describe("the key on synthetic Qloo data", () => {
     vi.stubEnv("QLOO_MOCK", "1");
     kv.key = "metro_localities.mock";
     kv.value = { nashville: NASHVILLE };
-    expect(await readLocalityCoverage(db)).toMatchObject({ state: "partial", missing: ["austin"] });
+    expect(await readLocalityCoverage(db)).toMatchObject({ state: "partial", missing: missingBut("nashville") });
     const api = kvLocalities(db, { runId: "run-invented-0006" });
     expect(await api.market("nashville")).toEqual(NASHVILLE);
     const lines = logged("warn");
@@ -186,7 +199,7 @@ describe("the key on synthetic Qloo data", () => {
 
   it("gives way to the key a caller names", async () => {
     vi.stubEnv("QLOO_MOCK", "1");
-    kv.value = { nashville: NASHVILLE, austin: AUSTIN };
+    kv.value = MAP_CITY_PINS;
     expect(await readLocalityCoverage(db, LOCALITIES_KV_KEY)).toMatchObject({ state: "complete" });
     expect(await kvLocalities(db, {}, LOCALITIES_KV_KEY).market("austin")).toEqual(AUSTIN);
   });

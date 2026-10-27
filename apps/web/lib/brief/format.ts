@@ -80,6 +80,15 @@ export function formatClock(ms: number): string {
   return h > 0 ? `${h}:${pad2(m)}:${pad2(s)}` : `${pad2(m)}:${pad2(s)}`;
 }
 
+/** The working view's short timer: "0:06", "1:12", "12:05", or "1:02:03" past an hour. */
+export function formatClockShort(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return h > 0 ? `${h}:${pad2(m)}:${pad2(s)}` : `${m}:${pad2(s)}`;
+}
+
 /** A request or step duration: "154 ms", "1.8 s", "42 s", "2 min". */
 export function formatDuration(ms: number): string {
   const v = Math.max(0, ms);

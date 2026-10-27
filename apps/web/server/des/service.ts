@@ -70,11 +70,11 @@ const DES_LIMITS: RunLimits = { ...DEFAULT_RUN_LIMITS, qlooCalls: DES_RUN_QLOO_C
 const NO_STEP = { trigger_finding_id: null, step_id: null } as const;
 
 const PAUSED_REASON = "it was paused by the operator";
-const QLOO_OFF_MESSAGE = "Tearsheets are off: this server makes no Qloo requests (QLOO_DISABLED). Showcases and replays still work.";
-const UNCONFIGURED_MESSAGE = "Tearsheets are unavailable: the Qloo client is not configured on this server.";
-const BUDGET_MESSAGE = "Today's Qloo requests for tearsheets are used up. Tearsheets resume at 00:00 UTC; showcases and replays still work.";
+const QLOO_OFF_MESSAGE = "Profiles are off: this server makes no Qloo requests (QLOO_DISABLED). Answers you already have still open.";
+const UNCONFIGURED_MESSAGE = "Profiles are unavailable: the Qloo client is not configured on this server.";
+const BUDGET_MESSAGE = "Today's Qloo requests for profiles are used up. Profiles resume at 00:00 UTC; answers you already have still open.";
 const FLOOR_MESSAGE =
-  "Live tearsheets are paused: this month's Qloo quota is at its floor. Tearsheets computed earlier, showcases and replays still open.";
+  "Live profiles are paused: this month's Qloo quota is at its floor. Profiles read earlier and answers you already have still open.";
 const FAILED_MESSAGE = "The name could not be looked up in Qloo just now. Try again shortly.";
 const NOT_VETTED_MESSAGE =
   "This name is not among the vetted public figures, so no Qloo request was made for it. To read a public figure's audience, ask a question about them: a brief checks first whether they are one. Culture Terminal reads an audience's taste, never an individual's.";
@@ -136,7 +136,7 @@ export function desIntent(query: { name: string; type: DesType }, publicFigure: 
     pillar: "audience",
     job: "audience_discovery",
     mentions: [{ text: query.name, entity_type: query.type, role: "primary", public_figure: query.type === "person" && publicFigure }],
-    geo: { metro: null, area: null, unsupported_place: null },
+    geo: { metro: null, area: null, unsupported_place: null, market: null },
     constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
     safety: { allowed: true, category: null, reframe: null },
     assumptions: ["US geography"],
@@ -159,13 +159,13 @@ function waitOutcome(wait: DesWait, now: number): DesOutcome {
     case "visitor":
       return {
         kind: "limited",
-        message: `You have opened several new tearsheets in a short time. Try again ${waitText(wait)}; tearsheets already computed still open.`,
+        message: `You have opened several new tearsheets in a short time. Try again ${waitText(wait)}; profiles already read still open.`,
         retryAfterS: wait.retryAfterS,
       };
     case "global":
       return {
         kind: "limited",
-        message: `Tearsheets are busy right now. Try again ${waitText(wait)}; tearsheets already computed still open.`,
+        message: `Profiles are busy right now. Try again ${waitText(wait)}; profiles already read still open.`,
         retryAfterS: wait.retryAfterS,
       };
   }
@@ -174,7 +174,7 @@ function waitOutcome(wait: DesWait, now: number): DesOutcome {
 /** The step-down as a tearsheet reader reads it. */
 function pausedMessage(mode: DesMode): string {
   const resumes = mode.until !== null ? " They resume at 00:00 UTC." : "";
-  return `Live tearsheets are paused: ${mode.reason ?? PAUSED_REASON}.${resumes} Tearsheets computed earlier, showcases and replays still open.`;
+  return `Live profiles are paused: ${mode.reason ?? PAUSED_REASON}.${resumes} Profiles read earlier and answers you already have still open.`;
 }
 
 class Unavailable extends Error {

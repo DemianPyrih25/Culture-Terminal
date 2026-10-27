@@ -8,6 +8,7 @@ import {
   formatNumber,
   formatTick,
   reasonLabel,
+  sentenceCase,
   type NumberStyle,
 } from "./format";
 import { fitText, linear, niceDomain, px, symmetricDomain, textWidth, ticksBetween } from "./scale";
@@ -47,9 +48,9 @@ export interface DivergingBarsOptions {
   baseline?: number;
   /** Half-width of the "reads as even" band in a split; null hides it. Default: the payload's evenBand, else 0.02. */
   band?: number | null;
-  /** Head of the label column, e.g. "METRO" or "AGE". */
+  /** Head of the label column, e.g. "Metro" or "Age". */
   labelHeader?: string;
-  /** Text either side of the centre, e.g. ["← OLIPOP AHEAD", "POPPI AHEAD →"]; null hides them. */
+  /** Text either side of the centre, e.g. ["← Brand B ahead", "Brand A ahead →"]; null hides them. */
   directionLabels?: readonly [string, string] | null;
   /** dumbbell with two series: show the first series and its delta to the second, ▲/▼. */
   deltaColumn?: boolean;
@@ -71,7 +72,7 @@ const PAD = 16;
 /** Units that centre on 1, but only when every value is positive. */
 const BASELINE_ONE: ReadonlySet<MetricUnit> = new Set(["lift", "ratio"]);
 const INTEGER_UNITS: ReadonlySet<MetricUnit> = new Set(["delta", "rank", "count"]);
-const HEAD_FONT = { weight: 500, tracking: 0.8 } as const;
+const HEAD_FONT = { weight: 500 } as const;
 
 export function DivergingBars(props: DivergingBarsProps) {
   const label = figureLabel(props);
@@ -92,7 +93,7 @@ export function DivergingBars(props: DivergingBarsProps) {
       fixedCaption={props.data.caption}
       legend={
         method ? (
-          <span className="font-ui text-[10px] font-semibold tracking-[1px] text-dim uppercase">
+          <span className="type-label text-ink-2">
             Location method · {method}
           </span>
         ) : null
@@ -180,23 +181,23 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
   const height = plotBottom + AXIS_H;
 
   const bars = data.groups.flatMap((g) => g.bars);
-  const noun = COMPARATOR_NOUN[data.comparator].toUpperCase();
+  const noun = COMPARATOR_NOUN[data.comparator];
   const heads: { text: string; swatch: "data" | "data-2" | null }[] =
     display === "diverging"
       ? [{ text: comparatorHead(data.comparator), swatch: null }]
       : display === "dumbbell" && props.deltaColumn && two
         ? [
-            { text: data.unit.toUpperCase(), swatch: null },
-            { text: props.deltaHeader ?? `VS ${s1.label.toUpperCase()}`, swatch: null },
+            { text: data.unit.charAt(0).toUpperCase() + data.unit.slice(1), swatch: null },
+            { text: props.deltaHeader ?? `vs ${s1.label}`, swatch: null },
           ]
         : [
-            { text: (s0?.label ?? "").toUpperCase(), swatch: "data" },
-            ...(two ? [{ text: s1.label.toUpperCase(), swatch: "data-2" as const }] : []),
+            { text: s0?.label ?? "", swatch: "data" },
+            ...(two ? [{ text: s1.label, swatch: "data-2" as const }] : []),
           ];
   // Value columns are 68 px (A04) unless a series name needs more, up to 112 px.
   const valueW = Math.min(
     112,
-    Math.max(VALUE_W, ...heads.map((h) => Math.ceil(textWidth(h.text, 10, HEAD_FONT)) + (h.swatch ? 16 : 4))),
+    Math.max(VALUE_W, ...heads.map((h) => Math.ceil(textWidth(h.text, 12, HEAD_FONT)) + (h.swatch ? 16 : 4))),
   );
   const trackW = width - labelW - VALUE_GAP - nCols * valueW;
   // Values on the axis: leads for a split, raw values otherwise. A payload domain sets the same axis.
@@ -221,36 +222,35 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
       ? null
       : (props.directionLabels ??
         (display === "split"
-          ? ([`← ${(s1?.label ?? "").toUpperCase()} AHEAD`, `${(s0?.label ?? "").toUpperCase()} AHEAD →`] as const)
+          ? ([`← ${s1?.label ?? ""} ahead`, `${s0?.label ?? ""} ahead →`] as const)
           : display === "dumbbell"
-            ? ([`← BELOW ${noun}`, "ABOVE →"] as const)
-            : ([`← BELOW ${noun}`, `ABOVE ${noun} →`] as const)));
+            ? ([`← Below ${noun}`, "Above →"] as const)
+            : ([`← Below ${noun}`, `Above ${noun} →`] as const)));
   const dot = display === "dumbbell";
 
   return (
     <div className="pt-1">
       <svg
         viewBox={`0 0 ${width} ${px(height)}`}
-        width="100%"
+        width={width}
         role="img"
         aria-label={props.label}
-        className="block h-auto font-ui"
-        style={{ maxWidth: width }}
+        className="block h-auto max-w-none font-sans"
       >
         <title>{props.label}</title>
         <desc>{describe(data, display, baseline)}</desc>
 
         {/* Header: label head, direction or legend over the track, value column heads. */}
-        <text x={0} y={15} fontSize={10} fontWeight={500} letterSpacing={0.8} className="fill-dim">
-          {(props.labelHeader ?? "").toUpperCase()}
+        <text x={0} y={15} fontSize={12} fontWeight={500} className="fill-ink-2">
+          {sentenceCase(props.labelHeader ?? "")}
         </text>
         {direction ? (
           <>
-            <text x={cx - 8} y={15} textAnchor="end" fontSize={10} fontWeight={500} letterSpacing={0.8} className="fill-dim">
-              {fitText(direction[0], cx - trackX - 8, 10, { weight: 500, tracking: 0.8 })}
+            <text x={cx - 8} y={15} textAnchor="end" fontSize={12} fontWeight={500} className="fill-ink-2">
+              {fitText(direction[0], cx - trackX - 8, 12, HEAD_FONT)}
             </text>
-            <text x={cx + 8} y={15} fontSize={10} fontWeight={500} letterSpacing={0.8} className="fill-dim">
-              {fitText(direction[1], trackX + trackW - cx - 8, 10, { weight: 500, tracking: 0.8 })}
+            <text x={cx + 8} y={15} fontSize={12} fontWeight={500} className="fill-ink-2">
+              {fitText(direction[1], trackX + trackW - cx - 8, 12, HEAD_FONT)}
             </text>
           </>
         ) : display === "dumbbell" && two ? (
@@ -258,18 +258,18 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
         ) : null}
         {heads.map((h, k) => {
           const right = colX(k);
-          const text = fitText(h.text, valueW - (h.swatch ? 16 : 2), 10, HEAD_FONT);
-          const w = textWidth(text, 10, HEAD_FONT);
+          const text = fitText(h.text, valueW - (h.swatch ? 16 : 2), 12, HEAD_FONT);
+          const w = textWidth(text, 12, HEAD_FONT);
           return (
             <g key={`h-${k}`}>
               {h.swatch ? (
                 dot ? (
-                  <circle cx={px(right - w - 10)} cy={11.5} r={4} className={h.swatch === "data" ? "fill-data" : "fill-data-2"} />
+                  <circle cx={px(right - w - 10)} cy={11.5} r={4} className={h.swatch === "data" ? "fill-accent" : "fill-chart-muted"} />
                 ) : (
-                  <rect x={px(right - w - 14)} y={7.5} width={8} height={8} className={h.swatch === "data" ? "fill-data" : "fill-data-2"} />
+                  <rect x={px(right - w - 14)} y={7.5} width={8} height={8} className={h.swatch === "data" ? "fill-accent" : "fill-chart-muted"} />
                 )
               ) : null}
-              <text x={right} y={15} textAnchor="end" fontSize={10} fontWeight={500} letterSpacing={0.8} className="fill-dim">
+              <text x={right} y={15} textAnchor="end" fontSize={12} fontWeight={500} className="fill-ink-2">
                 {text}
               </text>
             </g>
@@ -280,8 +280,8 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
         {lines.map((line) => {
           if (line.kind === "group") {
             return (
-              <text key={`g-${line.y}`} x={0} y={px(line.y + 14)} fontSize={9.5} fontWeight={600} letterSpacing={1} className="fill-dim">
-                {line.label.toUpperCase()}
+              <text key={`g-${line.y}`} x={0} y={px(line.y + 14)} fontSize={12} fontWeight={500} className="fill-ink-2">
+                {sentenceCase(line.label)}
               </text>
             );
           }
@@ -289,24 +289,24 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
           const mid = y + rowH / 2;
           const v0 = bar.values[0]?.value ?? null;
           const v1 = bar.values[1]?.value ?? null;
-          const labelText = fitText(bar.label, labelW - (bar.isNew ? 40 : 10), 12);
+          const labelText = fitText(bar.label, labelW - (bar.isNew ? 44 : 10), 12);
           return (
             <g key={`b-${bar.key}`} data-row={bar.key}>
               <title>{barTitle(bar, data, display, style, baseline)}</title>
               {band !== null ? (
-                <rect x={px(x(-band))} y={y} width={px(x(band) - x(-band))} height={rowH} className="fill-canvas" />
+                <rect x={px(x(-band))} y={y} width={px(x(band) - x(-band))} height={rowH} className="fill-sunken" />
               ) : null}
               {ticks
                 .filter((t) => Math.abs(t - centre) > 1e-9)
                 .map((t) => (
                   <line key={t} x1={px(x(t)) + 0.5} x2={px(x(t)) + 0.5} y1={y} y2={y + rowH} className="stroke-line" />
                 ))}
-              <text x={0} y={px(mid + 4)} fontSize={12} className="fill-text-2">
+              <text x={0} y={px(mid + 4)} fontSize={12} className="fill-ink-2">
                 {labelText}
               </text>
               {bar.isNew ? (
-                <text x={labelW - 10} y={px(mid + 3.5)} textAnchor="end" fontSize={8.5} fontWeight={600} letterSpacing={0.9} className="fill-accent">
-                  NEW
+                <text x={labelW - 10} y={px(mid + 3.5)} textAnchor="end" fontSize={12} fontWeight={600} className="fill-accent-ink">
+                  New
                 </text>
               ) : null}
 
@@ -321,7 +321,7 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
                     y={px(mid - 4.5)}
                     width={px(Math.abs(x(v0) - cx))}
                     height={9}
-                    className={v0 >= baseline ? "fill-data" : "fill-negative"}
+                    className={v0 >= baseline ? "fill-accent" : "fill-second"}
                   />
                 )
               ) : (
@@ -338,7 +338,7 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
                 />
               )}
 
-              <line x1={cx + 0.5} x2={cx + 0.5} y1={y} y2={y + rowH} className="stroke-faint" />
+              <line x1={cx + 0.5} x2={cx + 0.5} y1={y} y2={y + rowH} className="stroke-ink-3" />
 
               <ValueColumns
                 display={display}
@@ -371,9 +371,9 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
               x={px(x(t)) + 0.5}
               y={px(plotBottom + 14)}
               textAnchor="middle"
-              fontSize={10}
+              fontSize={12}
               fontWeight={atCentre && display === "dumbbell" ? 500 : 400}
-              className={`tabular-nums ${atCentre && display === "dumbbell" ? "fill-ink" : "fill-dim"}`}
+              className={`tabular-nums ${atCentre && display === "dumbbell" ? "fill-ink" : "fill-ink-2"}`}
             >
               {text}
             </text>
@@ -385,15 +385,15 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
 }
 
 function HeaderLegend({ x, names }: { x: number; names: readonly [string, string] }) {
-  const first = textWidth(names[0], 11.5) + 14 + 18;
+  const first = textWidth(names[0], 12) + 14 + 18;
   return (
     <g>
-      <circle cx={x + 4} cy={11.5} r={4} className="fill-data" />
-      <text x={x + 14} y={15.5} fontSize={11.5} className="fill-text-2">
+      <circle cx={x + 4} cy={11.5} r={4} className="fill-accent" />
+      <text x={x + 14} y={15.5} fontSize={12} className="fill-ink-2">
         {names[0]}
       </text>
-      <circle cx={px(x + first + 4)} cy={11.5} r={4} className="fill-data-2" />
-      <text x={px(x + first + 14)} y={15.5} fontSize={11.5} className="fill-text-2">
+      <circle cx={px(x + first + 4)} cy={11.5} r={4} className="fill-chart-muted" />
+      <text x={px(x + first + 14)} y={15.5} fontSize={12} className="fill-ink-2">
         {names[1]}
       </text>
     </g>
@@ -420,7 +420,7 @@ function SplitBar({
       y={px(mid - 4.5)}
       width={px(Math.abs(x(lead) - x(0)))}
       height={9}
-      className={lead >= 0 ? "fill-data" : "fill-data-2"}
+      className={lead >= 0 ? "fill-accent" : "fill-chart-muted"}
     />
   );
 }
@@ -460,9 +460,9 @@ function Dumbbell({
           className="fill-line-strong"
         />
       ) : null}
-      {hasSecond && v1 !== null ? <circle cx={px(x(v1))} cy={px(mid)} r={4.5} className="fill-data-2" /> : null}
+      {hasSecond && v1 !== null ? <circle cx={px(x(v1))} cy={px(mid)} r={4.5} className="fill-chart-muted" /> : null}
       {v0 !== null ? (
-        <circle cx={px(x(v0))} cy={px(mid)} r={4.75} className={below ? "fill-negative" : "fill-data"} />
+        <circle cx={px(x(v0))} cy={px(mid)} r={4.75} className={below ? "fill-second" : "fill-accent"} />
       ) : v1 !== null && x(v1) >= cx ? (
         <MissingNote x={span[0]} y={mid} reason={reason} />
       ) : (
@@ -484,7 +484,7 @@ function MissingNote({
   anchor?: "start" | "end";
 }) {
   return (
-    <text x={px(x)} y={px(y + 3.5)} textAnchor={anchor} fontSize={10} fontStyle="italic" className="fill-dim">
+    <text x={px(x)} y={px(y + 3.5)} textAnchor={anchor} fontSize={12} fontStyle="italic" className="fill-ink-2">
       {reasonLabel(reason)}
     </text>
   );
@@ -514,7 +514,7 @@ function ValueColumns({
   const v0 = bar.values[0]?.value ?? null;
   const v1 = bar.values[1]?.value ?? null;
   const missing = (k: number) => (
-    <text key={k} x={colX(k)} y={px(y)} textAnchor="end" fontSize={12} className="fill-dim">
+    <text key={k} x={colX(k)} y={px(y)} textAnchor="end" fontSize={12} className="fill-ink-2">
       {"—"}
     </text>
   );
@@ -527,7 +527,7 @@ function ValueColumns({
         textAnchor="end"
         fontSize={12}
         fontWeight={500}
-        className={`tabular-nums ${v0 < baseline ? "fill-negative" : "fill-ink"}`}
+        className={`tabular-nums ${v0 < baseline ? "fill-second" : "fill-ink"}`}
       >
         {formatNumber(v0, unit, { signed: true, ...style })}
       </text>
@@ -553,7 +553,7 @@ function ValueColumns({
             y={px(y)}
             textAnchor="end"
             fontSize={12}
-            className={`tabular-nums ${flat ? "fill-dim" : delta > 0 ? "fill-data" : "fill-negative"}`}
+            className={`tabular-nums ${flat ? "fill-ink-2" : delta > 0 ? "fill-accent" : "fill-second"}`}
           >
             {`${flat ? "=" : delta > 0 ? "▲" : "▼"} ${formatNumber(Math.abs(delta), unit, { ...style, signed: false })}`}
           </text>
@@ -571,7 +571,7 @@ function ValueColumns({
       {cols.map((v, k) => {
         if (v === null) return missing(k);
         const leads = lead === null ? true : k === 0 ? lead > 0 : lead < 0;
-        const tone = cols.length === 1 ? "fill-ink" : clear ? (leads ? "fill-ink" : "fill-dim") : leads ? "fill-text-2" : "fill-dim";
+        const tone = cols.length === 1 ? "fill-ink" : clear ? (leads ? "fill-ink" : "fill-ink-2") : leads ? "fill-ink-2" : "fill-ink-2";
         return (
           <text
             key={k}
@@ -616,8 +616,8 @@ function Butterfly(props: DivergingBarsProps & { label: string; style: NumberSty
   const inner = signed ? VALUE_ROOM : 0;
   const reach = linear([dMin, dMax], [0, half - 4 - inner - VALUE_ROOM]);
   const sides = [
-    { series: s0, k: 0, sign: -1, edge: half - 4, fill: "fill-data" },
-    { series: s1, k: 1, sign: 1, edge: half + labelW + 4, fill: "fill-data-2" },
+    { series: s0, k: 0, sign: -1, edge: half - 4, fill: "fill-accent" },
+    { series: s1, k: 1, sign: 1, edge: half + labelW + 4, fill: "fill-chart-muted" },
   ] as const;
   /** The x of a value in a panel: outward from the panel's inner edge. */
   const at = (side: (typeof sides)[number], value: number) => side.edge + side.sign * (inner + reach(value));
@@ -627,11 +627,10 @@ function Butterfly(props: DivergingBarsProps & { label: string; style: NumberSty
     <div className="pt-1">
       <svg
         viewBox={`0 0 ${width} ${px(height)}`}
-        width="100%"
+        width={width}
         role="img"
         aria-label={props.label}
-        className="block h-auto font-ui"
-        style={{ maxWidth: width }}
+        className="block h-auto max-w-none font-sans"
       >
         <title>{props.label}</title>
         <desc>{describe(data, "butterfly", baseline, signed)}</desc>
@@ -642,24 +641,24 @@ function Butterfly(props: DivergingBarsProps & { label: string; style: NumberSty
               x={px(s.sign < 0 ? s.edge - 14 : s.edge + 14)}
               y={15}
               textAnchor={s.sign < 0 ? "end" : "start"}
-              fontSize={10}
+              fontSize={12}
               fontWeight={500}
-              letterSpacing={0.8}
-              className="fill-dim"
+             
+              className="fill-ink-2"
             >
-              {fitText((s.series?.label ?? "").toUpperCase(), half - 30, 10, { weight: 500, tracking: 0.8 })}
+              {fitText(s.series?.label ?? "", half - 30, 12, HEAD_FONT)}
             </text>
           </g>
         ))}
-        <text x={px(width / 2)} y={15} textAnchor="middle" fontSize={10} fontWeight={500} letterSpacing={0.8} className="fill-dim">
-          {(props.labelHeader ?? "").toUpperCase()}
+        <text x={px(width / 2)} y={15} textAnchor="middle" fontSize={12} fontWeight={500} className="fill-ink-2">
+          {sentenceCase(props.labelHeader ?? "")}
         </text>
         <line x1={0} x2={width} y1={HEADER_H - 0.5} y2={HEADER_H - 0.5} className="stroke-line" />
         {lines.map((line) => {
           if (line.kind === "group") {
             return (
-              <text key={`g-${line.y}`} x={px(width / 2)} y={px(line.y + 14)} textAnchor="middle" fontSize={9.5} fontWeight={600} letterSpacing={1} className="fill-dim">
-                {line.label.toUpperCase()}
+              <text key={`g-${line.y}`} x={px(width / 2)} y={px(line.y + 14)} textAnchor="middle" fontSize={12} fontWeight={500} className="fill-ink-2">
+                {sentenceCase(line.label)}
               </text>
             );
           }
@@ -668,7 +667,7 @@ function Butterfly(props: DivergingBarsProps & { label: string; style: NumberSty
           return (
             <g key={`b-${bar.key}`} data-row={bar.key}>
               <title>{barTitle(bar, data, "butterfly", style, baseline)}</title>
-              <text x={px(width / 2)} y={px(mid + 4)} textAnchor="middle" fontSize={12} className="fill-text-2">
+              <text x={px(width / 2)} y={px(mid + 4)} textAnchor="middle" fontSize={12} className="fill-ink-2">
                 {fitText(bar.label, labelW - 8, 12)}
               </text>
               {signed
@@ -679,7 +678,7 @@ function Butterfly(props: DivergingBarsProps & { label: string; style: NumberSty
                       x2={px(at(s, 0)) + 0.5}
                       y1={y}
                       y2={y + rowH}
-                      className="stroke-faint"
+                      className="stroke-ink-3"
                       data-zero={s.k}
                     />
                   ))
@@ -694,9 +693,9 @@ function Butterfly(props: DivergingBarsProps & { label: string; style: NumberSty
                       x={px(zero + s.sign * 4)}
                       y={px(mid + 3.5)}
                       textAnchor={s.sign < 0 ? "end" : "start"}
-                      fontSize={10}
+                      fontSize={12}
                       fontStyle="italic"
-                      className="fill-dim"
+                      className="fill-ink-2"
                     >
                       {reasonLabel(cell?.reason ?? null)}
                     </text>
@@ -710,7 +709,7 @@ function Butterfly(props: DivergingBarsProps & { label: string; style: NumberSty
                     y={px(mid - 4.5)}
                     width={px(Math.abs(end - zero))}
                     height={9}
-                    className={cell.value < 0 ? "fill-negative" : s.fill}
+                    className={cell.value < 0 ? "fill-second" : s.fill}
                     data-sign={cell.value < 0 ? "negative" : "positive"}
                   />
                 );
@@ -724,7 +723,7 @@ function Butterfly(props: DivergingBarsProps & { label: string; style: NumberSty
                       y1={y + 1}
                       y2={y + rowH - 1}
                       strokeDasharray="2 2"
-                      className="stroke-faint"
+                      className="stroke-ink-3"
                     />
                   ))
                 : null}
@@ -742,10 +741,10 @@ function Butterfly(props: DivergingBarsProps & { label: string; style: NumberSty
                     x={px(end + dir * 4)}
                     y={px(mid + 3.5)}
                     textAnchor={dir < 0 ? "end" : "start"}
-                    fontSize={11}
+                    fontSize={12}
                     strokeWidth={3}
                     paintOrder="stroke"
-                    className={`stroke-paper tabular-nums ${outward ? "fill-dim" : "fill-negative"}`}
+                    className={`stroke-surface tabular-nums ${outward ? "fill-ink-2" : "fill-second"}`}
                   >
                     {formatNumber(cell.value, data.unit, style)}
                   </text>

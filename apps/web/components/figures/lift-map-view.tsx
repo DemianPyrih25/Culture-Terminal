@@ -5,21 +5,15 @@ import { useEffect, useRef, useState, type ComponentType, type KeyboardEvent } f
 import { isTextField, type ShortcutFocusTarget, type ShortcutKeyEvent } from "../ui/shortcut";
 import type { LiftMapCanvasProps } from "./lift-map-canvas";
 import { LiftSchematic } from "./lift-map-schematic";
-import {
-  LIFT_CLAMP,
-  LIFT_MODES,
-  LIFT_MODE_KEY,
-  heatRgb,
-  liftRgb,
-  precisionBadge,
-  rgbHex,
-  type LiftLabel,
-  type LiftMode,
-} from "./lift-scale";
+import { cx } from "../ui/cx";
+import { Segmented } from "../ui/segmented";
+import { MODE_TEXT, MapLegend } from "./lift-map-parts";
+import { LIFT_MODES, LIFT_MODE_KEY, precisionBadge, type LiftLabel, type LiftMode } from "./lift-scale";
 
 /**
- * The interactive part of a LiftMap: the RAW / BASE / LIFT control (keys 1/2/3 while the figure has
- * focus), the mode's legend, the precision badge, and the map itself. The server and a browser
+ * The interactive part of a LiftMap: the "Extra interest | All interest" switch (LIFT and RAW; keys 1/2/3
+ * still pick RAW, BASE and LIFT while the map has focus), the ramp legend over the map, a note when the
+ * map is too coarse for area claims, the zoom buttons and the map itself. The server and a browser
  * without WebGL draw the static schematic; once the figure nears the viewport the map code
  * (MapLibre + deck.gl) is fetched with a dynamic import, so no other page carries it, and the
  * schematic steps aside when the basemap has loaded.
@@ -38,9 +32,16 @@ export interface LiftMapViewProps {
   outlinesUrl: string | null;
   /** false keeps the static schematic (tests, thumbnails, print). */
   interactive: boolean;
+  /** Controlled layer (the map card's panel switches it); omitted: the view keeps its own. */
+  mode?: LiftMode;
+  onModeChange?: (mode: LiftMode) => void;
+  /** Show the layer switch over the map (default true; the map card puts it in its panel). */
+  controls?: boolean;
+  /** Fill the parent's height instead of keeping the layout box's aspect ratio (the map card). */
+  fill?: boolean;
+  className?: string;
 }
 
-const MODE_TEXT: Readonly<Record<LiftMode, string>> = { RAW: "Raw", BASE: "Base", LIFT: "Lift" };
 
 /** The mode a 1/2/3 key press selects, or null for any other key. */
 export function modeForKey(key: string): LiftMode | null {
@@ -67,13 +68,47 @@ function webglAvailable(): boolean {
   }
 }
 
-export function LiftMapView({ data, labels, label, initialMode, width, height, outlinesUrl, interactive }: LiftMapViewProps) {
-  const [mode, setMode] = useState<LiftMode>(initialMode);
+export function LiftMapView({
+  data,
+  labels,
+  label,
+  initialMode,
+  width,
+  height,
+  outlinesUrl,
+  interactive,
+  mode: controlledMode,
+  onModeChange,
+  controls = true,
+  fill = false,
+  className,
+}: LiftMapViewProps) {
+  const [ownMode, setOwnMode] = useState<LiftMode>(initialMode);
+  const mode = controlledMode ?? ownMode;
+  const setMode = (next: LiftMode) => {
+    if (controlledMode === undefined) setOwnMode(next);
+    onModeChange?.(next);
+  };
   const [Canvas, setCanvas] = useState<ComponentType<LiftMapCanvasProps> | null>(null);
   const [ready, setReady] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const badge = precisionBadge(data);
+  // A map that fills its card draws the schematic at the box's own size, so pins and flags keep their size.
+  const [dims, setDims] = useState({ w: width, h: height });
+  useEffect(() => {
+    const node = box.current;
+    if (!fill || !node || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const w = Math.round(node.clientWidth);
+      const h = Math.round(node.clientHeight);
+      if (w > 0 && h > 0) setDims((d) => (d.w === w && d.h === h ? d : { w, h }));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [fill]);
 
   // Fetch the map code when the figure comes near the viewport, and only where WebGL works.
   useEffect(() => {
@@ -123,42 +158,30 @@ export function LiftMapView({ data, labels, label, initialMode, width, height, o
   };
 
   return (
-    <div className="flex flex-col gap-2 pt-2" onKeyDown={onKeyDown} data-lift-map={data.metro} data-mode={mode}>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-        <div role="group" aria-label={`Map layer: ${label}`} className="inline-flex rounded-brief border border-line-strong">
-          {LIFT_MODES.map((m, i) => (
-            <button
-              key={m}
-              type="button"
-              aria-pressed={mode === m}
-              aria-keyshortcuts={LIFT_MODE_KEY[m]}
-              title={`${MODE_TEXT[m]} (key ${LIFT_MODE_KEY[m]})`}
-              onClick={() => setMode(m)}
-              className={`flex items-center gap-1.5 px-2 py-[3px] font-ui text-[10px] font-semibold tracking-[1px] uppercase ${
-                i > 0 ? "border-l border-line-strong" : ""
-              } ${mode === m ? "bg-ink text-on-ink" : "bg-paper text-dim hover:text-ink"}`}
-            >
-              {m}
-              <span aria-hidden="true" className={`font-mono text-[9px] font-normal ${mode === m ? "text-on-ink/70" : "text-faint"}`}>
-                {LIFT_MODE_KEY[m]}
-              </span>
-            </button>
-          ))}
-        </div>
-        <ModeLegend mode={mode} data={data} />
-        <span
-          className={`ml-auto font-ui text-[10px] font-semibold tracking-[1px] uppercase ${badge.coarse ? "text-negative" : "text-dim"}`}
-          data-precision={data.precision}
-        >
-          {badge.text}
-        </span>
-      </div>
+    <div
+      className={cx("flex min-w-0 flex-col gap-3", fill && "h-full", className)}
+      onKeyDown={onKeyDown}
+      data-lift-map={data.metro}
+      data-mode={mode}
+    >
+      {controls ? (
+        <Segmented
+          label={`Map layer: ${label}`}
+          options={[
+            { value: "LIFT", label: MODE_TEXT.LIFT },
+            { value: "RAW", label: MODE_TEXT.RAW },
+          ]}
+          value={mode === "RAW" ? "RAW" : "LIFT"}
+          onChange={setMode}
+          className="self-start"
+        />
+      ) : null}
       <div
         ref={box}
-        className="relative w-full overflow-hidden rounded-brief border border-line bg-canvas"
-        style={{ aspectRatio: `${width} / ${height}`, maxHeight: height }}
+        className={cx("@container relative w-full overflow-hidden bg-sunken", fill ? "h-full min-h-[280px]" : "rounded-tile")}
+        style={fill ? undefined : { aspectRatio: `${width} / ${height}`, maxHeight: height }}
       >
-        <LiftSchematic data={data} mode={mode} labels={labels} width={width} height={height} label={label} hidden={ready} />
+        <LiftSchematic data={data} mode={mode} labels={labels} width={dims.w} height={dims.h} label={label} hidden={ready} />
         {Canvas ? (
           <Canvas
             data={data}
@@ -174,58 +197,18 @@ export function LiftMapView({ data, labels, label, initialMode, width, height, o
             }}
           />
         ) : null}
+        <MapLegend mode={mode} className="pointer-events-none absolute bottom-3 left-3 max-sm:top-3 max-sm:bottom-auto" />
+        {badge.coarse ? (
+          <span
+            data-precision={data.precision}
+            className="pointer-events-none absolute top-3 right-3 left-3 w-fit rounded-chip bg-surface px-2.5 py-1 type-caption text-caution-ink shadow-xs max-sm:top-14"
+          >
+            Rough areas only: too coarse to compare neighbourhoods
+          </span>
+        ) : (
+          <span data-precision={data.precision} hidden />
+        )}
       </div>
     </div>
-  );
-}
-
-/** What the colours mean in the current mode. */
-function ModeLegend({ mode, data }: { mode: LiftMode; data: GeoLiftPayload }) {
-  const item = "flex items-center gap-1.5 font-ui text-[12px] text-text-2";
-  if (mode === "LIFT") {
-    const stops = [LIFT_CLAMP.min, 0.8, 1, 1.25, LIFT_CLAMP.max].map((l) => rgbHex(liftRgb(l)));
-    return (
-      <span className="flex flex-wrap items-center gap-x-[18px] gap-y-1">
-        <span className={item}>
-          <span aria-hidden="true" className="inline-block size-2.5 rounded-full bg-data" />
-          Above baseline
-        </span>
-        <span className={item}>
-          <span aria-hidden="true" className="inline-block size-2.5 rounded-full bg-negative" />
-          Below baseline
-        </span>
-        <span className="flex items-center gap-1.5 font-ui text-[10.5px] text-dim tabular-nums">
-          {`${LIFT_CLAMP.min.toFixed(1)}×`}
-          <span aria-hidden="true" className="inline-block h-2 w-16 rounded-[1px]" style={{ background: `linear-gradient(90deg, ${stops.join(", ")})` }} />
-          {`${LIFT_CLAMP.max.toFixed(1)}×`}
-        </span>
-        {data.supply ? <SupplyKey capped={data.supply.capped} /> : null}
-      </span>
-    );
-  }
-  const what = mode === "RAW" ? `${data.concept.label} heat` : `${data.baseline.label} heat (baseline)`;
-  return (
-    <span className="flex flex-wrap items-center gap-x-[18px] gap-y-1">
-      <span className="flex items-center gap-1.5 font-ui text-[12px] text-text-2">
-        {what}
-        <span className="font-ui text-[10.5px] text-dim">low</span>
-        <span
-          aria-hidden="true"
-          className="inline-block h-2 w-12 rounded-[1px]"
-          style={{ background: `linear-gradient(90deg, ${rgbHex(heatRgb(0))}, ${rgbHex(heatRgb(1))})` }}
-        />
-        <span className="font-ui text-[10.5px] text-dim">high</span>
-      </span>
-      {data.supply ? <SupplyKey capped={data.supply.capped} /> : null}
-    </span>
-  );
-}
-
-function SupplyKey({ capped }: { capped: boolean }) {
-  return (
-    <span className="flex items-center gap-1.5 font-ui text-[12px] text-text-2">
-      <span aria-hidden="true" className="inline-block size-[5px] rounded-full bg-ink outline outline-1 outline-paper" />
-      {capped ? "Venues (capped sample)" : "Venues (sample)"}
-    </span>
   );
 }

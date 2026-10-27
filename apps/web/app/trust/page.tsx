@@ -1,23 +1,11 @@
-import type { Metadata } from "next";
-import { TRUST_PAGE } from "../../content/trust";
-import { ReferenceChrome } from "../../components/method/reference";
-import { TrustView } from "../../components/trust/trust-view";
-import { trendWindowText } from "../method/facts";
-import { trustFacts } from "./facts";
+import { permanentRedirect } from "next/navigation";
+import { HOW_IT_WORKS_HREF } from "../../components/chrome/links";
 
-export const metadata: Metadata = {
-  title: TRUST_PAGE.metaTitle,
-  description: TRUST_PAGE.metaDescription,
-};
-
-// Rendered per request: the daily caps it states are the running server's configuration.
-export const dynamic = "force-dynamic";
-
-/** /trust: safe use, refusals, the audience allowlist, data handling and the guards (SPEC §6.5). */
-export default function TrustPage() {
-  return (
-    <ReferenceChrome trendWindow={trendWindowText()}>
-      <TrustView {...trustFacts()} />
-    </ReferenceChrome>
-  );
+/**
+ * /trust moved: what we don't do is on /how-it-works, and the full rules (refusals, the audience
+ * allowlist, data handling, models and caps) on /method. next.config.ts answers /trust with a 308
+ * before this page is reached; the page is the same redirect, should the config ever lose it.
+ */
+export default function TrustPage(): never {
+  permanentRedirect(HOW_IT_WORKS_HREF);
 }

@@ -1,26 +1,5 @@
-// The brief page of Concept A (D36): /run/[id] live, finished and replayed, and the dev sample viewer.
+// /run/[id] live, finished and replayed, and the dev sample viewer (BriefView). The working view is
+// components/working, the finished answer components/answer and the How we know drawer components/drawer.
 export { BriefView, handOver } from "./brief-view";
 export type { BriefLinks, BriefViewMode, BriefViewProps } from "./brief-view";
-export { BriefDocument } from "./brief-document";
-export type { BriefDocumentProps, BriefDocumentView } from "./brief-document";
-export { BriefMissing } from "./brief-missing";
-export { BriefProvider, briefContextValue, useBrief } from "./brief-context";
-export type { BriefContextValue, CallQuery } from "./brief-context";
-export { NoteInspector, RequestDetail, SourceInspector, requestCurl, requestViewOf, sourceRequestView } from "./request-inspector";
-export type { RequestView } from "./request-inspector";
-export { API_KEY_PLACEHOLDER, QLOO_BASE_URL, curlCommand, hasShortenedParams, publicParams, requestUrl } from "./curl";
-export { ROW, citedIn, citingRows, expectedRivalRefs, figureRows, isCompactFigure, placeNotes } from "./plan";
-export type { CitingRow } from "./plan";
-export { FLASH_WINDOW_MS, FreshCalls } from "./fresh";
-export { noteText, noteTrace, sentenceCase } from "./note-text";
-export { sameProgress, steadyProgress } from "./progress";
-export type { SteadyProgress } from "./progress";
-export { STOP_CONFIRM_MS, isStopKey, postCancel, stopStep } from "./live";
-export type { StopPhase } from "./live";
-export { loadDataset } from "./figure-row";
-export { pickCandidate, refusalRequestsLine } from "./terminal";
-export type { PickDeps } from "./terminal";
-export { REPLAY_BAR_SPEEDS, ReplayBar, ReplayMarker, ReplayMini } from "./replay-bar";
-export type { ReplayBarProps } from "./replay-bar";
-export { STAMP_WORD, RequestStamp } from "./stamp";
 export { recordedEventSource } from "./sample-source";

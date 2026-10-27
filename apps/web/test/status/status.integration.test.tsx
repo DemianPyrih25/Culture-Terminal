@@ -1,10 +1,11 @@
 // The two reads server/status.ts makes on its own (until @ct/db has them) against a real Postgres in a
 // throwaway database: the latest runs' statuses by hash prefix, and today's cache hit count by
-// environment; and kv metro_localities' coverage of the markets a run needs. Then a whole reading over
+// environment; and kv metro_localities' coverage of the map cities and config markets. Then a whole reading over
 // those reads, rendered, with canaries planted in the rows, the pins and the key: no question, entity,
 // request id, locality id or key reaches the reading or the page (D31). Skips only
 // when no database is reachable. Invented questions, entities and paths only.
 import { renderToStaticMarkup } from "react-dom/server";
+import { MetroId } from "@ct/contracts";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createRun, insertQlooCalls, setKv, type CacheStatus, type RunStatus } from "@ct/db";
 import { createTestDatabase, databaseAvailable, type TestDatabase } from "../support/test-db";
@@ -12,10 +13,10 @@ import { CANARY_API_KEY, CANARY_ENTITY, CANARY_QUESTION, CANARY_REQUEST_ID, fake
 
 vi.mock("server-only", () => ({}));
 
-const { defaultStatusSources, readQlooCache, readRecentStatuses, readStatus } = await import("../../server/status");
+const { CONFIG_MARKETS, defaultStatusSources, readLocalityStatus, readQlooCache, readRecentStatuses, readStatus } = await import("../../server/status");
 const { StatusView } = await import("../../components/status/status-view");
 // The live key by name: the shell may export QLOO_MOCK=1, which reads the mock pins.
-const { LOCALITIES_KV_KEY, readLocalityCoverage } = await import("../../server/localities");
+const { LOCALITIES_KV_KEY } = await import("../../server/localities");
 
 const available = await databaseAvailable();
 
@@ -78,11 +79,26 @@ describe.skipIf(!available)("status reads against Postgres", () => {
     // Past the row cap the count is over the latest calls only.
   });
 
-  it("reads kv metro_localities' coverage: missing, then partial, by market id and count only", async () => {
-    expect(await readLocalityCoverage(t!.db, LOCALITIES_KV_KEY)).toEqual({ state: "missing", required: ["nashville", "austin"], missing: ["nashville", "austin"], pinned: 0 });
+  it("reads kv metro_localities' coverage of the map cities and the config markets: missing, then partial, by id and count only", async () => {
+    // Every map city is a config market; the markets beyond them are share and slate cities.
+    expect(CONFIG_MARKETS.length).toBeGreaterThan(MetroId.options.length);
+    expect(MetroId.options.every((id) => CONFIG_MARKETS.includes(id))).toBe(true);
+    expect(await readLocalityStatus(t!.db, LOCALITIES_KV_KEY)).toEqual({
+      state: "missing",
+      required: MetroId.options,
+      missing: MetroId.options,
+      pinned: 0,
+      markets: { total: CONFIG_MARKETS.length, missing: CONFIG_MARKETS },
+    });
     // The canary stands in for a locality id: the next test checks it never reaches the reading.
     await setKv(t!.db, "metro_localities", { nashville: { entityId: CANARY_REQUEST_ID, label: "Nashville" } });
-    expect(await readLocalityCoverage(t!.db, LOCALITIES_KV_KEY)).toEqual({ state: "partial", required: ["nashville", "austin"], missing: ["austin"], pinned: 1 });
+    expect(await readLocalityStatus(t!.db, LOCALITIES_KV_KEY)).toEqual({
+      state: "partial",
+      required: MetroId.options,
+      missing: MetroId.options.slice(1),
+      pinned: 1,
+      markets: { total: CONFIG_MARKETS.length, missing: CONFIG_MARKETS.filter((id) => id !== "nashville") },
+    });
   });
 
   it("keeps the canaries in runs, call-log rows, the pins and the key out of the reading and the page", async () => {
@@ -111,7 +127,7 @@ describe.skipIf(!available)("status reads against Postgres", () => {
           anthropicConfigured: defaultStatusSources().anthropicConfigured,
           recentStatuses: (prefix, limit) => readRecentStatuses(t!.db, prefix, limit),
           qlooCache: (env, since) => readQlooCache(t!.db, env, since),
-          localities: () => readLocalityCoverage(t!.db, LOCALITIES_KV_KEY),
+          localities: () => readLocalityStatus(t!.db, LOCALITIES_KV_KEY),
         }),
       );
       // The planted rows were read: the newest live run, and today's prod calls.

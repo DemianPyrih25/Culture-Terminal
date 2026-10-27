@@ -64,7 +64,7 @@ import {
   type FamilyResult,
   type LadderStep,
 } from "./blockDna/outputs";
-import { METRO_CENTRES } from "./metros";
+import { METRO_CENTRES, metroReachKm } from "./metros";
 
 /**
  * S7 block_dna, Block DNA (SPEC §5.3 S7; PROBE consequences 3 and 6): the area's urn:tag fingerprint
@@ -119,7 +119,9 @@ const sideCalls = (brands: boolean): number => 2 + (brands ? 1 : 0);
  */
 export async function estimateBlockDnaCalls(input: BlockInput, probe: CacheProbe, localities: LocalityApi | null): Promise<number> {
   const { area } = input;
-  if (area.kind === "point" && !(distanceKm(parsePoint(area.ref), METRO_CENTRES[area.metro]) <= MAX_POINT_KM)) return 0;
+  // Without the gazetteer a far point may still lie in the map city (resolveArea decides), so only a
+  // point beyond the metro's whole reach is known to cost nothing; a refused point is over-counted.
+  if (area.kind === "point" && !(distanceKm(parsePoint(area.ref), METRO_CENTRES[area.metro]) <= metroReachKm(area.metro, MAX_POINT_KM))) return 0;
   const locality = localities === null ? undefined : await localities.market(area.metro);
   const brands = input.include_brands && locality !== null;
   const areaLocation = area.kind === "point" ? pointAreaLocation(area) : null;

@@ -1,9 +1,11 @@
-import type { GeoApi } from "@ct/contracts";
-import { createGeo } from "@ct/geo";
+import { createGeo, type Geo } from "@ct/geo";
 
-/** The gazetteer is static data: indexed once per process, shared by every run, scan plan and preview. */
-let sharedGeo: GeoApi | null = null;
+/**
+ * The gazetteer is static data: indexed once per process, shared by every run, scan plan and preview.
+ * Names answer at once; a metro's polygons load when a tool first names it (tools.ts).
+ */
+let sharedGeo: Geo | null = null;
 
-export function gazetteer(): GeoApi {
+export function gazetteer(): Geo {
   return (sharedGeo ??= createGeo());
 }

@@ -2,9 +2,10 @@ import type { QlooParams, QlooTagSearchItem, SponsorCategory } from "@ct/contrac
 
 /**
  * The S10 sponsor categories, mirrored from config/sponsor_categories.json (the source, built from
- * probes G14 and P5); a test keeps the two equal. `tag` is the one filter tag P5 verified for the
- * category, or null: those categories find a genre:brand tag at runtime with the config's semantic
- * query. Public taxonomy URNs only (D29).
+ * probes G14, P5 and C2); a test keeps the two equal. `tag` is the one filter tag P5 or C2 verified
+ * for the category, or null: such a category (the named fallback, semantic_tag_search) finds a
+ * genre:brand tag at runtime with the config's semantic query, and the slate labels that tag as
+ * found by search. Public taxonomy URNs only (D29).
  */
 
 export interface SponsorCategorySpec {
@@ -17,19 +18,24 @@ export interface SponsorCategorySpec {
 
 export const SPONSOR_CATEGORIES: Readonly<Record<SponsorCategory, SponsorCategorySpec>> = {
   beer: { label: "Beer", semanticQuery: "beer", tag: "urn:tag:product_category:qloo:beer" },
-  spirits: { label: "Spirits", semanticQuery: "whiskey", tag: null },
-  rtd_seltzer: { label: "RTD and hard seltzer", semanticQuery: "hard seltzer", tag: null },
+  spirits: { label: "Spirits", semanticQuery: "whiskey", tag: "urn:tag:genre:brand:wine_and_spirits:spirits:whiskey" },
+  rtd_seltzer: { label: "RTD and hard seltzer", semanticQuery: "hard seltzer", tag: "urn:tag:genre:brand:wine_and_spirits:spirits:hard_seltzer" },
   outdoor_sporting_retail: { label: "Outdoor and sporting retail", semanticQuery: "outdoor gear", tag: null },
-  apparel_footwear: { label: "Apparel and footwear", semanticQuery: "boots and footwear", tag: null },
-  qsr: { label: "Quick-service restaurants", semanticQuery: "fast food", tag: null },
+  apparel_footwear: { label: "Apparel and footwear", semanticQuery: "boots and footwear", tag: "urn:tag:genre:brand:fashion:footwear" },
+  qsr: { label: "Quick-service restaurants", semanticQuery: "fast food", tag: "urn:tag:genre:brand:dining" },
   energy_drinks: {
     label: "Energy drinks",
     semanticQuery: "energy drink",
     tag: "urn:tag:genre:brand:food_and_beverage:drinks:energy_drink",
   },
-  auto: { label: "Auto", semanticQuery: "pickup trucks", tag: null },
-  telecom: { label: "Telecom", semanticQuery: "wireless carrier", tag: null },
-  fintech: { label: "Fintech", semanticQuery: "mobile payments app", tag: null },
+  auto: { label: "Auto", semanticQuery: "pickup trucks", tag: "urn:tag:genre:brand:automotive:car_and_suv" },
+  telecom: { label: "Telecom", semanticQuery: "wireless carrier", tag: "urn:tag:genre:brand:telecom" },
+  fintech: { label: "Fintech", semanticQuery: "mobile payments app", tag: "urn:tag:genre:brand:mobile_app:financial_services" },
+  beauty: { label: "Beauty and personal care", semanticQuery: "beauty and cosmetics", tag: "urn:tag:genre:brand:health_and_beauty" },
+  gaming: { label: "Gaming", semanticQuery: "video games", tag: "urn:tag:genre:brand:entertainment:video_game_developer" },
+  travel: { label: "Travel", semanticQuery: "travel booking", tag: "urn:tag:genre:brand:travel" },
+  food_delivery: { label: "Food delivery", semanticQuery: "food delivery app", tag: "urn:tag:genre:brand:mobile_app:food_and_dining" },
+  consumer_tech: { label: "Consumer tech", semanticQuery: "consumer electronics", tag: "urn:tag:genre:brand:electronics" },
 };
 
 const BRAND = "urn:entity:brand";

@@ -17,7 +17,17 @@ import type { FormulaId } from "../../formulas";
 import { addSkillMetric } from "../common";
 import { fixed2, safeFullName, safeName } from "../format";
 import { HEATMAP_BASELINE } from "../findTags/curated";
-import { NO_CLAIM_PRECISION, precisionFactor, QUADRANT_LABEL, type AreaLift, type AreaSupply, type LiftGrid } from "./lift";
+import {
+  MIN_AREA_CELLS,
+  MIN_BUSY_AREA_VENUES,
+  NO_CLAIM_PRECISION,
+  precisionFactor,
+  QUADRANT_LABEL,
+  THIN_SUPPLY_LABEL,
+  type AreaLift,
+  type AreaSupply,
+  type LiftGrid,
+} from "./lift";
 
 /**
  * What one geo_lift run writes: a bounded metric set, the GeoLift dataset behind the LiftMap, the
@@ -42,8 +52,20 @@ export interface LiftEvidence {
   supply: EvidenceId[];
 }
 
+/**
+ * Why similar venues (competitors) were not counted although supply was asked for. `text` is the
+ * reader's sentence (the UNAVAILABLE metric's label and the map's supplyGap); a count is then unknown,
+ * never 0 (PLAN §8.3).
+ */
+export interface SupplyGap {
+  reason: NoValueReason;
+  text: string;
+}
+
 /** Neighbourhood lifts that get a metric: the top five and, for contrast, the lowest. */
 export const TOP_AREA_METRICS = 5;
+/** With named areas, which come first with up to four metrics each, the top three and the lowest, so the digest keeps its rows. */
+export const TOP_AREA_METRICS_WITH_FOCUS = 3;
 /**
  * Top neighbourhoods that also get a confidence metric, and the most open ones a white-space metric.
  * It equals MAX_NAMES_IN_TEXT, so every neighbourhood LATENT_DEMAND names has a metric to cite.
@@ -102,6 +124,26 @@ export interface LiftMetrics {
   areas: Map<string, Metric>;
   confidence: Map<string, Metric>;
   whiteSpace: Map<string, Metric>;
+  /** lift.rank by neighbourhood id: a named area's rank among the areas with a lift. */
+  rank: Map<string, Metric>;
+  /** lift.supply by neighbourhood id (sampled similar venues), plus the metro-wide UNAVAILABLE one under the metro id. */
+  supply: Map<string, Metric>;
+}
+
+/** Why a named area has no lift, in a reader's words. */
+export function noLiftWhy(a: AreaLift): string {
+  switch (a.reason) {
+    case "insufficient_n":
+      return a.n === 0
+        ? `no gated cell, and a reliable lift needs ${MIN_AREA_CELLS}`
+        : `only ${a.n} of the ${MIN_AREA_CELLS} gated cells a reliable lift needs`;
+    case "not_measured":
+      return "the concept and baseline maps share no cell in it";
+    case "coarse":
+      return "the maps are too coarse for any neighbourhood claim";
+    default:
+      return "no lift was measured in this run";
+  }
 }
 
 /**
@@ -120,12 +162,20 @@ export function addLiftMetrics(
     conceptRefs: readonly string[];
     evidence: LiftEvidence;
     gap: NoValueReason | null;
+    /** The named areas (focus_areas the gazetteer knows), in the question's order. */
+    focus?: readonly AreaLift[];
+    /** Set when supply was asked for and no similar venue was counted. */
+    supplyGap?: SupplyGap | null;
+    /** Whether the venue sample came back full, so more venues may exist than it holds. */
+    capped?: boolean;
   },
 ): LiftMetrics {
   const { grid, areas, supply, conceptRefs, evidence, gap } = args;
+  const focus = args.focus ?? [];
+  const supplyGap = args.supplyGap ?? null;
   const ledger = run.ctx.ledger;
   const metro = METRO_LABEL[run.metro];
-  const out: LiftMetrics = { precision: null, areas: new Map(), confidence: new Map(), whiteSpace: new Map() };
+  const out: LiftMetrics = { precision: null, areas: new Map(), confidence: new Map(), whiteSpace: new Map(), rank: new Map(), supply: new Map() };
 
   if (grid !== null) {
     const prec = precisionFactor(grid.precision);
@@ -150,8 +200,39 @@ export function addLiftMetrics(
   }
 
   const ranked = byLift(areas);
-  const lowest = ranked.length > TOP_AREA_METRICS ? ranked[ranked.length - 1] : undefined;
-  for (const a of [...ranked.slice(0, TOP_AREA_METRICS), ...(lowest === undefined ? [] : [lowest])]) {
+  const top = focus.length > 0 ? TOP_AREA_METRICS_WITH_FOCUS : TOP_AREA_METRICS;
+  const lowest = ranked.length > top ? ranked[ranked.length - 1] : undefined;
+  const open = byOpenness(areas, supply);
+
+  // Competitors in the metro: unknown, with the reason, whenever supply was asked for and not counted.
+  if (supplyGap !== null) {
+    out.supply.set(
+      run.metro,
+      push(
+        run,
+        addSkillMetric(ledger, {
+          key: "lift.supply",
+          label: `similar venues (competitors) in ${metro}: unknown, never 0. ${supplyGap.text}`,
+          subjectRefs: [run.metro, ...conceptRefs],
+          value: null,
+          reason: supplyGap.reason,
+          display: "",
+          unit: "count",
+          badge: "MEASURED",
+          formulaId: "lift.white_space",
+          evidenceIds: evidence.maps,
+          n: null,
+          comparator: null,
+        }),
+      ),
+    );
+  }
+
+  // The areas the question names come first, each with its own numbers whatever its rank, or why it has none.
+  for (const a of focus) addFocusMetrics(run, out, { area: a, ranked, supply, conceptRefs, evidence, supplyGap, capped: args.capped === true });
+
+  for (const a of [...ranked.slice(0, top), ...(lowest === undefined ? [] : [lowest])]) {
+    if (out.areas.has(a.id)) continue;
     out.areas.set(
       a.id,
       push(
@@ -197,52 +278,155 @@ export function addLiftMetrics(
   }
 
   for (const a of ranked.slice(0, TOP_DETAIL_METRICS)) {
-    out.confidence.set(
-      a.id,
-      push(
-        run,
-        addSkillMetric(ledger, {
-          key: "lift.confidence",
-          label: `confidence of the ${safeName(a.name)} lift (gated cells × map precision)`,
-          subjectRefs: [a.id],
-          value: a.conf,
-          reason: a.reason ?? "insufficient_n",
-          display: a.conf === null ? "" : fixed2(a.conf),
-          unit: "ratio",
-          badge: "DERIVED",
-          formulaId: "lift.confidence",
-          evidenceIds: evidence.maps,
-          n: a.n,
-          comparator: null,
-        }),
-      ),
-    );
+    if (!out.confidence.has(a.id)) out.confidence.set(a.id, push(run, confidenceMetric(run, a, evidence)));
   }
-
-  const open = byOpenness(areas, supply);
-  for (const { area: a, supply: s, whiteSpace: ws } of open.slice(0, TOP_DETAIL_METRICS)) {
-    out.whiteSpace.set(
-      a.id,
-      push(
-        run,
-        addSkillMetric(ledger, {
-          key: "lift.white_space",
-          label: `white space in ${safeName(a.name)} (demand percentile × open supply)`,
-          subjectRefs: [a.id, ...conceptRefs],
-          value: ws,
-          reason: "not_measured",
-          display: `${fixed2(ws)} · ${s.quadrant === null ? "" : QUADRANT_LABEL[s.quadrant]}`,
-          unit: "score",
-          badge: "ESTIMATED",
-          formulaId: "lift.white_space",
-          evidenceIds: [...evidence.maps, ...evidence.supply],
-          n: open.length,
-          comparator: null,
-        }),
-      ),
-    );
+  for (const o of open.slice(0, TOP_DETAIL_METRICS)) {
+    if (!out.whiteSpace.has(o.area.id)) out.whiteSpace.set(o.area.id, push(run, whiteSpaceMetric(run, o, conceptRefs, evidence, open.length)));
   }
   return out;
+}
+
+/**
+ * A named area's numbers: its lift (or UNAVAILABLE with why, e.g. too few gated cells), and with a
+ * lift its rank among the areas with one, its confidence and its sampled similar venues when supply
+ * was counted. A capped sample's 0 is no count (the supply-label rule in ./lift): its lift.supply is
+ * UNAVAILABLE with the reason, so no claim can cite it as few or none. Its white-space quadrant, or
+ * THIN_SUPPLY_LABEL, is in its digest row; the three most open areas keep their metrics.
+ */
+function addFocusMetrics(
+  run: LiftRun,
+  out: LiftMetrics,
+  args: {
+    area: AreaLift;
+    ranked: readonly AreaLift[];
+    supply: ReadonlyMap<string, AreaSupply>;
+    conceptRefs: readonly string[];
+    evidence: LiftEvidence;
+    supplyGap: SupplyGap | null;
+    capped: boolean;
+  },
+): void {
+  const { area: a, ranked, conceptRefs, evidence } = args;
+  const ledger = run.ctx.ledger;
+  const name = safeName(a.name);
+  out.areas.set(
+    a.id,
+    push(
+      run,
+      addSkillMetric(ledger, {
+        key: "lift.area",
+        label:
+          a.lift === null
+            ? `lift of ${name} vs the restaurant baseline: not measured, ${noLiftWhy(a)}`
+            : `lift of ${name} vs the restaurant baseline (named in the question)`,
+        subjectRefs: [a.id, ...conceptRefs],
+        value: a.lift,
+        reason: a.reason ?? "insufficient_n",
+        display: a.lift === null ? "" : `${fixed2(a.lift)}×`,
+        unit: "lift",
+        badge: "ESTIMATED",
+        formulaId: "lift.area",
+        evidenceIds: evidence.maps,
+        n: a.n,
+        comparator: "BASELINE",
+      }),
+    ),
+  );
+  const rank = ranked.indexOf(a);
+  if (a.lift === null || rank < 0) return;
+  out.rank.set(
+    a.id,
+    push(
+      run,
+      addSkillMetric(ledger, {
+        key: "lift.rank",
+        label: `rank of ${name} by lift among the ${ranked.length} areas with one (1 = highest)`,
+        subjectRefs: [a.id, ...conceptRefs],
+        value: rank + 1,
+        reason: "not_measured",
+        display: `${rank + 1} of ${ranked.length}`,
+        unit: "rank",
+        badge: "DERIVED",
+        formulaId: "lift.area",
+        evidenceIds: evidence.maps,
+        n: ranked.length,
+        comparator: null,
+      }),
+    ),
+  );
+  out.confidence.set(a.id, push(run, confidenceMetric(run, a, evidence)));
+  const s = args.supply.get(a.id);
+  if (args.supplyGap === null && s !== undefined && s.count !== null) {
+    out.supply.set(a.id, push(run, focusSupplyMetric(run, a, { ...s, count: s.count }, conceptRefs, evidence, args.capped)));
+  }
+}
+
+/** A named area's sampled similar venues: a count, or for a capped sample's 0 an UNAVAILABLE metric that says why. */
+function focusSupplyMetric(run: LiftRun, a: AreaLift, s: AreaSupply & { count: number }, conceptRefs: readonly string[], evidence: LiftEvidence, capped: boolean): Metric {
+  const name = safeName(a.name);
+  const base = {
+    key: "lift.supply",
+    subjectRefs: [a.id, ...conceptRefs],
+    unit: "count",
+    badge: "MEASURED",
+    formulaId: "lift.white_space",
+    evidenceIds: evidence.supply,
+    n: null,
+    comparator: null,
+  } as const;
+  if (capped && s.count === 0) {
+    return addSkillMetric(run.ctx.ledger, {
+      ...base,
+      label:
+        `similar venues in ${name}: unknown, not 0 (${THIN_SUPPLY_LABEL.toLowerCase()}). None of the venues in Qloo's capped sample is in ${name}, ` +
+        "and a capped sample cannot show how many exist there, so it supports no competitor claim",
+      value: null,
+      reason: "insufficient_n",
+      display: "",
+    });
+  }
+  const thin = s.thin ? ` (${THIN_SUPPLY_LABEL.toLowerCase()}: too few to call the area crowded; ${MIN_BUSY_AREA_VENUES} needed)` : "";
+  return addSkillMetric(run.ctx.ledger, {
+    ...base,
+    label: `similar venues in ${name} in a${capped ? " capped" : ""} sample of Qloo-indexed venues, not every business${thin}`,
+    value: s.count,
+    reason: "not_measured",
+    display: `${s.count} in the sample`,
+  });
+}
+
+function confidenceMetric(run: LiftRun, a: AreaLift, evidence: LiftEvidence): Metric {
+  return addSkillMetric(run.ctx.ledger, {
+    key: "lift.confidence",
+    label: `confidence of the ${safeName(a.name)} lift (${a.n} gated ${a.n === 1 ? "cell" : "cells"} × map precision)`,
+    subjectRefs: [a.id],
+    value: a.conf,
+    reason: a.reason ?? "insufficient_n",
+    display: a.conf === null ? "" : fixed2(a.conf),
+    unit: "ratio",
+    badge: "DERIVED",
+    formulaId: "lift.confidence",
+    evidenceIds: evidence.maps,
+    n: a.n,
+    comparator: null,
+  });
+}
+
+function whiteSpaceMetric(run: LiftRun, o: OpenArea, conceptRefs: readonly string[], evidence: LiftEvidence, n: number): Metric {
+  return addSkillMetric(run.ctx.ledger, {
+    key: "lift.white_space",
+    label: `white space in ${safeName(o.area.name)} (demand percentile × open supply, from a sample of Qloo-indexed venues)`,
+    subjectRefs: [o.area.id, ...conceptRefs],
+    value: o.whiteSpace,
+    reason: "not_measured",
+    display: `${fixed2(o.whiteSpace)} · ${o.supply.quadrant === null ? "" : QUADRANT_LABEL[o.supply.quadrant]}`,
+    unit: "score",
+    badge: "ESTIMATED",
+    formulaId: "lift.white_space",
+    evidenceIds: [...evidence.maps, ...evidence.supply],
+    n,
+    comparator: null,
+  });
 }
 
 /**
@@ -279,11 +463,17 @@ export function addLiftMap(
     points: readonly SupplyPoint[] | null;
     capped: boolean;
     concept: GeoLiftPayload["concept"];
+    /** The named areas' ids, shown first. */
+    focus?: readonly string[];
+    /** Why similar venues were not counted; every supplyCount is then null ("unknown"), never 0. */
+    supplyGap?: SupplyGap | null;
     areaOf: (geohash: string) => string | null;
     evidenceIds: readonly EvidenceId[];
   },
 ): DatasetId {
   const { grid, areas, supply, points, capped, concept, areaOf } = args;
+  const focus = args.focus ?? [];
+  const supplyGap = args.supplyGap ?? null;
   const prec = precisionFactor(grid.precision);
   const coarse = grid.precision <= NO_CLAIM_PRECISION;
   const metro = METRO_LABEL[run.metro];
@@ -314,7 +504,8 @@ export function addLiftMap(
         conf: a.conf,
         demandPct: a.demandPct,
         supplyPct: s?.supplyPct ?? null,
-        supplyCount: s?.count ?? null,
+        // A gap means unknown for every area, never a count of 0.
+        supplyCount: supplyGap === null ? (s?.count ?? null) : null,
         whiteSpace: s?.whiteSpace ?? null,
         quadrant: s?.quadrant ?? null,
         reason: a.reason,
@@ -325,7 +516,10 @@ export function addLiftMap(
     caption:
       `Lift = the concept's taste heat against the pinned restaurant baseline, relative within ${metro} · geohash ${grid.precision}` +
       (coarse ? " (coarse: no neighbourhood claims)" : "") +
-      (points === null ? "" : " · supply: a capped sample of Qloo-indexed venues"),
+      (points === null ? "" : " · supply: a capped sample of Qloo-indexed venues, not every business") +
+      (supplyGap === null ? "" : " · similar venues: unknown"),
+    ...(focus.length > 0 ? { focusAreas: [...focus] } : {}),
+    ...(supplyGap === null ? {} : { supplyGap: supplyGap.text }),
   };
   const dataset = run.ctx.ledger.addDataset({
     kind: "GeoLift",
@@ -343,23 +537,39 @@ export function addLiftMap(
  * gated cells. A row names the metrics that hold its numbers instead of repeating them (cell counts
  * live in the metrics' n), and its neighbourhood id is the `ref` a block_dna area takes.
  */
-export function liftDigestRows(areas: readonly AreaLift[], supply: ReadonlyMap<string, AreaSupply>, metrics: LiftMetrics): DigestRow[] {
+export function liftDigestRows(
+  areas: readonly AreaLift[],
+  supply: ReadonlyMap<string, AreaSupply>,
+  metrics: LiftMetrics,
+  focus: readonly AreaLift[] = [],
+): DigestRow[] {
   const ranked = byLift(areas);
+  const named = new Set(focus.map((a) => a.id));
   const rest = areas
-    .filter((a) => a.lift === null && a.covered > 0)
+    .filter((a) => a.lift === null && a.covered > 0 && !named.has(a.id))
     .sort((a, b) => b.n - a.n || b.covered - a.covered || (a.id < b.id ? -1 : 1));
-  return [...ranked, ...rest].map((a) => {
+  return [...focus, ...ranked.filter((a) => !named.has(a.id)), ...rest].map((a) => {
     const s = supply.get(a.id);
     const values: DigestRow["values"] = { area: a.id };
+    if (named.has(a.id)) values.named = "in the question";
     if (a.lift !== null) {
       values.lift_rank = ranked.indexOf(a) + 1;
+      if (named.has(a.id)) values.ranked_of = ranked.length;
       values.lift_metric = metrics.areas.get(a.id)?.id ?? null;
     } else {
       values.unscored = a.reason;
+      if (named.has(a.id)) values.gated_cells = a.n;
     }
+    const rank = metrics.rank.get(a.id);
+    if (rank !== undefined) values.rank_metric = rank.id;
+    const conf = named.has(a.id) ? metrics.confidence.get(a.id) : undefined;
+    if (conf !== undefined) values.confidence_metric = conf.id;
+    const venues = metrics.supply.get(a.id);
+    if (venues !== undefined) values.supply_metric = venues.id;
     const ws = metrics.whiteSpace.get(a.id);
     if (ws !== undefined) values.white_space_metric = ws.id;
     if (s?.quadrant) values.quadrant = QUADRANT_LABEL[s.quadrant];
+    else if (s?.thin) values.quadrant = THIN_SUPPLY_LABEL;
     return { ref: null, name: safeName(a.name), values };
   });
 }

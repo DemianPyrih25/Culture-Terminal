@@ -98,7 +98,7 @@ function focusIsLost(): boolean {
  * the tab order of a panel placed right after its trigger: Tab on the trigger enters it, Shift+Tab out of
  * it returns to the trigger, Tab out of it moves on to the stop after the trigger. It closes on Escape and
  * on its content's `close` (focus returns to the trigger), on those Tab moves, on a click outside, and
- * when focus moves elsewhere. Used for the request inspector behind every number.
+ * when focus moves elsewhere. C/Popover: 320 wide, r12, surface, shadow-lg (the confidence popover).
  */
 export function Popover({
   trigger,
@@ -269,7 +269,7 @@ export function Popover({
               onBlur={onPanelBlur}
               style={panelStyle}
               className={cx(
-                "fixed z-50 max-h-[min(480px,calc(100vh-16px))] overflow-auto rounded-brief border border-line-strong bg-paper p-4 text-ink outline-none",
+                "fixed z-50 max-h-[min(480px,calc(100vh-16px))] overflow-auto rounded-control border border-line bg-surface p-4 text-ink shadow-lg outline-none",
                 className,
               )}
             >

@@ -1,11 +1,12 @@
-// /d/[entity] and /d rendered on the server: noindex unless a curated entity's tearsheet is drawn (D31),
-// the tearsheet's sections, figures and receipts, each state's card, and the search box. The lookup is
+// /d/[entity] and /d rendered on the server: noindex unless a curated entity's profile is drawn (D31),
+// the profile's header, key numbers and cards (N14), each state's card, and the search box. The lookup is
 // stubbed where the page loads it; the tearsheet itself comes from the service on the Qloo mock. Invented
 // entities only (D29).
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { DesType } from "../../components/des/des-href";
 import type { DesOutcome, Tearsheet } from "../../components/des/model";
+import { decode } from "../figures/markup";
 import { desDeps, OPEN_LIMITS, request } from "./support";
 
 const { loadTearsheet, redirect } = vi.hoisted(() => ({
@@ -17,10 +18,9 @@ const { loadTearsheet, redirect } = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }), redirect }));
-vi.mock("../../components/ask/top-bar-ask", () => ({ TopBarAsk: () => null }));
 vi.mock("../../app/d/[entity]/load", () => ({ loadTearsheet }));
-// Juniper Cola (a brand) and Comedian Vega (a person) stand for curated showcase entities, as the config
-// spells them; every other name is a reader's own lookup.
+// Juniper Cola (a brand) and Comedian Vega (a person) stand for curated entities, as the config spells
+// them; every other name is a reader's own lookup.
 vi.mock("../../server/des/curated", () => {
   const curated = [
     { name: "Juniper Cola", type: "brand" },
@@ -33,6 +33,7 @@ vi.mock("../../server/des/curated", () => {
 
 const { default: DesPage, generateMetadata } = await import("../../app/d/[entity]/page");
 const { default: DesSearchPage } = await import("../../app/d/page");
+const { default: DesLoading } = await import("../../app/d/[entity]/loading");
 const { DesService } = await import("../../server/des/service");
 
 const NOINDEX = { index: false, follow: false };
@@ -59,22 +60,22 @@ beforeEach(() => {
 });
 
 describe("generateMetadata", () => {
-  it("indexes a curated entity's tearsheet at its own address, with a description, without waiting for the lookup", async () => {
+  it("indexes a curated entity's profile at its own address, with a description, without waiting for the lookup", async () => {
     // Whatever the lookup would say now (a pause, a limit), the curated page stays in the index.
-    loadTearsheet.mockResolvedValue({ kind: "unavailable", cause: "paused", message: "Live tearsheets are paused.", until: null });
+    loadTearsheet.mockResolvedValue({ kind: "unavailable", cause: "paused", message: "Live profiles are paused.", until: null });
     const metadata = await generateMetadata(props("Juniper%20Cola"));
     expect(metadata).toEqual({
-      title: "Juniper Cola · DES · Culture Terminal",
-      description: expect.stringMatching(/^Juniper Cola: audience DNA, cultural neighbours and travel taste/),
+      title: "Juniper Cola · Audience profile · Culture Terminal",
+      description: "Juniper Cola: who its fans are, what else they love, and where their taste travels. From Qloo taste data, every number traced.",
       alternates: { canonical: "/d/Juniper%20Cola" },
     });
-    expect((await generateMetadata(props("Comedian%20Vega", { type: "person" }))).title).toBe("Comedian Vega · DES · Culture Terminal");
+    expect((await generateMetadata(props("Comedian%20Vega", { type: "person" }))).title).toBe("Comedian Vega · Audience profile · Culture Terminal");
     expect(loadTearsheet).not.toHaveBeenCalled();
   });
 
   it("keeps a reader's own lookup out of the index without waiting for it", async () => {
     const metadata = await generateMetadata(props("Brand%20Alpha"));
-    expect(metadata).toEqual({ title: "Brand Alpha · DES · Culture Terminal", robots: NOINDEX });
+    expect(metadata).toEqual({ title: "Brand Alpha · Audience profile · Culture Terminal", robots: NOINDEX });
     expect(loadTearsheet).not.toHaveBeenCalled();
   });
 
@@ -88,111 +89,116 @@ describe("generateMetadata", () => {
     ] as const) {
       expect((await generateMetadata(props(entity, search))).robots).toEqual(NOINDEX);
     }
-    expect(await generateMetadata(props("%3Cx%3E"))).toEqual({ title: "Tearsheet · Culture Terminal", robots: NOINDEX });
+    expect(await generateMetadata(props("%3Cx%3E"))).toEqual({ title: "Profile · Culture Terminal", robots: NOINDEX });
     expect(loadTearsheet).not.toHaveBeenCalled();
   });
 
   it("never puts an uncurated person's name in the title", async () => {
-    expect(await generateMetadata(props("Neighbour%20Vega", { type: "person" }))).toEqual({ title: "Tearsheet · Culture Terminal", robots: NOINDEX });
+    expect(await generateMetadata(props("Neighbour%20Vega", { type: "person" }))).toEqual({ title: "Profile · Culture Terminal", robots: NOINDEX });
     expect(await generateMetadata(props("comedian%20vega", { type: "person", pick: "pk_00000000000000ab" }))).toEqual({
-      title: "Tearsheet · Culture Terminal",
+      title: "Profile · Culture Terminal",
       robots: NOINDEX,
     });
   });
 });
 
-describe("the tearsheet", () => {
-  it("draws the head, the five sections in order, every figure and the receipts", async () => {
+describe("the profile", () => {
+  it("draws the entity header, the three key numbers and the four cards in the new shell", async () => {
     loadTearsheet.mockResolvedValue({ kind: "ready", sheet: SHEET, cachedAt: null });
     const html = await render("Juniper%20Cola");
+    const text = decode(html);
+    expect(html.match(/<h1[^>]*>/g)).toHaveLength(1);
     expect(html).toMatch(/<h1[^>]*>Juniper Cola<\/h1>/);
-    expect(html).toContain("JUNIPER COLA &lt;BRAND&gt; DES");
-    expect(html).toContain("Curated");
-    expect(html).not.toContain('data-unlisted="true"');
-    const sections = [...html.matchAll(/data-section="([a-z]+)"/g)].map((m) => m[1]);
-    expect(sections).toEqual(["overview", "dna", "neighbours", "travel", "receipts"]);
-    for (const id of sections) expect(html).toContain(`href="#${id}"`);
-    // Figures 1 to 7: DNA bars and tags, four domain lists, the travel quadrant.
-    expect([...html.matchAll(/data-figure="(\d+)"/g)].map((m) => Number(m[1]))).toEqual([1, 2, 3, 4, 5, 6, 7]);
-    expect(html).toContain('data-kind="Bars"');
-    expect(html).toContain('data-kind="Quadrant"');
-    expect(html).toContain('data-neighbour-lists="4"');
-    expect(html).toContain('data-tag-family="');
-    expect((html.match(/data-key-figure="M\d+"/g) ?? []).length).toBe(4);
-    // Receipts: one row per request, and each figure's source links to its row.
-    expect((html.match(/data-receipt="\d+"/g) ?? []).length).toBe(8);
-    expect(html).toContain('href="#receipt-1"');
-    expect(html).toContain(`${SHEET.traced.total}/${SHEET.traced.total} numbers traced`);
-    expect(html).toContain("Qloo 8 req");
-    expect(html).toContain("$0 LLM");
-    expect(html).toContain('data-picked="false"');
-    expect(html).toContain("The name was matched exactly, name and type");
-    // The destination the travel figure's title names is the plot's one ring, and the caption says so.
+    expect(text).toMatch(/Brand · Audience profile · Data as of \d{1,2} [A-Z][a-z]{2} \d{4}/);
+    expect(html).toContain('href="/ask?q=Who%20is%20the%20Juniper%20Cola%20audience%3F"');
+    for (const action of ["Ask about Juniper Cola", "Look up another", "How we know"]) expect(text).toContain(action);
+    expect(text).toContain("Who its fans are, what else they love, and where their taste travels.");
+    // Key numbers, from the tearsheet's popularity, youth and gender figures.
+    for (const label of ["How widely known", "Age lean", "Gender lean"]) expect(html).toContain(`aria-label="${label}"`);
+    expect(text).toContain("Top 22%");
+    expect(text).toContain("among all brands in Qloo");
+    expect(text).toContain("Leans younger");
+    expect(text).toContain("+0.59 vs the average audience");
+    expect(text).toContain("Leans female");
+    expect(text).toContain("+0.11 for women vs the average audience");
+    // The cards, each titled from its data.
+    for (const kind of ["Who the fans are", "How Qloo describes it", "What else their fans love", "Places their fans travel to"]) {
+      expect(text).toContain(kind);
+    }
+    expect(text).toContain("Fans lean female and 30–44.");
+    expect(text).toContain("Relative to the average audience, not shares of customers.");
+    expect(text).toContain("Bold, earnest and busy parent.");
+    expect(html).toMatch(/data-tag-family="Look"[\s\S]*data-tag-family="Tone"[\s\S]*data-tag-family="Lifestyle"/);
+    expect(text).toContain("Qloo's taste tags for the brand, grouped by theme.");
+    expect(html.match(/data-domain="/g)).toHaveLength(4);
+    expect(html).toContain('href="/d/Lyric%20and%20the%20Tides?type=artist"');
+    expect(text).toMatch(/Fans also love [^.]+, [^.]+ and [^.]+\./);
     const travel = SHEET.sections.travel.figures[0];
-    const top = travel?.dataset.kind === "Quadrant" ? travel.dataset.payload.points.find((p) => p.key === travel.featured?.[0]) : undefined;
-    if (!top) throw new Error("no featured destination");
-    expect(html).toContain(`Its taste travels furthest to ${top.label}`);
-    expect(html).toContain(`The ring marks ${top.label}, the closest fit.`);
-    expect(html.match(/data-tone="featured"/g)).toHaveLength(1);
-    expect(html).toContain(`data-point="${top.key}" data-tone="featured"`);
-    // A count or a duration in Receipts never breaks inside.
-    expect(html).toMatch(/<span class="whitespace-nowrap">\d+ rows?<\/span>/);
-    // The search box, with the tearsheet's type selected.
-    expect(html).toContain('action="/d"');
-    expect(html).toMatch(/<option value="brand" selected="">Brand<\/option>/);
-    expect(html).not.toMatch(/mock-ent-/);
+    const top = travel?.dataset.kind === "Quadrant" ? [...travel.dataset.payload.points].sort((a, b) => b.y - a.y)[0] : undefined;
+    if (!top) throw new Error("no destination");
+    expect(text).toContain(`Their taste travels furthest to ${top.label}.`);
+    expect(text).toContain("Places their fans are drawn to, not where they live.");
+    // The travel bars are one image to assistive tech; the list inside is hidden (an <ol> cannot take role img).
+    expect(html).toMatch(/<div role="img" aria-label="[^"]+" data-plot="travel"><ol aria-hidden="true"/);
+    expect(html).not.toMatch(/<ol[^>]*role="img"/);
+    expect((html.match(/aria-label="Source of /g) ?? []).length).toBeGreaterThanOrEqual(7);
+    // The drawer is closed: no request id or Qloo id reaches the page.
+    expect(html).not.toMatch(/mock-[0-9a-f]{6,}|mock-ent-|urn:/);
+    expect(html).not.toContain('role="dialog"');
+    // The new design only, and no examples.
+    expect(html).toContain('data-header="inner"');
+    expect(html).not.toMatch(/font-serif|text-dim|text-faint|rounded-brief|bg-paper|Receipts|Tearsheet/);
+    expect(text).not.toMatch(/example|showcase/i);
   });
 
-  it("marks a reader's own lookup unlisted and says when a cached tearsheet was computed", async () => {
-    loadTearsheet.mockResolvedValue({ kind: "ready", sheet: OWN, cachedAt: "2026-10-23T08:30:00.000Z" });
-    const html = await render("Brand%20Alpha");
-    expect(html).toContain('data-unlisted="true"');
-    expect(html).toContain("Unlisted · reader lookup");
-    expect(html).toContain("Served from the tearsheet cache: computed 23 Oct 2026, 08:30 UTC, no request repeated.");
-  });
-
-  it("says when the reader picked the entity from Qloo's candidates rather than matching it exactly", async () => {
-    loadTearsheet.mockResolvedValue({ kind: "ready", sheet: { ...OWN, picked: true }, cachedAt: null });
-    const html = await render("Brand%20Alpha", { pick: "pk_00000000000000ab" });
-    expect(html).toContain('data-picked="true"');
-    expect(html).toContain("You picked this entity from Qloo&#x27;s candidates; nothing was picked for you.");
-    expect(html).not.toContain("matched exactly");
+  it("says when Qloo spells the name differently from the address, and dates a cached profile", async () => {
+    loadTearsheet.mockResolvedValue({ kind: "ready", sheet: { ...OWN, query: { ...OWN.query, name: "brand alfa" } }, cachedAt: "2026-10-23T08:30:00.000Z" });
+    const text = decode(await render("brand%20alfa"));
+    expect(text).toContain("Looked up as “brand alfa”.");
+    expect(text).toContain("Data as of 23 Oct 2026");
   });
 });
 
 describe("the states", () => {
   const candidates = [
     { key: "pk_00000000000000a1", name: "Juniper Twin", disambiguation: "2004", popularity: 0.61, href: "/d/Juniper%20Twin?pick=pk_00000000000000a1" },
-    { key: "pk_00000000000000a2", name: "Juniper Twin", disambiguation: null, popularity: null, href: "/d/Juniper%20Twin?pick=pk_00000000000000a2" },
+    { key: "pk_00000000000000a2", name: "Juniper Twin", disambiguation: null, popularity: 0.2, href: "/d/Juniper%20Twin?pick=pk_00000000000000a2" },
   ];
 
   it.each<[string, DesOutcome, RegExp[]]>([
     [
       "a picker",
       { kind: "pick", query: { name: "Juniper Twin", type: "brand" }, message: "Pick the one you mean.", candidates },
-      [/data-state-card="Pick the one you mean"/, /href="\/d\/Juniper%20Twin\?pick=pk_00000000000000a1"/, /no other detail from Qloo/, /never decides the match/],
+      [
+        /data-state-card="Which one"/,
+        /“Juniper Twin” could mean a few things\. Which one\?/,
+        /href="\/d\/Juniper%20Twin\?pick=pk_00000000000000a1"/,
+        /No other detail from Qloo/,
+        /Widely known/,
+        /Less known/,
+        /Not listed\?/,
+      ],
     ],
     [
       "a name not found",
       { kind: "not_found", query: { name: "Notfound Cola", type: "brand" }, message: "No exact match.", candidates },
-      [/data-state-card="Name not found"/, /No brand in Qloo&#x27;s data is named exactly “Notfound Cola”/, /never applied/],
+      [/data-state-card="Name not found"/, /“Notfound Cola” isn&#x27;t in Qloo&#x27;s data\./, /Check the spelling or use the full name/, /Closest names in Qloo/],
     ],
     [
       "a pause",
-      { kind: "unavailable", cause: "paused", message: "Live tearsheets are paused: it was paused by the operator.", until: null },
-      [/data-state-card="Tearsheets unavailable"/, /it was paused by the operator/, /href="\/status"/],
-    ],
-    [
-      "the daily budget",
-      { kind: "unavailable", cause: "budget", message: "Today's Qloo requests for tearsheets are used up.", until: null },
-      [/Paused · daily budget/],
+      { kind: "unavailable", cause: "paused", message: "Live profiles are paused: it was paused by the operator.", until: null },
+      [/data-state-card="Paused"/, /it was paused by the operator/],
     ],
     [
       "a rate limit",
       { kind: "limited", message: "Try again in 40 s.", retryAfterS: 40 },
-      [/data-state-card="Too many lookups"/, /Try again in 40 s\./, /Try this tearsheet again/],
+      [/data-state-card="Too many lookups"/, /Try again in 40 s\./, /href="\/d\/Juniper%20Cola"[^>]*>[\s\S]*?Try again/],
     ],
-    ["a failure", { kind: "failed", message: "The name could not be looked up in Qloo just now." }, [/data-state-card="Lookup failed"/]],
+    [
+      "a failure",
+      { kind: "failed", message: "The name could not be looked up in Qloo just now." },
+      [/data-state-card="Not finished"/, /This profile couldn&#x27;t be finished\./, /Try again/],
+    ],
   ])("words %s with the search box under it", async (_name, outcome, patterns) => {
     loadTearsheet.mockResolvedValue(outcome);
     const name = "query" in outcome ? outcome.query.name : "Juniper Cola";
@@ -200,20 +206,21 @@ describe("the states", () => {
     for (const p of patterns) expect(html).toMatch(p);
     expect(html).toMatch(new RegExp(`<h1[^>]*>${name}</h1>`));
     expect(html).toContain('action="/d"');
-    expect(html).not.toContain("data-section=");
+    expect(html).toContain('id="look-up"');
+    expect(html).not.toContain("data-profile=");
   });
 
-  it("refuses a person who is not vetted without repeating the name, saying no request was made", async () => {
+  it("refuses a person who is not vetted without repeating the name", async () => {
     loadTearsheet.mockResolvedValue({
       kind: "refused",
       query: { name: "Neighbour Vega", type: "person" },
       message: "This name is not among the vetted public figures, so no Qloo request was made for it.",
     });
     const html = await render("Neighbour%20Vega", { type: "person" });
-    expect(html).toContain('data-state-card="Lookup refused"');
-    expect(html).toContain("Not looked up · not a vetted public figure");
+    expect(html).toContain('data-state-card="Not looked up"');
+    expect(html).toContain("We only profile public figures.");
     expect(html).toContain("no Qloo request was made");
-    expect(html).toMatch(/<h1[^>]*>Tearsheet<\/h1>/);
+    expect(html).toMatch(/<h1[^>]*>Look up a profile<\/h1>/);
     expect(html).not.toContain("Neighbour Vega");
     expect(html).toContain('action="/d"');
   });
@@ -221,23 +228,35 @@ describe("the states", () => {
   it("explains an address it cannot read, without a lookup", async () => {
     const html = await render("%3Cscript%3E");
     expect(loadTearsheet).not.toHaveBeenCalled();
-    expect(html).toContain("That name cannot be looked up");
-    expect(html).toMatch(/<h1[^>]*>Describe any entity<\/h1>/);
+    expect(decode(html)).toContain("That name can't be looked up");
+    expect(html).toMatch(/<h1[^>]*>Look up a profile<\/h1>/);
+  });
+});
+
+describe("/d/[entity] while loading", () => {
+  it("keeps one page heading for screen readers under the skeleton", () => {
+    const html = renderToStaticMarkup(<DesLoading />);
+    expect(html.match(/<h1[^>]*>/g)).toHaveLength(1);
+    expect(html).toMatch(/<h1 class="sr-only">Loading the profile…<\/h1>/);
   });
 });
 
 describe("/d", () => {
   const searchProps = (search: Record<string, string>) => ({ params: Promise.resolve({}), searchParams: Promise.resolve(search) }) as PageProps<"/d">;
 
-  it("opens the tearsheet the search box names, compiling <NAME> DES", async () => {
+  it("opens the profile the search box names, compiling <NAME> DES", async () => {
     await expect(DesSearchPage(searchProps({ q: "Artist Nova <ARTIST> DES", type: "brand" }))).rejects.toThrow("NEXT_REDIRECT /d/Artist%20Nova?type=artist");
     await expect(DesSearchPage(searchProps({ q: "Juniper Cola", type: "brand" }))).rejects.toThrow("NEXT_REDIRECT /d/Juniper%20Cola");
   });
 
   it("shows the search box, with an error for a name it cannot read", async () => {
     const empty = renderToStaticMarkup(await DesSearchPage(searchProps({})));
-    expect(empty).toMatch(/<h1[^>]*>Describe any entity<\/h1>/);
+    expect(empty).toMatch(/<h1[^>]*>Look up a profile<\/h1>/);
+    // The card under the page heading does not repeat it.
+    expect(empty.match(/>Look up a profile</g)).toHaveLength(1);
+    expect(empty).toMatch(/<h2[^>]*>Name and type<\/h2>/);
     expect(empty).toContain('role="search"');
+    expect(empty).toMatch(/<option value="brand" selected="">Brand<\/option>/);
     expect(empty).not.toContain('aria-invalid="true"');
     const bad = renderToStaticMarkup(await DesSearchPage(searchProps({ q: "<>" })));
     expect(redirect).not.toHaveBeenCalled();

@@ -1,9 +1,11 @@
 // The local smoke (SPEC §10.2, P1 #14): a Playwright run against a server that is already up, before the
-// feature freeze, never in CI. It checks the Launchpad, a test run streaming to its note, a replay at 8×
-// reaching the note, the lift map mounting, the request inspector opening, /method /trust /status, the
-// /r/[id] permalink (noindex for a reader's own run, D31) and the brief's tabs at 390×844. It makes no
-// Qloo or model call: the test run replays a recorded brief, and the map reads the dev sample. Vitest
-// never collects e2e/ (vitest.config.ts includes packages, apps/web and tools only).
+// feature freeze, never in CI. It checks Home and Your answers with no examples anywhere, a test run's
+// working view swapping to its answer, the How we know drawer, a replay at 4×, the site_selection map card,
+// How it works, /method and /status (and /trust's 308), the /r/[id] permalink (noindex for a reader's own
+// run, D31), the phone layout at 390×844, and axe-core on every public page at both widths. It makes no
+// Qloo or model call: the test run replays a recorded run, and the map reads the dev sample. The test run
+// and its permalink need the server's database, and skip without it. Vitest never collects e2e/
+// (vitest.config.ts includes packages, apps/web and tools only).
 //
 //   pnpm smoke                                        against http://localhost:3100
 //   SMOKE_BASE_URL=http://localhost:3000 pnpm smoke   against another server
@@ -46,7 +48,7 @@ export default defineConfig({
     {
       name: "desktop",
       testIgnore: /mobile\.spec\.ts$/,
-      // The design exports' frame (design/exports/concept-a).
+      // The design exports' frame (design/exports/redesign).
       use: { viewport: { width: 1440, height: 900 } },
     },
     {

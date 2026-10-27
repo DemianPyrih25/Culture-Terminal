@@ -70,10 +70,10 @@ interface MarketConfig {
   center?: { lat: number; lon: number };
 }
 
-/** Every locality the app resolves by name: the config/metros.json gazetteer, reserved metros and markets. */
+/** Every locality the app resolves by name: the config/metros.json map cities and markets. */
 function configuredLocalities(): MarketConfig[] {
   const config = JSON.parse(readFileSync(new URL("../../../config/metros.json", import.meta.url), "utf8")) as Record<string, unknown>;
-  return ["gazetteer", "reserved", "markets"].flatMap((key) => (config[key] ?? []) as MarketConfig[]);
+  return ["gazetteer", "markets"].flatMap((key) => (config[key] ?? []) as MarketConfig[]);
 }
 
 describe("mock /search", () => {
@@ -151,17 +151,26 @@ describe("mock /search", () => {
       QlooSearchResponse.parse(
         await body("/search", { query: "Lakeside Espresso Bar", types: ["urn:entity:place"], "filter.location": point, "filter.radius": 1 }),
       ).results[0];
-    const chicago = await located("41.88,-87.63");
-    const at = (chicago as { location?: { lat: number; lon: number } }).location;
-    expect(Math.abs((at?.lat ?? 0) - 41.88)).toBeLessThan(0.02);
-    expect(Math.abs((at?.lon ?? 0) + 87.63)).toBeLessThan(0.02);
-    expect(chicago?.disambiguation).toBe("Chicago, IL");
-    expect(chicago?.properties).toMatchObject({ geocode: { city: "Chicago", admin1_region: "Illinois", country_code: "US" } });
-    expect(chicago?.properties?.neighborhood).toBeUndefined();
+    const portland = await located("45.52,-122.68");
+    const at = (portland as { location?: { lat: number; lon: number } }).location;
+    expect(Math.abs((at?.lat ?? 0) - 45.52)).toBeLessThan(0.02);
+    expect(Math.abs((at?.lon ?? 0) + 122.68)).toBeLessThan(0.02);
+    expect(portland?.disambiguation).toBe("Portland, OR");
+    expect(portland?.properties).toMatchObject({ geocode: { city: "Portland", admin1_region: "Oregon", country_code: "US" } });
+    expect(portland?.properties?.neighborhood).toBeUndefined();
     const remote = await located("44.0,-103.0");
     expect(remote?.disambiguation).toBeNull();
     expect(remote?.properties?.geocode).toMatchObject({ city: null, metro: null, admin1_region: null, country_code: null });
-    for (const row of [chicago, remote]) expect(JSON.stringify(row)).not.toContain("Austin");
+    for (const row of [portland, remote]) expect(JSON.stringify(row)).not.toContain("Austin");
+  });
+
+  it("places a located place in a ZIP-area map city in that mock metro, with its neighbourhood", async () => {
+    const [chicago] = QlooSearchResponse.parse(
+      await body("/search", { query: "Lakeside Espresso Bar", types: ["urn:entity:place"], "filter.location": "41.88,-87.63", "filter.radius": 1 }),
+    ).results;
+    expect(chicago?.disambiguation).toBe("Chicago, IL");
+    expect(chicago?.properties).toMatchObject({ geocode: { city: "Chicago", admin1_region: "Illinois", admin2_region: "Cook County" } });
+    expect(JSON.stringify(chicago)).not.toContain("Austin");
   });
 
   it("returns destinations without geocode or location, as live destination search did", async () => {

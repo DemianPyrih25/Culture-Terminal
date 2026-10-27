@@ -1,15 +1,16 @@
-import type {
-  EntityRegistry,
-  EventInputOf,
-  EvidenceInput,
-  Intent,
-  Mention,
-  QlooApi,
-  QlooCallMeta,
-  QlooParams,
-  QlooSearchEntity,
-  RegisteredEntity,
-  ResolvedMention,
+import {
+  placeSearchMarket,
+  type EntityRegistry,
+  type EventInputOf,
+  type EvidenceInput,
+  type Intent,
+  type Mention,
+  type QlooApi,
+  type QlooCallMeta,
+  type QlooParams,
+  type QlooSearchEntity,
+  type RegisteredEntity,
+  type ResolvedMention,
 } from "@ct/contracts";
 import { classifyMatches, normaliseName, searchParams, unmatchedLimitation, type MatchAlternative } from "@ct/quant";
 import { pickerKey } from "./picker";
@@ -195,11 +196,12 @@ export async function runResolutionGate(input: GateInput): Promise<GateOutcome> 
       drop(`'${clip(mention.text)}' is not marked as a public figure, so it was not looked up.`);
       continue;
     }
-    const metro = mention.entity_type === "place" ? intent.geo.metro : null;
+    // A place is searched around its map city, or the market CLERK put it in (D44).
+    const metro = mention.entity_type === "place" ? placeSearchMarket(intent.geo) : null;
     const params = key === "" ? null : searchParams({ text: mention.text, type: mention.entity_type, metro });
     if (params === null) {
       if (isPrimary) unsearchablePrimary = mention;
-      else drop(`'${clip(mention.text)}' is a place with no supported metro to search in, so it was not looked up.`);
+      else drop(`'${clip(mention.text)}' is a place with no map city or market to search in, so it was not looked up.`);
       continue;
     }
     // The primary is ordered first, so the cap only ever leaves out secondary mentions.
@@ -264,7 +266,7 @@ export async function runResolutionGate(input: GateInput): Promise<GateOutcome> 
 
   if (unsearchablePrimary !== null) {
     const mention = unsearchablePrimary;
-    const reason = `'${clip(mention.text)}' is a place, and places are searched inside a supported metro (Nashville or Austin); name one.`;
+    const reason = `'${clip(mention.text)}' is a place, and places are searched inside a US city we cover (a map city or market); name its city.`;
     return { kind: "needs_input", entities, reason, picker: picker(mention, "not_found", []) };
   }
   if (primaryMiss !== null) {

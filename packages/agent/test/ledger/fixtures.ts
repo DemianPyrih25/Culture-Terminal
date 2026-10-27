@@ -110,7 +110,7 @@ export function brandHealthLedger(): LedgerFixture {
     flags: [],
   });
 
-  ledger.addMetric({ ...metric, key: "subs.similarity", label: "Similarity to Brand Beta", value: 0.62, display: "0.62", unit: "similarity", badge: "MEASURED", formulaId: "subs.similarity", evidenceIds: ["E1"], comparator: "WITHIN_CALL" });
+  ledger.addMetric({ ...metric, subjectRefs: ["R1", "R2"], key: "subs.similarity", label: "Similarity to Brand Beta", value: 0.62, display: "0.62", unit: "similarity", badge: "MEASURED", formulaId: "subs.similarity", evidenceIds: ["E1"], comparator: "WITHIN_CALL" });
   ledger.addMetric({ ...metric, key: "subs.distinctiveness", label: "Distinctiveness rank", value: 2, display: "2 of 6", unit: "rank", badge: "DERIVED", formulaId: "subs.distinctiveness", evidenceIds: ["E1"], comparator: "PEERS" });
   ledger.addMetric({ ...metric, key: "share.youth_tilt", label: "Youth tilt", value: 0.14, display: "+0.14", unit: "delta", badge: "DERIVED", formulaId: "share.youth_tilt", evidenceIds: ["E2"], comparator: "WITHIN_CALL" });
   ledger.addMetric({ ...metric, key: "share.metros_won", label: "Metros won", value: 3, display: "3 of 8", unit: "count", badge: "DERIVED", formulaId: "share.metros_won", evidenceIds: ["E2"] });

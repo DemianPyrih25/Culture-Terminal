@@ -1,46 +1,55 @@
 import type { ReactNode } from "react";
-import { abbreviateRequestId } from "./format";
 import { ROUTE_LIVE } from "@/lib/routes";
+import { cardClassName } from "../ui/card";
+import { cx } from "../ui/cx";
 import { FigureViews } from "./figure-views";
+import { abbreviateRequestId } from "./format";
 
 /**
- * A/Figure frame (Concept A, D36): FIGURE n in the accent, the serif title (the finding), the
- * caption, an optional legend, the plot, then the source line with its short request id, the ⧉
- * table toggle and the ⓘ link to /method#<formula id>. Every family renders inside one.
+ * The frame every figure family draws in: the C/ChartCard anatomy (design/redesign.pen). The kind line
+ * (13/500 ink-2) and the title (20/600) on the left; Draft, the "Chart | Table" switch and Source on the
+ * right; then the legend, the plot (or its table), the captions, and a quiet footer with the source line
+ * and the link to how the number is calculated. `chrome="plain"` drops the card for figures shown inside
+ * another surface (the chart sheet).
  */
 
-/** Where a figure's numbers came from, as its source line shows it. */
+/** Where a figure's numbers came from, as its footer prints it. */
 export interface FigureSource {
   /** The source line, e.g. "Source: Qloo /v2/insights · 8 requests · computed in code". */
   text: string;
   /** The request behind the figure, shown shortened ("req 0001…f001"); null for code-only figures. */
   requestId: string | null;
-  /** Where the request id links to, e.g. the request in the Sources section. */
+  /** Where the request id links to. */
   href?: string | null;
-  /** Printed right after the text, e.g. a CODE FALLBACK superscript (A06 note 5). */
+  /** Printed right after the text. */
   after?: ReactNode;
 }
 
 /** What every figure takes besides its data. */
 export interface FigureMeta {
-  /** "FIGURE n"; null or omitted hides the label. */
-  number?: number | null;
-  /** The serif title: the finding, not the chart type. May carry footnote markers. */
+  /** The fixed kind line over the title ("Closest audiences"); omitted: none. */
+  kind?: string | null;
+  /** The title: the finding, not the chart type. */
   title: ReactNode;
   /** Plain-text name for the plot's accessible title; defaults to the title when it is a string. */
   label?: string;
+  /** A caption under the plot (12 ink-2). */
   caption?: ReactNode;
   source?: FigureSource | null;
-  /** A FORMULAS id for the ⓘ link to /method#<id>; null hides the link. */
+  /** A FORMULAS id for the "How it's calculated" link to /method#<id>; null hides the link. */
   formulaId?: string | null;
-  /** full: the 680 reading column (or a half of it). margin: the 300 sidenote column (A08 figure 3). */
-  size?: "full" | "margin";
-  /** Right side of the label row in the margin size, e.g. "INDEX VS US 1.00". */
-  aside?: ReactNode;
+  /** Opens the How we know drawer on this figure: the Source button. Client parents only. */
+  onSource?: () => void;
+  /** A live run's figure: the Draft tag, Source disabled. */
+  draft?: boolean;
   headingLevel?: 2 | 3 | 4;
   /** DOM id of the figure, for links to it. */
   id?: string;
+  /** DOM id of the title heading, e.g. for a dialog that the title names (aria-labelledby). */
+  titleId?: string;
   className?: string;
+  /** card (default): a ChartCard. plain: no card, for a figure inside another surface. */
+  chrome?: "card" | "plain";
 }
 
 /** The method page anchor for a formula id. */
@@ -49,10 +58,10 @@ export function methodHref(formulaId: string): string {
 }
 
 /** The plain-text accessible name of a figure. */
-export function figureLabel(meta: Pick<FigureMeta, "label" | "title" | "number">): string {
+export function figureLabel(meta: Pick<FigureMeta, "label" | "title" | "kind">): string {
   if (meta.label) return meta.label;
   if (typeof meta.title === "string") return meta.title;
-  return meta.number ? `Figure ${meta.number}` : "Figure";
+  return meta.kind ?? "Chart";
 }
 
 export function FigureFrame({
@@ -66,132 +75,108 @@ export function FigureFrame({
   meta: FigureMeta;
   legend?: ReactNode;
   plot: ReactNode;
-  /** The ⧉ table view; null hides the toggle. */
+  /** The Table view; null hides the switch. */
   table: ReactNode | null;
-  /**
-   * The payload's fixed, code-written caption (e.g. SLATE's "taste fit only; no fee, availability or
-   * ROI data"), printed under the plot in both views; null or empty prints nothing.
-   */
+  /** The payload's fixed, code-written caption, printed under the plot in both views. */
   fixedCaption?: string | null;
-  /** The plot is already an accessible HTML table, so the table view stays out of the reading order until toggled. */
+  /** The plot is already an accessible HTML table, so the table view stays out of the reading order until switched to. */
   htmlPlot?: boolean;
 }) {
-  const margin = meta.size === "margin";
   const Heading = `h${meta.headingLevel ?? 3}` as "h2" | "h3" | "h4";
-  const number = meta.number ? `FIGURE ${meta.number}` : null;
+  const label = figureLabel(meta);
+  const plain = meta.chrome === "plain";
+  const heading = (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      {meta.kind ? <p className="m-0 type-label text-ink-2">{meta.kind}</p> : null}
+      <Heading id={meta.titleId} className="m-0 type-title text-ink max-md:type-title-sm">
+        {meta.title}
+      </Heading>
+    </div>
+  );
+  const captions = [fixedCaption?.trim() ? fixedCaption.trim() : null, meta.caption ?? null].filter((c) => c !== null && c !== "");
   return (
     <figure
       id={meta.id}
-      className={`m-0 flex h-full min-w-0 flex-col border-t border-ink ${margin ? "pt-2.5" : "pt-3"} ${meta.className ?? ""}`}
+      data-figure="true"
+      className={cx("m-0 flex h-full min-w-0 flex-col gap-4", plain ? null : cardClassName("default"), meta.className)}
     >
-      <figcaption className={`flex flex-col ${margin ? "gap-0.5" : "gap-1"}`}>
-        {margin ? (
-          <span className="flex items-center justify-between gap-3">
-            {number ? (
-              <span className="font-ui text-[10.5px] font-semibold tracking-[1.3px] text-accent">{number}</span>
-            ) : null}
-            {meta.aside ? (
-              <span className="font-ui text-[10px] font-medium tracking-[0.8px] text-dim uppercase">{meta.aside}</span>
-            ) : null}
-          </span>
-        ) : number ? (
-          <span className="type-label text-accent">{number}</span>
-        ) : null}
-        <Heading
-          className={
-            margin
-              ? "m-0 font-serif text-[14px] leading-[19px] font-semibold text-ink"
-              : "type-figure-title m-0 text-ink"
-          }
-        >
-          {meta.title}
-        </Heading>
-        {meta.caption ? (
-          <span className={`font-ui text-dim ${margin ? "text-[11.5px] leading-[16px]" : "text-[13px] leading-[19px]"}`}>
-            {meta.caption}
-          </span>
-        ) : null}
-      </figcaption>
-      {legend ? <div className={margin ? "pt-1.5" : "pt-3"}>{legend}</div> : null}
-      <div className={`flex flex-1 flex-col ${margin ? "pt-1.5" : "pt-1"}`}>
-        <FigureViews
-          plot={plot}
-          table={table}
-          label={figureLabel(meta)}
-          note={fixedCaption?.trim() ? fixedCaption.trim() : null}
-          htmlPlot={htmlPlot}
-          source={<SourceLine source={meta.source ?? null} />}
-          methodHref={meta.formulaId && ROUTE_LIVE.method ? methodHref(meta.formulaId) : null}
-          compact={margin}
-        />
-      </div>
+      <FigureViews
+        heading={heading}
+        legend={legend ?? null}
+        plot={plot}
+        table={table}
+        label={label}
+        htmlPlot={htmlPlot}
+        draft={meta.draft === true}
+        onSource={meta.onSource}
+        captions={captions.map((c, i) => (
+          <p key={i} className="m-0 type-caption text-ink-2" data-fixed-caption={i === 0 && fixedCaption?.trim() ? "true" : undefined}>
+            {c}
+          </p>
+        ))}
+        footer={<FigureFooter source={meta.source ?? null} formulaId={meta.formulaId ?? null} label={label} />}
+      />
     </figure>
   );
 }
 
-function SourceLine({ source }: { source: FigureSource | null }) {
-  if (!source) return null;
-  const rid = source.requestId ? `req ${abbreviateRequestId(source.requestId)}` : null;
+/** The quiet footer: the source line with its short request id, and "How it's calculated". */
+function FigureFooter({ source, formulaId, label }: { source: FigureSource | null; formulaId: string | null; label: string }) {
+  const method = formulaId && ROUTE_LIVE.method ? methodHref(formulaId) : null;
+  if (!source && !method) return null;
+  const rid = source?.requestId ? `req ${abbreviateRequestId(source.requestId)}` : null;
   return (
-    <span className="flex min-w-0 flex-wrap items-baseline gap-x-2.5">
-      <span className="font-ui text-[11px] text-dim">
-        {source.text}
-        {source.after}
-      </span>
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 type-caption text-ink-2">
+      {source ? (
+        <span>
+          {source.text}
+          {source.after}
+        </span>
+      ) : null}
       {rid ? (
-        source.href ? (
-          <a
-            href={source.href}
-            title={`Request ${source.requestId}`}
-            className="type-trace text-dim underline-offset-2 hover:text-accent hover:underline"
-          >
+        source?.href ? (
+          <a href={source.href} title={`Request ${source.requestId}`} className="font-mono underline-offset-2 hover:text-accent hover:underline">
             {rid}
           </a>
         ) : (
-          <span className="type-trace text-dim" title={`Request ${source.requestId}`}>
+          <span className="font-mono" title={`Request ${source?.requestId}`}>
             {rid}
           </span>
         )
       ) : null}
-    </span>
+      {method ? (
+        <a href={method} aria-label={`How it's calculated: ${label}`} className="ml-auto text-accent hover:text-accent-hover hover:underline">
+          How it&apos;s calculated
+        </a>
+      ) : null}
+    </div>
   );
 }
 
-/** A legend entry: a swatch (square for bars and cells, dot for points) and its label. */
+/** A legend entry: an 8 px dot (bars, points) or a hatch swatch (no data) and its label. */
 export interface LegendItem {
   label: string;
-  swatch: "data" | "data-2" | "accent-soft" | "hatch";
-  shape?: "square" | "dot";
+  swatch: "data" | "data-2" | "accent-soft" | "hatch" | "second";
 }
 
-/** The A/Figure frame legend row: swatches with labels, 18 px apart. */
+const SWATCH: Readonly<Record<LegendItem["swatch"], string>> = {
+  data: "bg-accent",
+  "data-2": "bg-chart-muted",
+  "accent-soft": "bg-accent-soft ring-1 ring-line-strong ring-inset",
+  second: "bg-second",
+  hatch: "bg-hatch ring-1 ring-line-strong ring-inset",
+};
+
+/** The legend row: 8 px dots and 13/500 ink-2 labels, gap 20. */
 export function Legend({ items }: { items: readonly LegendItem[] }) {
   return (
-    <ul className="m-0 flex list-none flex-wrap items-center gap-x-[18px] gap-y-1 p-0">
+    <ul className="m-0 flex list-none flex-wrap items-center gap-x-5 gap-y-1 p-0">
       {items.map((item) => (
-        <li key={item.label} className="flex items-center gap-1.5 font-ui text-[12px] text-text-2">
-          <Swatch swatch={item.swatch} shape={item.shape ?? "square"} />
+        <li key={item.label} className="flex items-center gap-1.5 type-label text-ink-2">
+          <span aria-hidden="true" className={cx("inline-block size-2 shrink-0 rounded-full", SWATCH[item.swatch])} />
           {item.label}
         </li>
       ))}
     </ul>
-  );
-}
-
-function Swatch({ swatch, shape }: { swatch: LegendItem["swatch"]; shape: "square" | "dot" }) {
-  if (swatch === "hatch") {
-    return (
-      <svg viewBox="0 0 14 10" width="14" height="10" aria-hidden="true">
-        <rect x="0.5" y="0.5" width="13" height="9" className="fill-paper stroke-line-strong" />
-        <path d="M0 10L10 0M5 10L14 1M-5 10L5 0M10 10L14 6" className="stroke-faint" strokeWidth="1" />
-      </svg>
-    );
-  }
-  const fill =
-    swatch === "data" ? "fill-data" : swatch === "data-2" ? "fill-data-2" : "fill-accent-soft stroke-line-strong";
-  return (
-    <svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true">
-      {shape === "dot" ? <circle cx="5" cy="5" r="4" className={fill} /> : <rect width="10" height="10" className={fill} />}
-    </svg>
   );
 }

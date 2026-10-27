@@ -1,6 +1,6 @@
 import type { PeerRank, PositionAxisRow, PositionPayload } from "@ct/contracts";
 import { BADGE_LABEL } from "@/lib/brief/format";
-import { NoSignal } from "../ui/no-signal";
+import { NoSignal } from "./no-signal";
 import { FigureFrame, figureLabel, type FigureMeta } from "./figure-frame";
 import { FigureTable, type TableCell, type TableRow } from "./figure-table";
 import { formatNumber, reasonLabel } from "./format";
@@ -17,6 +17,8 @@ import { px } from "./scale";
 export interface PositionCardOptions {
   /** Where each axis's exhibit is, by dataset id, e.g. { D8: "#figure-3" }. An unknown id prints no link. */
   figureHrefs?: Readonly<Record<string, string>>;
+  /** Tighter rows, for a narrow column. */
+  compact?: boolean;
 }
 
 export type PositionCardProps = FigureMeta & PositionCardOptions & { data: PositionPayload };
@@ -26,7 +28,7 @@ const MAX_SLOTS = 12;
 
 export function PositionCard(props: PositionCardProps) {
   const label = figureLabel(props);
-  const compact = props.size === "margin";
+  const compact = props.compact ?? false;
   return (
     <FigureFrame
       meta={props}
@@ -50,7 +52,7 @@ export function PeerStrip({ rank }: { rank: PeerRank }) {
     return (
       <svg viewBox={`0 0 ${w} 10`} width={w} height={10} role="img" aria-label={rankWords(rank)} className="block shrink-0">
         <rect x={0} y={4.5} width={w} height={1} className="fill-line-strong" />
-        <circle cx={px(at)} cy={5} r={3.5} className="fill-data" />
+        <circle cx={px(at)} cy={5} r={3.5} className="fill-accent" />
       </svg>
     );
   }
@@ -60,9 +62,9 @@ export function PeerStrip({ rank }: { rank: PeerRank }) {
     <svg viewBox={`0 0 ${w} 10`} width={w} height={10} role="img" aria-label={rankWords(rank)} className="block shrink-0" data-rank={rank.rank} data-of={rank.of}>
       {Array.from({ length: rank.of }, (_, i) =>
         i + 1 === rank.rank ? (
-          <circle key={i} cx={i * step + 5} cy={5} r={3.75} className="fill-data" data-subject="true" />
+          <circle key={i} cx={i * step + 5} cy={5} r={3.75} className="fill-accent" data-subject="true" />
         ) : (
-          <circle key={i} cx={i * step + 5} cy={5} r={2.5} className="fill-paper stroke-line-strong" />
+          <circle key={i} cx={i * step + 5} cy={5} r={2.5} className="fill-surface stroke-line-strong" />
         ),
       )}
     </svg>
@@ -72,8 +74,8 @@ export function PeerStrip({ rank }: { rank: PeerRank }) {
 function BadgeWord({ badge }: { badge: PositionAxisRow["badge"] }) {
   return (
     <span
-      className={`font-ui text-[9.5px] font-semibold tracking-[1px] whitespace-nowrap uppercase ${
-        badge === "UNAVAILABLE" ? "text-faint" : "text-dim"
+      className={`text-[12px] leading-4 font-medium whitespace-nowrap ${
+        badge === "UNAVAILABLE" ? "text-ink-2 italic" : "text-ink-2"
       }`}
       data-badge={badge}
     >
@@ -93,10 +95,10 @@ function PositionRows({
   hrefs: Readonly<Record<string, string>>;
   compact: boolean;
 }) {
-  const head = "pb-1.5 font-ui text-[10px] font-medium tracking-[0.8px] text-dim uppercase";
+  const head = "pb-1.5 text-[12px] leading-4 font-medium text-ink-2";
   return (
     <div className="pt-2 pb-1">
-      <table className="w-full border-collapse font-ui" aria-label={label}>
+      <table className="w-full border-collapse font-sans" aria-label={label}>
         <thead>
           <tr className="border-b border-line-strong">
             <th scope="col" className={`${head} text-left`}>
@@ -123,20 +125,20 @@ function PositionRows({
               <tr key={a.axis} className="border-b border-line align-top" data-axis={a.axis} data-badge={a.badge}>
                 <th scope="row" className="py-2 pr-3 text-left font-normal">
                   <span className="block text-[13px] leading-[18px] font-medium text-ink">{a.label}</span>
-                  {a.note ? <span className="block text-[11.5px] leading-[16px] text-dim">{a.note}</span> : null}
+                  {a.note ? <span className="block type-caption text-ink-2">{a.note}</span> : null}
                 </th>
                 <td className="py-2 pr-3">
                   {missing ? (
                     a.axis === "momentum" && a.reason === "no_signal" ? (
                       <NoSignal label={a.display || "No signal"} className="pt-1 whitespace-nowrap" />
                     ) : (
-                      <span className="block pt-0.5 text-[12.5px] text-dim italic" data-missing="true">
+                      <span className="block pt-0.5 text-[12.5px] text-ink-2 italic" data-missing="true">
                         {a.display || reasonLabel(a.reason)}
                       </span>
                     )
                   ) : (
                     <span
-                      className={`block font-serif font-medium whitespace-nowrap text-ink tabular-nums ${
+                      className={`block font-display font-medium whitespace-nowrap text-ink tabular-nums ${
                         compact ? "text-[15px] leading-[20px]" : "text-[18px] leading-[22px]"
                       }`}
                     >
@@ -156,11 +158,11 @@ function PositionRows({
                         <PeerStrip rank={a.peerRank} />
                         {/* The words repeat only when the display says something else, e.g. "Rising". */}
                         {a.display.trim() === `${a.peerRank.rank} of ${a.peerRank.of}` ? null : (
-                          <span className="text-[11px] text-dim tabular-nums">{`${a.peerRank.rank} of ${a.peerRank.of}`}</span>
+                          <span className="text-[12px] text-ink-2 tabular-nums">{`${a.peerRank.rank} of ${a.peerRank.of}`}</span>
                         )}
                       </span>
                     ) : (
-                      <span className="block pt-1 text-[11px] text-faint">—</span>
+                      <span className="block pt-1 text-[12px] text-ink-2">—</span>
                     )}
                   </td>
                 )}
@@ -168,7 +170,7 @@ function PositionRows({
                   <span className="flex flex-col items-end gap-1 pt-1">
                     <BadgeWord badge={a.badge} />
                     {href ? (
-                      <a href={href} className="text-[11px] text-dim underline-offset-2 hover:text-accent hover:underline">
+                      <a href={href} className="text-[12px] text-ink-2 underline-offset-2 hover:text-accent hover:underline">
                         Figure →
                       </a>
                     ) : null}

@@ -8,16 +8,20 @@ All fonts are self-hosted through [Fontsource](https://fontsource.org) packages.
 
 | Font | Licence | Package |
 |---|---|---|
+| Bricolage Grotesque | SIL Open Font License 1.1 | `@fontsource-variable/bricolage-grotesque` |
+| Geist | SIL Open Font License 1.1 | `@fontsource-variable/geist` |
+| Geist Mono | SIL Open Font License 1.1 | `@fontsource-variable/geist-mono` |
 | IBM Plex Mono | SIL Open Font License 1.1 | `@fontsource/ibm-plex-mono` |
-| IBM Plex Sans | SIL Open Font License 1.1 | `@fontsource/ibm-plex-sans` |
-| IBM Plex Sans Condensed | SIL Open Font License 1.1 | `@fontsource/ibm-plex-sans-condensed` |
 | Inter | SIL Open Font License 1.1 | `@fontsource-variable/inter` |
-| Instrument Serif | SIL Open Font License 1.1 | `@fontsource/instrument-serif` |
 | Source Serif 4 | SIL Open Font License 1.1 (Reserved Font Name "Source") | `@fontsource-variable/source-serif-4` |
 
 IBM Plex is a trademark of IBM Corp. The OFL text is at <https://openfontlicense.org>.
 
 The share cards (`apps/web/lib/og/fonts`) carry static instances of Inter and Source Serif 4, cut to the card's characters and renamed "CT Card Sans" and "CT Card Serif", as the OFL asks of a Modified Version, each with its licence under its own copyright notice beside it. `build-fonts.mjs` in that folder rebuilds them from the packages above.
+
+## Icons
+
+The interface icons (`apps/web/components/ui/icons.tsx`) are path data copied from [Lucide](https://lucide.dev), ISC License, Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather (MIT); all other copyright (c) for Lucide are held by Lucide Contributors 2022.
 
 ## Charts and maps
 
@@ -37,7 +41,7 @@ Map data comes from OpenStreetMap and is available under the [Open Database Lice
 
 ## Neighbourhood gazetteers
 
-The neighbourhood boundaries for each metro come from public datasets. Each source and its licence is listed here when that gazetteer is built.
+The neighbourhood boundaries of the 13 map cities come from public datasets. Each source and its licence is listed here.
 
 ### Austin
 
@@ -293,6 +297,486 @@ Transformations:
 ### ZIP areas for further metros
 
 A metro without a neighbourhood set published under an open licence can use ZIP areas built by `tools/geo/zcta.ts`, the way Nashville's were. The build clips the Census Bureau's 2020 ZIP Code Tabulation Areas to the metro's 2020 county outlines. Both come from the TIGERweb map service (Census 2020 layers 84 and 82) or from the TIGER/Line files (<https://www2.census.gov/geo/tiger/TIGER2020/ZCTA520/> and <https://www2.census.gov/geo/tiger/TIGER2020/COUNTY/>). Like Nashville's, they are public domain as works of the U.S. Government (17 U.S.C. § 105). The build applies Nashville's steps 1 to 6 and adds any approximate aliases from a table given to it; Nashville's is `tools/geo/nashville-aliases.json`, so the build reproduces its ZIP areas. Each metro built this way gets its own section here, with its counties, retrieval date and aliases.
+
+The ten ZIP-area map cities below (D39) were built this way: Los Angeles, Chicago, Miami, San Francisco, Seattle, Boston, Denver, Atlanta, Houston and Dallas. They use the TIGERweb Census 2020 layers 84 (Zip Code Tabulation Areas) and 82 (Counties), retrieved 2026-10-27 as GeoJSON from each layer's query endpoint, January 1, 2020 vintage, public domain (17 U.S.C. § 105). Each applies Nashville's steps 1 to 6 to its counties, at the simplification interval its section gives. Their approximate aliases come from a table per city (`tools/geo/<city>-aliases.json`) and are checked against the USGS Geographic Names Information System (GNIS), public domain: the populated places in the state's domestic names file, retrieved 2026-10-27 from <https://prd-tnm.s3.amazonaws.com/StagedProducts/GeographicNames/DomesticNames/> (`DomesticNames_<ST>_Text.zip`). A name becomes an alias only when all of these hold:
+
+- the ZIP area is commonly known by that neighbourhood, community or town; a city that spans several ZIP areas is no alias, but a city that is one ZIP area, such as Malibu, Key Biscayne or Mercer Island, counts as a community;
+- a GNIS populated place of that name lies inside the ZIP area's query outline, the part Block DNA sends, at least 300 m from its border, as for Nashville; for Boston, Denver, Atlanta, Houston and Dallas, 150 m in a ZIP area under 5 km² and 100 m in one under 1 km², since a dense core's ZIP areas are too small for 300 m;
+- no GNIS place of that name lies in another ZIP area of the map, or outside the counties within 5 km;
+- no other area already answers to that name.
+
+The ZIP area's display label is its first alias. Every alias is approximate (`approximateAliases`), as Nashville's are, and lift map captions say "neighbourhood names approximate". GNIS has no populated-place point for many inner-city neighbourhoods, such as Wynwood, Boston's South End, Denver's LoDo, Atlanta's Midtown, Houston's Montrose and Dallas's Deep Ellum: those names match no area, but a point inside one is still placed in its ZIP area. ZCTAs are not ZIP Codes, so the ZIP Code of a street address can differ from the ZCTA it lies in.
+
+#### Los Angeles
+
+| | |
+|---|---|
+| Dataset | 2020 Census ZIP Code Tabulation Areas (ZCTAs), and the 2020 Census outline of Los Angeles County, California (GEOID 06037), January 1, 2020 vintage |
+| Publisher | U.S. Census Bureau, through its TIGERweb map service (layers 84 and 82, as for Nashville) |
+| URL | <https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Census2020/MapServer> |
+| Licence | Public domain (17 U.S.C. § 105) |
+| Aliases checked against | USGS GNIS, `DomesticNames_CA` (California), public domain |
+| Retrieved | 2026-10-27 (GeoJSON from the two layers' query endpoints; the GNIS file the same day) |
+| Used in | `packages/geo/src/data/los-angeles.ts`, built by `tools/geo/zcta.ts --metro los_angeles --label "Los Angeles County" --county 06037 --aliases tools/geo/los-angeles-aliases.json --interval 85 --out packages/geo/src/data/los-angeles.ts` |
+
+Transformations:
+
+1. The 414 ZCTAs that meet a box around the county are clipped to the Los Angeles County outline. 110 lie wholly outside the county and are left out. Four cross the county line with less than 1 km² inside and are left out as slivers: 90623, 90630, 90740 and 91709. Fifteen cross the county line and keep only their part inside it.
+2. Rings are repaired, and polygon parts and holes under 0.02 km² are dropped. Four ZIP areas under 0.1 km² are merged into the neighbour they share the longest border with, which then also answers to their ZIPs: 91046 into 91214, 90079 into 90015, 90747 into 90746, and 90831 into 90802. The 296 ZIP areas cover about 10,236 km². The county's outline also takes in open water, which no ZCTA covers. The largest ZIP area, 90704 (about 765 km² with its water), holds Santa Catalina Island and, as a second part, the northern tip of San Clemente Island. The rest of San Clemente Island lies in no ZCTA.
+3. The outlines are simplified with mapshaper (`-clean`, then Visvalingam at an 85 m interval with `keep-shapes`). Los Angeles has eight times Nashville's ZIP areas, and many of them are large desert and mountain ZIP areas, so a coarser step keeps the module to about 582 KB (about 14,200 display vertices). At 90 m and above, ZIP area 90840 (California State University, Long Beach) shrinks below 0.1 km². Neighbouring areas keep the same border vertices. Coordinates are rounded to 5 decimals, and rings are oriented as RFC 7946 requires.
+4. Each area gets a query outline for Qloo's `signal.location`: the outer ring of its largest part, reduced to at most 40 points (closing point included) without self-intersections.
+5. Centroids and geodesic areas are precomputed as for Nashville. Six areas have an area-weighted centroid that falls outside them and use an interior point instead: 90007, 90274, 91355, 91390, 93532 and 93563.
+6. Ids and names follow Nashville's pattern (`zcta_90026`, "ZIP 90026"). "Los Angeles part" labels the nine ZIP areas that keep less than 90% of their area inside the county: 90631, 91304, 91307, 91361, 91362, 91759, 92397, 93243 and 93560. ZIP area 90265 keeps 70% and carries its alias as its label instead: "ZIP 90265 (Malibu)". The City of Malibu lies wholly inside the county.
+7. 46 approximate aliases on 42 ZIP areas, each with its GNIS populated-place point at least 300 m inside:
+
+| Approximate alias | ZIP area |
+|---|---|
+| Baldwin Hills, Leimert Park | 90008 |
+| West Los Angeles | 90025 |
+| Hollywood | 90028 |
+| Lincoln Heights | 90031 |
+| El Sereno | 90032 |
+| Palms | 90034 |
+| Eagle Rock | 90041 |
+| Highland Park | 90042 |
+| Westchester | 90045 |
+| Brentwood | 90049 |
+| Glassell Park, Mount Washington, Cypress Park | 90065 |
+| Mar Vista | 90066 |
+| Bel Air | 90077 |
+| Malibu | 90265 |
+| Pacific Palisades | 90272 |
+| Topanga | 90290 |
+| Venice | 90291 |
+| Marina del Rey | 90292 |
+| Playa del Rey | 90293 |
+| Harbor City | 90710 |
+| San Pedro | 90731 |
+| Wilmington | 90744 |
+| Belmont Shore | 90803 |
+| Bixby Knolls | 90807 |
+| Altadena | 91001 |
+| Tujunga | 91042 |
+| La Crescenta | 91214 |
+| Canoga Park | 91303 |
+| Winnetka | 91306 |
+| Chatsworth | 91311 |
+| Pacoima | 91331 |
+| Reseda | 91335 |
+| Sylmar, Lake View Terrace | 91342 |
+| North Hills | 91343 |
+| Mission Hills | 91345 |
+| Sun Valley | 91352 |
+| Tarzana | 91356 |
+| Panorama City | 91402 |
+| Lake Balboa | 91406 |
+| North Hollywood | 91601 |
+| Studio City | 91604 |
+| Universal City | 91608 |
+
+Some well-known names fail the rule and match no area. A point inside one is still placed in its ZIP area. GNIS puts Koreatown 210 m from the edge of 90005, Echo Park 80 m inside 90039 (it is mostly 90026), Westwood 255 m inside 90024, Watts 265 m inside 90002, Little Tokyo 100 m inside 90012, and Boyle Heights, Sherman Oaks, Encino, Van Nuys and Woodland Hills within 60 m of a ZIP border. GNIS has no populated place for Silver Lake, Los Feliz, Downtown, Toluca Lake, Porter Ranch or West Hills. Atwater passes the rule in 90039, but it is left out: the neighbourhood is called Atwater Village, and 90039 is as much Silver Lake. Cities that span several ZIP areas, such as Santa Monica, Pasadena, West Hollywood and Long Beach, are not aliases.
+
+#### Chicago
+
+| | |
+|---|---|
+| Dataset | 2020 Census ZCTAs, and the 2020 Census outline of Cook County, Illinois (GEOID 17031), January 1, 2020 vintage |
+| Publisher | U.S. Census Bureau, through its TIGERweb map service (layers 84 and 82) |
+| URL | <https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Census2020/MapServer> |
+| Licence | Public domain (17 U.S.C. § 105) |
+| Aliases checked against | USGS GNIS, `DomesticNames_IL` (Illinois), public domain |
+| Retrieved | 2026-10-27 |
+| Used in | `packages/geo/src/data/chicago.ts`, built by `tools/geo/zcta.ts --metro chicago --label "Cook County" --county 17031 --aliases tools/geo/chicago-aliases.json --interval 20 --out packages/geo/src/data/chicago.ts` |
+
+Transformations:
+
+1. The 270 ZCTAs that meet a box around the county are clipped to the Cook County outline. 92 lie wholly outside it and are left out. Two are left out as slivers under 1 km² inside: 60126 and 60523. Twenty-one cross the county line and keep only their part inside.
+2. Rings are repaired and slivers dropped as for Nashville. No ZIP area is under 0.1 km², so none is merged. The 176 ZIP areas cover about 2,511 km². The county's outline also takes in part of Lake Michigan, which no ZCTA covers.
+3. Simplified at a 20 m interval: about 486 KB, about 14,650 display vertices.
+4. Query outlines as for Nashville.
+5. One area-weighted centroid falls outside its area and is replaced by an interior point: 60192.
+6. "Cook part" labels the fifteen ZIP areas that keep less than 90% of their area inside the county: 60010, 60015, 60089, 60103, 60120, 60133, 60172, 60423, 60439, 60449, 60466, 60475, 60487, 60521 and 60527.
+7. 33 approximate aliases on 29 ZIP areas, all Chicago community areas or neighbourhoods:
+
+| Approximate alias | ZIP area |
+|---|---|
+| Pilsen, Bridgeport | 60608 |
+| Back of the Yards | 60609 |
+| Near North Side | 60610 |
+| Streeterville | 60611 |
+| Lincoln Park | 60614 |
+| Chinatown | 60616 |
+| South Chicago | 60617 |
+| Avondale | 60618 |
+| Chatham | 60619 |
+| Englewood | 60621 |
+| West Town | 60622 |
+| West Garfield Park | 60624 |
+| Albany Park | 60625 |
+| Rogers Park | 60626 |
+| Roseland, Pullman | 60628 |
+| Chicago Lawn | 60629 |
+| Jefferson Park | 60630 |
+| Brighton Park | 60632 |
+| Hegewisch | 60633 |
+| Woodlawn | 60637 |
+| Irving Park | 60641 |
+| Beverly, Morgan Park | 60643 |
+| Austin | 60644 |
+| Sauganash, Edgebrook | 60646 |
+| Logan Square | 60647 |
+| South Shore | 60649 |
+| Humboldt Park | 60651 |
+| Ashburn | 60652 |
+| Mount Greenwood | 60655 |
+
+Some well-known names fail the rule. GNIS puts Hyde Park 102 m inside 60637 (on its border with 60615, since both are Hyde Park), Uptown 125 m inside 60640, Gold Coast 254 m inside 60610, Bronzeville and Kenwood within 20 m of a border, and the Loop 95 m inside 60603. GNIS's only Lake View in Cook County is in Glenview (60093), not the Chicago neighbourhood. It has no populated place for Wicker Park, Bucktown, Wrigleyville, Andersonville, Old Town, West Loop or River North. Other names pass the rule but would mislabel a ZIP area mostly known by another name, so they are left out: Buena Park (60613 is Lakeview), Ravenswood (60640 is Uptown), and Galewood and Montclare (60707 is mostly Elmwood Park).
+
+#### Miami
+
+| | |
+|---|---|
+| Dataset | 2020 Census ZCTAs, and the 2020 Census outline of Miami-Dade County, Florida (GEOID 12086), January 1, 2020 vintage |
+| Publisher | U.S. Census Bureau, through its TIGERweb map service (layers 84 and 82) |
+| URL | <https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Census2020/MapServer> |
+| Licence | Public domain (17 U.S.C. § 105) |
+| Aliases checked against | USGS GNIS, `DomesticNames_FL` (Florida), public domain |
+| Retrieved | 2026-10-27 |
+| Used in | `packages/geo/src/data/miami.ts`, built by `tools/geo/zcta.ts --metro miami --label "Miami-Dade County" --county 12086 --aliases tools/geo/miami-aliases.json --interval 15 --out packages/geo/src/data/miami.ts` |
+
+Transformations:
+
+1. The 88 ZCTAs that meet a box around the county are clipped to the Miami-Dade County outline. Seven lie wholly outside it and are left out. Two cross the county line and keep only their part inside.
+2. One ZIP area under 0.1 km², 33101 (about 0.035 km²), is merged into 33136, which also answers to "ZIP 33101" and "33101". The 80 ZIP areas cover about 4,154 km², including the Everglades and Florida Bay parts of 33034, which is the largest at about 1,704 km².
+3. Simplified at a 15 m interval, Nashville's step: about 312 KB, about 11,070 display vertices.
+4. Query outlines as for Nashville.
+5. Every area-weighted centroid lies inside its area.
+6. "Miami-Dade part" labels the two ZIP areas that keep less than 90% of their area inside the county: 33034 and 34141.
+7. Eight approximate aliases on eight ZIP areas:
+
+| Approximate alias | ZIP area |
+|---|---|
+| Redland | 33031 |
+| Fisher Island | 33109 |
+| Coconut Grove | 33133 |
+| Little Havana | 33135 |
+| Allapattah | 33142 |
+| Flagami | 33144 |
+| Key Biscayne | 33149 |
+| Kendall | 33156 |
+
+GNIS has no populated place for Wynwood, Little Haiti, Overtown, Edgewater, the Design District, Midtown or South Beach. It puts Brickell Hammock 269 m inside 33129 and Westchester 64 m inside 33155. Cities that span several ZIP areas, such as Miami Beach, Coral Gables, Hialeah, Doral and Aventura, are not aliases.
+
+#### San Francisco
+
+| | |
+|---|---|
+| Dataset | 2020 Census ZCTAs, and the 2020 Census outline of San Francisco County, California (GEOID 06075), January 1, 2020 vintage |
+| Publisher | U.S. Census Bureau, through its TIGERweb map service (layers 84 and 82) |
+| URL | <https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Census2020/MapServer> |
+| Licence | Public domain (17 U.S.C. § 105) |
+| Aliases checked against | USGS GNIS, `DomesticNames_CA` (California), public domain |
+| Retrieved | 2026-10-27 |
+| Used in | `packages/geo/src/data/san-francisco.ts`, built by `tools/geo/zcta.ts --metro san_francisco --label "San Francisco County" --county 06075 --aliases tools/geo/san-francisco-aliases.json --interval 15 --out packages/geo/src/data/san-francisco.ts` |
+
+Transformations:
+
+1. The 55 ZCTAs that meet a box around the county are clipped to the San Francisco County outline. 25 lie wholly outside it and are left out. Two are left out as slivers under 1 km² inside: 94501 (Alameda) and 94920 (Belvedere Tiburon), which reach the county line in the bay. No ZIP area keeps only part of itself, so none is labelled as a part.
+2. No ZIP area is under 0.1 km². The 28 ZIP areas cover about 130.5 km², including the Presidio (94129) and Treasure and Yerba Buena Islands (94130). The county's outline also takes in bay and ocean water and the Farallon Islands, which no ZCTA covers.
+3. Simplified at a 15 m interval: about 87 KB, about 2,640 display vertices.
+4. Query outlines as for Nashville.
+5. Two area-weighted centroids fall outside their areas and are replaced by interior points: 94105 and 94107.
+6. Ids and names as for Nashville.
+7. Seven approximate aliases on seven ZIP areas:
+
+| Approximate alias | ZIP area |
+|---|---|
+| Potrero District | 94107 |
+| Mission District | 94110 |
+| Ingleside | 94112 |
+| Haight-Ashbury | 94117 |
+| Marina District | 94123 |
+| Bayview District | 94124 |
+| North Beach | 94133 |
+
+The name matcher drops a trailing "district", so "the Mission District", "Mission District" and "Mission" all match 94110. GNIS puts the Richmond District 279 m inside 94118, the Sunset District 222 m inside 94122 and Chinatown 89 m inside 94133. Its Pacific Heights point lies in 94118, in what is locally Presidio Heights, so it is left out. GNIS has no populated place for SoMa, the Castro, Nob Hill, Noe Valley, the Tenderloin, Hayes Valley or Dogpatch.
+
+#### Seattle
+
+| | |
+|---|---|
+| Dataset | 2020 Census ZCTAs, and the 2020 Census outline of King County, Washington (GEOID 53033), January 1, 2020 vintage |
+| Publisher | U.S. Census Bureau, through its TIGERweb map service (layers 84 and 82) |
+| URL | <https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Census2020/MapServer> |
+| Licence | Public domain (17 U.S.C. § 105) |
+| Aliases checked against | USGS GNIS, `DomesticNames_WA` (Washington), public domain |
+| Retrieved | 2026-10-27 |
+| Used in | `packages/geo/src/data/seattle.ts`, built by `tools/geo/zcta.ts --metro seattle --label "King County" --county 53033 --aliases tools/geo/seattle-aliases.json --interval 20 --out packages/geo/src/data/seattle.ts` |
+
+Transformations:
+
+1. The 153 ZCTAs that meet a box around the county are clipped to the King County outline. 64 lie wholly outside it and are left out. One is left out as a sliver under 1 km² inside: 98422. Seven cross the county line and keep only their part inside.
+2. Three downtown ZIP areas under 0.1 km² are merged into 98104, which also answers to their ZIPs: 98154, 98164 and 98174. The 85 ZIP areas cover about 5,719 km², including the Cascade foothills and mountains. The largest is 98022 (Enumclaw, King part) at about 1,164 km².
+3. Simplified at a 20 m interval: about 490 KB, about 18,480 display vertices.
+4. Query outlines as for Nashville.
+5. Every area-weighted centroid lies inside its area.
+6. "King part" labels the six ZIP areas that keep less than 90% of their area inside the county: 98022, 98047, 98068, 98072, 98077 and 98354.
+7. 23 approximate aliases on 14 ZIP areas:
+
+| Approximate alias | ZIP area |
+|---|---|
+| Mercer Island | 98040 |
+| Vashon | 98070 |
+| Capitol Hill | 98102 |
+| Green Lake | 98103 |
+| Georgetown, South Park | 98108 |
+| Madison Park, Montlake | 98112 |
+| Ravenna, Wedgwood, Maple Leaf | 98115 |
+| West Seattle, Alki | 98116 |
+| Columbia City, Rainier Beach, Seward Park | 98118 |
+| Queen Anne | 98119 |
+| Lake City, Northgate | 98125 |
+| Fauntleroy | 98136 |
+| Beacon Hill, Mount Baker | 98144 |
+| Skyway | 98178 |
+
+GNIS has a second Georgetown in King County, near Ravensdale (98051). As in New York's rule, a namesake elsewhere in the city's own county does not block a name. Seattle's Georgetown point lies 431 m inside 98108. Several well-known names fail the rule. GNIS puts Ballard and Fremont on a ZIP border, Belltown 232 m inside 98121, Wallingford 58 m inside 98105, the University District 23 m inside 98195 and Greenwood 152 m inside 98103. GNIS has no populated place for South Lake Union, Magnolia or the Central District. Other names pass the rule but are left out because their ZIP area is mostly known by another name: Crown Hill (98117 is Ballard), Interbay (98199 is Magnolia), Laurelhurst (98105 is the University District), Madrona (98122 is the Central District), and Haller Lake and Bitter Lake (98133). Cities that span several ZIP areas, such as Bellevue, Redmond, Kirkland and Renton, are not aliases.
+
+#### Boston
+
+No neighbourhood boundary set for Boston is used. Boston uses ZIP areas: the Census Bureau's ZIP Code Tabulation Areas, clipped to Suffolk County, which is the cities of Boston, Chelsea and Revere and the town of Winthrop.
+
+| | |
+|---|---|
+| Dataset | 2020 Census ZIP Code Tabulation Areas (ZCTAs), and the 2020 Census outline of Suffolk County, Massachusetts (GEOID 25025), January 1, 2020 vintage |
+| Publisher | U.S. Census Bureau, through its TIGERweb map service (layers credited as for Nashville) |
+| URL | <https://tigerweb.geo.census.gov/arcgis/rest/services/TIGERweb/tigerWMS_Census2020/MapServer>, layer 84 (Zip Code Tabulation Areas) and layer 82 (Counties) |
+| Licence | Public domain (17 U.S.C. § 105) |
+| Retrieved | 2026-10-27 (GeoJSON from the two layers' query endpoints) |
+| Used in | `packages/geo/src/data/boston.ts`, built with `tools/geo/boston-aliases.json` |
+
+Transformations:
+
+1. The 79 ZCTAs that meet a box around the county are clipped to the Suffolk County outline. 40 lie wholly outside and are left out, and 3 keep less than 1 km² inside (02149, 02445 and 02446) and are left out as slivers. 02215 keeps 96% of its area and 02467 14%. The result is 36 ZIP areas.
+2. As Nashville's step 2. Two downtown ZCTAs under 0.1 km² are merged into 02108, which also answers to their ZIPs: 02133 (0.034 km², the State House block) and 02203 (0.025 km², a downtown block). The 34 ZIP areas cover about 166 km². ZCTAs leave out most of the harbour, so this is about the county's land area, not its 311 km² outline.
+3. As Nashville's step 3, at a 15 m interval: about 107 KB, 3,398 display vertices.
+4. to 6. As Nashville's. The area-weighted centroid of 02115 lies outside it, so an interior point is used. 02467, mostly in Newton and Brookline, keeps 14% of its area and is labelled "Suffolk part".
+7. Nineteen ZIP areas answer to an approximate alias:
+
+| Approximate alias | ZIP area |
+|---|---|
+| North End | 02113 |
+| Roxbury | 02119 |
+| Grove Hall | 02121 |
+| Fields Corner | 02122 |
+| Dorchester Center | 02124 |
+| Uphams Corner | 02125 |
+| Mattapan | 02126 |
+| South Boston | 02127 |
+| East Boston | 02128 |
+| Charlestown | 02129 |
+| Jamaica Plain | 02130 |
+| Roslindale | 02131 |
+| West Roxbury | 02132 |
+| Allston | 02134 |
+| Brighton | 02135 |
+| Hyde Park | 02136 |
+| Chelsea | 02150 |
+| Revere | 02151 |
+| Winthrop | 02152 |
+
+Dorchester covers four ZIP areas (02121, 02122, 02124, 02125), so "Dorchester" names none of them. Each answers to the GNIS village it is known by instead; for 02124 that is Dorchester Center, which is also its postal name. Some names are left out:
+- Back Bay: its GNIS point lies in 02115, not 02116.
+- Beacon Hill: its GNIS point lies 15 m from the border of 02114.
+- South End, Fenway, Mission Hill, Chinatown and the Seaport: GNIS has no populated place for them.
+
+#### Denver
+
+| | |
+|---|---|
+| Dataset | 2020 Census ZCTAs, and the 2020 Census outline of the City and County of Denver, Colorado (GEOID 08031), January 1, 2020 vintage |
+| Publisher | U.S. Census Bureau, through its TIGERweb map service |
+| URL | as for Boston |
+| Licence | Public domain (17 U.S.C. § 105) |
+| Retrieved | 2026-10-27 |
+| Used in | `packages/geo/src/data/denver.ts`, built with `tools/geo/denver-aliases.json` |
+
+Transformations:
+
+1. Of the 78 ZCTAs that meet the box, 37 lie wholly outside and are left out, and 5 keep less than 1 km² inside (80012, 80110, 80214, 80226 and 80232) and are left out as slivers. 17 are clipped to the county line. The result is 36 ZIP areas.
+2. Four downtown ZCTAs under 0.1 km² are merged: 80290, 80293 and 80294 into 80202, and 80264 into 80203. Each host also answers to the merged ZIPs. Glendale, an Arapahoe County city surrounded by Denver, is left as a hole that no area fills. The 32 ZIP areas cover about 400 km², the whole county, including the airport's 80249.
+3. As Nashville's step 3, at a 15 m interval: about 105 KB, 3,189 display vertices.
+4. to 6. As Nashville's. 80123, 80222 and 80246 store an interior point. Ten ZIP areas that keep under 90% of their area are labelled "Denver part": 80014, 80123, 80212, 80216, 80221, 80222, 80231, 80235, 80246 and 80247.
+7. Four ZIP areas answer to an approximate alias:
+
+| Approximate alias | ZIP area |
+|---|---|
+| Five Points | 80205 |
+| University Park | 80210 |
+| Bear Valley | 80227 |
+| Montbello | 80239 |
+
+80227 keeps 14% of its area, the Bear Valley neighbourhood, and 80239 80%, so their aliases label them instead of "Denver part". GNIS has no populated place for LoDo, RiNo, Capitol Hill, Cherry Creek (a stream in GNIS), the Highlands (GNIS has only a "Highland Park"), Washington Park, Stapleton or Green Valley Ranch, so those names match no area. University Hills, whose GNIS point also lies in 80210, is left out so that 80210 carries one name.
+
+#### Atlanta
+
+| | |
+|---|---|
+| Dataset | 2020 Census ZCTAs, and the 2020 Census outlines of Fulton County (GEOID 13121) and DeKalb County (GEOID 13089), Georgia, January 1, 2020 vintage |
+| Publisher | U.S. Census Bureau, through its TIGERweb map service |
+| URL | as for Boston |
+| Licence | Public domain (17 U.S.C. § 105) |
+| Retrieved | 2026-10-27 |
+| Used in | `packages/geo/src/data/atlanta.ts`, built with `tools/geo/atlanta-aliases.json` and `--part-label "Fulton-DeKalb"` |
+
+Transformations:
+
+1. Of the 135 ZCTAs that meet the box around the two counties, 60 lie wholly outside and are left out, and 4 keep less than 1 km² inside (30012, 30092, 30094 and 30214) and are left out as slivers. 20 are clipped to the county lines. The result is 71 ZIP areas. The clip is the two counties' combined outline, so a ZIP that straddles the Fulton and DeKalb line stays whole.
+2. ZCTA 30334 (0.064 km², the State Capitol block) is merged into 30303. The 70 ZIP areas cover about 2,085 km², both counties. Hartsfield-Jackson's terminal lies in Clayton County, so a point there locates to no area, although ZCTA 30337 holds it.
+3. As Nashville's step 3, at a 15 m interval: about 416 KB, 16,641 display vertices.
+4. to 6. As Nashville's. 30087 stores an interior point. Twelve ZIP areas that keep under 90% of their area are labelled "Fulton-DeKalb part": 30005, 30024, 30039, 30087, 30097, 30288, 30294, 30296, 30339, 30340, 30349 and 30360. 30004 keeps 69% and is labelled by its alias, Milton.
+7. Twenty-eight ZIP areas answer to an approximate alias. 30306 has two: Virginia-Highland, the neighbourhood's own spelling, and Virginia Highlands, GNIS's.
+
+| Approximate alias | ZIP area |
+|---|---|
+| Avondale Estates | 30002 |
+| Milton | 30004 |
+| Alpharetta | 30009 |
+| Clarkston | 30021 |
+| Johns Creek | 30022 |
+| Decatur | 30030 |
+| Lithonia | 30058 |
+| Roswell | 30075 |
+| Stone Mountain | 30083 |
+| Tucker | 30084 |
+| Fairburn | 30213 |
+| Palmetto | 30268 |
+| Union City | 30291 |
+| Five Points | 30303 |
+| Buckhead | 30305 |
+| Virginia-Highland, Virginia Highlands | 30306 |
+| West End | 30310 |
+| Cascade Heights | 30311 |
+| Vine City | 30314 |
+| East Atlanta | 30316 |
+| Kirkwood | 30317 |
+| Brookhaven | 30319 |
+| Sandy Springs | 30328 |
+| College Park | 30337 |
+| Dunwoody | 30338 |
+| Chamblee | 30341 |
+| East Point | 30344 |
+| Hapeville | 30354 |
+
+Some names are left out:
+- No GNIS populated place: Midtown, Old Fourth Ward, Little Five Points, Cabbagetown, Grant Park and West Midtown.
+- GNIS point too close to the ZIP area's border: Inman Park (198 m), Doraville (259 m), South Fulton (291 m) and Stonecrest (279 m).
+- Neighbourhoods inside a ZIP area better known by other names: Ansley Park, in Midtown's 30309, and Edgewood, in 30307 with Inman Park and Candler Park.
+
+#### Houston
+
+| | |
+|---|---|
+| Dataset | 2020 Census ZCTAs, and the 2020 Census outline of Harris County, Texas (GEOID 48201), January 1, 2020 vintage |
+| Publisher | U.S. Census Bureau, through its TIGERweb map service |
+| URL | as for Boston |
+| Licence | Public domain (17 U.S.C. § 105) |
+| Retrieved | 2026-10-27 |
+| Used in | `packages/geo/src/data/houston.ts`, built with `tools/geo/houston-aliases.json` and `--interval 25` |
+
+Transformations:
+
+1. Of the 178 ZCTAs that meet the box, 35 lie wholly outside and are left out. 22 are clipped to the county line, and none is a sliver. The result is 143 ZIP areas.
+2. No ZCTA is under 0.1 km², so none is merged. The 143 ZIP areas cover about 4,603 km², the whole county.
+3. As Nashville's step 3, at a 25 m interval instead of 15 m. Harris County has four times Davidson's ZIP areas, and 25 m keeps the module to about 523 KB (18,048 display vertices); 15 m would make it about 667 KB.
+4. to 6. As Nashville's. Every area-weighted centroid lies inside its area. Fifteen ZIP areas that keep under 90% of their area are labelled "Harris part": 77053, 77339, 77357, 77365, 77450, 77477, 77484, 77489, 77493, 77494, 77521, 77523, 77535, 77546 and 77581.
+7. Thirty-one ZIP areas answer to an approximate alias. 77008 also answers to The Heights, and 77018 to Oak Forest, which GNIS also places inside it.
+
+| Approximate alias | ZIP area |
+|---|---|
+| West University Place | 77005 |
+| Houston Heights, The Heights | 77008 |
+| Woodland Heights | 77009 |
+| Cloverleaf | 77015 |
+| Garden Oaks, Oak Forest | 77018 |
+| Eastwood | 77023 |
+| Jacinto City | 77029 |
+| Westbury | 77035 |
+| Jersey Village | 77040 |
+| Alief | 77072 |
+| Sharpstown | 77074 |
+| Meyerland | 77096 |
+| Huffman | 77336 |
+| Humble | 77338 |
+| Atascocita | 77346 |
+| Spring | 77373 |
+| Tomball | 77375 |
+| Klein | 77379 |
+| Bellaire | 77401 |
+| Hockley | 77447 |
+| Baytown | 77520 |
+| Channelview | 77530 |
+| Crosby | 77532 |
+| Deer Park | 77536 |
+| Galena Park | 77547 |
+| Highlands | 77562 |
+| La Porte | 77571 |
+| Seabrook | 77586 |
+| South Houston | 77587 |
+| Webster | 77598 |
+
+Some names are left out:
+- No GNIS populated place: Montrose, Midtown, River Oaks, the Third and Fifth Wards, the Galleria and Uptown, and Katy, whose GNIS point lies outside Harris County.
+- GNIS point too close to the ZIP area's border: Kingwood (89 m), Pasadena (29 m), Cypress (21 m) and Clear Lake (292 m).
+- Mission Bend: GNIS also places it in Fort Bend County.
+- The Memorial villages share 77024 and are not used as its label.
+
+#### Dallas
+
+| | |
+|---|---|
+| Dataset | 2020 Census ZCTAs, and the 2020 Census outline of Dallas County, Texas (GEOID 48113), January 1, 2020 vintage |
+| Publisher | U.S. Census Bureau, through its TIGERweb map service |
+| URL | as for Boston |
+| Licence | Public domain (17 U.S.C. § 105) |
+| Retrieved | 2026-10-27 |
+| Used in | `packages/geo/src/data/dallas.ts`, built with `tools/geo/dallas-aliases.json` |
+
+Transformations:
+
+1. Of the 103 ZCTAs that meet the box, 8 lie wholly outside and are left out, and 3 keep less than 1 km² inside (75287, 76051 and 76065) and are left out as slivers. 21 are clipped to the county line. The result is 92 ZIP areas.
+2. ZCTA 75270 (0.010 km², a downtown block) is merged into 75202. The 91 ZIP areas cover about 2,353 km², the whole county.
+3. As Nashville's step 3, at a 15 m interval: about 386 KB, 14,058 display vertices.
+4. to 6. As Nashville's. Every area-weighted centroid lies inside its area. Thirteen ZIP areas that keep under 90% of their area are labelled "Dallas part": 75007, 75050, 75051, 75052, 75054, 75067, 75080, 75082, 75089, 75098, 75125, 75154 and 75252.
+7. Eighteen ZIP areas answer to an approximate alias, all of them the suburban cities and towns that the ZIP areas are known by, and Highland Park:
+
+| Approximate alias | ZIP area |
+|---|---|
+| Addison | 75001 |
+| Carrollton | 75006 |
+| Coppell | 75019 |
+| Garland | 75040 |
+| Sachse | 75048 |
+| Rowlett | 75088 |
+| Cedar Hill | 75104 |
+| DeSoto | 75115 |
+| Duncanville | 75116 |
+| Hutchins | 75141 |
+| Lancaster | 75146 |
+| Mesquite | 75149 |
+| Seagoville | 75159 |
+| Wilmer | 75172 |
+| Balch Springs | 75180 |
+| Sunnyvale | 75182 |
+| Highland Park | 75205 |
+| Farmers Branch | 75234 |
+
+Some names are left out:
+- No GNIS populated place: Deep Ellum, Uptown, the Bishop Arts District, Lakewood, Lake Highlands, Preston Hollow and Pleasant Grove.
+- GNIS point too close to the ZIP area's border:
+  - Oak Cliff (72 m in 75203) and University Park (106 m; its GNIS point lies in 75205, Highland Park's ZIP area);
+  - Richardson (282 m), Irving (99 m), Grand Prairie (108 m) and Glenn Heights (155 m), each in a ZIP area of over 5 km².
+- Cockrell Hill: a small city inside 75211, which is mostly Dallas, so it is not used as 75211's label.
 
 ## Qloo
 

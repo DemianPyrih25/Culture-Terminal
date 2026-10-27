@@ -49,6 +49,7 @@ import { MOCK_QUOTA_KV_KEY, QUOTA_KV_KEY, type QuotaSnapshot, QuotaTracker } fro
 import type { QlooCallRecord } from "./records";
 import { responseSchema, rowCount } from "./schemas";
 import type { QlooEnv, QlooStore } from "./store";
+import { audienceCatalogueKvKey, readAudienceCatalogue, type AudienceCatalogueRead } from "./audience-catalogue";
 import { sanitizeQlooText } from "./trim";
 import type { CanonicalRequest, Transport, TransportResponse } from "./transport-types";
 import { ERROR_TTL_MS, successTtlMs } from "./ttl";
@@ -135,6 +136,12 @@ export interface QlooClient {
   quota(): QuotaSnapshot;
   /** Makes sure the answer to this request is cached (fetching it if needed) and pins it so it never expires. */
   pin(path: QlooPath, params: QlooParams): Promise<void>;
+  /**
+   * The pinned audience catalogue of this environment (kv, D21), read now: a run reads it once at
+   * start. Missing or malformed values read as no segments; a failed read rejects. Optional so test
+   * doubles need not implement it: a client without it offers no audiences.
+   */
+  audienceCatalogue?(): Promise<AudienceCatalogueRead>;
   /** Waits for every background write: call-log rows, L2 entries, counters and the quota snapshot. */
   flush(): Promise<void>;
 }
@@ -325,6 +332,10 @@ class QlooClientImpl implements QlooClient {
 
   quota(): QuotaSnapshot {
     return this.quotaTracker.snapshot();
+  }
+
+  async audienceCatalogue(): Promise<AudienceCatalogueRead> {
+    return readAudienceCatalogue(await this.store.getKv(audienceCatalogueKvKey(this.env)));
   }
 
   async pin(path: QlooPath, params: QlooParams): Promise<void> {

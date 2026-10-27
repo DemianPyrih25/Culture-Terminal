@@ -26,24 +26,42 @@ import {
 
 /**
  * S2 share_of_taste, the Share-of-Taste Grid (SPEC §5.3 S2; PLAN §5.3): one rank call per context
- * over the set (age G4, audience G1, metro locality G2), then QUANT reads within-call percentiles,
+ * over the set (age G4, gender C4, audience G1, metro locality G2), then QUANT reads within-call percentiles,
  * ranks k of n, youth tilt, metros won and the subject's best and worst contexts. The first entity
  * of the set is the subject.
  */
 
 type ShareInput = ToolInput<"share_of_taste">;
 
-/** What the frozen allowlist can share: brands under every context, persons by age (P5) and metro (G3). */
-const SHARE_RULES: Partial<Readonly<Record<EntityType, { ages: boolean; audiences: boolean; metros: boolean }>>> = {
-  brand: { ages: true, audiences: true, metros: true },
-  person: { ages: true, audiences: false, metros: true },
+interface ShareRule {
+  ages: boolean;
+  audiences: boolean;
+  genders: boolean;
+  metros: boolean;
+}
+
+/** Podcasts, TV shows and movies by age (C3); a media location is not probed, so no metros. */
+const MEDIA_RULE: ShareRule = { ages: true, audiences: false, genders: false, metros: false };
+
+/**
+ * What the frozen allowlist can share: brands under every context; persons by age (P5), metro (G3),
+ * audience (C5) and gender (C4); media sets by age (C3), TV shows also by audience (C5).
+ */
+const SHARE_RULES: Partial<Readonly<Record<EntityType, ShareRule>>> = {
+  brand: { ages: true, audiences: true, genders: true, metros: true },
+  person: { ages: true, audiences: true, genders: true, metros: true },
+  podcast: MEDIA_RULE,
+  tv_show: { ...MEDIA_RULE, audiences: true },
+  movie: MEDIA_RULE,
 };
 
 /** Why this input cannot be shared at all, or null. */
 function refusal(input: ShareInput): string | null {
   const rule = SHARE_RULES[input.type];
-  if (rule === undefined) return `share_of_taste takes brand or person sets; a ${input.type} set cannot be shared.`;
+  if (rule === undefined) return `share_of_taste takes brand, person, podcast, TV show or movie sets; a ${input.type} set cannot be shared.`;
   if (!rule.audiences && input.audiences.length > 0) return `${input.type} sets take no audience contexts (not verified for that type).`;
+  if (!rule.genders && input.genders.length > 0) return `${input.type} sets take no gender contexts (not verified for that type).`;
+  if (!rule.metros && input.metros.length > 0) return `${input.type} sets take no metro contexts (not verified for that type).`;
   if (!rule.ages && input.ages.length > 0) return `${input.type} sets take no age contexts.`;
   return null;
 }

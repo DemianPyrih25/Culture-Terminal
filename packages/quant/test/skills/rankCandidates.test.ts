@@ -404,16 +404,20 @@ describe("rank_candidates: one context and slopes", () => {
     expect(run.calls.every((c) => c.params["signal.interests.entities"] === undefined)).toBe(true);
   });
 
-  it("refuses types with no candidate list and contexts a type cannot take, with no calls", async () => {
+  it("refuses contexts and signals a type cannot take, with no calls", async () => {
     const run = setup();
-    const tv = await rankCandidatesSkill.run(unparsed({ type: "tv_show", contexts: [{ kind: "none" }], signal_entities: [SEED] }), run.ctx);
+    const tv = await rankCandidatesSkill.run(unparsed({ type: "tv_show", contexts: [{ kind: "age", age: "24_and_younger" }], signal_entities: [SEED] }), run.ctx);
     expect(tv.status).toBe("error");
-    expect(tv.forModel.notices[0]).toContain("cannot rank tv_shows");
-    const audience = await rankCandidatesSkill.run(
-      unparsed({ type: "person", contexts: [{ kind: "audience", audience: "urn:audience:leisure:board_games" }] }),
+    expect(tv.forModel.notices[0]).toBe(
+      "tv_shows take signal_entities and signal_tags under a none context only; their other contexts are verified with no signal.",
+    );
+    const podcast = await rankCandidatesSkill.run(
+      unparsed({ type: "podcast", contexts: [{ kind: "audience", audience: "urn:audience:leisure:board_games" }] }),
       run.ctx,
     );
-    expect(audience.forModel.notices[0]).toBe("persons rank under site, city, metro, age contexts only; not audience.");
+    expect(podcast.forModel.notices[0]).toBe("podcasts rank under none, age contexts only; not audience.");
+    const person = await rankCandidatesSkill.run(unparsed({ type: "person", contexts: [{ kind: "none" }], signal_entities: [SEED] }), run.ctx);
+    expect(person.forModel.notices[0]).toBe("persons rank under site, city, metro, age, audience, gender contexts only; not none.");
     expect(run.calls).toHaveLength(0);
     expect(rankCandidatesSkill.limitations(["BUDGET_TRUNCATED"])).toEqual([...SKILL_LIMITATIONS.rank_candidates]);
   });

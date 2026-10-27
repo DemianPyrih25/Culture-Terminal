@@ -1,7 +1,7 @@
 import type { MetricUnit, QuadrantName, QuadrantPayload, QuadrantPoint } from "@ct/contracts";
 import { FigureFrame, figureLabel, type FigureMeta } from "./figure-frame";
 import { FigureTable, type TableColumn, type TableRow } from "./figure-table";
-import { formatNumber, formatTick, reasonLabel, type NumberStyle } from "./format";
+import { formatNumber, formatTick, reasonLabel, sentenceCase, type NumberStyle } from "./format";
 import { fitText, linear, niceDomain, px, textWidth, ticksBetween } from "./scale";
 
 /**
@@ -14,9 +14,9 @@ import { fitText, linear, niceDomain, px, textWidth, ticksBetween } from "./scal
  */
 
 export interface QuadrantScatterOptions {
-  /** Layout width in px. Default 680. */
+  /** Layout width in px; the SVG draws at this width (a narrow box scrolls). Default 680. */
   width?: number;
-  /** Height of the plot area in px. Default 136. */
+  /** Height of the plot area in px. Default 168. */
   plotHeight?: number;
   /** Points drawn in the data colour with a label. Default: the payload's labelled points. */
   highlightKeys?: readonly string[];
@@ -29,9 +29,11 @@ export interface QuadrantScatterOptions {
 
 export type QuadrantScatterProps = FigureMeta & QuadrantScatterOptions & { data: QuadrantPayload };
 
-const Y_TITLE_W = 14;
-const Y_TICK_W = 26;
-const QUADRANT_FONT = { weight: 600, tracking: 1 } as const;
+const Y_TITLE_W = 16;
+const Y_TICK_W = 30;
+/** Every label in the plot: 12 px (the design's 12/16 chart labels). */
+const FONT = 12;
+const QUADRANT_FONT = { weight: 500 } as const;
 
 /** Quadrant placement: HIDDEN POCKET top-left (high fit, low popularity), HEARTLAND top-right, COLD and MASS below. */
 const CORNER: Readonly<Record<QuadrantName, { top: boolean; left: boolean }>> = {
@@ -103,12 +105,12 @@ function axisDomain(
 function ScatterPlot(props: QuadrantScatterProps & { label: string; style: NumberStyle }) {
   const { data, style } = props;
   const width = props.width ?? 680;
-  const plotH = props.plotHeight ?? 136;
+  const plotH = props.plotHeight ?? 168;
   const left = Y_TITLE_W + Y_TICK_W + 6;
   const right = width - 8;
   const top = 8;
   const bottom = top + plotH;
-  const height = bottom + 34;
+  const height = bottom + 40;
   const xd = axisDomain(data.points.map((p) => p.x), data.xSplit, props.xDomain, 4, xAsPercentile(data, props.xDomain));
   const yd = axisDomain(data.points.map((p) => p.y), data.ySplit, props.yDomain, 5, false);
   const sx = linear([xd.min, xd.max], [left, right]);
@@ -127,12 +129,12 @@ function ScatterPlot(props: QuadrantScatterProps & { label: string; style: Numbe
   const quadrants = (Object.keys(CORNER) as QuadrantName[]).map((q) => {
     const c = CORNER[q];
     const room = (c.left ? splitX - left : right - splitX) - 12;
-    const text = fitText(data.quadrantLabels[q].toUpperCase(), room, 9.5, QUADRANT_FONT);
-    const w = textWidth(text, 9.5, QUADRANT_FONT);
+    const text = fitText(sentenceCase(data.quadrantLabels[q]), room, FONT, QUADRANT_FONT);
+    const w = textWidth(text, FONT, QUADRANT_FONT);
     const x = c.left ? left + 6 : right - 6;
-    const y = c.top ? top + 13 : bottom - 6;
+    const y = c.top ? top + 15 : bottom - 6;
     const anchor: "start" | "end" = c.left ? "start" : "end";
-    return { q, text, x, y, anchor, box: { x: c.left ? x : x - w, y: y - 9, w, h: 11 } };
+    return { q, text, x, y, anchor, box: { x: c.left ? x : x - w, y: y - 11, w, h: 14 } };
   });
 
   const placed = placeLabels(
@@ -151,11 +153,10 @@ function ScatterPlot(props: QuadrantScatterProps & { label: string; style: Numbe
     <div className="flex flex-col gap-1.5 pt-1">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        width="100%"
+        width={width}
         role="img"
         aria-label={props.label}
-        className="block h-auto font-ui"
-        style={{ maxWidth: width }}
+        className="block h-auto max-w-none font-sans"
       >
         <title>{props.label}</title>
         <desc>
@@ -178,7 +179,7 @@ function ScatterPlot(props: QuadrantScatterProps & { label: string; style: Numbe
         <line x1={splitX + 0.5} x2={splitX + 0.5} y1={top} y2={bottom} className="stroke-line-strong" />
 
         {yTicks.map((t) => (
-          <text key={`ty-${t}`} x={left - 8} y={px(sy(t) + 3.5)} textAnchor="end" fontSize={10} className="fill-dim tabular-nums">
+          <text key={`ty-${t}`} x={left - 8} y={px(sy(t) + 4)} textAnchor="end" fontSize={FONT} className="fill-ink-2 tabular-nums">
             {formatTick(t, yd.step, data.yUnit, { minDigits: 1 })}
           </text>
         ))}
@@ -186,28 +187,27 @@ function ScatterPlot(props: QuadrantScatterProps & { label: string; style: Numbe
           <text
             key={`tx-${t}`}
             x={px(sx(t))}
-            y={bottom + 16}
+            y={bottom + 17}
             textAnchor={i === 0 ? "start" : i === xTicks.length - 1 ? "end" : "middle"}
-            fontSize={10}
-            className="fill-dim tabular-nums"
+            fontSize={FONT}
+            className="fill-ink-2 tabular-nums"
           >
             {xd.percentile
               ? `${Math.round(t * 100)}${i === xTicks.length - 1 ? "th pctl" : ""}`
               : formatTick(t, xd.step, data.xUnit)}
           </text>
         ))}
-        <text x={right} y={bottom + 30} textAnchor="end" fontSize={9.5} fontWeight={600} letterSpacing={1} className="fill-dim">
-          {`${data.xLabel.toUpperCase()} →`}
+        <text x={right} y={bottom + 35} textAnchor="end" fontSize={FONT} fontWeight={500} className="fill-ink-2">
+          {`${sentenceCase(data.xLabel)} →`}
         </text>
         <text
           transform={`translate(${Y_TITLE_W - 4} ${px((top + bottom) / 2)}) rotate(-90)`}
           textAnchor="middle"
-          fontSize={9.5}
-          fontWeight={600}
-          letterSpacing={1}
-          className="fill-dim"
+          fontSize={FONT}
+          fontWeight={500}
+          className="fill-ink-2"
         >
-          {`${fitText(data.yLabel.toUpperCase(), plotH - 8, 9.5, QUADRANT_FONT)} →`}
+          {`${fitText(sentenceCase(data.yLabel), plotH - 8, FONT, QUADRANT_FONT)} →`}
         </text>
 
         {quadrants.map((q) => (
@@ -216,19 +216,18 @@ function ScatterPlot(props: QuadrantScatterProps & { label: string; style: Numbe
             x={q.x}
             y={q.y}
             textAnchor={q.anchor}
-            fontSize={9.5}
-            fontWeight={600}
-            letterSpacing={1}
+            fontSize={FONT}
+            fontWeight={500}
             strokeWidth={3}
             paintOrder="stroke"
-            className={q.q === "HIDDEN_POCKET" ? "fill-accent stroke-accent-soft" : "fill-faint stroke-paper"}
+            className={q.q === "HIDDEN_POCKET" ? "fill-accent-ink stroke-accent-soft" : "fill-ink-2 stroke-surface"}
           >
             {q.text}
           </text>
         ))}
 
         {others.map((p) => (
-          <circle key={p.key} cx={px(sx(p.x))} cy={px(sy(p.y))} r={3} className="fill-data-2" data-point={p.key}>
+          <circle key={p.key} cx={px(sx(p.x))} cy={px(sy(p.y))} r={3} className="fill-chart-muted" data-point={p.key}>
             <title>{pointTitle(p, data, style, xd.percentile)}</title>
           </circle>
         ))}
@@ -236,9 +235,9 @@ function ScatterPlot(props: QuadrantScatterProps & { label: string; style: Numbe
           <g key={p.key} data-point={p.key} data-tone={featured.has(p.key) ? "featured" : "highlight"}>
             <title>{pointTitle(p, data, style, xd.percentile)}</title>
             {featured.has(p.key) ? (
-              <circle cx={px(sx(p.x))} cy={px(sy(p.y))} r={8} strokeWidth={1} className="fill-none stroke-data" />
+              <circle cx={px(sx(p.x))} cy={px(sy(p.y))} r={8} strokeWidth={1} className="fill-none stroke-accent" />
             ) : null}
-            <circle cx={px(sx(p.x))} cy={px(sy(p.y))} r={4} strokeWidth={1.5} className="fill-data stroke-paper" />
+            <circle cx={px(sx(p.x))} cy={px(sy(p.y))} r={4} strokeWidth={1.5} className="fill-accent stroke-surface" />
           </g>
         ))}
         {placed.map((l) => (
@@ -247,23 +246,23 @@ function ScatterPlot(props: QuadrantScatterProps & { label: string; style: Numbe
             x={px(l.x)}
             y={px(l.y)}
             textAnchor={l.anchor}
-            fontSize={l.featured ? 11 : 10.5}
+            fontSize={FONT}
             fontWeight={l.featured ? 600 : 400}
             strokeWidth={3}
             paintOrder="stroke"
-            className={`${l.featured ? "fill-accent" : "fill-text-2"} ${l.inTint ? "stroke-accent-soft" : "stroke-paper"}`}
+            className={`${l.featured ? "fill-accent" : "fill-ink-2"} ${l.inTint ? "stroke-accent-soft" : "stroke-surface"}`}
           >
             {l.text}
           </text>
         ))}
       </svg>
       {data.omitted.length > 0 ? (
-        <p className="m-0 font-ui text-[11px] leading-[16px] text-dim">
-          <span className="font-semibold text-text-2">Not placed: </span>
+        <p className="m-0 type-caption text-ink-2">
+          <span className="font-semibold text-ink-2">Not placed: </span>
           {data.omitted.map((o, i) => (
             <span key={`${o.label}-${i}`}>
               {i > 0 ? " · " : ""}
-              {o.label} <span className="text-dim italic">({reasonLabel(o.reason)})</span>
+              {o.label} <span className="text-ink-2 italic">({reasonLabel(o.reason)})</span>
             </span>
           ))}
         </p>
@@ -304,17 +303,17 @@ function placeLabels(
   const out: PlacedLabel[] = [];
   for (const p of order) {
     const isFeatured = featured.has(p.key);
-    const size = isFeatured ? 11 : 10.5;
+    const size = FONT;
     const weight = isFeatured ? 600 : 400;
     const text = isFeatured ? `${p.label} · ${formatNumber(p.y, data.yUnit, style)}` : p.label;
     const w = textWidth(text, size, { weight });
-    const h = size + 1;
+    const h = size + 2;
     const cx = sx(p.x);
     const cy = sy(p.y);
     const gap = isFeatured ? 12 : 7;
     const candidates: { box: Box; x: number; y: number; anchor: PlacedLabel["anchor"] }[] = [
-      { box: { x: cx + gap, y: cy - h / 2 - 1, w, h }, x: cx + gap, y: cy + 3.5, anchor: "start" },
-      { box: { x: cx - gap - w, y: cy - h / 2 - 1, w, h }, x: cx - gap, y: cy + 3.5, anchor: "end" },
+      { box: { x: cx + gap, y: cy - h / 2 - 1, w, h }, x: cx + gap, y: cy + 4, anchor: "start" },
+      { box: { x: cx - gap - w, y: cy - h / 2 - 1, w, h }, x: cx - gap, y: cy + 4, anchor: "end" },
       { box: { x: cx - w / 2, y: cy - gap - h, w, h }, x: cx, y: cy - gap - 2, anchor: "middle" },
       { box: { x: cx - w / 2, y: cy + gap, w, h }, x: cx, y: cy + gap + h - 2, anchor: "middle" },
     ];
@@ -337,7 +336,7 @@ function placeLabels(
 }
 
 function pointTitle(p: QuadrantPoint, data: QuadrantPayload, style: NumberStyle, percentile: boolean): string {
-  return `${p.label}: ${data.yLabel} ${formatNumber(p.y, data.yUnit, style)}, ${data.xLabel} ${xText(p.x, data, style, percentile)} · ${data.quadrantLabels[p.quadrant]}`;
+  return `${p.label}: ${data.yLabel} ${formatNumber(p.y, data.yUnit, style)}, ${data.xLabel} ${xText(p.x, data, style, percentile)} · ${sentenceCase(data.quadrantLabels[p.quadrant])}`;
 }
 
 /**
@@ -369,7 +368,7 @@ export function quadrantTableSpec(
       p.label,
       formatNumber(p.y, data.yUnit, style),
       percentile ? String(Math.round(p.x * 100)) : formatNumber(p.x, data.xUnit, style),
-      data.quadrantLabels[p.quadrant],
+      sentenceCase(data.quadrantLabels[p.quadrant]),
       ...(withGroup ? [p.group ?? ""] : []),
       ...(withScore ? [p.score === null ? "—" : formatNumber(p.score, "stat", style)] : []),
       p.utr ? "under the radar" : "",

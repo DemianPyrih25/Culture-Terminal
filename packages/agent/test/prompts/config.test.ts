@@ -9,10 +9,10 @@ import {
   MetroId,
   Pillar,
   QUESTION_MAX_CHARS,
-  RESERVED_METRO_IDS,
   SafetyCategory,
   SponsorCategory,
 } from "@ct/contracts";
+import { loadGazetteers } from "@ct/geo";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
@@ -21,6 +21,7 @@ import { z } from "zod";
  * The configs are read as text so the raw bytes are checked too, exactly as `pnpm guard` sees them.
  */
 
+const GAZETTEERS = await loadGazetteers();
 const CONFIG_FILES = ["categories.json", "metros.json", "showcases.json", "sponsor_categories.json"] as const;
 type ConfigFile = (typeof CONFIG_FILES)[number];
 
@@ -46,9 +47,13 @@ const Tag = z
   .strictObject({
     urn: z.string().regex(/^urn:tag:[a-z_]+:[a-z_]+:[a-z0-9_:]+$/),
     status: TagStatus,
-    verified_by: z.string().regex(/^(?:G\d{1,2}|P5)$/).nullable(),
+    // C1b: the follow-up place filter check of the coverage probe (bookstore and pizza).
+    verified_by: z.string().regex(/^(?:G\d{1,2}|P5|C[1-6]|C1b)$/).nullable(),
     verified_as: VerifiedAs.optional(),
+    /** The named fallback a tag whose gate failed carries (PLAN §11.2). */
+    fallback: z.literal("semantic_tag_search").optional(),
   })
+  .refine((t) => t.fallback === undefined || t.status === "unverified", { message: "only an unverified tag names a fallback" })
   .refine((t) => (t.status === "verified") === (t.verified_by !== null), {
     message: "exactly the verified tags name their probe gate",
   })
@@ -85,6 +90,11 @@ const Gazetteer = z.strictObject({
 });
 /** A name the probe sweep found ambiguous: its locality is chosen by hand, never auto-picked. */
 const Pin = z.literal("deliberate").optional();
+const Center = z.strictObject({ lat: Lat, lon: Lon });
+const Bbox = z.strictObject({ min_lon: Lon, min_lat: Lat, max_lon: Lon, max_lat: Lat });
+/** A public centre inside its bbox: place search runs around it (D44). */
+const centred = <T extends { center: z.infer<typeof Center>; bbox: z.infer<typeof Bbox> }>(m: T): boolean =>
+  m.bbox.min_lon < m.center.lon && m.center.lon < m.bbox.max_lon && m.bbox.min_lat < m.center.lat && m.center.lat < m.bbox.max_lat;
 const MetroEntry = z
   .strictObject({
     id: MarketId,
@@ -93,29 +103,28 @@ const MetroEntry = z
     state_name: text,
     query: text,
     pin: Pin,
-    center: z.strictObject({ lat: Lat, lon: Lon }),
-    bbox: z.strictObject({ min_lon: Lon, min_lat: Lat, max_lon: Lon, max_lat: Lat }),
+    center: Center,
+    bbox: Bbox,
     gazetteer: Gazetteer,
   })
-  .refine((m) => m.bbox.min_lon < m.center.lon && m.center.lon < m.bbox.max_lon, { message: "centre outside bbox (lon)" })
-  .refine((m) => m.bbox.min_lat < m.center.lat && m.center.lat < m.bbox.max_lat, { message: "centre outside bbox (lat)" });
+  .refine(centred, { message: "centre outside bbox" });
+const MarketEntry = z
+  .strictObject({
+    id: MarketId,
+    label: text,
+    state: State,
+    state_name: text,
+    query: text,
+    pin: Pin,
+    tier: z.enum(["major", "secondary"]),
+    center: Center,
+    bbox: Bbox,
+  })
+  .refine(centred, { message: "centre outside bbox" });
 const Metros = z.strictObject({
   $comment: comment,
   gazetteer: z.array(MetroEntry),
-  reserved: z.array(MetroEntry),
-  markets: z
-    .array(
-      z.strictObject({
-        id: MarketId,
-        label: text,
-        state: State,
-        state_name: text,
-        query: text,
-        pin: Pin,
-        tier: z.enum(["major", "secondary"]),
-      }),
-    )
-    .min(16),
+  markets: z.array(MarketEntry).min(16),
 });
 
 const SponsorCategories = z.strictObject({
@@ -125,10 +134,11 @@ const SponsorCategories = z.strictObject({
     z.strictObject({
       label: text,
       semantic_query: text,
-      probe: z.literal("G14").nullable(),
+      probe: z.enum(["G14", "C2"]).nullable(),
       aliases: z.array(text).min(1),
       tags: z.array(Tag),
       tag_status: TagStatus,
+      fallback: z.literal("semantic_tag_search").optional(),
       note: text.optional(),
     }),
   ),
@@ -201,12 +211,25 @@ describe("config/categories.json", () => {
     const tags = categories.categories.flatMap((c) => c.tags);
     for (const t of tags) expect(isTaxonomyTag(t.urn), t.urn).toBe(true);
     const verified = tags.filter((t) => t.status === "verified").map((t) => `${t.urn} ${t.verified_by} ${t.verified_as}`);
-    expect(verified.sort()).toEqual([
+    expect(verified.filter((v) => !v.includes(" C1 ")).sort()).toEqual([
+      "urn:tag:category:place:book_store C1b place_filter",
       "urn:tag:category:place:cafe G10 place_filter",
+      "urn:tag:category:place:pizza_restaurant C1b place_filter",
       "urn:tag:genre:place:restaurant G6 heatmap_signal",
       "urn:tag:genre:place:restaurant:bar P5 heatmap_signal",
       "urn:tag:genre:place:restaurant:coffee_shop P5 heatmap_signal",
     ]);
+    // PLAN §11.1: 18 place types, each with a verified heatmap_signal (genre:place) tag.
+    expect(categories.categories).toHaveLength(18);
+    for (const c of categories.categories) {
+      expect(c.tags.some((t) => t.status === "verified" && t.verified_as === "heatmap_signal"), c.key).toBe(true);
+      // Done-when (Part 8): every entry is verified by its gate or names its fallback.
+      for (const t of c.tags) expect(t.status === "verified" || t.fallback === "semantic_tag_search", `${c.key} ${t.urn}`).toBe(true);
+    }
+    // Every type but restaurant and bar (genre-only) has a verified supply filter; without one geo_lift
+    // reports the competitor count as unknown, never 0.
+    const filtered = categories.categories.filter((c) => c.tags.some((t) => t.status === "verified" && t.verified_as === "place_filter"));
+    expect(categories.categories.filter((c) => !filtered.includes(c)).map((c) => c.key)).toEqual(["restaurant", "bar"]);
     expect(isTaxonomyTag(categories.baseline.urn)).toBe(true);
   });
 
@@ -221,26 +244,59 @@ describe("config/categories.json", () => {
 describe("config/metros.json", () => {
   const metros = Metros.parse(readConfig("metros.json").json);
 
-  it("lists exactly the contracts gazetteer metros, plus the reserved ones", () => {
-    expect(metros.gazetteer.map((m) => m.id).sort()).toEqual([...MetroId.options].sort());
-    expect(metros.reserved.map((m) => m.id)).toEqual([...RESERVED_METRO_IDS]);
-    for (const m of metros.reserved) expect(m.gazetteer.status).toBe("reserved");
-  });
-
-  it("makes every gazetteer and reserved metro a market, with unique ids and matching names", () => {
-    const ids = metros.markets.map((m) => m.id);
-    expect(new Set(ids).size).toBe(ids.length);
-    for (const metro of [...metros.gazetteer, ...metros.reserved]) {
-      const market = metros.markets.find((m) => m.id === metro.id);
-      expect(market, metro.id).toBeDefined();
-      expect(market).toMatchObject({ label: metro.label, state: metro.state, query: metro.query });
-      expect(market?.pin, metro.id).toBe(metro.pin);
+  it("lists the 13 map cities, the contracts gazetteer metros, each built with its gazetteer's boundary source", () => {
+    expect(metros.gazetteer.map((m) => m.id)).toEqual([...MetroId.options]);
+    for (const m of metros.gazetteer) {
+      expect(m.gazetteer.status, m.id).toBe("built");
+      expect(m.gazetteer.source, m.id).toBe(GAZETTEERS[MetroId.parse(m.id)]?.source);
     }
   });
 
-  it("pins the Austin locality deliberately, since the probe sweep found its name ambiguous", () => {
-    const austin = [...metros.gazetteer, ...metros.markets].filter((m) => m.id === "austin");
-    expect(austin.map((m) => m.pin)).toEqual(["deliberate", "deliberate"]);
+  it("gives each map city its gazetteer's bounds, rounded outward to two decimals", () => {
+    for (const m of metros.gazetteer) {
+      const box = { min_lon: Infinity, min_lat: Infinity, max_lon: -Infinity, max_lat: -Infinity };
+      for (const a of GAZETTEERS[MetroId.parse(m.id)]?.areas ?? []) {
+        const rings = a.geometry.type === "Polygon" ? a.geometry.coordinates : a.geometry.coordinates.flat();
+        for (const [lon, lat] of rings.flat() as [number, number][]) {
+          box.min_lon = Math.min(box.min_lon, lon);
+          box.min_lat = Math.min(box.min_lat, lat);
+          box.max_lon = Math.max(box.max_lon, lon);
+          box.max_lat = Math.max(box.max_lat, lat);
+        }
+      }
+      const down = (x: number) => Math.floor(x * 100) / 100;
+      const up = (x: number) => Math.ceil(x * 100) / 100;
+      expect(m.bbox, m.id).toEqual({ min_lon: down(box.min_lon), min_lat: down(box.min_lat), max_lon: up(box.max_lon), max_lat: up(box.max_lat) });
+    }
+  });
+
+  it("lists the 51 markets with unique ids, every map city among them with the same names, centre and bbox", () => {
+    const ids = metros.markets.map((m) => m.id);
+    expect(ids).toHaveLength(51);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const metro of metros.gazetteer) {
+      const market = metros.markets.find((m) => m.id === metro.id);
+      expect(market, metro.id).toBeDefined();
+      expect(market).toMatchObject({ label: metro.label, state: metro.state, query: metro.query, center: metro.center, bbox: metro.bbox });
+      expect(market?.pin, metro.id).toBe(metro.pin);
+      expect(market?.tier, metro.id).toBe("major");
+    }
+    for (const id of ["washington_dc", "san_diego", "san_antonio", "las_vegas", "minneapolis", "detroit", "new_orleans", "st_louis", "pittsburgh", "baltimore", "orlando", "tampa", "sacramento"]) {
+      expect(ids, id).toContain(id);
+    }
+  });
+
+  it("lists major markets first, then secondary ones", () => {
+    const tiers = metros.markets.map((m) => m.tier);
+    expect(tiers.indexOf("secondary")).toBe(tiers.lastIndexOf("major") + 1);
+  });
+
+  it("pins Austin and Washington deliberately: Austin's name is ambiguous in Texas, and Washington also names the state", () => {
+    const pinned = [...metros.gazetteer, ...metros.markets].filter((m) => m.pin === "deliberate").map((m) => m.id);
+    expect(pinned).toEqual(["austin", "austin", "washington_dc"]);
+    expect(metros.markets.find((m) => m.id === "washington_dc")).toMatchObject({ label: "Washington", state: "DC", query: "Washington" });
+    // The locality search knows the Missouri city by its full spelling; "St. Louis" finds other countries' namesakes.
+    expect(metros.markets.find((m) => m.id === "st_louis")).toMatchObject({ label: "St. Louis", state: "MO", query: "Saint Louis" });
   });
 
   it("offers at least eight secondary markets for secondary-market questions", () => {
@@ -251,7 +307,7 @@ describe("config/metros.json", () => {
 describe("config/sponsor_categories.json", () => {
   const sponsors = SponsorCategories.parse(readConfig("sponsor_categories.json").json);
 
-  it("covers the ten contracts sponsor categories with a semantic query each", () => {
+  it("covers the fifteen contracts sponsor categories with a semantic query each", () => {
     expect(Object.keys(sponsors.categories).sort()).toEqual([...SponsorCategory.options].sort());
   });
 
@@ -260,13 +316,16 @@ describe("config/sponsor_categories.json", () => {
     for (const [key, c] of Object.entries(sponsors.categories)) {
       for (const t of c.tags) if (t.status === "verified") verified.push(`${key} ${t.urn} ${t.verified_by} ${t.verified_as}`);
       if (c.tags.length === 0) expect(c.tag_status, key).toBe("unverified");
+      // PLAN Part 8: every category is verified by its gate or names its fallback.
+      expect(c.tag_status === "verified" || c.fallback === "semantic_tag_search", key).toBe(true);
       // Several filter.tags values combine as a union (P5), so a category names one tag.
       expect(c.tags.length, key).toBeLessThanOrEqual(1);
     }
-    expect(verified.sort()).toEqual([
+    expect(verified.filter((v) => v.includes(" P5 ")).sort()).toEqual([
       "beer urn:tag:product_category:qloo:beer P5 brand_filter",
       "energy_drinks urn:tag:genre:brand:food_and_beverage:drinks:energy_drink P5 brand_filter",
     ]);
+    expect(verified.filter((v) => v.includes(" C2 "))).toHaveLength(12);
   });
 });
 

@@ -25,20 +25,20 @@ const paused = (over: Partial<StatusReport> = {}) =>
 
 describe("leadSentence", () => {
   it("says live analysis is on when nothing stops it", () => {
-    expect(leadSentence(statusReport())).toBe("Live analysis is on: Sonnet 5.5 writes each brief.");
+    expect(leadSentence(statusReport())).toBe("Live analysis is on: Sonnet 5.5 writes each answer.");
   });
 
   it("puts the most fundamental block first", () => {
     const report = statusReport({ live: { state: "unavailable", blocks: ["no_anthropic", "replay_only"], message: null } });
     expect(leadSentence(report)).toBe(
-      "Live analysis is unavailable: this server has no Anthropic API key. Recorded briefs and test runs still work.",
+      "Live analysis is unavailable: this server has no Anthropic API key. Recorded answers and test runs still work.",
     );
     expect(leadSentence(statusReport({ live: { state: "unavailable", blocks: ["no_database"], message: null } }))).toMatch(/^The database is unreachable/);
   });
 
   it("prints the breakers' own message when paused, and what still works", () => {
     expect(leadSentence(paused())).toBe(
-      "Live analysis is paused: today's budget for live analysis is used up. It resumes at 00:00 UTC. Showcases, replays and cached answers still work.",
+      "Live analysis is paused: today's budget for live analysis is used up. It resumes at 00:00 UTC. Answers already made, replays and cached answers still work.",
     );
   });
 
@@ -56,7 +56,7 @@ describe("leadSentence", () => {
       mode: { ...base.mode, override: "live" },
     });
     expect(leadSentence(report)).toBe(
-      "Live analysis is on: Sonnet 5.5 writes each brief. Qloo month floor and Public runs per hour are past 80%. MODE_OVERRIDE bypasses every breaker.",
+      "Live analysis is on: Sonnet 5.5 writes each answer. Qloo month floor and Public runs per hour are past 80%. MODE_OVERRIDE bypasses every breaker.",
     );
   });
 
@@ -68,14 +68,14 @@ describe("leadSentence", () => {
       breakers: base.breakers.map((b) => (b.key === "qloo_auth" ? { ...b, level: "warn" as const } : b)),
     });
     expect(leadSentence(report)).toBe(
-      "Live analysis is on: Sonnet 5.5 writes each brief. The Qloo key was rejected 1 time in a row; at 3 live analysis pauses.",
+      "Live analysis is on: Sonnet 5.5 writes each answer. The Qloo key was rejected 1 time in a row; at 3 live analysis pauses.",
     );
     expect(leadSentence(report)).not.toContain("80%");
   });
 
   it("says runs go without evidence while QLOO_DISABLED, first or behind a pause", () => {
     expect(leadSentence(statusReport({ live: { state: "limited", blocks: ["qloo_disabled"], message: null } }))).toBe(
-      "Qloo calls are switched off (QLOO_DISABLED): live runs answer as insufficient evidence. Showcases, replays and cached answers still work.",
+      "Qloo calls are switched off (QLOO_DISABLED): live runs answer as insufficient evidence. Answers already made, replays and cached answers still work.",
     );
     expect(leadSentence(paused({ live: { ...paused().live, blocks: ["replay_only", "qloo_disabled"] } }))).toMatch(
       /still work\. Qloo calls are switched off \(QLOO_DISABLED\): live runs answer as insufficient evidence\.$/,
@@ -89,7 +89,7 @@ describe("leadSentence", () => {
 
 describe("laneView", () => {
   it("shows the decision while this server takes live runs", () => {
-    expect(laneView(decision("public"), [])).toEqual({ detail: "Sonnet 5.5 writes each brief", tag: MODE_TAG.live, state: "live" });
+    expect(laneView(decision("public"), [])).toEqual({ detail: "Sonnet 5.5 writes each answer", tag: MODE_TAG.live, state: "live" });
     expect(laneView(decision("public"), ["live_hourly"]).state).toBe("live");
   });
 
@@ -115,11 +115,11 @@ describe("laneView", () => {
 });
 
 describe("laneDetail", () => {
-  it("says who writes the briefs, or why the lane stepped down and until when", () => {
-    expect(laneDetail(decision("public"))).toBe("Sonnet 5.5 writes each brief");
+  it("says who writes the answers, or why the lane stepped down and until when", () => {
+    expect(laneDetail(decision("public"))).toBe("Sonnet 5.5 writes each answer");
     expect(
       laneDetail(decision("public", "economy", { reason: "today's live budget is nearly used", until: "2026-10-24T00:00:00.000Z" })),
-    ).toBe("Haiku 5.5 writes each brief until 00:00 UTC: today's live budget is nearly used");
+    ).toBe("Haiku 5.5 writes each answer until 00:00 UTC: today's live budget is nearly used");
     expect(laneDetail(decision("judge", "replay_only", { reason: "this month's Qloo quota is at its floor" }))).toBe(
       "No live runs: this month's Qloo quota is at its floor",
     );

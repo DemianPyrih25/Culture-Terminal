@@ -1,94 +1,79 @@
 import type { ReactNode } from "react";
 import type { StatusLevel } from "../../server/status";
 import { cx } from "../ui/cx";
-import { LEVEL_TAG, type Tag } from "./format";
+import { LEVEL_TAG, type Tag, type TagTone } from "./format";
 
-/** The rows of a section (A12 Settings): a definition list, one hairline row per item. */
+/** The rows of a section: a definition list, one row per item over a line. */
 export function StatusRows({ children, label }: { children: ReactNode; label?: string }) {
   return (
-    <dl aria-label={label} className="m-0 flex flex-col">
+    <dl aria-label={label} className="flex flex-col">
       {children}
     </dl>
   );
 }
 
 export interface StatusRowProps {
-  /** The 160 px label on the left, in dim. */
+  /** The 200 px label on the left, 13/500 ink-2. */
   label: ReactNode;
   /** The value: text, a meter and its amount, a strip. */
   children: ReactNode;
-  /** The note on the right, or a breaker's tag. */
+  /** The note on the right, or a breaker's state pill. */
   note?: ReactNode;
   className?: string;
 }
 
 /**
- * A/Settings row: label 160 · value · note, 32 px over a hairline. Below 640 px the label takes its own
- * line and the note goes under the value. A12 sets its notes in faint; here they carry numbers (the
- * spend by lane, the floor, the slots), so they take dim, which reads at AA on paper.
+ * A row: label 200 · value · note, 44 px over a line. Below 640 px the label takes its own line and the
+ * note goes under the value.
  */
 export function StatusRow({ label, children, note, className }: StatusRowProps) {
   return (
     <div
       className={cx(
-        "flex min-h-8 flex-wrap items-center gap-x-4 gap-y-1 border-b border-line py-[7px] max-sm:flex-col max-sm:items-start max-sm:py-2",
+        "flex min-h-11 flex-wrap items-center gap-x-4 gap-y-1 border-t border-line py-2.5 first:border-t-0 max-sm:flex-col max-sm:items-start",
         className,
       )}
     >
-      <dt className="w-[160px] shrink-0 text-[12px] leading-4 text-dim max-sm:w-full">{label}</dt>
-      <dd className="m-0 flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 text-[13px] leading-[18px] text-text-2 max-sm:w-full sm:flex-nowrap">
-        {children}
-      </dd>
-      {note ? <dd className="m-0 shrink-0 text-right text-[12px] leading-4 text-dim max-sm:text-left">{note}</dd> : null}
+      <dt className="w-[200px] shrink-0 type-label text-ink-2 max-sm:w-full">{label}</dt>
+      <dd className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 type-body text-ink-2 max-sm:w-full sm:flex-nowrap">{children}</dd>
+      {note ? <dd className="shrink-0 text-right type-label text-ink-2 max-sm:text-left">{note}</dd> : null}
     </div>
   );
 }
 
-/** "214 of 1,900": the used part in ink, the rest in text-2 (A12's meter rows). */
-export function Amount({ used, of }: { used: ReactNode; of?: ReactNode }) {
+/** "214 of 1,900": the used part in ink (never broken), the rest in ink-2, wrapping on a phone. */
+export function Amount({ used, of, wrap = false }: { used: ReactNode; of?: ReactNode; /** A sentence rather than a number: it may wrap. */ wrap?: boolean }) {
   return (
-    <span className="whitespace-nowrap tabular-nums">
-      <span className="font-medium text-ink">{used}</span>
+    <span className="min-w-0 tabular-nums [overflow-wrap:anywhere]">
+      <span className={cx("font-medium text-ink", !wrap && "whitespace-nowrap")}>{used}</span>
       {of ? <> {of}</> : null}
     </span>
   );
 }
 
-/** A state as A/Prior prints a verdict: the mark, then the word in small caps, in the tag's tone. */
+const PILL: Readonly<Record<TagTone, { box: string; dot: string }>> = {
+  good: { box: "bg-good-soft text-good-ink", dot: "bg-good" },
+  caution: { box: "bg-caution-soft text-caution-ink", dot: "bg-caution" },
+  danger: { box: "bg-danger-soft text-danger-ink", dot: "bg-danger" },
+  muted: { box: "bg-sunken text-ink-2", dot: "bg-ink-3" },
+};
+
+/** A state as a soft pill: a dot and the word, in the tone's soft fill. */
 export function StateTag({ tag, state }: { tag: Tag; state: string }) {
+  const pill = PILL[tag.tone];
   return (
-    <span className={cx("inline-flex items-center justify-end gap-1.5 sm:w-[120px]", tag.tone)} data-state={state}>
-      <span aria-hidden="true" className={cx("text-[14px] leading-none", tag.mark === "·" ? "font-normal" : "font-semibold")}>
-        {tag.mark}
-      </span>
-      <span className="text-[11px] leading-none font-semibold tracking-[1.3px] uppercase">{tag.word}</span>
+    <span
+      className={cx("inline-flex h-6 items-center gap-1.5 rounded-chip px-2.5 text-[13px] leading-[18px] font-medium whitespace-nowrap", pill.box)}
+      data-state={state}
+      data-tone={tag.tone}
+    >
+      <span aria-hidden="true" className={cx("size-1.5 shrink-0 rounded-full", pill.dot)} />
+      {tag.word}
     </span>
   );
 }
 
-/** A breaker's state: ✓ CLEAR, – PAST 80%, – WARNING, – ECONOMY, × TRIPPED. */
+/** A breaker's state: Clear, Past 80%, Warning, Economy, Tripped. */
 export function LevelTag({ level }: { level: StatusLevel }) {
   return <StateTag tag={LEVEL_TAG[level]} state={level} />;
-}
-
-/** A label's note number, as A12 marks "Briefs this month¹". */
-export function NoteMark({ n }: { n: number }) {
-  return (
-    <sup aria-hidden="true" className="ml-px text-[9px] font-semibold text-accent">
-      {n}
-    </sup>
-  );
-}
-
-/** A/Sidenote without a ledger behind it: the number, the note and an optional mono trace. */
-export function StatusNote({ n, children, trace }: { n: number; children: ReactNode; trace?: ReactNode }) {
-  return (
-    <div className="flex gap-2" data-status-note={n}>
-      <span className="min-w-3 shrink-0 text-[11px] leading-[17px] font-semibold text-accent tabular-nums">{n}</span>
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <p className="m-0 type-sidenote text-dim">{children}</p>
-        {trace ? <p className="m-0 type-trace text-dim">{trace}</p> : null}
-      </div>
-    </div>
-  );
 }

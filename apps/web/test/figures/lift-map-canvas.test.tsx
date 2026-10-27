@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import LiftMapCanvas, { BASEMAP_ATTRIBUTION, MapAttribution } from "../../components/figures/lift-map-canvas";
 import { MAP_LOAD_TIMEOUT_MS, watchMapLoad, type LoadEvents } from "../../components/figures/lift-map-load";
-import { liftLabels } from "../../components/figures/lift-scale";
+import { mapPins } from "../../components/figures/lift-scale";
 import { austinLiftMap } from "../../components/figures/fixtures";
 import { render, text } from "./markup";
 
@@ -34,7 +34,7 @@ describe("LiftMapCanvas · before the basemap loads", () => {
     <LiftMapCanvas
       data={data}
       mode="LIFT"
-      labels={liftLabels(data)}
+      labels={mapPins(data)}
       label="Figure 1. The fit sits east"
       outlinesUrl={null}
       reducedMotion={false}
@@ -63,9 +63,13 @@ describe("LiftMapCanvas · before the basemap loads", () => {
 describe("MapAttribution", () => {
   it("credits OpenFreeMap, OpenMapTiles and OpenStreetMap, each linked", () => {
     const html = render(<MapAttribution />);
-    expect(text(html)).toBe("© OpenFreeMap © OpenMapTiles © OpenStreetMap contributors");
+    // One line on a wide map, and the same credits behind a "©" button on a narrow one.
+    const line = html.slice(html.indexOf('data-attribution="basemap"'), html.indexOf("</p>"));
+    expect(text(line.slice(line.indexOf(">") + 1))).toBe("© OpenFreeMap © OpenMapTiles © OpenStreetMap contributors");
+    expect(html).toContain('data-attribution="basemap-compact"');
+    expect(html).toContain('aria-label="Map credits"');
     for (const a of BASEMAP_ATTRIBUTION) expect(html).toContain(`href="${a.href}"`);
-    expect([...html.matchAll(/<a /g)]).toHaveLength(3);
+    expect([...html.matchAll(/<a /g)]).toHaveLength(6);
   });
 });
 

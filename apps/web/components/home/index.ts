@@ -1,15 +1,17 @@
-// Home (A01): the chrome shared with Ask and the library, the question field, starters by desk and the
-// recent briefs.
-export { AppChrome } from "./app-chrome";
-export type { AppChromeProps } from "./app-chrome";
-export { HomeAsk } from "./home-ask";
-export { QlooUsage, qlooRequestsToday, qlooUsageText } from "./qloo-usage";
-export type { QlooQuotaSource, QlooUsageProps } from "./qloo-usage";
-export { RECENT_BRIEFS_EMPTY, RecentBriefs, RecentBriefsView } from "./recent-briefs";
-export type { RecentBriefsProps, RecentBriefsState, RecentBriefsViewProps } from "./recent-briefs";
-export { StarterColumns } from "./starter-columns";
-export type { StarterColumnsProps } from "./starter-columns";
-export { STARTER_DESKS } from "./starters";
-export type { Starter, StarterDesk } from "./starters";
+// Home (N01, N02, N17): the hero, the question box with its suggestion list and inline states, and the
+// how band. /ask renders the same view.
+export { AskBox } from "./ask-box";
+export type { AskBoxProps } from "./ask-box";
+export { AskNoticeView } from "./ask-notice";
+export type { AskNoticeViewProps } from "./ask-notice";
+export { HOW_ITEMS, HowBand } from "./how-band";
+export { HERO_LINES, HERO_SUBLINE, HomeView } from "./home-view";
+export type { HomeViewProps } from "./home-view";
+export { QUESTION_PLACEHOLDER, QuestionBox, questionKeyAction, questionText } from "./question-box";
+export type { QuestionBoxProps, QuestionBoxState, QuestionCombobox, QuestionKey } from "./question-box";
+export { SuggestionList, suggestionOptionId } from "./suggestion-list";
+export type { SuggestionListProps } from "./suggestion-list";
+export { looksLikeName, moveActive, PLACE_HINT, SUGGEST_MIN_CHARS, suggestionRows, suggestionsFor } from "./suggestions";
+export type { Suggestion, SuggestionGroup } from "./suggestions";
 export { TestRunButton } from "./test-run-button";
 export type { TestRunButtonProps } from "./test-run-button";

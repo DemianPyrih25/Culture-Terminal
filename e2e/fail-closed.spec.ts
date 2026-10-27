@@ -1,9 +1,9 @@
-import { answerBlock, expect, expectNote, open, shot, test } from "./support";
+import { expect, expectAnswer, open, shot, test } from "./support";
 
 // The fail-closed demo (SPEC §1.4 and §6.6, P1 #10, the README GIF). With QLOO_DISABLED=1 the
-// server makes no Qloo call at all, and a live question still ends as a note: its signal reads
-// Insufficient evidence (CHECKER V7) and its conviction Low (D35). No number is written without a
-// request behind it, so the model never fills the gap with a guess.
+// server makes no Qloo call at all, and a live question still ends as an answer: its verdict reads
+// "Not enough data" (CHECKER V7). No number is written without a request behind it, so the model never
+// fills the gap with a guess.
 //
 // Opt-in: it asks a real question, which spends on the model (CLERK's read and the ANALYST's turns, no
 // Qloo call), and the plain smoke never spends. It also skips, with what /status says, unless the switch
@@ -17,13 +17,12 @@ import { answerBlock, expect, expectNote, open, shot, test } from "./support";
 //      blank Qloo keys alone leave /status at "unavailable". /status must read "limited": "Qloo calls are
 //      switched off (QLOO_DISABLED): live runs answer as insufficient evidence."
 //   2. `SMOKE_FAIL_CLOSED=1 pnpm exec playwright test e2e/fail-closed.spec.ts --headed` asks the question
-//      on /ask, runs the brief and waits for the note. The recording is the video.webm under
+//      on /ask, which sends it at once, and waits for the answer. The recording is the video.webm under
 //      test-results/smoke/fail-closed-*. Copy it out at once: the next Playwright run of any spec clears
 //      test-results/smoke. `ffmpeg -i video.webm -vf "fps=12,scale=960:-1" fail-closed.gif` makes the GIF.
 //      SMOKE_FAIL_CLOSED_QUESTION asks another question.
-//   3. By hand instead, for a paced take: open /ask, type the question, Enter, "Run brief", and hold on
-//      the answer line "The answer — Insufficient evidence" with Conviction at Low and no requests
-//      under Sources.
+//   3. By hand instead, for a paced take: on Home, type the question, "Get answer", and hold on the
+//      verdict "Not enough data", then How we know's Sources tab: "No Qloo lookups were made."
 //   4. Restart the dev server without QLOO_DISABLED.
 
 const QUESTION = process.env.SMOKE_FAIL_CLOSED_QUESTION ?? "Is the Juniper Cola audience a moat or a niche?";
@@ -45,19 +44,17 @@ test("with Qloo switched off, a live question ends as Insufficient evidence (V7)
   const said = (await lead.innerText()).trim();
   test.skip(live !== "limited" || !said.startsWith("Qloo calls are switched off"), `live analysis is ${live}: ${said}`);
 
+  // /ask?q= reads the question and starts its run at once.
   await open(page, `/ask?q=${encodeURIComponent(QUESTION)}`);
-  const run = page.getByRole("button", { name: "Run brief" });
-  await expect(run).toBeEnabled({ timeout: 60_000 });
-  await run.click();
-  await page.waitForURL(/\/run\/[A-Za-z0-9-]+$/);
+  await page.waitForURL(/\/run\/[A-Za-z0-9-]+$/, { timeout: 60_000 });
 
-  await expectNote(page, 240_000);
-  await expect(answerBlock(page).getByRole("heading", { level: 2 })).toContainText("Insufficient evidence");
-  // The band itself ("Low · 18"), not a word in the penalty lines.
-  await expect(page.getByRole("meter", { name: "Conviction" })).toHaveAttribute("aria-valuetext", /^Low · \d+$/);
-  await expect(page.locator('[data-penalty="insufficient_evidence"]')).toBeAttached();
-  // Fail-closed: Sources says no Qloo request was made, and lists none.
-  await expect(page.getByText("No Qloo request was made.", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Request \d+: inspect$/ })).toHaveCount(0);
-  await shot(page, testInfo, "fail-closed-note");
+  await expectAnswer(page, 240_000);
+  await expect(page.locator('[data-verdict="not_enough"]')).toBeVisible();
+  await expect(page.getByText("Not enough data").first()).toBeVisible();
+  // Fail-closed: How we know's Sources says no Qloo lookup was made.
+  await page.getByRole("button", { name: "How we know", exact: true }).click();
+  const drawer = page.getByRole("dialog", { name: "How we know" });
+  await drawer.getByRole("tab", { name: /^Sources/ }).click();
+  await expect(drawer.getByText("No Qloo lookups were made.", { exact: true })).toBeVisible();
+  await shot(page, testInfo, "fail-closed-answer");
 });

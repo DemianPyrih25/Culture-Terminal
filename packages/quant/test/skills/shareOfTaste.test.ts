@@ -80,7 +80,7 @@ interface Setup {
   table?: Table;
   budget?: number;
   members?: Invented[];
-  type?: "brand" | "person";
+  type?: "brand" | "person" | "podcast" | "tv_show" | "movie";
   localities?: LocalityApi | null;
   /** Context keys whose call rejects with this error. */
   fail?: Record<string, () => unknown>;
@@ -104,7 +104,11 @@ function setup(options: Setup = {}) {
   return { ...run, ctx, calls: qloo.calls };
 }
 
-function input(raw: Partial<{ type: string; set: string[]; ages: string[]; audiences: string[]; metros: string[]; step_id: string | null }> = {}) {
+type ShareInput = Parameters<typeof shareOfTasteSkill.run>[0];
+
+function input(
+  raw: Partial<{ type: string; set: string[]; ages: string[]; audiences: string[]; genders: string[]; metros: string[]; step_id: string | null }> = {},
+) {
   return shareOfTasteSkill.input.parse({
     type: "brand",
     set: ["R1", "R2", "R3", "R4"],
@@ -586,7 +590,7 @@ describe("share_of_taste: partial, truncated and empty results", () => {
 });
 
 describe("share_of_taste: persons and pairs", () => {
-  it("shares person sets by metro and by age (P5), never by audience", async () => {
+  it("shares person sets by metro, age (P5), audience (C5) and gender (C4)", async () => {
     const run = setup({ type: "person" });
     const result = await shareOfTasteSkill.run(input({ type: "person", ages: [], metros: ["nashville", "austin"] }), run.ctx);
     expect(result.status).toBe("ok");
@@ -597,10 +601,27 @@ describe("share_of_taste: persons and pairs", () => {
     const byAge = await shareOfTasteSkill.run(byAgeInput, aged.ctx);
     expect(byAge.status).toBe("ok");
     expect(aged.calls.map((c) => c.params["signal.demographics.age"])).toEqual(["24_and_younger", "55_and_older"]);
-    // The schema refuses person audiences; the skill refuses them too when called without it.
-    expect(shareOfTasteSkill.input.safeParse({ ...byAgeInput, audiences: ["urn:audience:leisure:board_games"] }).success).toBe(false);
-    const refused = await shareOfTasteSkill.run({ ...byAgeInput, audiences: ["urn:audience:leisure:board_games"] }, aged.ctx);
-    expect(refused.status).toBe("error");
+    const others = setup({ type: "person" });
+    const byOthers = input({ type: "person", ages: [], genders: ["female"], audiences: ["urn:audience:leisure:board_games"], metros: [] });
+    expect(shareOfTasteSkill.input.safeParse(byOthers).success).toBe(true);
+    await shareOfTasteSkill.run(byOthers, others.ctx);
+    expect(others.calls.map((c) => c.params["signal.demographics.gender"] ?? c.params["signal.demographics.audiences"])).toEqual([
+      "female",
+      ["urn:audience:leisure:board_games"],
+    ]);
+  });
+
+  it("shares media sets by age, TV shows also by audience, and refuses metros and genders for them (C3, C5)", async () => {
+    const shows = setup({ type: "tv_show" });
+    const byAge = await shareOfTasteSkill.run(input({ type: "tv_show", ages: ["24_and_younger", "55_and_older"], metros: [] }), shows.ctx);
+    expect(byAge.status).not.toBe("error");
+    expect(shows.calls.every((c) => c.filterType === "urn:entity:tv_show")).toBe(true);
+    for (const bad of [{ metros: ["nashville"] }, { genders: ["male"] }, { audiences: ["urn:audience:leisure:board_games"], type: "podcast" }] as const) {
+      const run = setup({ type: "podcast" });
+      const refused = await shareOfTasteSkill.run({ ...input({ type: "podcast", ages: ["24_and_younger"], metros: [] }), ...bad } as unknown as ShareInput, run.ctx);
+      expect(refused.status).toBe("error");
+      expect(run.calls).toHaveLength(0);
+    }
   });
 
   it("builds the who-wins-where split for a pair: the first entity's share of the two affinities in each call", async () => {

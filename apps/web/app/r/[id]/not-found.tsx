@@ -1,17 +1,17 @@
 import type { Metadata } from "next";
-import { BriefMissing } from "@/components/brief";
+import { AnswerMissing } from "@/components/working/missing";
 import { PendingSwitch } from "./pending";
 
 export const metadata: Metadata = {
-  title: "No brief here · Culture Terminal",
+  title: "No answer here · Culture Terminal",
   robots: { index: false, follow: false },
 };
 
-/** A permalink with no finished brief: the run's way to /run/[id] while it has no brief yet, else the styled 404. */
+/** A permalink with no finished answer: the way to its run while it has none yet, else the plain not-found card. */
 export default function PermalinkNotFound() {
   return (
     <PendingSwitch>
-      <BriefMissing kind="not_found" />
+      <AnswerMissing kind="not_found" />
     </PendingSwitch>
   );
 }

@@ -1,6 +1,5 @@
 import {
   AgeBucket,
-  AudienceKey,
   JOB_MNEMONIC,
   type Evidence,
   type Finding,
@@ -11,18 +10,19 @@ import {
   isId,
   type Metric,
   type MetroId,
-  type Pillar,
   type RunLimits,
   SEVERITY_RANK,
   type SkillId,
 } from "@ct/contracts";
-import { audienceDenial, sanitizeQlooName, sanitizeQlooText } from "@ct/qloo";
+import { sanitizeQlooName, sanitizeQlooText, type AudienceSegment } from "@ct/qloo";
 import type { FollowupLead } from "../analyst";
 import type { AnalystMode } from "../anthropic";
 import { MIN_OK_EVIDENCE } from "../checker";
 import { wrapQuestion } from "../clerk";
 import type { RunRegistry } from "../registry";
 import { isSkillAvailable, toolLabel } from "./catalogue";
+import { listedAreas } from "./areas";
+import { audienceSegmentsFor, audiencesBlock } from "./audiences";
 import { describeMarket, isGazetteerMetro, MARKET_CATALOGUE, MARKET_TIERS, marketTier, type RunMarket } from "./markets";
 import { describeChainedStep, describeDeferredStep, describeScanStep, type ScanPlan } from "./scan";
 
@@ -50,12 +50,6 @@ export const RUN_CONTEXT_LABELS = [
   "CASE SUMMARY",
 ] as const;
 
-/**
- * Leaf audience URNs the build can offer the model. No audience catalogue ships yet, so AUDIENCES
- * reads "none"; a catalogue joins here and is filtered by the desk allowlist (D21).
- */
-export const AUDIENCE_CATALOGUE: readonly string[] = [];
-
 export interface ScanSummary {
   plan: ScanPlan;
   /** Estimated network calls per scan step (toolCallId), null when unknown. */
@@ -73,6 +67,8 @@ export interface RunContextInput {
   scan: ScanSummary;
   /** The run's MARKETS (runMarkets); defaults to the gazetteer metros. */
   markets?: readonly RunMarket[];
+  /** The pinned audience catalogue read at run start (loadRunAudiences); filtered by the desk again here. Defaults to none. */
+  audiences?: readonly AudienceSegment[];
   unavailable: readonly SkillId[];
   qlooEnabled: boolean;
   caseSummary: string | null;
@@ -241,11 +237,6 @@ export function findingLeads(input: FindingLeadsInput): FollowupLead[] {
   return leads.sort((a, b) => emptyRank(a) - emptyRank(b) || varyRank(a) - varyRank(b));
 }
 
-/** Allowlisted audience keys for the desk: well-formed leaf URNs that D21 allows. */
-export function audienceKeysFor(pillar: Pillar, catalogue: readonly string[] = AUDIENCE_CATALOGUE): string[] {
-  return catalogue.filter((k) => AudienceKey.safeParse(k).success && audienceDenial(k, pillar) === null);
-}
-
 function budgetBlock(input: RunContextInput): string {
   const { limits } = input;
   const s = (ms: number) => `${Math.round(ms / 1000)} s`;
@@ -284,12 +275,29 @@ function registryBlock(registry: RunRegistry): string {
 
 /**
  * The question's metro's neighbourhoods, or none: a metro's full list runs to hundreds of tokens
- * (Austin's planning areas), so it is sent only to a run whose question names a gazetteer metro.
+ * (Austin's planning areas), so it is sent only to a run whose question names a gazetteer metro. A
+ * metro with more than AREAS_MAX areas lists the area the question names first, then the areas nearest
+ * it (nearest the city centre when it names none), up to AREAS_MAX; the LIFT digest names its top areas
+ * by id, and every area id of the metro stays valid in a tool call.
  */
-function areasBlock(geo: GeoApi, metro: MetroId | null): string {
+function areasBlock(geo: GeoApi, metro: MetroId | null, areaText: string | null): string {
   if (metro === null) return "AREAS: none (the question names no gazetteer metro, so no area tool applies)";
-  const areas = geo.neighbourhoods(metro).map((n) => `${n.id} (${escapeAngles(n.name)})`);
-  return `AREAS (${metro}): ${areas.length === 0 ? NONE : areas.join("; ")}`;
+  const all = geo.neighbourhoods(metro);
+  const named = areaText === null ? null : geo.matchNeighbourhood(metro, areaText);
+  const listed = listedAreas(geo, metro, named);
+  const areas = listed.map((n) => `${n.id} (${escapeAngles(n.name)})`);
+  const more =
+    all.length > listed.length
+      ? ` (${listed.length} of ${all.length}, ${named === null ? "nearest the city centre" : "the question's area and those nearest it"}; the LIFT digest names its top areas by id, and any area id of ${metro} is valid)`
+      : "";
+  const asked = areaText?.trim() ?? "";
+  // A name the gazetteer cannot match gets no number of its own: the note must say so, never answer another area for it.
+  const unmatched =
+    asked !== "" && named === null && all.length > 0
+      ? `\nAREA NOT ON THE MAP: the question names "${escapeAngles(asked)}", which matches no ${metro} area id, so it has no lift, rank ` +
+        "or competitor count of its own. Say so plainly near the top of the note, then answer with the areas you can measure; never present another area as the one the question names."
+      : "";
+  return `AREAS (${metro})${more}: ${areas.length === 0 ? NONE : areas.join("; ")}${unmatched}`;
 }
 
 /**
@@ -320,7 +328,7 @@ function scanBlock(input: RunContextInput): string {
   });
   for (const c of plan.chained) lines.push(`- ${describeChainedStep(c)}: runs once ${toolLabel(c.after)} returns, about ${c.estimate} network calls.`);
   for (const d of plan.deferred) {
-    lines.push(`- ${describeDeferredStep(d)}: runs once your wave-1 calls return, about ${d.estimate} network calls; skipped if they resolve no such peer.`);
+    lines.push(`- ${describeDeferredStep(d)}: runs once your wave-1 calls return, about ${d.estimate} network calls; with no such peer from them it reads the scan's own neighbours of that type, and is skipped without either.`);
   }
   for (const s of plan.skipped) lines.push(`- ${toolLabel(s.tool)}: skipped, ${s.reason}.`);
   if (plan.unavailable.length > 0) lines.push(`- Not available in this build: ${plan.unavailable.map(toolLabel).join(", ")}.`);
@@ -343,8 +351,8 @@ export function buildRunContext(input: RunContextInput): string {
     `CLERK:\n${safeJson(intent)}`,
     registryBlock(input.registry),
     marketsBlock(input),
-    `AUDIENCES: ${audienceKeysFor(intent.pillar).join(", ") || NONE}`,
-    areasBlock(input.geo, intent.geo.metro),
+    audiencesBlock(audienceSegmentsFor(intent.pillar, input.audiences ?? []), NONE),
+    areasBlock(input.geo, intent.geo.metro, intent.geo.area),
     scanBlock(input),
     `UNAVAILABLE TOOLS: ${unavailable}`,
     `CASE SUMMARY: ${input.caseSummary === null ? "none" : escapeAngles(input.caseSummary)}`,

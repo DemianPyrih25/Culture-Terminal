@@ -1,8 +1,8 @@
-import { COMPARATOR_LABEL, type Comparator, type MetricUnit, type NoValueReason } from "@ct/contracts";
+import type { Comparator, MetricUnit, NoValueReason } from "@ct/contracts";
 import { stepDigits } from "./scale";
 
 /**
- * Number and label formatting shared by the figure families (Concept A, D36). Figures print what
+ * Number and label formatting shared by the figure families. Figures print what
  * the dataset holds and never invent a value: a missing cell prints its reason, never 0.
  */
 
@@ -82,12 +82,12 @@ export function cellText(
     : { kind: "value", text: formatNumber(cell.value, unit, style) };
 }
 
-/** The comparator a delta is measured against, as a column head: "Δ VS CITY". */
+/** The comparator a delta is measured against, as a column head: "Δ vs city". */
 export function comparatorHead(comparator: Comparator): string {
-  return COMPARATOR_LABEL[comparator].toUpperCase();
+  return `Δ vs ${COMPARATOR_NOUN[comparator]}`;
 }
 
-/** The comparator as a short noun for direction labels: "CITY", "PEERS", "BASELINE", "EVEN". */
+/** The comparator as a short noun for heads and direction labels: "city", "peers", "baseline", "even split". */
 export const COMPARATOR_NOUN: Readonly<Record<Comparator, string>> = {
   CITY: "city",
   PEERS: "peers",
@@ -144,4 +144,15 @@ function codeCandidates(label: string): string[] {
   const first = words[0]!;
   const last = words[words.length - 1]!;
   return [initials, upper(first.slice(0, 2) + last[0]), upper(first[0] + last.slice(0, 2))];
+}
+
+/**
+ * A label in sentence case for the chart scale: each " · " part written all in capitals is lowered,
+ * then the first letter is raised ("UNDER-THE-RADAR FIT · no pricing data" reads "Under-the-radar fit ·
+ * no pricing data"). Mixed-case parts keep their capitals, so names stay as written.
+ */
+export function sentenceCase(label: string): string {
+  const parts = label.split(" · ").map((part) => (/[a-z]/.test(part) || !/[A-Z]{2}/.test(part) ? part : part.toLowerCase()));
+  const out = parts.join(" · ");
+  return out.charAt(0).toUpperCase() + out.slice(1);
 }

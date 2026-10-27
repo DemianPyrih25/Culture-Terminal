@@ -1,5 +1,5 @@
 // MomentumStrip (S4, D19): step-shaped weekly series on a shared scale, the window shaded and the
-// time after it hatched, the STALE badge always shown, NO SIGNAL never drawn as a flat line.
+// time after it hatched, "No data after <month>" always shown, "No signal" never drawn as a flat line.
 import type { MomentumPayload } from "@ct/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { MomentumStrip, momentumDomain, stepPath, windowEndMonth } from "../../components/figures";
@@ -14,7 +14,6 @@ const html = render(
   <MomentumStrip
     data={data}
     asOf="2026-10-14"
-    number={5}
     title="Juniper Cola rose through the window"
     source={FIXTURE_SOURCES.trending}
     formulaId="mom.delta_26w"
@@ -22,12 +21,15 @@ const html = render(
 );
 
 describe("MomentumStrip", () => {
-  it("always shows the STALE badge with its window, and no signal after the window", () => {
+  it("always says there is no data after the window, in sentence case, without the old badge", () => {
     expect(html).toContain('data-badge="STALE"');
-    expect(text(html)).toContain(`STALE${data.badgeText}`);
-    expect(text(html)).toContain("No signal after Aug 2026");
+    expect(text(html)).not.toContain("STALE");
+    expect(text(html)).not.toContain(data.badgeText);
+    expect(text(html)).toContain("No data after Aug 2026");
     expect(plotView(html)).toContain(`data-no-signal-after="${MOMENTUM_WINDOW.end}"`);
-    expect(text(plotView(html))).toContain("TRENDING WINDOW · MAR–AUG 2026");
+    // The window head: "Trending window, Mar–Aug 2026", or only the months where that does not fit.
+    expect(text(plotView(html))).toContain("Mar–Aug 2026");
+    expect(text(plotView(html))).not.toContain("TRENDING");
   });
 
   it("draws a step line per series with signal, its trend, Δ over 26 weeks and peer rank", () => {
@@ -40,7 +42,7 @@ describe("MomentumStrip", () => {
     expect(text(rising)).toContain("1 of 3");
     expect(text(rowMarkup(plot, "R2"))).toContain("– Flat");
     expect(text(rowMarkup(plot, "R3"))).toContain("▼ Declining");
-    expect(rowMarkup(plot, "R3")).toContain("fill-negative");
+    expect(rowMarkup(plot, "R3")).toContain("fill-second");
   });
 
   it("marks winsorised outliers with a caret and a scale break in the subline", () => {
@@ -56,37 +58,37 @@ describe("MomentumStrip", () => {
     const plot = plotView(html);
     const flat = rowMarkup(plot, "R4");
     expect(flat).toContain('data-hatch="no_signal"');
-    expect(text(flat)).toContain("NO SIGNAL");
-    expect(flat).not.toContain("stroke-data");
+    expect(text(flat)).toContain("No signal");
+    expect(flat).not.toContain("stroke-accent");
     const none = rowMarkup(plot, "R11");
     expect(none).toContain('data-hatch="unavailable"');
-    expect(text(none)).toContain("NOT MEASURED");
+    expect(text(none)).toContain("Not measured");
     expect(text(none)).toContain("unavailable");
   });
 
   it("lists every week in the table view, and why a series has none", () => {
     const rows = tableRows(tableView(html));
     expect(rows).toContainEqual(["Juniper Cola · brand"]);
-    expect(rows).toContainEqual(["Trend", "Rising", data.badgeText]);
+    expect(rows).toContainEqual(["Trend", "Rising", "Historical, Mar–Aug 2026"]);
     expect(rows).toContainEqual(["Δ over 26 weeks", "+.17", "Theil–Sen slope × 26"]);
     expect(rows).toContainEqual(["Week of 2026-05-25", ".88", "winsorised outlier (^)"]);
     expect(rows).toContainEqual(["Week of 2026-03-02", ".62", ""]);
     expect(rows.filter((r) => r[0]?.startsWith("Week of"))).toHaveLength(26 + 26 + 18);
-    expect(rows).toContainEqual(["Trend", "no signal", data.badgeText]);
-    expect(rows).toContainEqual(["Trend", "unavailable", data.badgeText]);
+    expect(rows).toContainEqual(["Trend", "no signal", "Historical, Mar–Aug 2026"]);
+    expect(rows).toContainEqual(["Trend", "unavailable", "Historical, Mar–Aug 2026"]);
   });
 
   it("keeps the trend column only at half width", () => {
     const compact = text(plotView(render(<MomentumStrip data={data} width={328} title="Compact" />)));
-    expect(compact).toContain("TREND");
-    expect(compact).not.toContain("PEERS");
+    expect(compact).toContain("Trend");
+    expect(compact).not.toContain("Peers");
   });
 
   it("frames an empty strip without a scale", () => {
     const empty: MomentumPayload = { ...data, series: [] };
     const out = render(<MomentumStrip data={empty} title="Empty" />);
     expect(out).not.toContain('data-scale="true"');
-    expect(text(out)).toContain("No signal after Aug 2026");
+    expect(text(out)).toContain("No data after Aug 2026");
   });
 });
 

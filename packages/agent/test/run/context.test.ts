@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import { createEntityRegistry } from "../../src/registry";
 import { UNAVAILABLE_SKILLS } from "../../src/run/catalogue";
 import {
-  audienceKeysFor,
   buildRunContext,
   evidenceStatus,
   findingLeads,
@@ -13,6 +12,7 @@ import {
   type RanCall,
   type RunContextInput,
 } from "../../src/run/context";
+import { AREAS_MAX, listedAreas } from "../../src/run/areas";
 import { MARKET_CATALOGUE } from "../../src/run/markets";
 import { emptyScan, planScan } from "../../src/run/scan";
 import { intentFor } from "./support";
@@ -108,20 +108,46 @@ describe("buildRunContext", () => {
         },
       },
     });
-    const intent = intentFor({ job: "area_profile", pillar: "location", geo: { metro: "nashville", area: "Maple Hollow", unsupported_place: null } });
+    const intent = intentFor({ job: "area_profile", pillar: "location", geo: { metro: "nashville", area: "Maple Hollow", unsupported_place: null, market: null } });
     expect(buildRunContext(input({ geo }, intent))).toContain("AREAS (nashville): maple_hollow (Maple Hollow)");
+    expect(buildRunContext(input({ geo }, intent))).not.toContain("AREA NOT ON THE MAP");
+    // A named area the gazetteer cannot match is never dropped silently: the note must say it has no numbers of its own.
+    const unmatched = intentFor({ job: "site_selection", pillar: "location", geo: { metro: "nashville", area: "Quarry Glen Village", unsupported_place: null, market: null } });
+    expect(buildRunContext(input({ geo }, unmatched))).toContain(
+      'AREA NOT ON THE MAP: the question names "Quarry Glen Village", which matches no nashville area id, so it has no lift, rank or competitor count of its own.',
+    );
     // A question with no metro gets no list, however many areas the gazetteer holds.
     const brand = buildRunContext(input({ geo }));
     expect(brand).toContain("AREAS: none (the question names no gazetteer metro");
     expect(brand).not.toContain("maple_hollow");
   });
 
+  it("caps a large county's AREAS: the question's area first, then the areas nearest it", () => {
+    const geo = createGeo();
+    const all = geo.neighbourhoods("los_angeles");
+    expect(all.length).toBeGreaterThan(AREAS_MAX);
+    const intent = intentFor({ job: "area_profile", pillar: "location", geo: { metro: "los_angeles", area: "Venice", unsupported_place: null, market: null } });
+    const line = buildRunContext(input({ geo }, intent))
+      .split("\n")
+      .find((l) => l.startsWith("AREAS"));
+    expect(line?.startsWith(`AREAS (los_angeles) (${AREAS_MAX} of ${all.length}, the question's area and those nearest it; `)).toBe(true);
+    expect(line?.split("): ")[1]?.startsWith("zcta_90291 (ZIP 90291 (Venice)); ")).toBe(true);
+    expect(line?.match(/zcta_[0-9]{5} [(]/g)).toHaveLength(AREAS_MAX);
+    // Without a named area, the areas nearest the centre: downtown's ZIP is listed, Catalina's is not.
+    const centre = listedAreas(geo, "los_angeles").map((n) => n.id);
+    expect(centre).toHaveLength(AREAS_MAX);
+    expect(centre).toContain("zcta_90012");
+    expect(centre).not.toContain("zcta_90704");
+    // A metro of AREAS_MAX areas or fewer is listed whole.
+    expect(listedAreas(geo, "boston")).toEqual(geo.neighbourhoods("boston"));
+  });
+
   it("lists the run's markets with labels by tier, and only the gazetteer metros on the location desk", () => {
-    const markets = MARKET_CATALOGUE.filter((m) => ["nashville", "austin", "denver", "boise", "knoxville"].includes(m.id));
+    const markets = MARKET_CATALOGUE.filter((m) => ["nashville", "austin", "portland", "boise", "knoxville"].includes(m.id));
     expect(buildRunContext(input({ markets }))).toContain(
-      "MARKETS: major: nashville (Nashville, TN), austin (Austin, TX), denver (Denver, CO); secondary: knoxville (Knoxville, TN), boise (Boise, ID)\n",
+      "MARKETS: major: nashville (Nashville, TN), austin (Austin, TX), portland (Portland, OR); secondary: knoxville (Knoxville, TN), boise (Boise, ID)\n",
     );
-    const intent = intentFor({ job: "tenant_mix", pillar: "location", geo: { metro: "austin", area: null, unsupported_place: null } });
+    const intent = intentFor({ job: "tenant_mix", pillar: "location", geo: { metro: "austin", area: null, unsupported_place: null, market: null } });
     expect(buildRunContext(input({ markets }, intent))).toContain("MARKETS: major: nashville (Nashville, TN), austin (Austin, TX)\n");
   });
 
@@ -130,13 +156,13 @@ describe("buildRunContext", () => {
       job: "site_selection",
       pillar: "location",
       mentions: [],
-      geo: { metro: "austin", area: null, unsupported_place: null },
+      geo: { metro: "austin", area: null, unsupported_place: null, market: null },
       constraints: { concepts: ["cocktail bar"], sponsor_categories: [], domains: [], ages: [], notes: [] },
     });
     const text = buildRunContext(input({}, intent));
     expect(text).toContain("- find_tags (TAGS) for 1 concept(s): running now, about 7 network calls.");
     expect(text).toContain(
-      "- geo_lift (LIFT) in austin on the place tags find_tags returns, with supply when a category tag comes back: runs once find_tags (TAGS) returns, about 3 network calls.",
+      "- geo_lift (LIFT) in austin on the place tags find_tags returns, with supply: runs once find_tags (TAGS) returns, about 3 network calls.",
     );
     expect(text).toContain("- Opening scan: about 10 network calls of that budget.");
   });
@@ -153,11 +179,12 @@ describe("buildRunContext", () => {
     const text = buildRunContext(input({ registry, scan: { plan, estimates: new Map(plan.steps.map((s) => [s.toolCallId, 1])) } }, intent));
     expect(text).toContain("- destination_affinity (TRVL) from R1: running now, about 1 network calls.");
     expect(text).toContain(
-      "- share_of_taste (SHARE) for R1 and the person peers your wave-1 resolve_entities registers, by markets nashville, austin: " +
-        "runs once your wave-1 calls return, about 2 network calls; skipped if they resolve no such peer.",
+      "- share_of_taste (SHARE) for R1 and the person peers your wave-1 resolve_entities registers, by markets nashville, austin, nyc, los_angeles, chicago, atlanta, denver, seattle: " +
+        "runs once your wave-1 calls return, about 8 network calls; with no such peer from them it reads the scan's own neighbours of that type, " +
+        "and is skipped without either.",
     );
     expect(text).not.toContain("share_of_taste (SHARE): skipped");
-    expect(text).toContain("- Opening scan: about 3 network calls of that budget.");
+    expect(text).toContain("- Opening scan: about 9 network calls of that budget.");
   });
 });
 
@@ -397,21 +424,22 @@ describe("findingLeads", () => {
   });
 });
 
-describe("audienceKeysFor", () => {
-  const catalogue = [
-    "urn:audience:leisure:synthetic_one",
-    "urn:audience:spending_habits:synthetic_two",
-    "urn:audience:communities:synthetic_three",
-    "urn:audience:leisure:political_junkie",
-    "urn:audience:leisure",
+describe("buildRunContext: AUDIENCES", () => {
+  // Invented segments (D29); the families are Qloo's public parents.
+  const segments = [
+    { key: "urn:audience:leisure:synthetic_trail_runners", label: "Trail Runners" },
+    { key: "urn:audience:life_stage:synthetic_new_parents", label: "Parents of <toddlers>" },
+    { key: "urn:audience:communities:synthetic_group", label: "Denied family" },
+    { key: "urn:audience:leisure:political_junkie", label: "Denied segment" },
   ];
 
-  it("keeps well-formed leaf keys the desk allowlist allows (D21)", () => {
-    expect(audienceKeysFor("location", catalogue)).toEqual(["urn:audience:leisure:synthetic_one"]);
-    expect(audienceKeysFor("investment", catalogue)).toEqual([
-      "urn:audience:leisure:synthetic_one",
-      "urn:audience:spending_habits:synthetic_two",
-    ]);
-    expect(audienceKeysFor("investment")).toEqual([]);
+  it("lists the pinned segments the desk may send, by family, with labels only where they add words", () => {
+    const text = buildRunContext({ ...input(), audiences: segments });
+    expect(text).toContain(
+      "AUDIENCES (send only these keys):\n- leisure: urn:audience:leisure:synthetic_trail_runners (Trail Runners)\n" +
+        "- life_stage: urn:audience:life_stage:synthetic_new_parents (Parents of &lt;toddlers&gt;)",
+    );
+    expect(text).not.toContain("communities");
+    expect(text).not.toContain("political_junkie");
   });
 });

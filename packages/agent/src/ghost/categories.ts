@@ -1,5 +1,6 @@
 import { JOB_MNEMONIC, JOB_PILLAR, PILLAR_LABEL, type GeoApi, type GhostPickCategory, type Job, type MetroId } from "@ct/contracts";
 import { sanitizeQuestion, wrapQuestion } from "../llm/question";
+import { listedAreas } from "../run/areas";
 import { gazetteer } from "../run/gazetteer";
 import type { RunMarket } from "../run/markets";
 
@@ -67,7 +68,8 @@ export function ghostUserMessage(question: string, job: Job, context: GhostConte
   }
   const metro = context.metro ?? null;
   if (lists.includes("neighbourhoods") && metro !== null) {
-    const areas = (context.geo ?? gazetteer()).neighbourhoods(metro);
+    // A large county lists the AREAS_MAX areas nearest its centre, as the ANALYST's AREAS does.
+    const areas = listedAreas(context.geo ?? gazetteer(), metro);
     if (areas.length > 0) lines.push(`AREAS (${metro}): ${areas.map((a) => escapeAngles(a.name)).join("; ")}`);
   }
   const earlier = (context.earlier ?? []).map((q) => escapeAngles(sanitizeQuestion(q))).filter((q) => q !== "");

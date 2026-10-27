@@ -1,7 +1,8 @@
 import "server-only";
 import { existsSync } from "node:fs";
 import path from "node:path";
-import { closeDb, isConnectionError, migrateUrl, resolveDatabaseUrl } from "@ct/db";
+import { closeDb, getKv, isConnectionError, migrateUrl, resolveDatabaseUrl, type Queryable } from "@ct/db";
+import { audienceCatalogueKvKey, readAudienceCatalogue, resolveQlooEnv } from "@ct/qloo";
 import { shutdownGraceMsFromEnv } from "./config";
 import { getDatabase, getRunManager, peekQlooClient } from "./container";
 import { logLocalityCoverage, readLocalityCoverage } from "./localities";
@@ -132,9 +133,21 @@ function sweepEveryHour(): void {
 }
 
 /**
+ * Says in the log when the pinned audience catalogue (D21, tools/dev/audiences.ts pin) is missing or
+ * malformed: every run then offers no AUDIENCES and refuses every audience context, with no other sign.
+ */
+export async function checkAudienceCatalogue(db: Queryable, key: string = audienceCatalogueKvKey(resolveQlooEnv(process.env))): Promise<void> {
+  const read = readAudienceCatalogue(await getKv(db, key));
+  const effect = "runs offer no audience segments and refuse every audience context";
+  if (read.state === "missing") log.warn({ key }, `kv "${key}" is not set: ${effect}`);
+  else if (read.state === "malformed") log.error({ key }, `kv "${key}" is malformed: ${effect}`);
+  else if (read.segments.length === 0) log.warn({ key }, `kv "${key}" holds no usable segment: ${effect}`);
+}
+
+/**
  * Housekeeping that needs the schema: drop fake runs past their retention and clear visitor hashes
  * past the per-visitor windows, now and every hour after, and say in the log when the market
- * locality pins are missing or partial.
+ * locality pins are missing or partial, or the audience catalogue is not pinned.
  */
 export function afterMigrations(): void {
   sweep();
@@ -145,6 +158,11 @@ export function afterMigrations(): void {
       .catch((err: unknown) => log.warn({ err }, "the market locality pins could not be read"));
   } catch (err) {
     log.warn({ err }, "the market locality check skipped");
+  }
+  try {
+    void checkAudienceCatalogue(getDatabase()).catch((err: unknown) => log.warn({ err }, "the audience catalogue could not be read"));
+  } catch (err) {
+    log.warn({ err }, "the audience catalogue check skipped");
   }
 }
 

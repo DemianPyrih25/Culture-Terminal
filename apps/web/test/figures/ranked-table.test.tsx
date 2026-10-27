@@ -20,7 +20,6 @@ const lollipop = render(
   <RankedTable
     data={nearestAudiences.payload}
     width={384}
-    number={1}
     title="Its nearest audience is a tonic, not a rival"
     caption="Audience similarity, 0–1. Grey: rivals we expected."
     comparisonKeys={EXPECTED_RIVALS}
@@ -61,9 +60,9 @@ describe("RankedTable · lollipop", () => {
     const plot = plotView(lollipop);
     expect(plot).toContain('role="img"');
     expect(plot).toContain("<title>Its nearest audience is a tonic, not a rival</title>");
-    expect(plot).toContain("TOP FIVE ABOVE");
+    expect(plot).toContain("Top five above");
     // Axis ticks at 0, 0.2, 0.4, 0.6 for similarities up to .47.
-    expect(plot.match(/font-size="10" class="fill-dim tabular-nums">[^<]+</g)?.map((t) => t.split(">")[1]!.slice(0, -1))).toEqual([
+    expect(plot.match(/font-size="12" class="fill-ink-2 tabular-nums">[^<]+</g)?.map((t) => t.split(">")[1]!.slice(0, -1))).toEqual([
       "0",
       "0.2",
       "0.4",
@@ -131,10 +130,10 @@ describe("RankedTable · table (Slate)", () => {
   it("shows category, best fit, the bar with its tick and the flag", () => {
     const plot = plotView(html);
     expect(plot).toContain("<table");
-    expect(text(plot)).toContain("UNDER THE RADAR5");
-    expect(rowMarkup(plot, "beer")).toContain("bg-canvas");
+    expect(text(plot)).toContain("Under the radar5");
+    expect(rowMarkup(plot, "beer")).toContain("bg-sunken");
     // Below the 0.80 tick the bar turns grey; the missing category has no bar at all.
-    expect(rowMarkup(plot, "energy_drinks")).toContain("fill-data-2");
+    expect(rowMarkup(plot, "energy_drinks")).toContain("fill-chart-muted");
     expect(rowMarkup(plot, "fintech")).not.toContain("<svg");
     expect(text(rowMarkup(plot, "fintech"))).toContain("not fetched (budget)");
   });
@@ -146,18 +145,18 @@ describe("RankedTable · table (Slate)", () => {
 
   it("keeps every category in a table view that stays hidden until toggled", () => {
     // The plot is an HTML table already: a second, screen-reader-only copy would be read twice.
-    expect(html).toContain('<div hidden="" class="pt-2" data-view="table">');
+    expect(html).toContain('<div hidden="" data-view="table" class="min-w-0 overflow-x-auto">');
     expect(html).not.toContain('class="sr-only" data-view="table"');
     const body = tableRows(tableView(html));
     expect(body).toHaveLength(7);
-    expect(body.find((r) => r[2] === "Beer")).toEqual(["Granite Hollow Ale", "1", "Beer", "0.86", "UNDER THE RADAR"]);
+    expect(body.find((r) => r[2] === "Beer")).toEqual(["Granite Hollow Ale", "1", "Beer", "0.86", "Under the radar"]);
     expect(body.find((r) => r[2] === "Fintech")).toEqual(["No fit found", "—", "Fintech", "not fetched (budget)", ""]);
   });
 
   it("draws a negative value left of zero in the negative colour", () => {
     const plot = plotView(render(<RankedTable data={ranked("delta", [["up", 0.4], ["down", -0.3]])} variant="table" title="Signed" />));
-    const [up] = rects(rowMarkup(plot, "up")).filter((r) => r.cls.startsWith("fill-data"));
-    const [down] = rects(rowMarkup(plot, "down")).filter((r) => r.cls === "fill-negative");
+    const [up] = rects(rowMarkup(plot, "up")).filter((r) => r.cls.startsWith("fill-accent"));
+    const [down] = rects(rowMarkup(plot, "down")).filter((r) => r.cls === "fill-second");
     expect(down).toBeDefined();
     expect(down!.width).toBeGreaterThan(0);
     expect(down!.x + down!.width).toBeCloseTo(up!.x, 1);
@@ -171,7 +170,7 @@ describe("RankedTable · lists and bars", () => {
     expect(plot.match(/<table/g)).toHaveLength(3);
     expect(text(plot)).toContain("Music · artists");
     expect(text(rowMarkup(plot, "V4"))).toContain("not measured");
-    expect(html).toContain('<div hidden="" class="pt-2" data-view="table">');
+    expect(html).toContain('<div hidden="" data-view="table" class="min-w-0 overflow-x-auto">');
     const body = tableRows(tableView(html));
     expect(body.filter((r) => r.length === 1).map((r) => r[0])).toEqual(["Music · artists", "Podcasts", "TV · series"]);
     expect(body.find((r) => r[0] === "The Velvet Lanterns")).toEqual(["The Velvet Lanterns", "1", ".97"]);
@@ -184,22 +183,21 @@ describe("RankedTable · lists and bars", () => {
       return [...plot.matchAll(/<col style="width:(\d+)px"/g)].map((m) => Number(m[1]));
     };
     expect(widths("Pctl")).toEqual([48, 48, 48]);
-    // "PERCENTILE" needs more than the 48 px default, or it runs into the next list's head.
-    expect(Math.min(...widths("Percentile"))).toBeGreaterThan(70);
+    // "Percentile" (12 px) needs more than the 48 px default, or it runs into the next list's head.
+    expect(Math.min(...widths("Percentile"))).toBeGreaterThan(60);
   });
 
   it("draws margin bars, with a baseline mark only when asked for one", () => {
     const html = render(
-      <RankedTable data={marginBrands.payload} variant="bars" size="margin" aside="Percentile in call" number={3} title="Outdoor" />,
+      <RankedTable data={marginBrands.payload} variant="bars" title="Outdoor" />,
     );
     const plot = plotView(html);
     expect(plot).toContain('role="img"');
-    expect(plot).not.toContain('class="fill-paper"');
-    expect(html).toContain("Percentile in call");
+    expect(plot).not.toContain('class="fill-surface"');
     // A category shows beside its name when there is room for it.
     expect(text(plot)).toContain("Pale Harborapparel");
     const ticked = plotView(render(<RankedTable data={marginBrands.payload} variant="bars" tick={0.8} title="Ticked" />));
-    expect(ticked.match(/class="fill-paper"/g)).toHaveLength(5);
+    expect(ticked.match(/class="fill-surface"/g)).toHaveLength(5);
     expect(ticked).toContain("the paper tick marks 0.80");
   });
 
@@ -215,8 +213,8 @@ describe("RankedTable · lists and bars", () => {
     const plot = plotView(html);
     const [gain] = rects(rowMarkup(plot, "B11"));
     const [loss] = rects(rowMarkup(plot, "B14"));
-    expect(gain!.cls).toBe("fill-data");
-    expect(loss!.cls).toBe("fill-negative");
+    expect(gain!.cls).toBe("fill-accent");
+    expect(loss!.cls).toBe("fill-second");
     expect(loss!.width).toBeGreaterThan(0);
     // Both bars meet at the zero line: the loss ends where the gain starts.
     expect(loss!.x + loss!.width).toBeCloseTo(gain!.x, 1);
@@ -232,9 +230,9 @@ describe("RankedTable · comparison rows from the payload", () => {
     const plot = plotView(render(<RankedTable data={nearestWithRivals.payload} width={384} title="Rivals" />));
     for (const key of EXPECTED_RIVALS) expect(rowMarkup(plot, key)).toContain('data-tone="comparison"');
     expect(rowMarkup(plot, "R5")).toContain('data-tone="highlight"');
-    const bars = plotView(render(<RankedTable data={nearestWithRivals.payload} variant="bars" size="margin" title="Rivals" />));
-    expect(rowMarkup(bars, "R2")).toContain("fill-data-2");
-    expect(rowMarkup(bars, "R7")).toContain('class="fill-data"');
+    const bars = plotView(render(<RankedTable data={nearestWithRivals.payload} variant="bars" title="Rivals" />));
+    expect(rowMarkup(bars, "R2")).toContain("fill-chart-muted");
+    expect(rowMarkup(bars, "R7")).toContain('class="fill-accent"');
     const lists = render(<RankedTable data={nearestWithRivals.payload} variant="lists" title="Rivals" />);
     expect(rowMarkup(plotView(lists), "R3")).toContain('data-tone="comparison"');
     const rows = tableRows(tableView(lists));

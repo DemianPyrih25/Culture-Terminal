@@ -18,16 +18,20 @@ import {
 import ngeohash from "ngeohash";
 import { describe, expect, it } from "vitest";
 import { SKILL_LIMITATIONS } from "../../src/limitations";
-import { HEATMAP_BASELINE } from "../../src/skills/findTags/curated";
+import { curatedConcept, HEATMAP_BASELINE } from "../../src/skills/findTags/curated";
 import { estimateGeoLiftCalls, geoLiftSkill, PLACES_TAKE } from "../../src/skills/geoLift";
+import { MIN_BUSY_AREA_VENUES, THIN_SUPPLY_LABEL } from "../../src/skills/geoLift/lift";
 import { BudgetError, fakeProbe, fakeRun, FakeRegistry, FETCHED_AT } from "./support/fakes";
 
 // A synthetic metro on public Austin coordinates: four invented neighbourhoods, invented tags with
-// public taxonomy namespaces, an invented locality id and invented venues (D29).
+// public taxonomy namespaces, an invented locality id and invented venues (D29). The supply filter is
+// the public wine bar category URN from config/categories.json, since geo_lift counts similar venues
+// only with a probe-verified category tag; UNVERIFIED is an invented one.
 
 const LOCALITY = "loc-synthetic-austin";
 const GENRE = "urn:tag:genre:place:test_wine_bar";
-const CATEGORY = "urn:tag:category:place:test_wine_bar";
+const CATEGORY = "urn:tag:category:place:wine_bar";
+const UNVERIFIED = "urn:tag:category:place:test_wine_cellar";
 const DESCRIPTIVE = "urn:tag:cuisine:qloo:test_natural_wine";
 const ANALOG = "ent-analog-venue-01";
 
@@ -204,6 +208,7 @@ function setup(options: QlooOptions & { world?: World; boxes?: Box[]; pins?: Loc
   registry.registerTag({ tagId: DESCRIPTIVE, name: "Natural Wine", type: "urn:tag:cuisine:qloo", signalCapable: false });
   registry.registerTag({ tagId: HEATMAP_BASELINE.tagId, name: "Restaurant", type: "urn:tag:genre:place", signalCapable: true });
   registry.registerEntity({ entityId: ANALOG, name: "Analog Venue One", type: "place", popularity: 0.6, disambiguation: null, tags: [] });
+  registry.registerTag({ tagId: UNVERIFIED, name: "Wine Cellar", type: "urn:tag:category:place", signalCapable: true });
   const qloo = liftQloo(options.world, options);
   const run = fakeRun(qloo.api, registry);
   const pins = options.pins === undefined ? PINS : options.pins;
@@ -211,7 +216,7 @@ function setup(options: QlooOptions & { world?: World; boxes?: Box[]; pins?: Loc
   return { ...run, ctx, calls: qloo.calls };
 }
 
-function input(raw: Partial<{ metro: MetroId; concept_tags: string[]; concept_entities: string[]; supply: boolean }> = {}) {
+function input(raw: Partial<{ metro: MetroId; concept_tags: string[]; concept_entities: string[]; supply: boolean; focus_areas: string[] }> = {}) {
   return geoLiftSkill.input.parse({
     metro: "austin",
     concept_tags: ["T1", "T2"],
@@ -488,14 +493,120 @@ describe("geo_lift: the lift map", () => {
     expect(result.forModel.notices).toContain("No neighbourhood boundaries for Nashville in this build: the map shows cells only.");
   });
 
-  it("takes no supply sample without a category tag, and says why", async () => {
-    const run = setup();
-    const result = await geoLiftSkill.run(input({ concept_tags: ["T1"] }), run.ctx);
-    expect(result.status).toBe("partial");
-    expect(run.calls.every((c) => c.filterType === "urn:heatmap")).toBe(true);
-    expect(liftMap(run).payload.supply).toBeNull();
+  it("reads competitors as unknown, never 0, without a verified category tag, and says why", async () => {
+    for (const concept_tags of [["T1"], ["T1", "T5"]]) {
+      const run = setup();
+      const result = await geoLiftSkill.run(input({ concept_tags }), run.ctx);
+      expect(result.status).toBe("partial");
+      // An unverified category tag (T5) is never sent: it could return no venue where many exist.
+      expect(run.calls.every((c) => c.filterType === "urn:heatmap")).toBe(true);
+      expect(result.flags).toContain("SUPPLY_UNAVAILABLE");
+      expect(run.ledger.evidences[0]?.flags).toContain("SUPPLY_UNAVAILABLE");
+      const sentence = "We can't count similar venues in Austin: Qloo's venue data has no verified category for Wine Bar, so the number of competitors here is unknown, not zero.";
+      expect(metricsOf(run, "lift.supply")).toMatchObject([{ value: null, reason: "unavailable", badge: "UNAVAILABLE", subjectRefs: ["austin", "T1"] }]);
+      expect(metricsOf(run, "lift.supply")[0]?.label).toContain(sentence);
+      const d = liftMap(run).payload;
+      expect(d.supply).toBeNull();
+      expect(d.supplyGap).toBe(sentence);
+      expect(d.neighbourhoods.every((n) => n.supplyCount === null && n.whiteSpace === null)).toBe(true);
+      expect(metricsOf(run, "lift.white_space")).toEqual([]);
+      const notices = result.forModel.notices.join(" ");
+      expect(notices).toContain(sentence);
+      expect(notices).toMatch(/never state or imply a competitor count/);
+      if (concept_tags.includes("T5")) expect(notices).toContain("T5 (Wine Cellar) is not a verified venue category");
+      expect(result.forModel.metrics.some((m) => m.badge === "UNAVAILABLE" && m.label.includes("unknown, never 0"))).toBe(true);
+    }
+  });
+
+  it("reads an empty venue sample as unknown competitors, never as zero venues in every area", async () => {
+    const run = setup({ world: { venues: [] } });
+    const result = await geoLiftSkill.run(input(), run.ctx);
+    expect(run.calls.filter((c) => c.filterType === "urn:entity:place")).toHaveLength(1);
+    expect(metricsOf(run, "lift.supply")).toMatchObject([{ value: null, reason: "not_measured", badge: "UNAVAILABLE" }]);
+    const d = liftMap(run).payload;
+    expect(d.supplyGap).toMatch(/came back empty in Austin, so the number of competitors here is unknown, not zero/);
+    expect(d.neighbourhoods.every((n) => n.supplyCount === null)).toBe(true);
+    // No find_tags suggestion: another tag found now would never be counted with, so the count stays unknown.
+    expect(run.ledger.findings.find((f) => f.kind === "EMPTY_RESULT")?.suggestion).toBeNull();
+    // No venue layer and no venue total: unknown is never drawn or totalled as 0.
+    expect(d.supply).toBeNull();
+    expect(result.flags).toContain("SUPPLY_UNAVAILABLE");
+    expect(result.forModel.notices.join(" ")).toMatch(/came back empty in Austin.*never state or imply a competitor count/);
+  });
+
+  it("reads a sample too thin to compare areas as unknown competitors, never as 0 or few", async () => {
+    const run = setup({ world: { venues: venues({ birch_hollow: 2, cedar_point: 3 }) } });
+    const result = await geoLiftSkill.run(input(), run.ctx);
+    expect(metricsOf(run, "lift.supply")).toMatchObject([{ value: null, reason: "insufficient_n", badge: "UNAVAILABLE" }]);
+    const d = liftMap(run).payload;
+    expect(d.supplyGap).toBe(
+      "Qloo's venue sample for Wine bar places only 5 similar venues in the Austin areas this map compares, too few to count " +
+        "competitors area by area (10 needed), so the number of competitors here is unknown, not zero.",
+    );
+    expect(d.supply).toBeNull();
+    expect(d.neighbourhoods.every((n) => n.supplyCount === null && n.quadrant === null)).toBe(true);
     expect(metricsOf(run, "lift.white_space")).toEqual([]);
-    expect(result.forModel.notices.join(" ")).toMatch(/Supply needs a category:place concept tag/);
+    expect(run.ledger.findings.some((f) => f.kind === "LATENT_DEMAND")).toBe(false);
+    expect(run.ledger.evidences.find((e) => e.purpose.startsWith("Places sample"))?.flags).toContain("SUPPLY_UNAVAILABLE");
+    expect(result.forModel.notices.join(" ")).toMatch(/too few to count competitors area by area.*never state or imply a competitor count/);
+  });
+
+  it("reads venues that all lie outside the areas with a lift as unknown competitors, never as 0 in every area", async () => {
+    const far: QlooEntity[] = Array.from({ length: 12 }, (_, k) => ({
+      entity_id: `ent-venue-far-${k}`,
+      name: `Venue Far ${k}`,
+      popularity: 0.4,
+      location: { lat: FAR_AWAY.minLat + 0.0005 * (k + 1), lon: FAR_AWAY.minLon + 0.0005 * (k + 1) },
+    }));
+    const run = setup({ world: { venues: far }, boxes: [...QUADRANTS, FAR_AWAY] });
+    await geoLiftSkill.run(input({ focus_areas: ["birch_hollow"] }), run.ctx);
+    expect(metricsOf(run, "lift.supply")).toMatchObject([{ value: null, reason: "insufficient_n", subjectRefs: ["austin", "T1"] }]);
+    expect(liftMap(run).payload.supplyGap).toMatch(/places only 0 similar venues/);
+    expect(liftMap(run).payload.neighbourhoods.every((n) => n.supplyCount === null)).toBe(true);
+  });
+
+  it("counts with the place type's verified category when the call sends only its genre tag", async () => {
+    const curated = curatedConcept("wine bar");
+    const genre = curated?.served.find((t) => t.use === "heatmap_signal");
+    const category = curated?.served.find((t) => t.use === "place_filter");
+    if (genre === undefined || category === undefined) throw new Error("expected the curated wine bar tags");
+    const run = setup();
+    const ref = run.registry.registerTag({ tagId: genre.tagId, name: "Wine Bar", type: "urn:tag:genre:place", signalCapable: true }).ref;
+    const result = await geoLiftSkill.run(input({ concept_tags: [ref] }), run.ctx);
+    const places = run.calls.filter((c) => c.filterType === "urn:entity:place");
+    expect(places.length).toBeGreaterThan(0);
+    expect(places[0]?.params["filter.tags"]).toEqual([category.tagId]);
+    expect(result.flags).not.toContain("SUPPLY_UNAVAILABLE");
+    expect(liftMap(run).payload.supplyGap).toBeUndefined();
+  });
+
+  it("labels a counted supply as a sample of Qloo-indexed venues", async () => {
+    const run = setup();
+    await geoLiftSkill.run(input(), run.ctx);
+    expect(metricsOf(run, "lift.white_space").every((m) => m.label.includes("from a sample of Qloo-indexed venues"))).toBe(true);
+    expect(liftMap(run).payload.caption).toContain("a capped sample of Qloo-indexed venues, not every business");
+    expect(liftMap(run).payload.supplyGap).toBeUndefined();
+    expect(metricsOf(run, "lift.supply")).toEqual([]);
+  });
+
+  it("never cites a capped sample's 0 as a count: the named area's supply is UNAVAILABLE and reads Not enough venue data", async () => {
+    // 110 located venues, so both pages come back full (capped); none of them in Birch Hollow.
+    const run = setup({ world: { venues: venues({ alder_flats: 60, cedar_point: 30, dunmore_yards: 20 }) } });
+    const result = await geoLiftSkill.run(input({ focus_areas: ["birch_hollow"] }), run.ctx);
+    const map = liftMap(run).payload;
+    expect(map.supply?.capped).toBe(true);
+    const birch = map.neighbourhoods.find((n) => n.id === "birch_hollow");
+    expect(birch).toMatchObject({ supplyCount: 0, quadrant: null, whiteSpace: null, supplyPct: null });
+    const supply = metricsOf(run, "lift.supply").filter((m) => m.subjectRefs[0] === "birch_hollow");
+    expect(supply).toMatchObject([{ value: null, reason: "insufficient_n", badge: "UNAVAILABLE" }]);
+    expect(supply[0]?.label).toMatch(/^similar venues in Birch Hollow: unknown, not 0 \(not enough venue data\)\. None of the venues in Qloo's capped sample/);
+    const digest = ModelDigest.parse(result.forModel);
+    expect(digest.top_rows[0]?.values).toMatchObject({ area: "birch_hollow", quadrant: THIN_SUPPLY_LABEL });
+    expect(digest.notices.find((n) => n.includes("the area the question names"))).toContain(`Its competition reads "${THIN_SUPPLY_LABEL}"`);
+    // No area of the map is called crowded or saturated from fewer venues than the rule asks.
+    for (const n of map.neighbourhoods) {
+      if (n.quadrant === "PROVEN_CROWDED" || n.quadrant === "SATURATED") expect(n.supplyCount ?? 0).toBeGreaterThanOrEqual(MIN_BUSY_AREA_VENUES);
+    }
   });
 
   it("skips supply when it is not asked for", async () => {
@@ -522,6 +633,114 @@ describe("geo_lift: the lift map", () => {
     expect(run.ledger.metrics.length).toBeLessThanOrEqual(13);
     expect(result.forModel.metrics.map((m) => m.id)).toEqual(run.ledger.metrics.map((m) => m.id));
     expect(liftMap(run).payload.neighbourhoods).toHaveLength(36);
+  });
+});
+
+/** 36 invented neighbourhoods in a six-by-six grid over the synthetic box. */
+function grid36(): Box[] {
+  const boxes: Box[] = [];
+  for (let i = 0; i < 6; i++) {
+    for (let j = 0; j < 6; j++) {
+      const lat = BOX.minLat + (i * (BOX.maxLat - BOX.minLat)) / 6;
+      const lon = BOX.minLon + (j * (BOX.maxLon - BOX.minLon)) / 6;
+      boxes.push({ id: `area_${i}_${j}`, name: `Invented Quarter ${i}${j}`, minLat: lat, maxLat: lat + 0.02 / 6, minLon: lon, maxLon: lon + 0.02 / 6 });
+    }
+  }
+  return boxes;
+}
+
+describe("geo_lift: the areas the question names", () => {
+  // Finer maps, so most of the 36 small areas reach the five gated cells a lift needs.
+  const fine = (): World => ({ concept: rows(8, conceptAffinity), baseline: rows(8, baselineAffinity) });
+
+  /** The ids of the areas with a lift, highest first, from a run without focus areas. */
+  async function rankedIds(boxes: Box[]): Promise<string[]> {
+    const run = setup({ boxes, world: fine() });
+    await geoLiftSkill.run(input(), run.ctx);
+    return liftMap(run).payload.neighbourhoods.filter((n) => n.lift !== null).map((n) => n.id);
+  }
+
+  it("gives a named area outside the top five its own lift, rank, confidence and sampled venues, first", async () => {
+    const boxes = grid36();
+    const ranked = await rankedIds(boxes);
+    expect(ranked.length).toBeGreaterThan(8);
+    const named = ranked[7] as string;
+    const run = setup({ boxes, world: fine() });
+    const result = await geoLiftSkill.run(input({ focus_areas: [named] }), run.ctx);
+    const about = (key: string) => metricsOf(run, key).filter((m) => m.subjectRefs[0] === named);
+
+    expect(about("lift.area")).toHaveLength(1);
+    expect(about("lift.area")[0]?.label).toMatch(/\(named in the question\)$/);
+    expect(about("lift.rank")).toMatchObject([{ value: 8, display: `8 of ${ranked.length}`, unit: "rank", badge: "DERIVED", n: ranked.length }]);
+    expect(about("lift.confidence")).toHaveLength(1);
+    expect(about("lift.confidence")[0]?.label).toMatch(/gated cells? × map precision/);
+    const venues = about("lift.supply");
+    expect(venues).toHaveLength(1);
+    expect(venues[0]?.label).toMatch(/in a sample of Qloo-indexed venues, not every business/);
+    expect(venues[0]?.value).toBe(liftMap(run).payload.neighbourhoods.find((n) => n.id === named)?.supplyCount);
+
+    // The model reads the named area first: its digest row, and a notice that says its rank.
+    const digest = ModelDigest.parse(result.forModel);
+    expect(digest.top_rows[0]?.values).toMatchObject({ area: named, named: "in the question", lift_rank: 8, ranked_of: ranked.length, rank_metric: about("lift.rank")[0]?.id });
+    const lead = digest.notices.find((n) => n.includes("the area the question names"));
+    expect(lead).toMatch(new RegExp(`the area the question names, ranks 8 of ${ranked.length} areas with a lift`));
+    expect(lead).toContain(about("lift.rank")[0]?.id ?? "missing");
+    // Only the row cut, which fitting adds, may come before it.
+    expect(digest.notices.indexOf(lead ?? "")).toBeLessThanOrEqual(1);
+    expect(digestFits(digest, { tool: "geo_lift", step: "S2" })).toBe(true);
+    expect(liftMap(run).payload.focusAreas).toEqual([named]);
+    // The top three and the lowest keep their own lift metrics.
+    for (const id of [...ranked.slice(0, 3), ranked[ranked.length - 1] as string]) expect(metricsOf(run, "lift.area").some((m) => m.subjectRefs[0] === id)).toBe(true);
+  });
+
+  it("reuses a named area's metric when it is already among the top areas", async () => {
+    const boxes = grid36();
+    const ranked = await rankedIds(boxes);
+    const top = ranked[0] as string;
+    const run = setup({ boxes, world: fine() });
+    await geoLiftSkill.run(input({ focus_areas: [top] }), run.ctx);
+    expect(metricsOf(run, "lift.area").filter((m) => m.subjectRefs[0] === top)).toHaveLength(1);
+    expect(metricsOf(run, "lift.confidence").filter((m) => m.subjectRefs[0] === top)).toHaveLength(1);
+    expect(metricsOf(run, "lift.rank").find((m) => m.subjectRefs[0] === top)?.display).toBe(`1 of ${ranked.length}`);
+  });
+
+  it("says plainly when a named area has too few gated cells for a reliable lift", async () => {
+    // A tiny invented corner, listed first so its cells are located there: too small for five gated cells.
+    const corner: Box = { id: "fig_corner", name: "Fig Corner", minLat: 30.2645, maxLat: 30.2655, minLon: -97.7455, maxLon: -97.7445 };
+    const run = setup({ boxes: [corner, ...QUADRANTS] });
+    const result = await geoLiftSkill.run(input({ focus_areas: ["fig_corner"] }), run.ctx);
+    const area = metricsOf(run, "lift.area").find((m) => m.subjectRefs[0] === "fig_corner");
+    expect(area).toMatchObject({ value: null, reason: "insufficient_n", badge: "UNAVAILABLE" });
+    expect(area?.label).toMatch(/^lift of Fig Corner vs the restaurant baseline: not measured, (only \d of the 5 gated cells a reliable lift needs|no gated cell, and a reliable lift needs 5)$/);
+    expect(metricsOf(run, "lift.rank").some((m) => m.subjectRefs[0] === "fig_corner")).toBe(false);
+    expect(result.forModel.notices[0]).toMatch(/^Fig Corner \(fig_corner\), the area the question names, has no lift: .*gated cell.*Say so plainly; do not rank it or read it as low interest\.$/);
+    expect(result.forModel.top_rows[0]?.values).toMatchObject({ area: "fig_corner", named: "in the question", unscored: "insufficient_n" });
+    expect(result.forModel.top_rows[0]?.values.gated_cells).toBe(area?.n);
+  });
+
+  it("names an id outside the metro's areas and leaves it out", async () => {
+    const run = setup();
+    const result = await geoLiftSkill.run(input({ focus_areas: ["nowhere_heights"] }), run.ctx);
+    expect(result.forModel.notices).toContain("nowhere_heights is not an area of Austin (AREAS); left out of focus_areas.");
+    expect(liftMap(run).payload.focusAreas).toBeUndefined();
+  });
+
+  it("keeps three named areas in a metro of many areas within the digest budget", async () => {
+    const boxes = grid36();
+    const ranked = await rankedIds(boxes);
+    const named = [ranked[6], ranked[9], ranked[ranked.length - 2]] as string[];
+    const run = setup({ boxes, world: fine() });
+    const result = await geoLiftSkill.run(input({ focus_areas: named }), run.ctx);
+    const digest = ModelDigest.parse(result.forModel);
+    expect(digestFits(digest, { tool: "geo_lift", step: "S2" })).toBe(true);
+    expect(digest.metrics.map((m) => m.id)).toEqual(run.ledger.metrics.map((m) => m.id));
+    expect(digest.top_rows.slice(0, 3).map((r) => r.values.area)).toEqual(named);
+    expect(digest.notices.filter((n) => n.includes("the area the question names"))).toHaveLength(3);
+    expect(metricsOf(run, "lift.rank")).toHaveLength(3);
+  });
+
+  it("rejects more than three named areas", () => {
+    expect(() => input({ focus_areas: ["a", "b", "c", "d"] })).toThrow();
   });
 });
 
@@ -592,7 +811,10 @@ describe("geo_lift: budget and failures", () => {
     expect(result.status).toBe("partial");
     expect(run.ledger.evidences).toHaveLength(0);
     expect(run.ledger.datasets).toHaveLength(0);
-    expect(run.ledger.metrics).toMatchObject([{ key: "lift.area", value: null, reason: "budget_truncated" }]);
+    expect(run.ledger.metrics).toMatchObject([
+      { key: "lift.supply", value: null, reason: "budget_truncated" },
+      { key: "lift.area", value: null, reason: "budget_truncated" },
+    ]);
   });
 
   it("keeps the first supply page when the budget stops the second", async () => {

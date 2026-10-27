@@ -104,7 +104,7 @@ describe("PreviewService", () => {
         pillar: "location",
         job: "site_selection",
         mentions: [],
-        geo: { metro, area: null, unsupported_place: null },
+        geo: { metro, area: null, unsupported_place: null, market: null },
         constraints: { concepts: ["natural-wine bar"], sponsor_categories: [], domains: [], ages: [], notes: [] },
         mnemonic: "NATURAL-WINE BAR SITE AUSTIN",
       });
@@ -244,7 +244,7 @@ describe("PreviewService", () => {
     expect(await paused.preview(QUESTION)).toEqual({
       kind: "refused",
       code: "unavailable",
-      message: "Live analysis is paused. Showcases and replays still work.",
+      message: "Live analysis is paused. Answers you already have still open.",
       retryAfterS: null,
       alreadyHave: hit,
     });

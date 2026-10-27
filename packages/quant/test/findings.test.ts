@@ -388,7 +388,7 @@ describe("LATENT_DEMAND", () => {
       }),
     );
     expect(d.text).toBe(
-      "Hilltop and Riverside in Austin show high demand for this concept with low venue supply: latent, open white space.",
+      "Hilltop and Riverside in Austin show high demand for this concept and fewer similar venues than most areas in Qloo's venue sample (a sample, not every business): possible white space.",
     );
     expect(d.suggestion).toEqual({ tool: "block_dna", reason: "Profile the Block DNA of Hilltop to see what its venue-goers favour." });
   });

@@ -1,28 +1,34 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { RunEvent, RunState } from "@ct/contracts";
-import { buildBriefModel } from "../../lib/brief";
-import { useRunState, type ReplaySpeed, type UseRunStateOptions } from "../../lib/run-stream";
-import { BriefDocument } from "./brief-document";
-import { useFreshCalls, useNow } from "./hooks";
-import type { ReplayBarProps } from "./replay-bar";
+import { buildAnswerModel } from "../../lib/answer";
+import { buildBriefModel, type BriefModel } from "../../lib/brief";
+import { useRunState, type UseRunStateOptions } from "../../lib/run-stream";
+import { PermalinkAnswer } from "../answer/permalink-answer";
+import { DraftChartCard } from "../working/draft-chart";
+import { draftKeyNumber } from "../working/draft-numbers";
+import { handOver } from "../working/hand-over";
+import { useConnectionLost, useNow } from "../working/use-now";
+import { REPLAY_SPEEDS_SHOWN, type ShownSpeed } from "../working/replay-controls";
+import { WorkingView, type WorkingReplay } from "../working/working-view";
 import { recordedEventSource } from "./sample-source";
 
 /**
- * The brief page's state (Concept A, D36). The server renders the first paint from the run's stored
- * events; then a live run keeps streaming (with reconnects) and is rebuilt into the brief as each event
- * lands, a finished run stays as it is, and a replay plays the stored events back at 1×, 4× or 16×.
+ * /run/[id] (design/redesign.pen N03, N04, N16; the answer N05–N12): the server renders the first paint
+ * from the run's stored events; then a live run streams (with reconnects) and is rebuilt as each event
+ * lands, a finished run stays as it is, and a replay plays the stored events back at 1× or 4×. While the
+ * answer is being made it is the working view; once its report arrives it swaps in place to the answer.
  */
 
 export type BriefViewMode = "live" | "replay" | "static";
 
 export interface BriefLinks {
-  /** The brief's own path, copied by Share. */
+  /** The answer's own path, copied by Share. */
   permalink: string;
-  /** The replay of a finished brief; null hides "Replay". */
+  /** The replay of a finished answer; null hides "Watch it being made". */
   replay: string | null;
-  /** Where "Exit replay" goes. */
+  /** Where leaving the replay goes. */
   exitReplay: string;
 }
 
@@ -39,7 +45,7 @@ export interface BriefViewProps {
   /** The question from the run row, until run.created arrives. */
   fallbackQuestion?: string | null;
   links: BriefLinks;
-  /** A reader's own question, not a curated showcase: marked "Unlisted · user question" (D31). */
+  /** A reader's own question, not a curated showcase (D31): the page is unlisted (noindex). */
   unlisted?: boolean;
 }
 
@@ -58,88 +64,118 @@ function streamOptions(events: readonly RunEvent[] | null | undefined): UseRunSt
   return events ? { createEventSource: recordedEventSource(events) } : undefined;
 }
 
-/**
- * The state a live brief shows: the stream replays the run from its first event, so until it has caught
- * up with the server's first paint, that paint stays on screen.
- */
-export function handOver(streamed: RunState, initial: RunState): RunState {
-  return streamed.lastSeq > 0 && streamed.lastSeq >= initial.lastSeq ? streamed : initial;
+export { handOver };
+
+interface PageProps {
+  runId: string;
+  model: BriefModel;
+  state: RunState;
+  mode: BriefViewMode;
+  links: BriefLinks;
+  fallbackQuestion: string | null;
+  elapsedMs: number;
+  connectionLost?: boolean;
+  replay?: WorkingReplay | null;
 }
 
-const callIds = (state: RunState) => state.qloo.chips.map((c) => c.qlooCallId);
+/** The working view until the report arrives; then the answer, with its How we know drawer. */
+function RunPage({ runId, model, state, mode, links, fallbackQuestion, elapsedMs, connectionLost, replay }: PageProps) {
+  // While the answer is made: its key numbers and main chart so far, worded as the answer will word them.
+  const answer = useMemo(
+    () => (state.report === null ? buildAnswerModel(model, { resolves: state.resolves, ghost: state.ghost, report: null, metrics: state.metrics }, { fallbackQuestion }) : null),
+    [model, state, fallbackQuestion],
+  );
 
-function StaticBrief({ initialState, serverNow, links, fallbackQuestion, unlisted }: BriefViewProps) {
-  const model = useMemo(() => buildBriefModel(initialState, serverNow), [initialState, serverNow]);
+  // The report is in: the answer, with its How we know drawer.
+  if (state.report !== null || answer === null) {
+    return <PermalinkAnswer model={model} state={state} runId={runId} mode={mode} links={links} fallbackQuestion={fallbackQuestion} />;
+  }
+
+  const chart: ReactNode = answer.charts.main ? <DraftChartCard chart={answer.charts.main} draft={state.draft} /> : null;
   return (
-    <BriefDocument
+    <WorkingView
+      runId={runId}
       model={model}
-      state={initialState}
-      view={model.live ? "live" : "final"}
-      links={{ permalink: links.permalink, replay: model.live ? null : links.replay }}
+      state={state}
+      mode={mode}
       fallbackQuestion={fallbackQuestion}
-      unlisted={unlisted}
+      elapsedMs={elapsedMs}
+      replay={replay}
+      connectionLost={connectionLost}
+      keyNumbers={answer.keyNumbers.map(draftKeyNumber)}
+      chart={chart}
+      sharePath={links.permalink}
     />
   );
 }
 
-function LiveBrief({ runId, initialState, serverNow, events, links, fallbackQuestion, unlisted }: BriefViewProps) {
+function StaticBrief({ runId, initialState, serverNow, links, fallbackQuestion = null }: BriefViewProps) {
+  const model = useMemo(() => buildBriefModel(initialState, serverNow), [initialState, serverNow]);
+  return (
+    <RunPage
+      runId={runId}
+      model={model}
+      state={initialState}
+      mode="static"
+      links={links}
+      fallbackQuestion={fallbackQuestion}
+      elapsedMs={initialState.ended?.elapsedMs ?? 0}
+    />
+  );
+}
+
+function LiveBrief({ runId, initialState, serverNow, events, links, fallbackQuestion = null }: BriefViewProps) {
   const client = useMemo(() => streamOptions(events), [events]);
   const handle = useRunState(runId, { client });
   const state = handOver(handle.state, initialState);
-  // A call the first paint showed never flashes; one that lands while the reader watches flashes once.
-  const [known] = useState(() => callIds(initialState));
-  const isFresh = useFreshCalls(callIds(state), known);
   const now = useNow(serverNow, state.ended === null);
   const model = useMemo(() => buildBriefModel(state, now), [state, now]);
+  const lost = useConnectionLost(handle.connection);
   return (
-    <BriefDocument
+    <RunPage
+      runId={runId}
       model={model}
       state={state}
-      view={model.live ? "live" : "final"}
-      connection={handle.connection}
-      links={{ permalink: links.permalink, replay: model.live ? null : links.replay }}
+      mode="live"
+      links={links}
       fallbackQuestion={fallbackQuestion}
-      isFresh={isFresh}
-      unlisted={unlisted}
+      elapsedMs={model.live?.progress.elapsedMs ?? state.ended?.elapsedMs ?? 0}
+      connectionLost={lost}
     />
   );
 }
 
-function ReplayBrief({ runId, initialState, serverNow, events, links, fallbackQuestion, unlisted }: BriefViewProps) {
-  const [speed, setSpeed] = useState<ReplaySpeed>(4);
+function ReplayBrief({ runId, initialState, serverNow, events, links, fallbackQuestion = null }: BriefViewProps) {
+  const [speed, setSpeed] = useState<ShownSpeed>(REPLAY_SPEEDS_SHOWN[1]);
   const client = useMemo(() => streamOptions(events), [events]);
   const handle = useRunState(runId, { replay: { speed }, client });
   const controls = handle.replay;
   const state = handle.state;
-  // Everything in a replay lands while the reader watches, and flashes once as it does.
-  const isFresh = useFreshCalls(callIds(state));
   const now = state.createdAt ? Date.parse(state.createdAt) + (controls?.positionMs ?? 0) : serverNow;
   const model = useMemo(() => buildBriefModel(state, now), [state, now]);
-  const replay: ReplayBarProps | null = controls
+  const replay: WorkingReplay | null = controls
     ? {
         playing: controls.playing,
         done: controls.done,
         speed,
-        progress: controls.progress,
-        positionMs: controls.positionMs,
-        durationMs: controls.durationMs,
         onPlay: controls.play,
         onPause: controls.pause,
         onSpeed: setSpeed,
-        onRestart: controls.restart,
-        exitHref: links.exitReplay,
+        positionMs: controls.positionMs,
+        durationMs: controls.durationMs,
+        progress: controls.progress,
       }
     : null;
   return (
-    <BriefDocument
+    <RunPage
+      runId={runId}
       model={model}
       state={state}
-      view="replay"
-      replay={replay}
-      links={{ permalink: links.permalink, replay: null }}
+      mode="replay"
+      links={links}
       fallbackQuestion={initialState.question ?? fallbackQuestion}
-      isFresh={isFresh}
-      unlisted={unlisted}
+      elapsedMs={controls?.positionMs ?? 0}
+      replay={replay}
     />
   );
 }

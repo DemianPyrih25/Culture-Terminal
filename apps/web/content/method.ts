@@ -7,7 +7,7 @@ import {
   type SkillId,
   type ValidationRule,
 } from "@ct/contracts";
-import type { FormulaId } from "@ct/quant";
+import { MIN_BUSY_AREA_VENUES, MIN_SUPPLY_VENUES, THIN_SUPPLY_LABEL, type FormulaId } from "@ct/quant";
 
 /**
  * The copy of /method (A11 · Method & sources). The numbers in it come from the code: the page passes
@@ -29,34 +29,26 @@ export interface MethodFacts {
 }
 
 export const METHOD_PAGE = {
-  metaTitle: "Method & sources · Culture Terminal",
+  metaTitle: "Method · Culture Terminal",
   metaDescription:
-    "How a Culture Terminal brief is made: the seven steps, the checker rules, the conviction penalties and every formula, generated from the code.",
-  kicker: "Appendix",
-  section: "Method & sources",
-  extra: ["Generated from the code", "Applies to every brief"],
-  title: "How a brief is made",
-  lede: "The model proposes; the data disposes. Every number is traced to its request.",
-  outlineHeading: "On this page",
-  outlineTrace: "Method · from the code",
-  trustLink: "Trust & safety",
-  trustLinkNote: "Refusals, the audience allowlist, data handling and cost guards.",
+    "Every formula and rule behind a Culture Terminal answer: the steps, the checks, confidence, what we refuse and the guards, generated from the code.",
+  title: "Every formula and rule",
+  lede: "How an answer is made, how each number is checked, and what we refuse. Generated from the code every answer runs on.",
 } as const;
 
-export type MethodSectionId = "steps" | "marks" | "checker" | "conviction" | "formulas" | "eval" | "refuse";
+export type MethodSectionId = "steps" | "marks" | "checker" | "conviction" | "formulas" | "eval";
 
 /** Outline label, section title and the note on the right of its head. `eval` is the anchor SPEC §6.7 names. */
 export const METHOD_SECTIONS: Readonly<Record<MethodSectionId, { title: string; aside: string }>> = {
-  steps: { title: "The seven steps", aside: "Same for every brief" },
-  marks: { title: "Evidence marks", aside: "How to read a brief" },
+  steps: { title: "The seven steps", aside: "Same for every answer" },
+  marks: { title: "Evidence marks", aside: "How to read an answer" },
   checker: { title: "Checker rules", aside: "Code, not a model" },
-  conviction: { title: "Conviction", aside: "Computed, not chosen" },
+  conviction: { title: "Confidence", aside: "Computed, not chosen" },
   formulas: { title: "Formulas", aside: "Every number has one" },
   eval: { title: "Evaluation", aside: "With and without Qloo" },
-  refuse: { title: "What we refuse", aside: "Decided before any request" },
 };
 
-export const METHOD_SECTION_ORDER: readonly MethodSectionId[] = ["steps", "marks", "checker", "conviction", "formulas", "eval", "refuse"];
+export const METHOD_SECTION_ORDER: readonly MethodSectionId[] = ["steps", "marks", "checker", "conviction", "formulas", "eval"];
 
 // 01 The seven steps ------------------------------------------------------------------------------------
 
@@ -77,7 +69,7 @@ export function methodSteps(f: MethodFacts): StepCopy[] {
   const clerk = family(f.clerkModel);
   const analyst = family(f.analystModel);
   return [
-    { name: "Interpret", text: "The question becomes an intent: desk, job, names and safety.", who: `Clerk · ${clerk}` },
+    { name: "Interpret", text: "The question becomes an intent: topic, job, names and safety.", who: `Clerk · ${clerk}` },
     { name: "Resolve", text: "Names must match Qloo exactly; a near miss stops at a picker.", who: "Gate · code" },
     {
       name: "Plan",
@@ -90,7 +82,7 @@ export function methodSteps(f: MethodFacts): StepCopy[] {
     },
     {
       name: "Fetch",
-      text: `Up to ${f.limits.qlooCalls} Qloo requests per brief; repeats come from cache.`,
+      text: `Up to ${f.limits.qlooCalls} Qloo requests per answer; repeats come from cache.`,
       who: "Quant · code",
       note: {
         text: "A cached request keeps its original request id and fetch time, and its age is shown on every note.",
@@ -134,7 +126,7 @@ export function analystTurns(f: MethodFacts): { label: string; text: string }[] 
     { label: "Turn 3", text: "The report. Any further data call is refused." },
     {
       label: "Guards",
-      text: `At most ${l.modelResponses} model responses. A nudge at ${Math.round(l.softMs / 1000)} s and a stop at ${Math.round(l.hardMs / 1000)} s; a wrap-up nudge at $${l.usdNudge.toFixed(2)} of model spend and a stop at $${l.usdHard.toFixed(2)}. A brief with no report by then becomes an evidence digest marked incomplete.`,
+      text: `At most ${l.modelResponses} model responses. A nudge at ${Math.round(l.softMs / 1000)} s and a stop at ${Math.round(l.hardMs / 1000)} s; a wrap-up nudge at $${l.usdNudge.toFixed(2)} of model spend and a stop at $${l.usdHard.toFixed(2)}. An answer with no report by then becomes an evidence digest marked incomplete.`,
     },
   ];
 }
@@ -142,23 +134,30 @@ export function analystTurns(f: MethodFacts): { label: string; text: string }[] 
 // 02 Evidence marks ---------------------------------------------------------------------------------------
 
 export const MARKS_COPY = {
-  claimsHeading: "Claims",
-  dataHeading: "Data",
-  traced: "Number traced to a request",
-  delta: "Comparator always named",
-  cached: "From cache; age shown",
+  claimsHeading: "On a number",
+  dataHeading: "On the data",
+  guessesHeading: "On a guess",
+  source: "Opens the Qloo requests behind a number",
+  draft: "Still being checked; opens once every number passes",
+  cached: "From the shared cache; its age is shown",
   noSignal: "No data; never drawn as 0",
-  fallback: (points: number) => `Simpler query; −${points} conviction`,
   /** The sample glyphs the legend draws. */
-  samples: { comparator: "vs peers", cached: "cached 2h", fallback: "Fallback" },
+  samples: { cached: "Saved copy, 2h old" },
   badgesHeading: "Badges",
   badgesCaption: "The five badges and their weight in evidence strength",
   badgeColumns: { badge: "Badge", meaning: "Meaning" },
   badgesIntro:
-    "Every number carries one badge. Its weight m scales the evidence strength conf = m·(1 − 1/√n), which sets the Strong, Moderate and Thin pills.",
+    "Every number carries one badge. Its weight m scales the evidence strength conf = m·(1 − 1/√n), which sets the Strong, Moderate and Thin tags.",
   weightLabel: "Weight",
   staleWeight: "freshness F",
 } as const;
+
+/** The guess states an answer shows, by the verdict behind them. */
+export const VERDICT_WORD: Readonly<Record<ScorecardVerdict, string>> = {
+  CONFIRMED: "As expected",
+  REFUTED: "Surprise",
+  INCONCLUSIVE: "Can't tell yet",
+};
 
 export const VERDICT_MEANING: Readonly<Record<ScorecardVerdict, string>> = {
   CONFIRMED: "Prior held against the data",
@@ -184,7 +183,7 @@ export interface RuleCopy {
 }
 
 export const CHECKER_INTRO =
-  "The checker reads every draft report before anyone sees it. It is code, not a model. A rejection sends the draft back once; after that the report is accepted with warnings, and each warning costs conviction.";
+  "The checker reads every draft report before anyone sees it. It is code, not a model. A rejection sends the draft back once; after that the report is accepted with warnings, and each warning lowers confidence.";
 
 export function checkerRules(f: MethodFacts): Readonly<Record<ValidationRule, RuleCopy>> {
   const r = REPORT_LIMITS;
@@ -219,28 +218,33 @@ export function checkerRules(f: MethodFacts): Readonly<Record<ValidationRule, Ru
       action: "Rejects",
     },
     V10: {
-      title: "Demographics are measured",
-      text: "Age, gender or generation is claimed only where the same part cites a metric that measures it.",
+      title: "Claims are measured",
+      text:
+        "Age, gender or generation is claimed only where the same part cites a metric that measures it. " +
+        "A competitor claim (a count, few or no rivals, crowded, white space) needs the same part to cite a counted venue sample: " +
+        `at least ${MIN_SUPPLY_VENUES} similar venues across the compared areas, and ${MIN_BUSY_AREA_VENUES} in an area before it is called crowded. ` +
+        `An area with none in a capped sample is not "few": its competition is unknown, and the map reads ${THIN_SUPPLY_LABEL}. ` +
+        "Where similar venues could not be counted, the note says the count is unknown.",
       action: "Rejects; warns on the repair",
     },
   };
 }
 
 export const CHECKER_NOTE = {
-  text: (points: number) => `Each warning a report is accepted with costs ${points} conviction points.`,
+  text: (points: number) => `Each warning a report is accepted with costs ${points} confidence points.`,
   trace: "checker_warning",
 };
 
 // 04 Conviction --------------------------------------------------------------------------------------------
 
 export const CONVICTION_COPY = {
-  intro: "Conviction starts at 100 and loses points only by written rules. Code computes it from the run's flags; the model never sets it.",
+  intro: "Confidence starts at 100 and loses points only by written rules. Code computes it from the run's flags; the model never sets it.",
   start: "Start",
-  caption: "Conviction penalties",
+  caption: "Confidence penalties",
   bandsHeading: "Bands",
   once: "once",
   each: "each",
-  note: "Conviction measures how complete and clean this run's evidence is, not the chance that the conclusion is right.",
+  note: "Confidence rates how complete and clean the run's evidence is, not the chance that the conclusion is right.",
   noteTrace: "confidence.run",
 } as const;
 
@@ -251,7 +255,7 @@ export const CONFIDENCE_ONCE: ReadonlySet<ConfidenceRule> = new Set(["coarse_geo
 
 export const FORMULAS_COPY = {
   intro:
-    "Every number in a brief names one of these formulas, and a figure's ⓘ link opens its entry here. They render from the same registry the code computes with.",
+    "Every number in an answer names one of these formulas, and “How it's calculated” in How we know opens its entry here. They render from the same registry the code computes with.",
   inputs: "Reads",
   caveats: "Caveats",
   badge: "Badge",
@@ -281,7 +285,7 @@ export const FORMULA_GROUPS: readonly FormulaGroup[] = [
     id: "resolve",
     title: "Name matching",
     skill: "resolve_entities",
-    where: "Run by the resolution gate on every brief; the analyst calls it for new names",
+    where: "Run by the resolution gate on every answer; the analyst calls it for new names",
     formulas: ["resolve.exact_match"],
   },
   {
@@ -390,7 +394,7 @@ export const EVAL_COPY = {
     "The evaluation has not been run yet, so there are no results to show. When it runs, this section prints its aggregates, never single answers.",
   unreadable: "An evaluation summary exists but could not be read, so no results are shown.",
   design:
-    "Pre-registered questions across the four desks, adversarial ones included, are answered twice: by the full system, and by the same model with no tools (Ghost). A Reality Check scores public, real-world choices against Qloo.",
+    "Pre-registered questions across the four topics, adversarial ones included, are answered twice: by the full system, and by the same model with no tools (Ghost). A Reality Check scores public, real-world choices against Qloo.",
   measures: [
     "How often priors are refuted",
     "Overlap of the top five picks, with and without Qloo",
@@ -398,7 +402,7 @@ export const EVAL_COPY = {
     "Numbers bound to a source",
     "Adversarial questions handled correctly",
     "Checker first-pass rate",
-    "Latency, Qloo calls and model cost per brief",
+    "Latency, Qloo calls and model cost per answer",
   ],
   measuresHeading: "What it measures",
   ranAt: "Run",
@@ -415,33 +419,16 @@ export const EVAL_COPY = {
   noteTrace: "eval · aggregates only",
 } as const;
 
-// 07 What we refuse ----------------------------------------------------------------------------------------
-
-export function refusalSummary(f: MethodFacts): { term: string; text: string }[] {
-  return [
-    { term: "Individuals", text: "Group-level data only. No private person is profiled, named or looked up." },
-    { term: "Politics", text: "No political, electoral or religious targeting of any audience." },
-    { term: "Advice", text: "No buy, sell or hold language. The checker blocks advice terms." },
-    { term: "Forecasts", text: `Nothing after ${f.windowEnd}. Later periods show No signal, not a guess.` },
-  ];
-}
-
-export const REFUSE_NOTE = {
-  text: "A refused question stops before any request and costs no Qloo data. The reason and a group-level reframe replace the brief.",
-  trace: "clerk · safety",
-};
-
-// The sidebar ----------------------------------------------------------------------------------------------
+// Sources ----------------------------------------------------------------------------------------------------
 
 export const METHOD_SOURCES = {
-  traceHead: (formulas: number, rules: number) => `${formulas} formulas · ${rules} checker rules`,
-  traceDetail: "Generated from the code every brief runs on",
+  aside: (formulas: number, rules: number) => `${formulas} formulas · ${rules} checker rules`,
   heading: "Sources",
   rows: (f: { endpoints: readonly string[]; trendWindow: string; clerkModel: string; analystModel: string }): { key: string; value: string }[] => [
     { key: "Data", value: "Qloo taste graph, group-level only" },
     { key: "Calls", value: f.endpoints.join(" · ") },
     { key: "Window", value: `${f.trendWindow}; nothing after it` },
-    { key: "Cache", value: "Shared; age shown on every note" },
+    { key: "Cache", value: "Shared; the age of every saved copy is shown" },
     { key: "Models", value: `Clerk ${f.clerkModel} · Analyst ${f.analystModel}` },
   ],
 } as const;

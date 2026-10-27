@@ -4,7 +4,7 @@ import { z } from "zod";
 /**
  * The browser side of GET /api/access: the visitor's lane and its mode, and the human check
  * (Turnstile's site key, and whether this browser already passed it). One read is shared by the
- * human check, the mode banner and the status line, and read again once it is ACCESS_TTL_MS old (a
+ * human check and the question box's paused state, and read again once it is ACCESS_TTL_MS old (a
  * breaker trips, or lifts at 00:00 UTC, without a page load), or at once after the server asks for
  * a new check or pauses live analysis. Mounted readers hear of every new read.
  */

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { GHOST_HONESTY_LINE } from "@ct/contracts";
 import { afterEach, describe, expect, it } from "vitest";
-import { EVAL_METRIC_IDS } from "../../apps/web/components/launchpad/eval-summary";
+import { EVAL_METRIC_IDS } from "../../apps/web/components/method/eval-ids";
 import { parseEvalSummary, type EvalSummary } from "../../apps/web/components/method/eval-summary";
 import { sampleInputs } from "./fixtures";
 import { computeEvalMetrics, METRIC_DEFINITIONS } from "./metrics";
@@ -53,7 +53,7 @@ function sampleWithTies() {
 const decimals = (x: number) => (String(x).split(".")[1] ?? "").length;
 
 describe("eval-summary.json", () => {
-  it("parses as /method reads it, with the launchpad's ids and two decimals at most", () => {
+  it("parses as /method reads it, with the eval ids and two decimals at most", () => {
     const { input, metrics } = sample();
     const text = renderEvalSummaryJson(buildEvalSummary(metrics, META), rawIds(input.records));
     const state = parseEvalSummary(text);

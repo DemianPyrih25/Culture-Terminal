@@ -335,6 +335,17 @@ export const GeoLiftPayload = z.object({
   /** Attribution for the neighbourhood boundaries. */
   boundarySource: z.string(),
   caption: z.string(),
+  /**
+   * Neighbourhood ids the question names, in its order: shown first, with their rank among the
+   * neighbourhoods with a lift. Absent or empty when it names none.
+   */
+  focusAreas: z.array(z.string().min(1)).optional(),
+  /**
+   * Why similar venues (competitors) were not counted, in a reader's words, when supply was asked
+   * for: e.g. no verified category tag for the place type. Then every supplyCount is null and reads
+   * "unknown", never 0 (PLAN §8.3). Absent or null when a sample was counted or none was asked for.
+   */
+  supplyGap: z.string().min(1).nullable().optional(),
 });
 export type GeoLiftPayload = z.infer<typeof GeoLiftPayload>;
 

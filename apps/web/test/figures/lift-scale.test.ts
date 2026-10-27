@@ -1,5 +1,5 @@
 // LiftMap scales: geohash arithmetic, the log2 lift ramp with confidence as alpha, the RAW/BASE
-// percentile ramp, the labelled neighbourhoods, chip placement and the precision badge.
+// percentile ramp, pin and flag sizes, flag placement and the precision badge.
 import type { GeoLiftCell, GeoLiftPayload } from "@ct/contracts";
 import { describe, expect, it } from "vitest";
 import {
@@ -10,16 +10,37 @@ import {
   geohashBounds,
   geohashCentre,
   heatPercentiles,
-  liftLabels,
-  liftRadius,
+  flagSize,
   liftRgb,
   liftT,
+  pinRadius,
   placeChips,
   precisionBadge,
   unionBounds,
 } from "../../components/figures";
 import { austinLiftMap, coarseLiftMap } from "../../components/figures/fixtures";
-import { COARSE_CONF_FLOOR, cellAlpha, focusBounds, heatRgb } from "../../components/figures/lift-scale";
+import {
+  MIN_BUSY_AREA_VENUES as QUANT_MIN_BUSY_AREA_VENUES,
+  MIN_SUPPLY_VENUES as QUANT_MIN_SUPPLY_VENUES,
+  THIN_SUPPLY_LABEL as QUANT_THIN_SUPPLY_LABEL,
+} from "@ct/quant";
+import { whiteSpace, type AreaLift } from "../../../../packages/quant/src/skills/geoLift/lift";
+import { liftTableSpec } from "../../components/figures/lift-map";
+import {
+  areaSupply,
+  COARSE_CONF_FLOOR,
+  cellAlpha,
+  fewRivals,
+  flagName,
+  focusBounds,
+  heatRgb,
+  MIN_BUSY_AREA_VENUES,
+  MIN_SUPPLY_VENUES,
+  namedAreas,
+  namedPins,
+  supplyUnknown,
+  THIN_SUPPLY_LABEL,
+} from "../../components/figures/lift-scale";
 
 const cell = (geohash: string, extra: Partial<GeoLiftCell> = {}): GeoLiftCell => ({
   geohash,
@@ -74,11 +95,12 @@ describe("lift ramp", () => {
     expect(liftT(0.8)).toBeLessThan(0);
   });
 
-  it("runs negative → neutral → data colour", () => {
-    expect(liftRgb(1)).toEqual([238, 240, 242]);
-    expect(liftRgb(1.6)).toEqual([28, 61, 110]);
-    expect(liftRgb(0.6)).toEqual([142, 47, 47]);
-    expect(heatRgb(1)).toEqual([28, 61, 110]);
+  it("colours extra interest on the map ramp and leaves less interest grey", () => {
+    expect(liftRgb(1)).toEqual([241, 238, 254]);
+    expect(liftRgb(1.6)).toEqual([91, 61, 245]);
+    expect(liftRgb(0.6)).toEqual([201, 206, 214]);
+    expect(heatRgb(0)).toEqual([241, 238, 254]);
+    expect(heatRgb(1)).toEqual([91, 61, 245]);
   });
 
   it("uses confidence as alpha, fades cells at the baseline and below the gate", () => {
@@ -92,12 +114,12 @@ describe("lift ramp", () => {
     expect(cellAlpha(cell("9v6k", { conf: 0 }), "LIFT")).toBe(0);
   });
 
-  it("formats lifts with the × sign and sizes markers by lift", () => {
+  it("formats lifts with the × sign and sizes pins and flags", () => {
     expect(formatLift(1.4812)).toBe("1.48×");
     expect(formatLift(0.8)).toBe("0.80×");
-    expect(liftRadius(1.5)).toBeGreaterThan(liftRadius(1.1));
-    expect(liftRadius(0.1)).toBe(3);
-    expect(liftRadius(9)).toBe(16);
+    expect(pinRadius({ fewRivals: true })).toBe(20);
+    expect(pinRadius({})).toBe(14);
+    expect(flagSize({ name: "A long neighbourhood name", lift: 1.2 }).w).toBeGreaterThan(flagSize({ name: "Short", lift: 1.2 }).w);
   });
 });
 
@@ -137,49 +159,6 @@ describe("RAW and BASE ramps", () => {
 });
 
 describe("labels and placement", () => {
-  it("labels the highest lifts and the lowest below the baseline, the top one with the halo", () => {
-    const labels = liftLabels(austinLiftMap.payload, 7);
-    const lifted = austinLiftMap.payload.neighbourhoods.filter((n) => n.lift !== null);
-    expect(labels).toHaveLength(7);
-    expect(labels[0]!.id).toBe(lifted[0]!.id);
-    expect(labels[0]!.top).toBe(true);
-    expect(labels.filter((l) => l.top)).toHaveLength(1);
-    // The two lowest lifts are kept for contrast.
-    const lowest = lifted.slice(-2).map((n) => n.id);
-    expect(labels.slice(-2).map((l) => l.id)).toEqual(lowest);
-    expect(labels.every((l) => l.lift !== null && l.at !== null)).toBe(true);
-    expect(labels.some((l) => l.id === "holly")).toBe(false);
-  });
-
-  it("makes no neighbourhood claim on a coarse map", () => {
-    expect(liftLabels(coarseLiftMap.payload)).toEqual([]);
-  });
-
-  it("keeps to the cap when no lift sits below the baseline", () => {
-    // Area lifts are geometric means over gated cells and skew above 1.00×: the common real case.
-    const above: GeoLiftPayload = {
-      ...austinLiftMap.payload,
-      neighbourhoods: austinLiftMap.payload.neighbourhoods.map((n, i) => (n.lift === null ? n : { ...n, lift: 1.05 + 0.04 * (20 - i) })),
-    };
-    const lifted = above.neighbourhoods.filter((n) => n.lift !== null);
-    expect(lifted.length).toBeGreaterThan(7);
-    expect(lifted.every((n) => n.lift! >= 1)).toBe(true);
-    for (const max of [7, 4, 3, 1]) {
-      const labels = liftLabels(above, max);
-      expect(labels, `max ${max}`).toHaveLength(max);
-      // The highest lifts, in order.
-      expect(labels.map((l) => l.id)).toEqual(lifted.slice(0, max).map((n) => n.id));
-    }
-    expect(liftLabels(above, 0)).toEqual([]);
-  });
-
-  it("labels the single highest lift at max 1, even with lifts below the baseline", () => {
-    const labels = liftLabels(austinLiftMap.payload, 1);
-    expect(labels).toHaveLength(1);
-    expect(labels[0]!.top).toBe(true);
-    expect(labels[0]!.lift).toBe(Math.max(...austinLiftMap.payload.neighbourhoods.flatMap((n) => (n.lift === null ? [] : [n.lift]))));
-  });
-
   it("places chips beside their markers without overlap and drops one that cannot fit", () => {
     const chips = [
       { id: "a", x: 50, y: 50, r: 5, w: 60, h: 18 },
@@ -204,5 +183,95 @@ describe("labels and placement", () => {
     expect(precisionBadge(austinLiftMap.payload)).toEqual({ text: "Geohash 6 · precision 0.80", coarse: false });
     expect(precisionBadge(coarseLiftMap.payload).coarse).toBe(true);
     expect(precisionBadge(coarseLiftMap.payload).text).toContain("no neighbourhood claims");
+  });
+});
+
+describe("flag names", () => {
+  it("keeps a name of up to 30 characters, and shortens a longer one to its bracketed name, first place or first words", () => {
+    expect(flagName("West Austin Neighborhood Group")).toBe("West Austin Neighborhood Group");
+    expect(flagName("ZIP 37206 (East Nashville)")).toBe("ZIP 37206 (East Nashville)");
+    expect(flagName("ZIP 77005 (West University Place)")).toBe("West University Place");
+    expect(flagName("Morningside Heights-Hamilton Heights")).toBe("Morningside Heights…");
+    expect(flagName("Alder Point Birch Hollow Cedar Bend Dune Park")).toBe("Alder Point Birch Hollow…");
+  });
+
+  it("sizes a flag by the name it shows", () => {
+    expect(flagSize({ name: "ZIP 77005 (West University Place)", lift: 1.5 })).toEqual(flagSize({ name: "West University Place", lift: 1.5 }));
+  });
+});
+
+describe("competitor counts on the lift map", () => {
+  const base = austinLiftMap.payload;
+
+  it("reads the sample by the same floors and label as geo_lift", () => {
+    expect(MIN_SUPPLY_VENUES).toBe(QUANT_MIN_SUPPLY_VENUES);
+    expect(MIN_BUSY_AREA_VENUES).toBe(QUANT_MIN_BUSY_AREA_VENUES);
+    expect(THIN_SUPPLY_LABEL).toBe(QUANT_THIN_SUPPLY_LABEL);
+  });
+
+  it("gives every area the same supply read as geo_lift's white space on the same invented areas", () => {
+    // Six invented areas; b is tiny, so its one venue is the densest of the capped sample.
+    const lifted = (id: string, demandPct: number, areaKm2 = 1): AreaLift => ({ id, name: id, areaKm2, covered: 10, n: 10, lift: 1 + demandPct, conf: 0.8, reason: null, demandPct });
+    const areas = [lifted("a", 1), lifted("b", 0.8, 0.05), lifted("c", 0.6), lifted("d", 0.4), lifted("e", 0.2), lifted("f", 0)];
+    const counts = new Map([["a", 0], ["b", 1], ["c", 4], ["d", 6], ["e", 2], ["f", 5]]);
+    const ws = whiteSpace(areas, counts, true);
+    const neighbourhoods = areas.map((a) => {
+      const s = ws.get(a.id)!;
+      return { id: a.id, name: a.id, n: a.n, lift: a.lift, conf: a.conf, demandPct: a.demandPct, supplyPct: s.supplyPct, supplyCount: s.count, whiteSpace: s.whiteSpace, quadrant: s.quadrant, reason: null };
+    });
+    const data = { ...base, supply: { source: "places_sample" as const, capped: true, points: [] }, supplyGap: undefined, neighbourhoods };
+    for (const n of neighbourhoods) {
+      const read = areaSupply(n, data);
+      const s = ws.get(n.id)!;
+      expect(read.kind, n.id).toBe(s.thin ? "thin" : "label");
+      if (read.kind === "label") expect(read.quadrant).toBe(s.quadrant);
+    }
+    expect(areaSupply(neighbourhoods[0]!, data)).toEqual({ kind: "thin", count: 0, cappedZero: true });
+    expect(areaSupply(neighbourhoods[1]!, data)).toEqual({ kind: "thin", count: 1, cappedZero: false });
+  });
+
+  it("withholds a stored crowded reading from fewer than three venues", () => {
+    const capped = { ...base, supply: { source: "places_sample" as const, capped: true, points: [] }, supplyGap: undefined };
+    const neighbourhoods = capped.neighbourhoods.map((n, i) => ({ ...n, supplyCount: n.supplyCount === null ? null : 12, quadrant: i === 0 ? ("PROVEN_CROWDED" as const) : n.quadrant }));
+    const first = neighbourhoods[0]!;
+    const stored = { ...capped, neighbourhoods: neighbourhoods.map((n, i) => (i === 0 ? { ...n, supplyCount: 1 } : n)) };
+    expect(areaSupply({ ...first, supplyCount: 1 }, stored)).toMatchObject({ kind: "thin" });
+    expect(areaSupply({ ...first, supplyCount: 3 }, stored)).toMatchObject({ kind: "label", quadrant: "PROVEN_CROWDED" });
+    const row = liftTableSpec(stored, "Invented").rows.find((r) => r.key === first.id);
+    expect(row !== undefined && "cells" in row ? row.cells[row.cells.length - 1] : null).toBe(THIN_SUPPLY_LABEL);
+  });
+
+  it("is unknown with the map's own reason, or for a stored sample too thin to read", () => {
+    expect(supplyUnknown({ ...base, supplyGap: "Invented reason." })).toBe("Invented reason.");
+    const thin = { ...base, supplyGap: undefined, neighbourhoods: base.neighbourhoods.map((n) => ({ ...n, supplyCount: n.supplyCount === null ? null : 0 })) };
+    if (base.supply !== null) expect(supplyUnknown(thin)).toMatch(/places only 0 similar venues/);
+    expect(supplyUnknown({ ...base, supply: null, supplyGap: undefined })).toBeNull();
+  });
+
+  it("never marks few rivals where the count is unknown, or for an area with no venue in a capped sample", () => {
+    const capped = { ...base, supply: { source: "places_sample" as const, capped: true, points: [] }, supplyGap: undefined };
+    const counted = capped.neighbourhoods.map((n) => ({ ...n, supplyCount: 12 }));
+    expect(fewRivals({ quadrant: "LATENT_OPEN", supplyCount: 0 }, { ...capped, neighbourhoods: counted })).toBe(false);
+    expect(fewRivals({ quadrant: "LATENT_OPEN", supplyCount: 2 }, { ...capped, neighbourhoods: counted })).toBe(true);
+    expect(fewRivals({ quadrant: "LATENT_OPEN", supplyCount: 2 }, { ...capped, neighbourhoods: counted, supplyGap: "Invented reason." })).toBe(false);
+  });
+
+  it("lists and pins the areas the question names, and shows unknown venues as unknown in the table", () => {
+    const lifted = base.neighbourhoods.filter((n) => n.lift !== null);
+    const last = lifted[lifted.length - 1];
+    if (last === undefined) throw new Error("expected areas with a lift");
+    const data: GeoLiftPayload = { ...base, focusAreas: [last.id], supplyGap: "Invented reason." };
+    expect(namedAreas(data)[0]).toMatchObject({ id: last.id, rank: [expect.any(Number), lifted.length] });
+    expect(namedPins(data).map((p) => [p.id, p.named, p.rank])).toEqual([[last.id, true, undefined]]);
+    const table = liftTableSpec(data, "Invented");
+    // Unknown, never "not measured" or 0; the named area first, with its rank and the map's reason.
+    expect(JSON.stringify(table.rows)).toContain('"reason":"Unknown"');
+    expect(JSON.stringify(table.rows)).not.toContain("not measured");
+    const first = table.rows[0];
+    expect(first?.key).toBe(last.id);
+    expect(first !== undefined && "cells" in first ? first.cells[0] : null).toBe(`${last.name} · Your area · #${lifted.length} of ${lifted.length}`);
+    expect(first !== undefined && "cells" in first ? first.cells[6] : null).toEqual({ kind: "missing", reason: "Unknown: Invented reason." });
+    const totals = table.rows.find((r) => r.key === "cells");
+    expect(totals !== undefined && "cells" in totals ? totals.cells : []).toContain("Unknown: Invented reason.");
   });
 });

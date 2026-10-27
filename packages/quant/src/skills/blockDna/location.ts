@@ -38,7 +38,12 @@ export interface BlockArea {
 
 export type AreaResolution = { ok: true; area: BlockArea } | { ok: false; message: string };
 
-/** A point further than this from the metro centre is not in the metro its city side describes. */
+/**
+ * A point further than this from the metro centre is not in the metro its city side describes,
+ * unless the map city's own gazetteer holds it (Santa Catalina Island lies about 130 km from central
+ * Los Angeles). The place search radius is not used here: it reaches bbox corners, often open sea or
+ * a neighbouring county.
+ */
 export const MAX_POINT_KM = 60;
 /** WKT coordinates as the Qloo client canonicalises them (about a metre). */
 const COORD_DP = 5;
@@ -156,13 +161,13 @@ export function resolveArea(input: AreaArg, geo: GeoApi): AreaResolution {
 
   const point = parsePoint(input.ref);
   const km = distanceKm(point, METRO_CENTRES[metro]);
-  if (!(km <= MAX_POINT_KM)) {
+  const holder = geo.locate(metro, point);
+  if (holder === null && !(km <= MAX_POINT_KM)) {
     return {
       ok: false,
-      message: `The point ${input.ref} lies ${Math.round(km)} km from central ${city}; Block DNA compares an area with its own city, so give a point inside ${city}.`,
+      message: `The point ${input.ref} lies ${Math.round(km)} km from central ${city}, outside its AREAS; Block DNA compares an area with its own city, so give a point inside ${city}.`,
     };
   }
-  const holder = geo.locate(metro, point);
   const holderName = holder === null ? null : (geo.neighbourhood(metro, holder)?.name ?? null);
   return {
     ok: true,

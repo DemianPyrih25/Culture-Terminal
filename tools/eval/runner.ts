@@ -9,7 +9,7 @@
 // what the attempt before it spent. The arms are injected: the CLI wires the real ones, the tests fakes.
 import type { DatasetEnvelope, EventInput, GhostAnswer, GhostDiff, Job, MetroId, Report } from "@ct/contracts";
 import { z } from "zod";
-import { ordinal } from "../../apps/web/components/launchpad/eval-summary";
+import { ordinal } from "../../apps/web/components/method/eval-ids";
 import { formatMs, formatUsd } from "../dev/cli/format";
 import type { CliIo } from "../dev/cli/io";
 import { readSpend, reserveSpend, settleSpend } from "../dev/cli/spend";

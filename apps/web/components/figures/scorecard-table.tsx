@@ -16,11 +16,11 @@ import { plainProse, renderProse, type ProseBindings, type ProseRenderer } from 
 export type PriorState = ScorecardVerdict | "AWAITING_DATA" | "AWAITING_CHECK";
 
 export const PRIOR_STATE: Readonly<Record<PriorState, { mark: string; word: string; tone: string }>> = {
-  REFUTED: { mark: "×", word: "REFUTED", tone: "text-negative" },
-  CONFIRMED: { mark: "✓", word: "CONFIRMED", tone: "text-accent" },
-  INCONCLUSIVE: { mark: "–", word: "INCONCLUSIVE", tone: "text-dim" },
-  AWAITING_DATA: { mark: "·", word: "AWAITING DATA", tone: "text-dim" },
-  AWAITING_CHECK: { mark: "·", word: "AWAITING CHECK", tone: "text-dim" },
+  REFUTED: { mark: "×", word: "Refuted", tone: "text-second-ink" },
+  CONFIRMED: { mark: "✓", word: "Confirmed", tone: "text-accent-ink" },
+  INCONCLUSIVE: { mark: "–", word: "Inconclusive", tone: "text-ink-2" },
+  AWAITING_DATA: { mark: "·", word: "Awaiting data", tone: "text-ink-2" },
+  AWAITING_CHECK: { mark: "·", word: "Awaiting check", tone: "text-ink-2" },
 };
 
 /** "We expected: …" without doubling a prefix the statement already has. */
@@ -42,16 +42,15 @@ export function PriorRow({
   state: PriorState;
 }) {
   const s = PRIOR_STATE[state];
-  const waiting = state === "AWAITING_DATA" || state === "AWAITING_CHECK";
   return (
     <li className="flex gap-4 border-b border-line py-3" data-prior={id} data-state={state}>
-      <span className="w-6 shrink-0 font-mono text-[11px] leading-[22px] text-dim">{id}</span>
+      <span className="w-6 shrink-0 font-mono text-[12px] leading-[22px] text-ink-2">{id}</span>
       <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
         <p className="m-0 type-body text-ink">{statement}</p>
-        <p className={`m-0 font-ui text-[13px] leading-[19px] ${waiting ? "text-dim" : "text-dim"}`}>{measured}</p>
+        <p className="m-0 font-sans text-[13px] leading-[19px] text-ink-2">{measured}</p>
       </div>
       <span className={`flex w-[140px] shrink-0 items-center justify-end gap-1.5 self-start pt-[3px] ${s.tone}`}>
-        <span aria-hidden="true" className="font-ui text-[14px] font-semibold">
+        <span aria-hidden="true" className="font-sans text-[14px] font-semibold">
           {s.mark}
         </span>
         <span className="type-label">{s.word}</span>

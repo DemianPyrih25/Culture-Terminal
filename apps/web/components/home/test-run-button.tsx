@@ -41,7 +41,7 @@ export function TestRunButton({ seconds, label, variant, size }: TestRunButtonPr
         {busy ? "Starting…" : (label ?? `Start a ${seconds}-second test run`)}
       </Button>
       {message ? (
-        <p role="status" className="text-[12px] text-dim">
+        <p role="status" className="type-caption text-ink-2">
           {message}
         </p>
       ) : null}

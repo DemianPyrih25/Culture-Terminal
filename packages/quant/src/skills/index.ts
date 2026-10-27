@@ -36,10 +36,17 @@ export { resolveEntitiesSkill, classifyMatches, searchParams, unmatchedLimitatio
 export type { MatchAlternative, MatchClassification, ResolveMatchClass, SearchResult } from "./resolve";
 export { peerLandscapeSkill, estimatePeerLandscapeCalls, discoveryParams, DISCOVERY_TAKE } from "./peerLandscape";
 export { normaliseName } from "./normalise";
-export { METRO_CENTRES, PLACE_SEARCH_RADIUS_MILES, metroCentreLatLon } from "./metros";
+// The S10 category check; the coverage probe's C2 gate applies the same rule.
+export { MAIN_LINE_MIN_TAGS, offCategoryBranch } from "./sponsorSlate/slate";
+export { marketLabel, METRO_CENTRES, PLACE_SEARCH_MIN_RADIUS_MILES, metroCentreLatLon, metroReachKm, placeSearchArea, type PlaceSearchArea } from "./metros";
 // How find_tags names and types a tag URN; run-skill --tags registers tags the same way.
 export { tagNameFromUrn, tagTypeOf } from "./findTags/tags";
+// The curated place types; CLERK's backstop reads a place mention that names one as the concept, not a venue.
+export { curatedConcept } from "./findTags/curated";
 export { buildSkillDigest, fitSkillDigest, orderedFlags, skillErrorResult, skillResult } from "./digest";
 export type { DigestParts, DigestTarget } from "./digest";
 export { addSkillEvidence, addSkillMetric, attemptAll, countUncached, isBudgetError, registerEntity } from "./common";
 export type { Attempt, EntityDraft, MetricSpec, Registration } from "./common";
+// The supply-label rule geo_lift, the CHECKER (V10) and the web answer read competitor counts by; the lift map
+// mirrors its numbers for the client bundle and for runs stored before the rule.
+export { BUSY_QUADRANTS, MIN_BUSY_AREA_VENUES, MIN_RANKED_AREAS, MIN_SUPPLY_VENUES, supplyLabelHolds, THIN_SUPPLY_LABEL } from "./geoLift/lift";

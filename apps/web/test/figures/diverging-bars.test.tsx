@@ -47,20 +47,20 @@ function bars(rows: [string, BarsPayload["groups"][number]["bars"][number]["valu
 
 describe("DivergingBars · split (A04 figure 1)", () => {
   const html = render(
-    <DivergingBars data={metroSplit.payload} display="split" labelHeader="Metro" number={1} title="Juniper Cola leads in Portland" />,
+    <DivergingBars data={metroSplit.payload} display="split" labelHeader="Metro" title="Juniper Cola leads in Portland" />,
   );
 
   it("draws the lead around the even split with the shaded band and both value columns", () => {
     const plot = plotView(html);
     expect(plot).toContain('role="img"');
-    expect(text(plot)).toContain("← BRAND ALPHA AHEAD");
-    expect(text(plot)).toContain("JUNIPER COLA AHEAD →");
-    expect(plot).toContain("fill-canvas");
+    expect(text(plot)).toContain("← Brand Alpha ahead");
+    expect(text(plot)).toContain("Juniper Cola ahead →");
+    expect(plot).toContain("fill-sunken");
     const portland = rowMarkup(plot, "portland");
-    expect(portland).toContain("fill-data");
+    expect(portland).toContain("fill-accent");
     expect(text(portland)).toContain(".66");
     expect(text(portland)).toContain(".34");
-    expect(rowMarkup(plot, "austin")).toContain("fill-data-2");
+    expect(rowMarkup(plot, "austin")).toContain("fill-chart-muted");
   });
 
   it("bolds a clear leader and keeps a lead inside the band regular", () => {
@@ -71,13 +71,13 @@ describe("DivergingBars · split (A04 figure 1)", () => {
   it("explains a metro without data instead of drawing a bar", () => {
     const nashville = rowMarkup(plotView(html), "nashville");
     expect(nashville).toContain("not measured");
-    expect(nashville).not.toMatch(/<rect[^>]*class="fill-data/);
+    expect(nashville).not.toMatch(/<rect[^>]*class="fill-accent/);
   });
 
   it("needs both shares: one missing share gives its reason, no bar and no lead", () => {
     const boston = rowMarkup(plotView(html), "boston");
     expect(text(boston)).toContain("dropped by Qloo");
-    expect(boston).not.toMatch(/<rect[^>]*class="fill-data/);
+    expect(boston).not.toMatch(/<rect[^>]*class="fill-accent/);
     expect(text(boston)).toContain(".64");
     expect(text(boston)).not.toContain("lead");
     expect(tableRows(tableView(html)).find((r) => r[0] === "Boston")).toEqual(["Boston", ".64", "dropped by Qloo", "dropped by Qloo"]);
@@ -133,10 +133,10 @@ describe("DivergingBars · dumbbell", () => {
     );
     const plot = plotView(html);
     expect(text(plot)).toContain("VS PEERS");
-    expect(text(plot)).toContain("INDEX");
+    expect(text(plot)).toContain("Index");
     expect(text(rowMarkup(plot, "25_to_29"))).toContain("▲ 0.24");
     expect(text(rowMarkup(plot, "35_to_44"))).toContain("▼ 0.09");
-    expect(text(plot)).toContain("GENDER");
+    expect(text(plot)).toContain("Gender");
     // 55+ has peers but no value for the subject: one grey dot, the reason, no delta.
     const missing = rowMarkup(plot, "55_and_older");
     expect(missing.match(/<circle/g)).toHaveLength(1);
@@ -164,12 +164,12 @@ describe("DivergingBars · diverging (Block DNA)", () => {
 
   it("names its comparator and draws over and under in two colours", () => {
     const plot = plotView(html);
-    expect(text(plot)).toContain("Δ VS CITY");
-    expect(text(plot)).toContain("ABOVE CITY →");
+    expect(text(plot)).toContain("Δ vs city");
+    expect(text(plot)).toContain("Above city →");
     expect(text(rowMarkup(plot, "T21"))).toContain("+14");
-    expect(rowMarkup(plot, "T24")).toContain("fill-negative");
+    expect(rowMarkup(plot, "T24")).toContain("fill-second");
     expect(text(rowMarkup(plot, "T24"))).toContain(`${MINUS}8`);
-    expect(text(rowMarkup(plot, "T21"))).toContain("NEW");
+    expect(text(rowMarkup(plot, "T21"))).toContain("New");
     expect(html).toContain("Location method · POLYGON");
   });
 
@@ -180,7 +180,7 @@ describe("DivergingBars · diverging (Block DNA)", () => {
   it("keeps a tag that was not scored, with its reason, and the raw ranks in the table", () => {
     expect(text(rowMarkup(plotView(html), "T30"))).toContain("not scored");
     const table = tableView(html);
-    expect(tableHeads(table)).toEqual(["Tag", "Riverside District (Δ VS CITY)", "Rank here", "Rank in city", "New"]);
+    expect(tableHeads(table)).toEqual(["Tag", "Riverside District (Δ vs city)", "Rank here", "Rank in city", "New"]);
     const rows = tableRows(table);
     expect(rows.filter((r) => r.length === 1).map((r) => r[0])).toEqual(["Venue-goer taste tags", "Vibe", "What"]);
     expect(rows.find((r) => r[0] === "Natural wine")).toEqual(["Natural wine", "+14", "3", "17", "new"]);
@@ -192,11 +192,11 @@ describe("DivergingBars · butterfly", () => {
   it("mirrors two series around the centre labels, with a zero line per panel", () => {
     const html = render(<DivergingBars data={ageIndexPair.payload} display="butterfly" labelHeader="Age" title="Mirrored" />);
     const plot = plotView(html);
-    expect(text(plot)).toContain("JUNIPER COLA");
-    expect(text(plot)).toContain("BRAND ALPHA");
+    expect(text(plot)).toContain("Juniper Cola");
+    expect(text(plot)).toContain("Brand Alpha");
     const young = rowMarkup(plot, "25_to_29");
-    expect(young).toContain('class="fill-data" data-sign="positive"');
-    expect(young).toContain('class="fill-negative" data-sign="negative"');
+    expect(young).toContain('class="fill-accent" data-sign="positive"');
+    expect(young).toContain('class="fill-second" data-sign="negative"');
     expect(young.match(/data-zero=/g)).toHaveLength(2);
     expect(text(young)).toContain("0.36");
     expect(text(young)).toContain(`${MINUS}0.05`);
@@ -211,10 +211,10 @@ describe("DivergingBars · butterfly", () => {
     const plot = plotView(html);
     const [upA, upB] = rects(rowMarkup(plot, "up"));
     const [downA, downB] = rects(rowMarkup(plot, "down"));
-    expect(upA!.cls).toBe("fill-data");
-    expect(upB!.cls).toBe("fill-data-2");
-    expect(downA!.cls).toBe("fill-negative");
-    expect(downB!.cls).toBe("fill-negative");
+    expect(upA!.cls).toBe("fill-accent");
+    expect(upB!.cls).toBe("fill-chart-muted");
+    expect(downA!.cls).toBe("fill-second");
+    expect(downB!.cls).toBe("fill-second");
     expect(downA!.x).not.toBe(upA!.x);
     expect(downB!.x).not.toBe(upB!.x);
     // Each panel's zero line (drawn half a pixel right of its position for a crisp stroke).
@@ -238,27 +238,27 @@ describe("DivergingBars · butterfly", () => {
 
   it("falls back to diverging for a one-series payload", () => {
     const html = render(<DivergingBars data={blockDna.payload} display="butterfly" title="One series" />);
-    expect(text(plotView(html))).toContain("Δ VS CITY");
+    expect(text(plotView(html))).toContain("Δ vs city");
   });
 });
 
 describe("DivergingBars · display, baseline and even band from the payload", () => {
   it("draws the split the payload asks for, with its band, and no display option", () => {
     const plot = plotView(render(<DivergingBars data={metroSplitSelfDescribed.payload} labelHeader="Metro" title="Split" />));
-    expect(text(plot)).toContain("JUNIPER COLA AHEAD →");
+    expect(text(plot)).toContain("Juniper Cola ahead →");
     // ±.03 around the even split, wider than the default ±.02.
-    const band = rects(rowMarkup(plot, "portland")).find((r) => r.cls === "fill-canvas")!;
+    const band = rects(rowMarkup(plot, "portland")).find((r) => r.cls === "fill-sunken")!;
     const fallback = rects(rowMarkup(plotView(render(<DivergingBars data={metroSplit.payload} display="split" title="Split" />)), "portland")).find(
-      (r) => r.cls === "fill-canvas",
+      (r) => r.cls === "fill-sunken",
     )!;
     expect(band.width).toBeGreaterThan(fallback.width);
   });
 
   it("draws the dumbbell the payload asks for around its baseline", () => {
     const plot = plotView(render(<DivergingBars data={ageDumbbellSelfDescribed.payload} title="Dumbbell" />));
-    expect(plot).toContain("fill-data-2");
+    expect(plot).toContain("fill-chart-muted");
     expect(plot).toMatch(/<circle[^>]*r="4.75"/);
-    expect(text(plot)).toContain("BELOW BASELINE");
+    expect(text(plot)).toContain("Below baseline");
   });
 
   it("lets a display option override the payload", () => {

@@ -21,7 +21,7 @@ import { emptyResultFinding } from "../findings";
 import { SKILL_LIMITATIONS } from "../limitations";
 import { addSkillEvidence, attemptAllKeepingFailures, countUncached, type Attempt } from "./common";
 import { skillResult, type DigestTarget } from "./digest";
-import { curatedConcept, HEATMAP_BASELINE, type CuratedConcept, type CuratedStatus } from "./findTags/curated";
+import { curatedConcept, HEATMAP_BASELINE, isVerifiedPlaceFilter, type CuratedConcept, type CuratedStatus } from "./findTags/curated";
 import { conceptWords, nameMatches, normaliseConcept, tagTypeOf, tagUse, type TagUse } from "./findTags/tags";
 import { safeName, safeText } from "./format";
 
@@ -81,11 +81,12 @@ export interface ConceptPlan {
 /**
  * How a concept is answered: curated tags when the map serves it, else a live search for the map's
  * semantic query (an unverified curated concept) or the concept text, normalised so concepts that
- * differ only in case or punctuation share one cached request.
+ * differ only in case or punctuation share one cached request. A curated concept whose supply filter
+ * failed its gate is served and searched both (filterFallback): the search only adds a supply filter.
  */
 export function planConcept(concept: Concept): ConceptPlan {
   const curated = concept.scope === "place" ? curatedConcept(concept.text) : null;
-  if (curated !== null && curated.served.length > 0) return { concept, curated, query: null, request: null };
+  if (curated !== null && curated.served.length > 0 && !curated.filterFallback) return { concept, curated, query: null, request: null };
   const query = normaliseConcept(curated?.semanticQuery ?? concept.text);
   return { concept, curated, query: query === "" ? null : query, request: query === "" ? null : tagSearchParams(query, concept.scope) };
 }
@@ -229,9 +230,10 @@ function rowsFor(concept: Concept, tags: readonly FoundTag[], outcome: Outcome):
 
 /**
  * What the model needs to use place tags right: which tag drives the map, which only filters supply,
- * and that the restaurant baseline maps nothing as a concept.
+ * that the restaurant baseline maps nothing as a concept, and that an unverified category tag counts
+ * no similar venues (`filterNoticed`: the supply-filter fallback has said so already).
  */
-function placeNotices(concept: Concept, tags: readonly FoundTag[]): string[] {
+function placeNotices(concept: Concept, tags: readonly FoundTag[], filterNoticed = false): string[] {
   if (concept.scope !== "place" || tags.length === 0) return [];
   const notices: string[] = [];
   const baseline = tags.find((t) => t.tag.tagId === HEATMAP_BASELINE.tagId);
@@ -248,7 +250,39 @@ function placeNotices(concept: Concept, tags: readonly FoundTag[]): string[] {
         "from tags: pass analog venues or brands as concept_entities with its category tag, which filters supply only.",
     );
   }
+  const filters = tags.filter((t) => t.use === "place_filter");
+  if (!filterNoticed && filters.length > 0 && !filters.some((t) => isVerifiedPlaceFilter(t.tag.tagId))) {
+    const named = filters.map((t) => `${t.tag.ref} (${safeName(t.tag.name)})`).join(", ");
+    notices.push(
+      `'${safeText(concept.text, 60)}' has no verified venue category: ${named} ${filters.length === 1 ? "is" : "are"} not probe-verified, so ` +
+        "geo_lift counts no similar venues with it and the competitor count stays unknown, never 0.",
+    );
+  }
   return notices;
+}
+
+/**
+ * A curated concept's tags with its supply-filter fallback (filterFallback): the served tags, then the
+ * first place_filter the live search found, labelled live, with a notice either way.
+ */
+function fallbackTags(run: Run, curated: CuratedConcept, search: Search | null): { tags: FoundTag[]; notice: string } {
+  const served = curatedTags(run, curated);
+  const label = safeText(curated.label, 60);
+  const pick = search?.picked.find((t) => tagUse(t.id) === "place_filter" && !served.some((s) => s.tag.tagId === t.id));
+  const found = search === null || pick === undefined ? undefined : searchedTags(run, { ...search, picked: [pick] })[0];
+  if (found === undefined) {
+    const why = search?.attempt?.kind === "ok" ? "the live tag search found none" : "the live tag search did not answer";
+    return {
+      tags: served,
+      notice: `${label} has no verified supply filter and ${why}, so geo_lift counts no similar venues for it: the competitor count is unknown.`,
+    };
+  }
+  return {
+    tags: [...served, found],
+    notice:
+      `${label}'s supply filter ${found.tag.ref} (${safeName(found.tag.name)}) was found by semantic search at run time, not probe-verified: ` +
+      "it may return no venue where many exist, so geo_lift counts no similar venues with it and the competitor count stays unknown.",
+  };
 }
 
 const PLACE_TAG_NOTICE =
@@ -300,11 +334,20 @@ async function runFindTags(input: FindInput, ctx: SkillCtx): Promise<SkillResult
   for (const plan of plans) {
     const key = requestKey(plan);
     const search = key === null ? null : (searches.get(key) ?? null);
-    const tags = plan.request === null && plan.curated !== null ? curatedTags(run, plan.curated) : search === null ? [] : searchedTags(run, search);
+    const fallback = plan.curated?.filterFallback === true && plan.curated.served.length > 0 ? fallbackTags(run, plan.curated, search) : null;
+    if (fallback !== null) run.notices.push(fallback.notice);
+    const tags =
+      fallback !== null
+        ? fallback.tags
+        : plan.request === null && plan.curated !== null
+          ? curatedTags(run, plan.curated)
+          : search === null
+            ? []
+            : searchedTags(run, search);
     const outcome = outcomeOf(search, tags);
     outcomes.push(outcome);
     rows.push(...rowsFor(plan.concept, tags, outcome));
-    run.notices.push(...placeNotices(plan.concept, tags));
+    run.notices.push(...placeNotices(plan.concept, tags, fallback !== null));
     if (plan.query === null && plan.curated === null) {
       run.notices.push(`'${safeText(plan.concept.text, 60)}' has no words to search for; not looked up.`);
     }

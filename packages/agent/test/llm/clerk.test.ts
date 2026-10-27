@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { QUESTION_MAX_CHARS, structuredOutputSchema, Intent, type Intent as IntentT } from "@ct/contracts";
+import { createGeo } from "@ct/geo";
 import { describe, expect, it } from "vitest";
 import { CLERK_MAX_TOKENS, CLERK_MODEL } from "../../src/anthropic";
 import { runClerk, sanitizeQuestion, wrapQuestion } from "../../src/clerk";
@@ -13,7 +14,7 @@ function intent(): IntentT {
     pillar: "investment",
     job: "brand_health",
     mentions: [{ text: "Brand Alpha", entity_type: "brand", role: "primary", public_figure: false }],
-    geo: { metro: null, area: null, unsupported_place: null },
+    geo: { metro: null, area: null, unsupported_place: null, market: null },
     constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
     safety: { allowed: true, category: null, reframe: null },
     assumptions: ["US geography"],
@@ -53,6 +54,26 @@ describe("runClerk", () => {
     expect(result.usage).toEqual({ input: 900, output: 150, cacheRead: 0, cacheCreation: 0 });
     expect(result.usd).toBeCloseTo(usdFor(CLERK_MODEL, message.usage), 12);
     expect(result.model).toBe(CLERK_MODEL);
+  });
+
+  it("moves a gazetteer area it listed as a place mention to geo.area (the area backstop)", async () => {
+    // Whichever area the austin gazetteer lists first: names come from the boundary data, not from Qloo.
+    const nbhd = createGeo().neighbourhoods("austin")[0];
+    expect(nbhd).toBeDefined();
+    const name = nbhd?.name ?? "";
+    const site: IntentT = {
+      ...intent(),
+      job: "site_selection",
+      mentions: [{ text: name, entity_type: "place", role: "secondary", public_figure: false }],
+      geo: { metro: "austin", area: null, unsupported_place: null, market: null },
+      constraints: { concepts: ["ramen counter"], sponsor_categories: [], domains: [], ages: [], notes: [] },
+    };
+    const { result } = await clerk(textMessage(JSON.stringify(site)), `Where in Austin should I open a ramen counter? Is ${name} a good fit?`);
+    expect(result.kind).toBe("intent");
+    if (result.kind !== "intent") return;
+    expect(result.intent.mentions).toEqual([]);
+    expect(result.intent.geo).toMatchObject({ metro: "austin", area: name });
+    expect(result.intent.pillar).toBe("location");
   });
 
   it("returns a refusal before reading any content", async () => {

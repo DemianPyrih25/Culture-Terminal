@@ -9,7 +9,6 @@ const data = sponsorQuadrant.payload;
 const html = render(
   <QuadrantScatter
     data={data}
-    number={2}
     title="Only one category winner sits in the under-the-radar corner"
     source={FIXTURE_SOURCES.scatter}
     formulaId="slate.under_the_radar"
@@ -21,15 +20,15 @@ describe("QuadrantScatter", () => {
     const plot = plotView(html);
     expect(plot).toContain('role="img"');
     expect(plot).toContain("<title>Only one category winner sits in the under-the-radar corner</title>");
-    expect(text(plot)).toContain("POPULARITY →");
-    expect(text(plot)).toContain("FIT →");
+    expect(text(plot)).toContain("Popularity →");
+    expect(text(plot)).toContain("Fit →");
     expect(text(plot)).toContain("100th pctl");
   });
 
   it("tints the under-the-radar quadrant and labels all four", () => {
     const plot = plotView(html);
     expect(plot).toContain('data-quadrant="HIDDEN_POCKET"');
-    for (const label of ["UNDER THE RADAR", "PRICED IN", "FAMOUS · POOR FIT", "WEAK FIT · NICHE"]) {
+    for (const label of ["Under the radar", "Priced in", "Famous · poor fit", "Weak fit · niche"]) {
       expect(text(plot)).toContain(label);
     }
   });
@@ -41,7 +40,7 @@ describe("QuadrantScatter", () => {
     expect(plot).toMatch(/data-point="R12" data-tone="highlight"/);
     const grey = data.points.filter((p) => !p.labelled).length;
     expect(grey).toBeGreaterThan(10);
-    expect(plot.match(/class="fill-data-2" data-point="C\d+"/g)).toHaveLength(grey);
+    expect(plot.match(/class="fill-chart-muted" data-point="C\d+"/g)).toHaveLength(grey);
     expect(text(plot)).toContain("Blackfern Rye");
   });
 

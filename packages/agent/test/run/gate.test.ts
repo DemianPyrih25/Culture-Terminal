@@ -10,12 +10,12 @@ import { intentFor, mockQloo, parseAll, run, typesOf } from "./support";
 
 const brand = (text: string, role: Mention["role"] = "secondary"): Mention => ({ text, entity_type: "brand", role, public_figure: false });
 
-function gate(mentions: Mention[], options: { pins?: Record<string, string>; faults?: Parameters<typeof mockQloo>[0]; metro?: "nashville" | null } = {}) {
+function gate(mentions: Mention[], options: { pins?: Record<string, string>; faults?: Parameters<typeof mockQloo>[0]; metro?: "nashville" | null; market?: string | null } = {}) {
   const calls: QlooCallRecord[] = [];
   const client = mockQloo(options.faults ?? []);
   const registry = createEntityRegistry();
   const input: GateInput = {
-    intent: intentFor({ mentions, geo: { metro: options.metro ?? null, area: null, unsupported_place: null } }),
+    intent: intentFor({ mentions, geo: { metro: options.metro ?? null, area: null, unsupported_place: null, market: options.market ?? null } }),
     qloo: client.standalone({ onCall: (r) => calls.push(r) }).forTool(null),
     registry,
     pins: options.pins ?? {},
@@ -77,8 +77,19 @@ describe("runResolutionGate", () => {
     const asked = await unlocated.run();
     if (asked.kind !== "needs_input") throw new Error(asked.kind);
     expect(asked.picker).toMatchObject({ type: "needs_input", mention: "Cafe Lumen", entityType: "place", reason: "not_found", candidates: [] });
-    expect(asked.reason).toContain("supported metro");
+    expect(asked.reason).toContain("a map city or market");
     expect(unlocated.calls).toHaveLength(0);
+  });
+
+  it("searches a place around the market CLERK put it in, and not in a market config/metros.json does not list (D44)", async () => {
+    const place: Mention = { text: "Cafe Lumen", entity_type: "place", role: "primary", public_figure: false };
+    const inMarket = gate([place], { market: "portland" });
+    expect((await inMarket.run()).kind).not.toBe("needs_input");
+    expect(inMarket.calls[0]?.query).toMatchObject({ "filter.location": "45.52,-122.68", "filter.radius": "25" });
+
+    const unknown = gate([place], { market: "riverton" });
+    expect((await unknown.run()).kind).toBe("needs_input");
+    expect(unknown.calls).toHaveLength(0);
   });
 
   it("offers the candidates of a non-exact primary under opaque keys", async () => {

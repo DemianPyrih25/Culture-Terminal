@@ -6,6 +6,8 @@ import { sanitizeQuestion, wrapQuestion } from "./llm/question";
 import { toRefusal } from "./llm/stop";
 import { tokenUsageOf, usdFor } from "./pricing";
 import { CLERK_PROMPT } from "./prompts";
+import { areaMentionsToGeo } from "./run/areaMentions";
+import { gazetteer } from "./run/gazetteer";
 
 export { sanitizeQuestion, wrapQuestion } from "./llm/question";
 
@@ -41,7 +43,10 @@ export type ClerkErrorCode =
   | "invalid_intent";
 
 export type ClerkResult =
-  /** The intent after normalizeIntent (pillar from the job, mnemonic recompiled). safety.allowed may be false. */
+  /**
+   * The intent after normalizeIntent (pillar from the job, mnemonic recompiled) and the area backstop
+   * (a gazetteer area CLERK listed as a place mention moves to geo.area). safety.allowed may be false.
+   */
   | ({ kind: "intent"; intent: Intent } & ClerkCost)
   /** The API's own refusal (stop_reason "refusal"); partial output is discarded. */
   | ({ kind: "refusal"; category: string | null; explanation: string | null } & ClerkCost)
@@ -118,5 +123,5 @@ export async function runClerk(options: ClerkOptions): Promise<ClerkResult> {
     const issues = parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`);
     return fail("invalid_intent", `not a valid Intent: ${issues.join("; ")}`, true, cost);
   }
-  return { kind: "intent", intent: normalizeIntent(parsed.data), ...cost };
+  return { kind: "intent", intent: areaMentionsToGeo(normalizeIntent(parsed.data), gazetteer()), ...cost };
 }

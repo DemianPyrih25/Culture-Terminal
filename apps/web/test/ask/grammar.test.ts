@@ -38,7 +38,7 @@ describe("parseCommand", () => {
       pillar: "investment",
       job: "brand_health",
       mentions: [],
-      geo: { metro: null, area: null, unsupported_place: null },
+      geo: { metro: null, area: null, unsupported_place: null, market: null },
       constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
       safety: { allowed: true, category: null, reframe: null },
       assumptions: [],
@@ -51,13 +51,13 @@ describe("parseCommand", () => {
       compileMnemonic(intent({ job: "head_to_head", mentions: [brand("Brand Alpha", "primary"), brand("Brand Beta", "peer")] })),
     );
     expect(parseCommand("Riverside, Austin TEN")?.mnemonic).toBe(
-      compileMnemonic(intent({ job: "tenant_mix", geo: { metro: "austin", area: "Riverside", unsupported_place: null } })),
+      compileMnemonic(intent({ job: "tenant_mix", geo: { metro: "austin", area: "Riverside", unsupported_place: null, market: null } })),
     );
     expect(parseCommand("juniper bar SITE Austin")?.mnemonic).toBe(
       compileMnemonic(
         intent({
           job: "site_selection",
-          geo: { metro: "austin", area: null, unsupported_place: null },
+          geo: { metro: "austin", area: null, unsupported_place: null, market: null },
           constraints: { concepts: ["juniper bar"], sponsor_categories: [], domains: [], ages: [], notes: [] },
         }),
       ),

@@ -26,7 +26,7 @@ import { classifyMatches, normaliseName, searchParams, SKILLS } from "@ct/quant"
 import { choiceOption, intOption, listOption, nameArg, parseCli, UsageError, type ParsedOptions } from "./args";
 import { renderDatasets } from "./dataset-view";
 import { formatFixed2, NONE } from "./format";
-import { loadGeo } from "./geo";
+import { ensureMetrosIn, loadGeo } from "./geo";
 import { EXIT, heading, safeIo, type CliIo } from "./io";
 import { callNumbers, evidenceByCall, renderCalls, renderEvidence, renderFindings, renderMetrics, renderQuota } from "./ledger-view";
 import { kvLocalityApi, localitiesKvKey, MalformedPinsError, pgKv, readPins, type KvStore } from "./localities";
@@ -503,6 +503,7 @@ async function runFromInput(args: InputSkillArgs, session: SkillSession, io: Cli
 
   const skill = SKILLS[args.skill] as unknown as Skill<unknown>;
   const toolCallId = `cli-${args.skill}`;
+  await ensureMetrosIn(session.geo, args.input);
   const estimate = await skill.estimateCalls(args.input, session.scope.forTool(toolCallId), session.registry, {
     localities: session.localities,
     geo: session.geo,

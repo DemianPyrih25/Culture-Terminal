@@ -1,9 +1,9 @@
-// The replay speeds (PLAN Part 6: "8× replay"): 8× joins 1×, 4× and 16× in the player and in both sets
-// of controls, and paces like the others (the gap over the speed, a long pause capped).
+// The replay speeds: the player keeps 1×, 4×, 8× and 16× (and pacing for each: the gap over the speed, a
+// long pause capped), while the page offers 1× and 4× (design/redesign.pen, N03 replay).
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_RUN_LIMITS, stampEvent, type EventInput, type RunEvent } from "@ct/contracts";
-import { REPLAY_BAR_SPEEDS, ReplayBar, ReplayMini, type ReplayBarProps } from "../../components/brief/replay-bar";
+import { REPLAY_SPEEDS_SHOWN, ReplayControls, type ReplayControlsProps } from "../../components/working";
 import { ReplayPlayer, REPLAY_MAX_DELAY_MS, REPLAY_SPEEDS } from "../../lib/run-stream";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }) }));
@@ -22,46 +22,30 @@ const RECORDING: RunEvent[] = [
   stamp(4, 10_800, { type: "run.end", status: "completed", elapsedMs: 10_800, reason: null }),
 ];
 
-function props(over: Partial<ReplayBarProps> = {}): ReplayBarProps {
-  return {
-    playing: true,
-    done: false,
-    speed: 8,
-    progress: 0.5,
-    positionMs: 5_000,
-    durationMs: 10_800,
-    onPlay: vi.fn(),
-    onPause: vi.fn(),
-    onSpeed: vi.fn(),
-    onRestart: vi.fn(),
-    exitHref: "/run/run-speed-test",
-    ...over,
-  };
+function controls(over: Partial<ReplayControlsProps> = {}): string {
+  const props: ReplayControlsProps = { playing: true, done: false, speed: 4, onPlay: vi.fn(), onPause: vi.fn(), onSpeed: vi.fn(), ...over };
+  return renderToStaticMarkup(<ReplayControls {...props} />);
 }
 
 describe("the replay speeds", () => {
-  it("adds 8× and keeps the others", () => {
+  it("keeps every speed in the player and offers 1× and 4× on the page", () => {
     expect(REPLAY_SPEEDS).toEqual([1, 4, 8, 16, "instant"]);
-    expect(REPLAY_BAR_SPEEDS).toEqual([1, 4, 8, 16]);
+    expect(REPLAY_SPEEDS_SHOWN).toEqual([1, 4]);
   });
 
-  it("offers 8× in the replay bar and the running head's controls, pressed when chosen", () => {
-    const bar = renderToStaticMarkup(<ReplayBar {...props()} />);
-    const radios = [...bar.matchAll(/role="radio" aria-checked="(true|false)"[^>]*>([^<]+)</g)].map((m) => [m[2], m[1]]);
-    expect(radios).toEqual([
-      ["1×", "false"],
-      ["4×", "false"],
-      ["8×", "true"],
-      ["16×", "false"],
-    ]);
-    const mini = renderToStaticMarkup(<ReplayMini {...props({ speed: 4 })} />);
-    const buttons = [...mini.matchAll(/aria-pressed="(true|false)" aria-label="([^"]+)"/g)].map((m) => [m[2], m[1]]);
-    expect(buttons).toEqual([
-      ["1× speed", "false"],
-      ["4× speed", "true"],
-      ["8× speed", "false"],
-      ["16× speed", "false"],
-    ]);
+  it("marks the chosen speed in the Speed switch", () => {
+    const html = controls({ speed: 1 });
+    expect(html).toMatch(/role="radiogroup" aria-label="Speed"/);
+    expect([...html.matchAll(/role="radio" aria-checked="(true|false)"/g)].map((m) => m[1])).toEqual(["true", "false"]);
+    expect(html).toContain(">1×<");
+    expect(html).toContain(">4×<");
+    expect(html).not.toContain("8×");
+  });
+
+  it("offers Pause while playing, Play when paused and Play again once done", () => {
+    expect(controls()).toContain('aria-label="Pause the recording"');
+    expect(controls({ playing: false })).toContain('aria-label="Play the recording"');
+    expect(controls({ playing: false, done: true })).toContain('aria-label="Play again the recording"');
   });
 });
 

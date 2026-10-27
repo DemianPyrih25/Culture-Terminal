@@ -57,17 +57,47 @@ export async function runMarkets(localities: LocalityApi | null, geo: GeoApi): P
 
 const words = (s: string): string => ` ${s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
 
+/** Like words, with each comma kept as its own token: ", washington " after a city is a state. */
+const clauses = (s: string): string => ` ${s.toLowerCase().replace(/[^a-z0-9,]+/g, " ").replace(/,/g, " , ").replace(/ +/g, " ").trim()} `;
+
+/** State codes by state name as words, from config/metros.json: "washington" is WA. */
+const StatesConfig = z.object({ markets: z.array(z.object({ state: z.string().min(2), state_name: z.string().min(1) })) });
+const STATE_CODE: ReadonlyMap<string, string> = new Map(StatesConfig.parse(raw).markets.map((m) => [words(m.state_name), m.state]));
+
+/** True when `clause` (words) ends with the name of a market outside `state`. */
+function endsWithMarketOutside(clause: string, state: string): boolean {
+  return MARKET_CATALOGUE.some((m) => m.state !== state && [m.label, m.query].some((n) => clause.endsWith(words(n))));
+}
+
+/**
+ * Where `notes` (from clauses) names the market by `name`, or -1. A name that is also another
+ * state's name ("Washington" for DC) right after a comma qualifies the city before it ("Spokane,
+ * Washington", "Seattle, Washington"), so it counts only after a market outside that state ("Boston,
+ * Washington") or before the market's own state code ("Baltimore, Washington, DC").
+ */
+function namedAt(notes: string, name: string, market: RunMarket): number {
+  const wanted = words(name);
+  const state = STATE_CODE.get(wanted);
+  for (let i = notes.indexOf(wanted); i >= 0; i = notes.indexOf(wanted, i + 1)) {
+    const before = notes.slice(0, i + 1);
+    if (state === undefined || state === market.state || !before.endsWith(" , ")) return i;
+    const after = notes.slice(i + wanted.length).replace(/^, /, "");
+    if (after.startsWith(`${market.state.toLowerCase()} `)) return i;
+    if (endsWithMarketOutside(` ${(before.slice(0, -3).split(" , ").pop() ?? "").trim()} `, state)) return i;
+  }
+  return -1;
+}
+
 /**
  * Markets the question names, in the order it names them: the question's gazetteer metro, then the
  * cities CLERK listed in its notes ("markets: Denver, Chicago", clerk.md), matched to MARKETS labels
- * by whole words. Only markets the run can use are returned.
+ * by whole words (namedAt). Only markets the run can use are returned.
  */
 export function namedMarkets(intent: Intent, markets: readonly RunMarket[]): MarketId[] {
   const usable = new Set(markets.map((m) => m.id));
-  const notes = words(intent.constraints.notes.join(" ; "));
-  const at = (name: string) => notes.indexOf(words(name));
+  const notes = clauses(intent.constraints.notes.join(" ; "));
   const found = markets
-    .map((m) => ({ id: m.id, at: Math.min(...[at(m.label), at(m.query)].map((i) => (i < 0 ? Infinity : i))) }))
+    .map((m) => ({ id: m.id, at: Math.min(...[namedAt(notes, m.label, m), namedAt(notes, m.query, m)].map((i) => (i < 0 ? Infinity : i))) }))
     .filter((m) => m.at !== Infinity)
     .sort((a, b) => a.at - b.at)
     .map((m) => m.id);

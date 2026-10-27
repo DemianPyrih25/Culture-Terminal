@@ -23,7 +23,7 @@ import {
   MetricIdSchema,
   StepIdSchema,
 } from "./ids";
-import { Intent } from "./intent";
+import { StoredIntent } from "./intent";
 import { DatasetEnvelope, Evidence, Finding, Metric } from "./ledger";
 import { RunLimits } from "./limits";
 import { QlooPath } from "./qloo-types";
@@ -125,7 +125,7 @@ const E = {
     /** The ANALYST model for this run; the economy model in economy mode. */
     model: z.string(),
   }),
-  clerk: event("clerk", { intent: Intent, ms: z.number().nonnegative() }),
+  clerk: event("clerk", { intent: StoredIntent, ms: z.number().nonnegative() }),
   resolve: event("resolve", { entities: z.array(ResolvedMention) }),
   needsInput: event("needs_input", {
     mention: z.string(),

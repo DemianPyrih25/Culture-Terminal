@@ -108,8 +108,12 @@ describe("localities pin", () => {
     expect(picked.text).toMatch(/austin\s+pinned\s+Austin \(Texas, United States/);
     expect(picked.text).toContain("this run      0 network · 1 cached");
     expect(pinsIn(kv).austin?.label).toBe("Austin");
-    expect(Object.keys(pinsIn(kv))).toEqual(MARKETS.map((m) => m.id));
     expect(picked.all).not.toMatch(ID);
+    // Washington is the other deliberate market: "Washington" also names the state.
+    const washington = await run(["pin", "washington_dc", "--pick", "1", "--yes"], { store, kv });
+    expect(washington.code).toBe(0);
+    expect(washington.text).toMatch(/washington_dc\s+pinned\s+Washington \(District of Columbia, United States/);
+    expect(Object.keys(pinsIn(kv))).toEqual(MARKETS.map((m) => m.id));
 
     // Everything pinned: nothing to search, nothing written, no call.
     const again = await run(["pin", "--all", "--yes"], { store, kv });

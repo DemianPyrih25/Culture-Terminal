@@ -126,19 +126,44 @@ describe("rank_candidates over the mock transport", () => {
     expect(blocked.flags).toContain("SENSITIVE_SEGMENT_BLOCKED");
     expect(blocked.forModel.notices).toContain("communities: invented group: a sensitive segment, refused on every desk (D21), so the context was not called.");
 
-    // spending_habits is allowed on other desks but not on the location desk: a notice, not a blocked segment.
+    // A family on no desk's list is refused too, but it is not a sensitive segment: a notice, no flag.
     const offDesk = mockRun("brand", "location");
-    const refused = await rankCandidatesSkill.run(raw({ contexts: contexts("urn:audience:spending_habits:invented_habit") }), offDesk.ctx);
+    const refused = await rankCandidatesSkill.run(raw({ contexts: contexts("urn:audience:unknown_family:invented_habit") }), offDesk.ctx);
     expect(refused.status).toBe("partial");
     expect(refused.flags).not.toContain("SENSITIVE_SEGMENT_BLOCKED");
-    expect(refused.forModel.notices).toContain("spending habits: invented habit: not on this desk's AUDIENCES list, so the context was not called.");
+    expect(refused.forModel.notices).toContain("unknown family: invented habit: not on this desk's AUDIENCES list, so the context was not called.");
     expect(offDesk.ledger.evidences[0]?.qlooCallIds).toHaveLength(1);
   });
 
-  it("makes no call for a type with no candidate list", async () => {
-    const run = mockRun("tv_show");
-    const result = await rankCandidatesSkill.run(raw({ type: "tv_show", signal_entities: ["R6"] }), run.ctx);
-    expect(result.status).toBe("error");
-    expect(run.ledger.evidences).toHaveLength(0);
+  it("ranks podcasts, TV shows and movies as named lists, from a seed or by age (C3), TV shows also by audience (C5)", async () => {
+    for (const type of ["podcast", "tv_show", "movie"] as const) {
+      const seeded = mockRun(type);
+      const named = await rankCandidatesSkill.run(raw({ type, signal_entities: ["R6"] }), seeded.ctx);
+      expect(named.status, type).not.toBe("error");
+      expect(seeded.ledger.evidences[0]?.qlooCallIds, type).toHaveLength(1);
+      const aged = mockRun(type);
+      const byAge = await rankCandidatesSkill.run(raw({ type, contexts: [{ kind: "age", age: "25_to_29" }] }), aged.ctx);
+      expect(byAge.status, type).not.toBe("error");
+      // A seed next to an age context is not verified for media: refused with no call.
+      const mixed = mockRun(type);
+      const refused = await rankCandidatesSkill.run(raw({ type, signal_entities: ["R6"], contexts: [{ kind: "age", age: "25_to_29" }] }), mixed.ctx);
+      expect(refused.status, type).toBe("error");
+      expect(mixed.ledger.evidences, type).toHaveLength(0);
+    }
+    const shows = mockRun("tv_show", "marketing");
+    const byAudience = await rankCandidatesSkill.run(raw({ type: "tv_show", contexts: [{ kind: "audience", audience: "urn:audience:life_stage:invented_stage" }] }), shows.ctx);
+    expect(byAudience.status).not.toBe("error");
+  });
+
+  it("ranks brands and persons by audience gender (C4)", async () => {
+    for (const type of ["brand", "person"] as const) {
+      const run = mockRun(type);
+      const result = await rankCandidatesSkill.run(raw({ type, contexts: [{ kind: "gender", gender: "female" }, { kind: "gender", gender: "male" }] }), run.ctx);
+      expect(result.status, type).not.toBe("error");
+      expect(run.ledger.evidences[0]?.qlooCallIds, type).toHaveLength(2);
+    }
+    const artists = mockRun("artist");
+    const refused = await rankCandidatesSkill.run(raw({ type: "artist", signal_entities: ["R6"], contexts: [{ kind: "gender", gender: "male" }] }), artists.ctx);
+    expect(refused.status).toBe("error");
   });
 });

@@ -1,167 +1,181 @@
-// Home (A01): the question field, the starters by desk (the showcase questions word for word, opening
-// a stored showcase brief when there is one), the recent briefs from fixtures, and the status line's
-// request count. The Launchpad's own parts are in ../launchpad. Invented briefs and run ids only.
-import { readFileSync } from "node:fs";
+// Home (N01, N02, N17): the hero, the question box and its states, the suggestion list (a profile row for
+// a typed name, never canned or example questions), the inline states and the how band. Invented names only.
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { briefList, BRIEFS, EMPTY_LIST } from "../library/briefs";
+import { describe, expect, it, vi } from "vitest";
+import type { AskNotice } from "../../components/ask/ask-machine";
 
-const showcases = vi.hoisted(() => ({ byQuestion: vi.fn<() => Promise<Map<string, string>>>() }));
-// The process's Qloo client as the container holds it: today's count is read from it on the server.
-const qloo = vi.hoisted(() => {
-  const client = { quota: () => ({ todayNetwork: 214 }) };
-  return { client, peek: vi.fn<() => typeof client | undefined>(() => client), get: vi.fn(() => client) };
-});
-
-vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/navigation")>()),
-  useRouter: () => ({ push: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  usePathname: () => "/",
 }));
-vi.mock("../../server/container", () => ({ getDatabase: () => ({}), peekQlooClient: qloo.peek, getQlooClient: qloo.get }));
-vi.mock("../../server/run-list", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../server/run-list")>()),
-  showcaseRunsByQuestion: showcases.byQuestion,
-}));
-// A pinned showcase's tile reads its run's events; here no run has any, and no showcase is pinned.
-vi.mock("../../server/event-store", () => ({ readAllEvents: async () => [] }));
-vi.mock("@ct/db", async (importOriginal) => ({ ...(await importOriginal<typeof import("@ct/db")>()), listPinnedShowcases: async () => [] }));
 
 const { default: Home } = await import("../../app/page");
-const { STARTER_DESKS } = await import("../../components/home/starters");
-const { RecentBriefsView } = await import("../../components/home/recent-briefs");
-const { qlooRequestsToday, qlooUsageText } = await import("../../components/home/qloo-usage");
-const { askHref } = await import("../../components/ask/ask-href");
+const { AskNoticeView } = await import("../../components/home/ask-notice");
+const { HOW_ITEMS } = await import("../../components/home/how-band");
+const { QUESTION_PLACEHOLDER, QuestionBox, questionKeyAction, questionText } = await import("../../components/home/question-box");
+const { SuggestionList, suggestionOptionId } = await import("../../components/home/suggestion-list");
+const { looksLikeName, moveActive, PLACE_HINT, suggestionRows, suggestionsFor } = await import("../../components/home/suggestions");
 
-afterEach(() => {
-  vi.unstubAllEnvs();
-  showcases.byQuestion.mockReset();
-});
-
-const showcaseConfig = JSON.parse(readFileSync(new URL("../../../../config/showcases.json", import.meta.url), "utf8")) as {
-  showcases: { code: string; desk: string; question: string }[];
-};
-
-/** Markup escapes the way React prints text. */
-const escaped = (text: string) => text.replace(/&/g, "&amp;").replace(/'/g, "&#x27;").replace(/"/g, "&quot;");
+const html = renderToStaticMarkup;
+const noop = () => undefined;
 
 describe("Home", () => {
-  it("renders the chrome, the question field and the four desks of starters", async () => {
-    vi.stubEnv("QLOO_DAILY_FRESH_CAP", "1900");
-    showcases.byQuestion.mockResolvedValue(new Map());
-    const html = renderToStaticMarkup(await Home());
-    expect(html).toContain('aria-label="Main"');
-    expect(html).toMatch(/<p[^>]*>Taste intelligence for investors<\/p>/);
-    expect(html).toMatch(/<h1[^>]*>Taste is a market. Now it has a terminal.<\/h1>/);
-    expect(html).toContain('placeholder="Ask about a brand, an artist, a place or an audience"');
-    expect(html).toContain("to ask");
-    // The top bar keeps ⌘K; the big field takes /.
-    expect(html).toContain('aria-keyshortcuts="Meta+K Control+K"');
-    expect(html).toContain('aria-keyshortcuts="/"');
-    for (const desk of ["Investment", "Location", "Marketing", "Audience"]) expect(html).toMatch(new RegExp(`<h2[^>]*>${desk}</h2>`));
-    for (const starter of STARTER_DESKS.flatMap((d) => d.starters)) {
-      expect(html).toContain(`href="${escaped(askHref(starter.question))}"`);
-      expect(html).toContain(`>${escaped(starter.label)}</a>`);
+  it("renders the hero, the question box and the how band in the home shell", () => {
+    const out = html(<Home />);
+    expect(out).toMatch(/<h1[^>]*>Ask what any audience<br\/>really loves\.<\/h1>/);
+    expect(out).toContain("Get a one-page answer from Qloo taste data in about a minute.");
+    // The box is #ask, so "New question" from any page lands in it.
+    const field = out.match(/<textarea[^>]*id="ask"[^>]*>/)?.[0] ?? "";
+    expect(field).toContain('aria-autocomplete="list"');
+    // ARIA allows role=combobox only on an input, so the textarea stays a textbox.
+    expect(field).not.toContain("role=");
+    expect(field).not.toContain("aria-expanded");
+    expect(field).not.toContain("aria-controls");
+    expect(out).toContain(`placeholder="${QUESTION_PLACEHOLDER}"`);
+    expect(out).toMatch(/<form[^>]*data-state="idle"/);
+    expect(out).toContain(">Get answer<");
+    for (const item of HOW_ITEMS) {
+      expect(out).toContain(item.title);
+      expect(out).toContain(item.line.replace(/'/g, "&#x27;"));
     }
-    // The recent list loads in the browser: it names this browser's own runs.
-    expect(html).toContain('aria-label="Loading recent briefs"');
-    expect(html).toContain("Analytics, not financial advice · Group-level taste data · No individuals");
-    // Today's Qloo requests come with the page: nothing asks GET /api/health for them.
-    expect(html).toContain('<span class="font-mono">Qloo 214 / 1,900 req today</span>');
+    // The home header: no New question button; the footer is there.
+    expect(out).not.toContain("New question");
+    expect(out).toContain("Not financial advice");
   });
 
-  it("opens the stored showcase brief of a starter, at no cost, and asks the others", async () => {
-    const [first, second] = STARTER_DESKS[0]!.starters;
-    showcases.byQuestion.mockResolvedValue(new Map([[` ${first!.question.toUpperCase()}`.trim().toLowerCase(), "run-showcase-0001"]]));
-    const html = renderToStaticMarkup(await Home());
-    expect(html).toContain(`href="/run/run-showcase-0001"`);
-    expect(html).toContain(`>${escaped(first!.label)}<span class="sr-only"> (stored brief)</span></a>`);
-    // The starter opens the brief; its showcase tile still offers [Run live].
-    expect(html).not.toContain(`href="${escaped(askHref(first!.question))}">${escaped(first!.label)}</a>`);
-    expect(html).toContain(`href="${escaped(askHref(second!.question))}">${escaped(second!.label)}</a>`);
+  it("shows no examples anywhere: no ready answers, no Try chips, no showcase or recording links", () => {
+    const out = html(<Home />);
+    expect(out).not.toMatch(/example|showcase|ready answer|Try:|recording|replay/i);
+    expect(out).not.toContain("/r/");
+    expect(out).not.toContain("?replay=1");
+    // Nothing is listed on Home: the visitor's own answers live on /briefs.
+    expect(out).not.toMatch(/Recent briefs|Your answers<\/h2>/);
   });
 
-  it("asks every starter when the showcases cannot be read", async () => {
-    showcases.byQuestion.mockRejectedValue(new Error("connection refused"));
-    const html = renderToStaticMarkup(await Home());
-    for (const starter of STARTER_DESKS.flatMap((d) => d.starters)) expect(html).toContain(`href="${escaped(askHref(starter.question))}"`);
-  });
-
-  it("asks every showcase question word for word on its desk", () => {
-    for (const showcase of showcaseConfig.showcases) {
-      const desk = STARTER_DESKS.find((d) => d.pillar === showcase.desk);
-      const starter = desk?.starters.find((s) => s.showcase === showcase.code);
-      expect(starter?.question, showcase.code).toBe(showcase.question);
-    }
-    for (const desk of STARTER_DESKS) {
-      expect(desk.starters.length, desk.pillar).toBeGreaterThanOrEqual(3);
-      for (const s of desk.starters) expect(s.label.length, s.label).toBeLessThanOrEqual(32);
-    }
+  it("uses only the placeholder's general words, never a sample name", () => {
+    expect(QUESTION_PLACEHOLDER).toBe("Type a question about a brand, artist, place or audience");
   });
 });
 
-describe("RecentBriefsView", () => {
-  it("lists the briefs with desk and job, verdict, conviction and date, and links to the library", () => {
-    const html = renderToStaticMarkup(<RecentBriefsView state={{ kind: "ready", list: briefList(BRIEFS), year: 2026 }} />);
-    expect(html).toMatch(/href="\/briefs"[^>]*>All 38 briefs/);
-    expect(html).toContain('href="/run/run-brief-0001"');
-    expect(html).toContain("Juniper Cola vs Brand Beta: who wins where?");
-    expect(html).toContain("Investment · Compare two brands");
-    expect(html).toContain("Mixed signal");
-    expect(html).toContain('aria-valuenow="71"');
-    expect(html).toContain(">14 Oct</time>");
-    // Another year prints its year.
-    expect(html).toContain(">30 Dec 2025</time>");
-    // A run that stopped without a note: no verdict, no conviction (none will come), never a 0.
-    expect(html).toContain("Incomplete");
-    expect(html).toContain("Conviction: not scored");
-    // The empty meter is drawn but hidden: its "pending" would promise a score.
-    expect(html).toContain('<span aria-hidden="true"><span role="meter" aria-label="Conviction" aria-valuemin="0" aria-valuemax="100" aria-valuetext="pending"');
-    expect(html).not.toContain('aria-valuenow="0"');
+describe("the question box", () => {
+  it("reads Enter as asking and Shift+Enter as nothing, and keeps a question on one line", () => {
+    expect(questionKeyAction({ key: "Enter", shiftKey: false })).toBe("submit");
+    expect(questionKeyAction({ key: "Enter", shiftKey: true })).toBe("ignore");
+    expect(questionKeyAction({ key: "Enter", shiftKey: false, isComposing: true })).toBeNull();
+    expect(questionKeyAction({ key: "a", shiftKey: false })).toBeNull();
+    expect(questionText("Who is\nthe Juniper Cola\r\naudience?")).toBe("Who is the Juniper Cola audience?");
   });
 
-  it("says so when there are no briefs, in the page's words, and offers a retry when the list failed", () => {
-    const empty = renderToStaticMarkup(<RecentBriefsView state={{ kind: "ready", list: EMPTY_LIST, year: 2026 }} />);
-    expect(empty).toContain("No briefs yet. The briefs you run in this browser are listed here.");
-    expect(empty).not.toContain('href="/briefs"');
-    const home = renderToStaticMarkup(
-      <RecentBriefsView state={{ kind: "ready", list: EMPTY_LIST, year: 2026 }} empty={<p>Pick a starter above.</p>} />,
+  it("greys the text and spins the button while reading", () => {
+    const out = html(<QuestionBox id="q" value="Juniper Cola" onChange={noop} onSubmit={noop} state="loading" />);
+    expect(out).toContain('data-state="loading"');
+    expect(out).toMatch(/<textarea[^>]*readOnly=""/);
+    expect(out).toContain("text-ink-2");
+    expect(out).toMatch(/aria-busy="true"[^>]*>.*Reading…/);
+    expect(html(<QuestionBox id="q" value="x" onChange={noop} onSubmit={noop} state="loading" loadingLabel="Starting…" />)).toContain(
+      "Starting…",
     );
-    expect(home).toContain("<p>Pick a starter above.</p>");
-    const failed = renderToStaticMarkup(
-      <RecentBriefsView state={{ kind: "error", message: "The briefs could not be loaded.", retry: true }} onRetry={() => undefined} />,
+  });
+
+  it("disables Get answer while live questions are paused", () => {
+    const out = html(<QuestionBox id="q" value="Juniper Cola" onChange={noop} onSubmit={noop} state="paused" />);
+    expect(out).toMatch(/<button type="submit" disabled=""/);
+    expect(out).not.toMatch(/<textarea[^>]*readOnly/);
+  });
+
+  it("draws the focus ring for the gallery, and the follow-up pill with x", () => {
+    expect(html(<QuestionBox id="q" value="" onChange={noop} onSubmit={noop} showFocus />)).toContain("ring-accent-soft");
+    const follow = html(
+      <QuestionBox id="q" value="" onChange={noop} onSubmit={noop} followUp={{ label: "Who is the Brand Beta audience?", onDrop: noop }} />,
     );
+    expect(follow).toContain("Follow-up to: Who is the Brand Beta audience?");
+    expect(follow).toContain('aria-label="Ask on its own"');
+    expect(follow).toContain("md:min-h-[104px]");
+  });
+
+  it("wires the field to the list and its active row", () => {
+    const out = html(
+      <QuestionBox id="q" value="Juniper Cola" onChange={noop} onSubmit={noop} combobox={{ expanded: true, listId: "list", activeId: "list-profile-0" }} />,
+    );
+    expect(out).not.toContain('role="combobox"');
+    expect(out).not.toContain("aria-expanded");
+    expect(out).toContain('aria-controls="list"');
+    expect(out).toContain('aria-activedescendant="list-profile-0"');
+    expect(out).toContain('aria-autocomplete="list"');
+  });
+});
+
+describe("suggestions", () => {
+  it("opens only for text that reads as a name", () => {
+    expect(looksLikeName("Juniper Cola")).toBe(true);
+    expect(looksLikeName("J")).toBe(false);
+    expect(looksLikeName("Juniper Cola?")).toBe(false);
+    expect(looksLikeName("Who is the Juniper Cola audience")).toBe(false);
+    expect(looksLikeName("is Juniper Cola big")).toBe(false);
+    expect(looksLikeName("one two three four five")).toBe(false);
+    expect(looksLikeName("Brand Alpha Beta Gamma")).toBe(true);
+  });
+
+  it("offers only the instant audience profile of the typed name: no canned or ready questions", () => {
+    const groups = suggestionsFor("  Juniper   Cola ");
+    expect(groups).toEqual([
+      {
+        key: "profile",
+        label: "Profile",
+        icon: "user-round",
+        rows: [{ key: "profile-0", label: "Juniper Cola · audience profile", href: "/d/Juniper%20Cola", tag: "instant" }],
+      },
+    ]);
+    expect(suggestionsFor("Who really competes with Juniper Cola?")).toEqual([]);
+    expect(suggestionsFor("")).toEqual([]);
+    expect(suggestionRows(groups)).toHaveLength(1);
+  });
+
+  it("walks the rows with the arrows, wrapping at both ends", () => {
+    expect(moveActive(-1, 3, "ArrowDown")).toBe(0);
+    expect(moveActive(2, 3, "ArrowDown")).toBe(0);
+    expect(moveActive(0, 3, "ArrowUp")).toBe(2);
+    expect(moveActive(-1, 3, "ArrowUp")).toBe(2);
+    expect(moveActive(1, 3, "ArrowUp")).toBe(0);
+    expect(moveActive(0, 0, "ArrowDown")).toBe(-1);
+  });
+
+  it("draws a listbox of grouped options, the active one selected, and the place hint", () => {
+    const groups = suggestionsFor("Juniper Cola");
+    const out = html(<SuggestionList id="list" groups={groups} activeKey="profile-0" onPick={noop} />);
+    expect(out).toContain('role="listbox"');
+    expect(out).toMatch(/role="group" aria-labelledby="list-profile-label"/);
+    expect(out).toMatch(new RegExp(`id="${suggestionOptionId("list", "profile-0")}" role="option" aria-selected="true"`));
+    expect(out).toContain("Instant");
+    expect(PLACE_HINT).toBe("Place questions cover 13 US cities: Atlanta, Austin, Boston, Chicago, Dallas, Denver, Houston, Los Angeles, Miami, Nashville, New York City, San Francisco and Seattle.");
+    expect(out).toContain(PLACE_HINT);
+  });
+});
+
+describe("the inline states", () => {
+  const view = (notice: AskNotice) => html(<AskNoticeView notice={notice} onReframe={noop} onRetry={noop} />);
+
+  it("paused links to the visitor's own answers, not to examples", () => {
+    const out = view({ kind: "paused", text: "New questions reopen at 8:00 pm your time. Answers you already have still open." });
+    expect(out).toContain('data-notice="paused"');
+    expect(out).toMatch(/href="\/briefs"[^>]*>.*Your answers/);
+    expect(out).not.toMatch(/example|ready answers/i);
+  });
+
+  it("refused offers the reframe as a chip that asks it", () => {
+    const out = view({ kind: "refused", text: "We don't answer political targeting questions. Try this instead:", reframe: "Who loves Riverside cafés?" });
+    expect(out).toMatch(/<button type="button"[^>]*>.*Who loves Riverside cafés\?/);
+    expect(view({ kind: "refused", text: "We don't give investment advice.", reframe: null })).not.toContain("<button");
+  });
+
+  it("needs input has no button; an error and a run that did not start try again", () => {
+    expect(view({ kind: "needs_input", text: "Add a second brand to compare with Juniper Cola." })).not.toMatch(/<(button|a) /);
+    expect(view({ kind: "error", text: "No connection.", retry: true })).toContain("Try again");
+    expect(view({ kind: "error", text: "Bad request.", retry: false })).not.toContain("Try again");
+    const failed = view({ kind: "run_failed", text: "Too many answers this hour." });
     expect(failed).toContain('role="alert"');
+    expect(failed).toContain('data-tone="danger"');
     expect(failed).toContain("Try again");
-  });
-});
-
-describe("the status line's Qloo count", () => {
-  const client = (todayNetwork: number) => ({ quota: () => ({ todayNetwork }) });
-
-  it("prints today's requests against the quota, read from the server's Qloo client", () => {
-    expect(qlooUsageText(214, 1900)).toBe("Qloo 214 / 1,900 req today");
-    const running = client(8);
-    expect(qlooRequestsToday(() => running, () => running)).toBe(8);
-  });
-
-  it("says nothing rather than a wrong 0 while a new client loads the day's count, or when Qloo is not configured", () => {
-    const get = vi.fn(() => client(0));
-    expect(qlooRequestsToday(() => undefined, get)).toBeNull();
-    // The read still creates the client, so the next page has the count.
-    expect(get).toHaveBeenCalledOnce();
-    const unconfigured = () => {
-      throw new Error("QLOO_API_KEY is not set");
-    };
-    expect(qlooRequestsToday(() => undefined, unconfigured)).toBeNull();
-    expect(qlooRequestsToday(() => client(3), unconfigured)).toBeNull();
-  });
-
-  it("leaves the count out of the status line when the server could not read it", async () => {
-    qloo.peek.mockReturnValueOnce(undefined);
-    showcases.byQuestion.mockResolvedValue(new Map());
-    const html = renderToStaticMarkup(await Home());
-    expect(html).toContain("Analytics, not financial advice");
-    expect(html).not.toContain("req today");
   });
 });

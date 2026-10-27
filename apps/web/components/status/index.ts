@@ -1,4 +1,4 @@
-// /status (PLAN Part 7, P1): the service's mode, breakers, budgets, quota and outcomes, after A12 Settings.
+// /status (PLAN Part 7, P1): the service's mode, breakers, budgets, quota and outcomes.
 export {
   BREAKER_LABEL,
   breakerDetail,
@@ -19,10 +19,10 @@ export {
   statusCounts,
   UNAVAILABLE_TAG,
 } from "./format";
-export type { LaneView, Tag } from "./format";
+export type { LaneView, Tag, TagTone } from "./format";
 export { RunStrip, STATUS_CELL } from "./run-strip";
 export type { RunStripProps } from "./run-strip";
-export { Amount, LevelTag, NoteMark, StateTag, StatusNote, StatusRow, StatusRows } from "./status-rows";
+export { Amount, LevelTag, StateTag, StatusRow, StatusRows } from "./status-rows";
 export type { StatusRowProps } from "./status-rows";
 export { STATUS_SECTIONS, StatusView } from "./status-view";
 export type { StatusViewProps } from "./status-view";

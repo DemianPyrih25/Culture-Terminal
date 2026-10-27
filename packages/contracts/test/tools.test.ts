@@ -156,7 +156,7 @@ describe("parseToolInput", () => {
     expect(parseToolInput("cross_domain", { ...base, seeds: ["R01"] }).ok).toBe(false);
     expect(parseToolInput("cross_domain", { ...base, extra: true }).ok).toBe(false);
     expect(parseToolInput("cross_domain", { ...base, popularity_max: 0.2 }).ok).toBe(false);
-    const lift = { metro: "nyc", concept_tags: ["T1"], concept_entities: [], supply: false, trigger_finding_id: null, step_id: null };
+    const lift = { metro: "portland", concept_tags: ["T1"], concept_entities: [], supply: false, trigger_finding_id: null, step_id: null };
     expect(parseToolInput("geo_lift", lift).ok).toBe(false);
     expect(parseToolInput("geo_lift", { ...lift, metro: "austin" }).ok).toBe(true);
   });
@@ -193,16 +193,28 @@ describe("parseToolInput", () => {
       step_id: null,
     };
     expect(parseToolInput("rank_candidates", rank).ok).toBe(true);
+    const audience = { kind: "audience", audience: "urn:audience:leisure:fixture" };
+    const female = { kind: "gender", gender: "female" };
+    expect(parseToolInput("rank_candidates", { ...rank, contexts: [{ kind: "none" }, female] }).ok).toBe(true);
+    expect(parseToolInput("rank_candidates", { ...rank, contexts: [{ kind: "gender", gender: "other" }] }).ok).toBe(false);
+    // Coverage probe C3 and C5: named lists of podcasts, TV shows and movies on one scale.
     for (const type of ["podcast", "tv_show", "movie"]) {
-      expect(parseToolInput("rank_candidates", { ...rank, type }).ok, type).toBe(false);
+      const media = { ...rank, type, contexts: [{ kind: "none" }] };
+      expect(parseToolInput("rank_candidates", media).ok, type).toBe(true);
+      expect(parseToolInput("rank_candidates", { ...media, signal_entities: [], contexts: [{ kind: "age", age: "25_to_29" }] }).ok, type).toBe(true);
+      expect(parseToolInput("rank_candidates", { ...media, contexts: [{ kind: "none" }, { kind: "age", age: "25_to_29" }] }).ok, type).toBe(false);
+      expect(parseToolInput("rank_candidates", { ...media, signal_entities: [], contexts: [city] }).ok, type).toBe(false);
+      expect(parseToolInput("rank_candidates", { ...media, signal_entities: [], contexts: [female] }).ok, type).toBe(false);
+      expect(parseToolInput("rank_candidates", { ...media, signal_entities: [], contexts: [audience] }).ok, type).toBe(type === "tv_show");
     }
     const person = { ...rank, type: "person", signal_entities: [], contexts: [city, { kind: "metro", market: "denver" }] };
     expect(parseToolInput("rank_candidates", person).ok).toBe(true);
     expect(parseToolInput("rank_candidates", { ...person, contexts: [city, { kind: "age", age: "25_to_29" }] }).ok).toBe(true);
-    expect(parseToolInput("rank_candidates", { ...person, contexts: [city, { kind: "audience", audience: "urn:audience:leisure:fixture" }] }).ok).toBe(false);
+    expect(parseToolInput("rank_candidates", { ...person, contexts: [city, audience, female] }).ok).toBe(true);
     expect(parseToolInput("rank_candidates", { ...person, signal_tags: ["T1"] }).ok).toBe(false);
     const artist = { ...rank, type: "artist", signal_tags: ["T1"], contexts: [{ kind: "none" }] };
     expect(parseToolInput("rank_candidates", artist).ok).toBe(true);
+    expect(parseToolInput("rank_candidates", { ...artist, contexts: [{ kind: "none" }, female] }).ok).toBe(false);
     expect(parseToolInput("rank_candidates", { ...artist, contexts: [{ kind: "none" }, city] }).ok).toBe(false);
     const place = { ...rank, type: "place", signal_entities: [], contexts: [{ kind: "site", area: { kind: "nbhd", ref: "fixture_area", metro: "nashville" } }, city] };
     expect(parseToolInput("rank_candidates", place).ok).toBe(true);
@@ -216,15 +228,30 @@ describe("parseToolInput", () => {
     expect(parseToolInput("rank_candidates", { ...destination, signal_entities: [], signal_tags: ["T1"] }).ok).toBe(false);
   });
 
-  it("restricts share_of_taste to brands, and persons by age and metro", () => {
+  it("restricts share_of_taste to brands and persons under any context, and media sets by age", () => {
     const share = { type: "brand", set: ["R1", "R2"], ages: ["25_to_29"], audiences: [], metros: [], trigger_finding_id: null, step_id: null };
-    expect(parseToolInput("share_of_taste", share).ok).toBe(true);
+    const parsed = parseToolInput("share_of_taste", share);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.input.genders).toEqual([]);
     for (const type of ["artist", "destination", "place"]) {
       expect(parseToolInput("share_of_taste", { ...share, type }).ok, type).toBe(false);
     }
+    const audiences = ["urn:audience:leisure:fixture"];
     expect(parseToolInput("share_of_taste", { ...share, type: "person" }).ok).toBe(true);
-    expect(parseToolInput("share_of_taste", { ...share, type: "person", audiences: ["urn:audience:leisure:fixture"] }).ok).toBe(false);
+    expect(parseToolInput("share_of_taste", { ...share, type: "person", audiences }).ok).toBe(true);
     expect(parseToolInput("share_of_taste", { ...share, type: "person", ages: [], metros: ["denver"] }).ok).toBe(true);
+    // Coverage probe C4: gender contexts on brands and persons; a gender alone is a context.
+    expect(parseToolInput("share_of_taste", { ...share, ages: [], genders: ["male", "female"] }).ok).toBe(true);
+    expect(parseToolInput("share_of_taste", { ...share, type: "person", genders: ["female"] }).ok).toBe(true);
+    expect(parseToolInput("share_of_taste", { ...share, genders: ["female", "female"] }).ok).toBe(false);
+    expect(parseToolInput("share_of_taste", { ...share, genders: ["nonbinary"] }).ok).toBe(false);
+    // C3 and C5: media sets by age; TV shows also by audience; no metros or genders.
+    for (const type of ["podcast", "tv_show", "movie"]) {
+      expect(parseToolInput("share_of_taste", { ...share, type }).ok, type).toBe(true);
+      expect(parseToolInput("share_of_taste", { ...share, type, audiences }).ok, type).toBe(type === "tv_show");
+      expect(parseToolInput("share_of_taste", { ...share, type, metros: ["denver"] }).ok, type).toBe(false);
+      expect(parseToolInput("share_of_taste", { ...share, type, genders: ["male"] }).ok, type).toBe(false);
+    }
   });
 
   it("restricts momentum to brands and TV shows", () => {

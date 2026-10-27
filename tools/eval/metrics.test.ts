@@ -1,7 +1,7 @@
 // The eval metrics on invented records (D29): every number here is made up, and nothing touches Qloo,
 // a model or the disk.
 import { describe, expect, it } from "vitest";
-import { EVAL_METRIC_IDS } from "../../apps/web/components/launchpad/eval-summary";
+import { EVAL_METRIC_IDS } from "../../apps/web/components/method/eval-ids";
 import {
   adversarialAccuracy,
   attemptSpend,
@@ -272,7 +272,7 @@ describe("computeEvalMetrics", () => {
     };
   }
 
-  it("publishes the SPEC §6.7 list in order, under the ids the launchpad reads", () => {
+  it("publishes the SPEC §6.7 list in order, under the ids the eval summary uses", () => {
     const m = computeEvalMetrics(inputs());
     expect(m.metrics.map((r) => r.id)).toEqual(Object.keys(METRIC_DEFINITIONS));
     for (const id of Object.values(EVAL_METRIC_IDS)) expect(m.metrics.some((r) => r.id === id), id).toBe(true);

@@ -10,6 +10,12 @@
 // keep-shapes) and round to 5 decimals. Then, here: orient rings as RFC 7946 asks and
 // validate them -> a query ring of at most MAX_WKT_VERTICES points that never self-intersects -> the
 // centroid (shapes labelPoint) and geodesic area, exactly as createGeo would compute them.
+//
+// A module written here is not served until it is wired in: @ct/geo loads each city's polygons only on
+// first use, so add a loader for it to GAZETTEER_LOADERS (packages/geo/src/gazetteer.ts), then regenerate
+// the polygon-free catalog every metro is matched from, packages/geo/src/catalog.ts, with
+// `pnpm --filter @ct/geo test -u` (its test fails while the catalog is stale). The rest of the checklist
+// is in the header of tools/geo/zcta.ts. Every build prints WIRE_UP after writing a module.
 import mapshaper from "mapshaper";
 import type { GazetteerArea } from "../../packages/geo/src/gazetteer";
 import { areaKm2 } from "../../packages/geo/src/measure";
@@ -21,6 +27,11 @@ type QueryPolygon = NonNullable<GazetteerArea["query"]>;
 export type Position = QueryPolygon["coordinates"][number][number];
 /** MultiPolygon coordinates: polygons, each an outer ring and then its holes. */
 export type Parts = Position[][][];
+
+/** What a build prints after writing a data module: the two steps that make @ct/geo serve it. */
+export const WIRE_UP =
+  "Next: add the module's loader to GAZETTEER_LOADERS in packages/geo/src/gazetteer.ts, then regenerate " +
+  "packages/geo/src/catalog.ts with `pnpm --filter @ct/geo test -u`; the rest is in the header of tools/geo/zcta.ts.";
 
 /** Polygon parts and holes below this are slivers. */
 export const MIN_PART_KM2 = 0.02;

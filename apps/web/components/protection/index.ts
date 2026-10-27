@@ -21,5 +21,4 @@ export {
   useHumanState,
 } from "./human-check-panel";
 export type { HumanCheckCardProps } from "./human-check-panel";
-export { ModeBanner, modeBannerText, ModeBannerView, ModeStatus, modeStatusText, ModeStatusView, useAccess } from "./mode-status";
-export type { ModeStatusProps } from "./mode-status";
+export { useAccess } from "./use-access";

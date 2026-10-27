@@ -1,7 +1,7 @@
 import type { MatrixCell, MatrixPayload, MetricUnit } from "@ct/contracts";
 import { FigureFrame, figureLabel, type FigureMeta } from "./figure-frame";
 import { FigureTable, type TableRow } from "./figure-table";
-import { axisCodes, cellText, formatNumber, reasonLabel, type NumberStyle } from "./format";
+import { axisCodes, cellText, formatNumber, reasonLabel, sentenceCase, type NumberStyle } from "./format";
 import { clamp, fitText, hatchPath, px, stepDigits, textWidth } from "./scale";
 
 /**
@@ -37,12 +37,14 @@ export type MatrixGridProps = FigureMeta & MatrixGridOptions & { data: MatrixPay
 const CELL_H = 20;
 const GAP = 1;
 const HEAD_H = 16;
-const GROUP_H = 14;
-const SECTION_H = 18;
+const GROUP_H = 16;
+const SECTION_H = 20;
 const CODE_W = 32;
-const MARGIN_H = 24;
-const RAMP_H = 14;
-const CODE_FONT = { weight: 600, tracking: 0.6 } as const;
+const MARGIN_H = 26;
+const RAMP_H = 16;
+const CODE_FONT = { weight: 600 } as const;
+/** Labels outside the cells: 12 px (the design's 12/16 chart labels). Cell values stay 11 to fit a 20 px cell. */
+const FONT = 12;
 /** Room for an annotation mark at the end of the row-head column. */
 const ROW_NOTE_W = 11;
 /**
@@ -109,7 +111,7 @@ function MatrixPlot(props: MatrixGridProps & { label: string; style: NumberStyle
   const labelW =
     (rowMode === "code"
       ? CODE_W
-      : clamp(Math.max(...data.rows.map((r) => textWidth(r.label, 11))) + 10, 48, 140)) + rowNoteW;
+      : clamp(Math.max(...data.rows.map((r) => textWidth(r.label, FONT))) + 10, 48, 160)) + rowNoteW;
   const nCols = Math.max(1, data.cols.length);
   const cellW = props.width ? clamp(Math.floor((props.width - labelW) / nCols) - GAP, 22, 72) : 39;
   const gridW = nCols * (cellW + GAP);
@@ -152,11 +154,10 @@ function MatrixPlot(props: MatrixGridProps & { label: string; style: NumberStyle
     <div className="flex flex-col gap-2 pt-1 pb-1.5">
       <svg
         viewBox={`0 0 ${px(width)} ${px(height)}`}
-        width="100%"
+        width={px(width)}
         role="img"
         aria-label={props.label}
-        className="block h-auto max-w-full overflow-visible font-ui"
-        style={{ maxWidth: width }}
+        className="block h-auto max-w-none overflow-visible font-sans"
       >
         <title>{props.label}</title>
         <desc>
@@ -171,13 +172,12 @@ function MatrixPlot(props: MatrixGridProps & { label: string; style: NumberStyle
             <text
               key={`g-${g.start}`}
               x={px(cellX(g.start))}
-              y={10}
-              fontSize={9}
-              fontWeight={600}
-              letterSpacing={0.9}
-              className="fill-dim"
+              y={12}
+              fontSize={FONT}
+              fontWeight={500}
+              className="fill-ink-2"
             >
-              {fitText(g.group!.toUpperCase(), g.length * (cellW + GAP) - 4, 9, { weight: 600, tracking: 0.9 })}
+              {fitText(sentenceCase(g.group!), g.length * (cellW + GAP) - 4, FONT, { weight: 500 })}
             </text>
           ))}
 
@@ -191,24 +191,23 @@ function MatrixPlot(props: MatrixGridProps & { label: string; style: NumberStyle
                 x={px(cellX(j) + cellW / 2)}
                 y={top + 11.5}
                 textAnchor="middle"
-                fontSize={9.5}
+                fontSize={11}
                 fontWeight={target ? 700 : 600}
-                letterSpacing={0.6}
-                className={target ? "fill-ink" : "fill-dim"}
+                className={target ? "fill-ink" : "fill-ink-2"}
               >
                 <title>{c.label}</title>
-                {fitText(code, cellW + 2, 9.5, CODE_FONT)}
+                {fitText(code, cellW + 2, 11, CODE_FONT)}
               </text>
               {note ? (
-                <AnnotationMark n={note.n} x={cellX(j) + cellW / 2 + textWidth(code, 9.5, CODE_FONT) / 2 + 5} y={top + 5} />
+                <AnnotationMark n={note.n} x={cellX(j) + cellW / 2 + textWidth(code, 11, CODE_FONT) / 2 + 5} y={top + 5} />
               ) : null}
             </g>
           );
         })}
 
         {sections.map((s) => (
-          <text key={`s-${s.y}`} x={0} y={px(s.y + 12.5)} fontSize={9} fontWeight={600} letterSpacing={0.9} className="fill-dim">
-            {fitText(s.label.toUpperCase(), width, 9, { weight: 600, tracking: 0.9 })}
+          <text key={`s-${s.y}`} x={0} y={px(s.y + 14)} fontSize={FONT} fontWeight={500} className="fill-ink-2">
+            {fitText(sentenceCase(s.label), width, FONT, { weight: 500 })}
           </text>
         ))}
 
@@ -217,18 +216,17 @@ function MatrixPlot(props: MatrixGridProps & { label: string; style: NumberStyle
           const target = i === targetRow;
           const head =
             rowMode === "code"
-              ? fitText(codes.get(row.key) ?? row.label, labelW - rowNoteW - 2, 9.5, CODE_FONT)
-              : fitText(row.label, labelW - rowNoteW - 8, 11);
+              ? fitText(codes.get(row.key) ?? row.label, labelW - rowNoteW - 2, 11, CODE_FONT)
+              : fitText(row.label, labelW - rowNoteW - 8, FONT);
           const note = annotations.find((a) => a.kind === "row" && a.rowKey === row.key);
           return (
             <g key={`r-${row.key}`}>
               <text
                 x={0}
                 y={px(ry + 13.5)}
-                fontSize={rowMode === "code" ? 9.5 : 11}
+                fontSize={rowMode === "code" ? 11 : FONT}
                 fontWeight={rowMode === "code" ? (target ? 700 : 600) : target ? 600 : 400}
-                letterSpacing={rowMode === "code" ? 0.6 : 0}
-                className={target ? "fill-ink" : rowMode === "code" ? "fill-dim" : "fill-text-2"}
+                className={target ? "fill-ink" : "fill-ink-2"}
               >
                 <title>{row.label}</title>
                 {head}
@@ -325,7 +323,7 @@ function MatrixPlot(props: MatrixGridProps & { label: string; style: NumberStyle
       </svg>
 
       {annotations.length > 0 ? (
-        <ol className="m-0 flex list-none flex-col gap-0.5 p-0 font-ui text-[11px] leading-[15px] text-accent">
+        <ol className="m-0 flex list-none flex-col gap-0.5 p-0 type-caption text-accent-ink">
           {annotations.map((a) => (
             <li key={a.n} className="flex gap-1.5">
               <span className="font-semibold">{a.kind === "note" ? "·" : a.n}</span>
@@ -336,13 +334,13 @@ function MatrixPlot(props: MatrixGridProps & { label: string; style: NumberStyle
       ) : null}
 
       {(props.showKey ?? true) && keyItems.length > 0 ? (
-        <p className="m-0 font-ui text-[11px] leading-[16px] text-dim">
+        <p className="m-0 type-caption text-ink-2">
           {keyItems.map(([key, code], n) => {
             const item = data.cols.find((c) => c.key === key) ?? data.rows.find((r) => r.key === key);
             return (
               <span key={key}>
                 {n > 0 ? " · " : ""}
-                <span className="font-semibold tracking-[0.6px] text-text-2">{code}</span> {item?.label}
+                <span className="font-semibold text-ink-2">{code}</span> {item?.label}
               </span>
             );
           })}
@@ -383,8 +381,8 @@ function Cell({
       return (
         <g data-cell="self">
           <title>{`${title}: ${reasonLabel(cell.reason)}`}</title>
-          <rect x={px(x)} y={px(y)} width={px(w)} height={CELL_H} className="fill-canvas" />
-          <text x={cx} y={px(y + 14)} textAnchor="middle" fontSize={11} className="fill-dim">
+          <rect x={px(x)} y={px(y)} width={px(w)} height={CELL_H} className="fill-sunken" />
+          <text x={cx} y={px(y + 14)} textAnchor="middle" fontSize={11} className="fill-ink-2">
             {"—"}
           </text>
         </g>
@@ -393,7 +391,7 @@ function Cell({
     return (
       <g data-cell="missing">
         <title>{`${title}: ${reasonLabel(cell.reason)}`}</title>
-        <rect x={px(x + 0.5)} y={px(y + 0.5)} width={px(w - 1)} height={CELL_H - 1} className="fill-paper stroke-line-strong" />
+        <rect x={px(x + 0.5)} y={px(y + 0.5)} width={px(w - 1)} height={CELL_H - 1} className="fill-surface stroke-line-strong" />
         <path d={hatchPath(x + 1, y + 1, w - 2, CELL_H - 2, 5)} strokeWidth={1} className="stroke-line-strong" />
       </g>
     );
@@ -404,7 +402,7 @@ function Cell({
   return (
     <g data-cell="value">
       <title>{`${title}: ${text}${cell.rank !== null ? ` (rank ${cell.rank} in row)` : ""}`}</title>
-      <rect x={px(x)} y={px(y)} width={px(w)} height={CELL_H} fillOpacity={px(a)} className="fill-data" />
+      <rect x={px(x)} y={px(y)} width={px(w)} height={CELL_H} fillOpacity={px(a)} className="fill-accent" />
       {showValue ? (
         <text
           x={cx}
@@ -412,7 +410,7 @@ function Cell({
           textAnchor="middle"
           fontSize={11}
           fontWeight={bold ? 600 : 400}
-          className={`tabular-nums ${dark ? "fill-on-ink" : "fill-text-2"}`}
+          className={`tabular-nums ${dark ? "fill-white" : "fill-ink-2"}`}
         >
           {text}
         </text>
@@ -425,7 +423,7 @@ function Cell({
           fontSize={showValue ? 7 : 11}
           fontWeight={600}
           data-glyph="rank"
-          className={dark ? "fill-on-ink" : "fill-dim"}
+          className={dark ? "fill-white" : "fill-ink-2"}
           opacity={showValue ? 0.85 : 1}
         >
           {showValue ? cell.rank : `#${cell.rank}`}
@@ -439,7 +437,7 @@ function AnnotationMark({ n, x, y }: { n: number; x: number; y: number }) {
   return (
     <g aria-hidden="true" data-annotation={n}>
       <circle cx={px(x)} cy={px(y)} r={4.5} className="fill-accent" />
-      <text x={px(x)} y={px(y + 2.6)} textAnchor="middle" fontSize={7} fontWeight={700} className="fill-on-ink">
+      <text x={px(x)} y={px(y + 2.6)} textAnchor="middle" fontSize={7} fontWeight={700} className="fill-white">
         {n}
       </text>
     </g>
@@ -467,20 +465,20 @@ function MarginRow({
 }) {
   const values = margin.values.flatMap((v) => (v.value === null ? [] : [Math.abs(v.value)]));
   const max = values.length > 0 ? Math.max(...values) : 1;
-  const head = (margin.label.split(/\s+/)[0] ?? margin.label).toUpperCase();
+  const head = margin.label.split(/\s+/)[0] ?? margin.label;
   return (
     <g data-margin="true">
       <line x1={px(cellX(0))} x2={px(cellX(colNames.length - 1) + cellW)} y1={y - 1} y2={y - 1} className="stroke-line" />
-      <text x={0} y={px(y + 12)} fontSize={9.5} fontWeight={600} letterSpacing={0.6} className="fill-dim">
+      <text x={0} y={px(y + 13)} fontSize={FONT} fontWeight={500} className="fill-ink-2">
         <title>{margin.label}</title>
-        {fitText(head, labelW - 2, 9.5, CODE_FONT)}
+        {fitText(head, labelW - 2, FONT, { weight: 500 })}
       </text>
       {margin.values.map((v, j) => {
         const x = cellX(j);
         const name = `${margin.label}, ${colNames[j] ?? ""}`;
         if (v.value === null) {
           return (
-            <text key={j} x={px(x + cellW / 2)} y={px(y + 12)} textAnchor="middle" fontSize={10} className="fill-dim">
+            <text key={j} x={px(x + cellW / 2)} y={px(y + 12)} textAnchor="middle" fontSize={10} className="fill-ink-2">
               <title>{`${name}: ${reasonLabel(v.reason)}`}</title>
               {"—"}
             </text>
@@ -490,7 +488,7 @@ function MarginRow({
         return (
           <g key={j}>
             <title>{`${name}: ${text}`}</title>
-            <text x={px(x + cellW / 2)} y={px(y + 12)} textAnchor="middle" fontSize={10} className="fill-dim tabular-nums">
+            <text x={px(x + cellW / 2)} y={px(y + 12)} textAnchor="middle" fontSize={10} className="fill-ink-2 tabular-nums">
               {text}
             </text>
             <rect
@@ -498,7 +496,7 @@ function MarginRow({
               y={px(y + 17)}
               width={px(Math.max(1, ((cellW - 6) * Math.abs(v.value)) / max))}
               height={2.5}
-              className="fill-data"
+              className="fill-accent"
             />
           </g>
         );
@@ -529,25 +527,25 @@ function RampLegend({
   const lo = formatNumber(min, unit, { digits });
   const hi = formatNumber(max, unit, { digits });
   const steps = [0, 1, 2, 3, 4].map((k) => min + ((max - min) * k) / 4);
-  const stepsX = x + textWidth(lo, 9.5) + 4;
+  const stepsX = x + textWidth(lo, FONT) + 4;
   const hiX = stepsX + 5 * 20;
-  const hatchX = hiX + textWidth(hi, 9.5) + 14;
+  const hatchX = hiX + textWidth(hi, FONT) + 14;
   return (
     <g aria-hidden="true">
-      <text x={px(x)} y={px(y + 10)} fontSize={9.5} className="fill-dim tabular-nums">
+      <text x={px(x)} y={px(y + 11)} fontSize={FONT} className="fill-ink-2 tabular-nums">
         {lo}
       </text>
       {steps.map((v, k) => (
-        <rect key={k} x={px(stepsX + k * 20)} y={px(y + 4)} width={16} height={6} fillOpacity={px(alpha(v))} className="fill-data" />
+        <rect key={k} x={px(stepsX + k * 20)} y={px(y + 4)} width={16} height={6} fillOpacity={px(alpha(v))} className="fill-accent" />
       ))}
-      <text x={px(hiX)} y={px(y + 10)} fontSize={9.5} className="fill-dim tabular-nums">
+      <text x={px(hiX)} y={px(y + 11)} fontSize={FONT} className="fill-ink-2 tabular-nums">
         {hi}
       </text>
       {hatch ? (
         <g data-legend="not-measured">
-          <rect x={px(hatchX + 0.5)} y={px(y + 2.5)} width={13} height={8} className="fill-paper stroke-line-strong" />
-          <path d={hatchPath(hatchX + 1, y + 3, 12, 7, 4)} strokeWidth={1} className="stroke-faint" />
-          <text x={px(hatchX + 18)} y={px(y + 10)} fontSize={9.5} className="fill-dim">
+          <rect x={px(hatchX + 0.5)} y={px(y + 2.5)} width={13} height={8} className="fill-surface stroke-line-strong" />
+          <path d={hatchPath(hatchX + 1, y + 3, 12, 7, 4)} strokeWidth={1} className="stroke-ink-3" />
+          <text x={px(hatchX + 18)} y={px(y + 11)} fontSize={FONT} className="fill-ink-2">
             not measured
           </text>
         </g>

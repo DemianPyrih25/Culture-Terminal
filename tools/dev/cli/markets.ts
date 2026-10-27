@@ -20,7 +20,6 @@ type Entry = z.infer<typeof Entry>;
 
 const MetrosConfig = z.object({
   gazetteer: z.array(Entry),
-  reserved: z.array(Entry).default([]),
   markets: z.array(Entry).min(1),
 });
 
@@ -35,7 +34,7 @@ export interface Market {
   query: string;
   /** config `pin: deliberate`: the name is ambiguous, so its locality is chosen by hand, never automatically. */
   deliberate: boolean;
-  /** The public centre of a gazetteer or reserved metro, for telling ambiguous localities apart; null otherwise. */
+  /** The market's public centre (D44), else its gazetteer metro's, for telling ambiguous localities apart; null without one. */
   center: LatLon | null;
 }
 
@@ -44,7 +43,7 @@ export class MarketsConfigError extends Error {
   override readonly name = "MarketsConfigError";
 }
 
-/** The `markets` list parsed from metros.json text, with the centre of each gazetteer or reserved metro of the same id. */
+/** The `markets` list parsed from metros.json text, each with its centre, or the centre of the gazetteer metro of the same id. */
 export function parseMarkets(text: string): Market[] {
   let raw: unknown;
   try {
@@ -57,8 +56,8 @@ export function parseMarkets(text: string): Market[] {
     const issue = parsed.error.issues[0];
     throw new MarketsConfigError(`config/metros.json: ${issue?.path.join(".") || "(file)"}: ${issue?.message ?? "invalid"}`);
   }
-  const { gazetteer, reserved, markets } = parsed.data;
-  const centres = new Map<string, Entry["center"]>([...gazetteer, ...reserved].map((e) => [e.id, e.center]));
+  const { gazetteer, markets } = parsed.data;
+  const centres = new Map<string, Entry["center"]>(gazetteer.map((e) => [e.id, e.center]));
   const seen = new Set<string>();
   return markets.map((e) => {
     if (seen.has(e.id)) throw new MarketsConfigError(`config/metros.json: market "${e.id}" is listed twice`);

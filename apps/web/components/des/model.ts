@@ -48,7 +48,7 @@ export interface DesKeyFigure {
   label: string;
   /** The metric's display ("0.78", "+0.59"), a name ("Elk Lake"), or "not measured" when UNAVAILABLE. */
   value: string;
-  /** A number sets in the key-figure serif; a name, which may run to two words or more, sets smaller. */
+  /** A number, or a name (which may run to two words or more). */
   kind: "number" | "name";
   /** What it is measured against, e.g. "Qloo percentile, all brands". */
   detail: string;

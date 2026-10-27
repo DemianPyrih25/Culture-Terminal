@@ -349,7 +349,7 @@ export function latentDemandFinding(args: {
   if (top === undefined) return null;
   return draft(
     "LATENT_DEMAND",
-    `${listNames(names)} in ${args.metroLabel} ${names.length === 1 ? "shows" : "show"} high demand for this concept with low venue supply: latent, open white space.`,
+    `${listNames(names)} in ${args.metroLabel} ${names.length === 1 ? "shows" : "show"} high demand for this concept and fewer similar venues than most areas in Qloo's venue sample (a sample, not every business): possible white space.`,
     `Profile the Block DNA of ${top} to see what its venue-goers favour.`,
   );
 }

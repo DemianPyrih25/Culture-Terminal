@@ -76,9 +76,41 @@ const MetrosConfig = z.object({
   ),
 });
 
+/**
+ * The secondary markets of config/metros.json when the cases were registered: the comedian candidates
+ * stay these 22, so the pool, the panel's calls and GHOST's question are the ones registered. Markets
+ * added to the tier later (Part 8, D28) are left out of the Reality Check.
+ */
+export const REGISTERED_SECONDARY_MARKETS: readonly MarketId[] = [
+  "louisville",
+  "kansas_city",
+  "indianapolis",
+  "columbus",
+  "cincinnati",
+  "charlotte",
+  "raleigh",
+  "richmond",
+  "birmingham",
+  "knoxville",
+  "chattanooga",
+  "memphis",
+  "oklahoma_city",
+  "tulsa",
+  "omaha",
+  "des_moines",
+  "grand_rapids",
+  "greenville",
+  "little_rock",
+  "salt_lake_city",
+  "boise",
+  "spokane",
+];
+
 export function loadSecondaryMarkets(file: URL | string = METROS_JSON): SecondaryMarket[] {
   const { markets } = MetrosConfig.parse(JSON.parse(readFileSync(file, "utf8")));
-  return markets.filter((m) => m.tier === "secondary").map((m) => ({ id: m.id, label: m.label, state: m.state, stateName: m.state_name }));
+  return markets
+    .filter((m) => m.tier === "secondary" && REGISTERED_SECONDARY_MARKETS.includes(m.id))
+    .map((m) => ({ id: m.id, label: m.label, state: m.state, stateName: m.state_name }));
 }
 
 /**

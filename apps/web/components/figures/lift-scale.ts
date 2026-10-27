@@ -1,4 +1,4 @@
-import type { GeoLiftCell, GeoLiftNeighbourhood, GeoLiftPayload } from "@ct/contracts";
+import { METRO_LABEL, type GeoLiftCell, type GeoLiftNeighbourhood, type GeoLiftPayload, type WhiteSpaceQuadrant } from "@ct/contracts";
 import { formatNumber } from "./format";
 import { geohashCentre, unionBounds, type Bounds } from "./geohash";
 import { clamp, textWidth } from "./scale";
@@ -7,7 +7,7 @@ import { clamp, textWidth } from "./scale";
  * LiftMap scales shared by the static schematic and the WebGL map, so both draw the same colours:
  * the log2 diverging lift ramp (negative → neutral at 1.00× → data, clamped to 0.6–1.6×, PLAN §8.3),
  * the sequential RAW and BASE ramp by percentile, confidence as alpha, the neighbourhood markers
- * sized by lift and the labels' positions. Pure; colours mirror the Concept A tokens in globals.css.
+ * sized by lift and the labels' positions. Pure; colours mirror the redesign tokens in globals.css.
  */
 
 /** RAW: the concept's own heat. BASE: the pinned baseline's heat. LIFT: concept over baseline. */
@@ -18,26 +18,43 @@ export const LIFT_MODE_KEY: Readonly<Record<LiftMode, string>> = { RAW: "1", BAS
 
 export type Rgb = readonly [number, number, number];
 
-/** Concept A tokens (app/globals.css) as RGB, for ramps that need computed colours. */
+/** Redesign tokens (app/globals.css) as RGB, for ramps and map layers that need computed colours. */
 export const TOKEN_RGB = {
-  paper: [255, 255, 255],
-  ink: [18, 20, 22],
-  dim: [107, 113, 120],
-  line: [230, 231, 233],
-  lineStrong: [201, 204, 208],
-  data: [28, 61, 110],
-  negative: [142, 47, 47],
-  data2: [169, 176, 184],
+  surface: [255, 255, 255],
+  ink: [14, 17, 22],
+  ink2: [74, 82, 97],
+  ink3: [138, 147, 163],
+  line: [230, 232, 236],
+  lineStrong: [205, 210, 218],
+  accent: [91, 61, 245],
+  second: [242, 118, 11],
+  muted: [201, 206, 214],
 } as const satisfies Record<string, Rgb>;
 
-/** The neutral the ramps start from: 1.00× on the lift ramp, the lowest heat on the RAW/BASE ramp. */
-const NEUTRAL: Rgb = [238, 240, 242];
-/** The lift ramp's clamp (PLAN §8.3): 0.6× is full negative, 1.6× full data colour. */
+/** The map ramp, map-1 … map-5: more interest is deeper violet. */
+export const MAP_RAMP: readonly Rgb[] = [
+  [241, 238, 254],
+  [213, 204, 252],
+  [168, 151, 249],
+  [124, 99, 247],
+  [91, 61, 245],
+];
+
+/** The neutral the ramps start from: 1.00× on the lift ramp. */
+const NEUTRAL: Rgb = [239, 241, 244];
+/** The lift ramp's clamp (PLAN §8.3): 0.6× is full "less", 1.6× the deepest ramp step. */
 export const LIFT_CLAMP = { min: 0.6, max: 1.6 } as const;
 
 function mix(a: Rgb, b: Rgb, t: number): Rgb {
   const k = clamp(t, 0, 1);
   return [Math.round(a[0] + (b[0] - a[0]) * k), Math.round(a[1] + (b[1] - a[1]) * k), Math.round(a[2] + (b[2] - a[2]) * k)];
+}
+
+/** A colour along the map ramp, 0 (map-1) to 1 (map-5). */
+export function rampRgb(t: number): Rgb {
+  const k = clamp(t, 0, 1) * (MAP_RAMP.length - 1);
+  const i = Math.min(MAP_RAMP.length - 2, Math.floor(k));
+  return mix(MAP_RAMP[i]!, MAP_RAMP[i + 1]!, k - i);
 }
 
 export function rgbHex(rgb: Rgb): string {
@@ -51,15 +68,18 @@ export function liftT(lift: number): number {
   return l >= 0 ? clamp(l / Math.log2(LIFT_CLAMP.max), 0, 1) : -clamp(l / Math.log2(LIFT_CLAMP.min), 0, 1);
 }
 
-/** The lift ramp colour: negative below 1.00×, data above, neutral at 1.00×. */
+/**
+ * The lift ramp colour: the map ramp above 1.00× (more interest than a typical area), a muted grey below
+ * it, so only extra interest is coloured; the table keeps every value.
+ */
 export function liftRgb(lift: number): Rgb {
   const t = liftT(lift);
-  return t >= 0 ? mix(NEUTRAL, TOKEN_RGB.data, t) : mix(NEUTRAL, TOKEN_RGB.negative, -t);
+  return t >= 0 ? rampRgb(t) : mix(NEUTRAL, TOKEN_RGB.muted, -t);
 }
 
 /** The RAW/BASE ramp colour for a heat percentile (0 = coolest cell, 1 = hottest). */
 export function heatRgb(pct: number): Rgb {
-  return mix(NEUTRAL, TOKEN_RGB.data, pct);
+  return rampRgb(pct);
 }
 
 /**
@@ -142,11 +162,6 @@ export function formatLift(lift: number): string {
   return `${formatNumber(lift, "lift", { digits: 2 })}×`;
 }
 
-/** Marker radius in px for a neighbourhood lift: circle size = lift (A06). */
-export function liftRadius(lift: number): number {
-  return clamp(1.5 + 15 * (lift - LIFT_CLAMP.min), 3, 16);
-}
-
 /** A labelled neighbourhood: where to put it and what it says. */
 export interface LiftLabel {
   id: string;
@@ -154,26 +169,146 @@ export interface LiftLabel {
   lift: number;
   /** The centre of the neighbourhood's cells, or null when no cell falls inside it. */
   at: { lat: number; lon: number } | null;
-  /** The highest lift on the map gets the halo (A06). */
+  /** The highest lift on the map. */
   top: boolean;
+  /** The pin's numeral: the area's rank by extra interest (pins only). */
+  rank?: number;
+  /** Few similar venues nearby (white space "latent & open"): the second-colour ring and tag. */
+  fewRivals?: boolean;
+  /** An area the question names: an accent pin, listed first. */
+  named?: boolean;
 }
 
 /**
- * The neighbourhoods the map labels: the highest lifts and, for contrast, the lowest ones below the
- * baseline, at most `max` in all. Each sits at the centre of its cells unless the caller has the
- * gazetteer centroid. A coarse map makes no neighbourhood claims, so it labels none.
+ * The supply-label rule of @ct/quant (skills/geoLift/lift), mirrored for the client bundle, which does not
+ * import quant; test/figures/lift-scale.test.ts keeps the numbers equal and runs both on the same areas.
+ * geo_lift applies it when it writes a map; the page applies it again so a run stored before the rule
+ * never shows a label its data cannot carry.
+ * - MIN_SUPPLY_VENUES: similar venues a map's sample must place in its areas with a lift before any count is read.
+ * - A capped sample's 0 is no count.
+ * - MIN_BUSY_AREA_VENUES: venues an area needs before it reads crowded or saturated ("busy with rivals").
+ * Below the rule an area with a lift reads THIN_SUPPLY_LABEL.
  */
-export function liftLabels(data: GeoLiftPayload, max = 7): LiftLabel[] {
+export const MIN_SUPPLY_VENUES = 10;
+export const MIN_BUSY_AREA_VENUES = 3;
+export const THIN_SUPPLY_LABEL = "Not enough venue data";
+const BUSY: ReadonlySet<WhiteSpaceQuadrant> = new Set(["PROVEN_CROWDED", "SATURATED"]);
+
+type SupplyData = Pick<GeoLiftPayload, "metro" | "supply" | "supplyGap" | "neighbourhoods">;
+
+/**
+ * Why a lift map's competitor counts cannot be read area by area, in a reader's words, or null when
+ * they can (or no venue sample was asked for). The payload's own supplyGap first; a run stored before
+ * geo_lift set one for a thin sample is read by the same rule, so an unknown is never shown as 0 or few.
+ */
+export function supplyUnknown(data: SupplyData): string | null {
+  if (data.supplyGap) return data.supplyGap;
+  if (data.supply === null) return null;
+  const placed = data.neighbourhoods.reduce((n, a) => n + (a.demandPct !== null ? (a.supplyCount ?? 0) : 0), 0);
+  if (placed >= MIN_SUPPLY_VENUES) return null;
+  return (
+    `Qloo's venue sample places only ${placed} similar ${placed === 1 ? "venue" : "venues"} in the ${METRO_LABEL[data.metro]} areas this map compares, ` +
+    `too few to count competitors area by area (${MIN_SUPPLY_VENUES} needed), so the number of competitors here is unknown, not zero.`
+  );
+}
+
+/**
+ * What a map can say about one area's competition, by the supply-label rule:
+ * - unknown: similar venues were not counted area by area (no count, a supply gap, a sample too thin to read);
+ * - thin: counted, but the count cannot carry a label (a capped sample's 0, a crowded reading from fewer
+ *   than MIN_BUSY_AREA_VENUES venues, or a quadrant geo_lift withheld): THIN_SUPPLY_LABEL;
+ * - label: the white-space quadrant, which ranks the area against the others;
+ * - count: a count with nothing to rank it against (an area without a lift);
+ * - none: no venue sample was asked for.
+ */
+export type AreaSupplyRead =
+  | { kind: "unknown"; why: string }
+  | { kind: "thin"; count: number; cappedZero: boolean }
+  | { kind: "label"; count: number; quadrant: WhiteSpaceQuadrant }
+  | { kind: "count"; count: number }
+  | { kind: "none" };
+
+type SupplyArea = Pick<GeoLiftNeighbourhood, "quadrant"> & Partial<Pick<GeoLiftNeighbourhood, "supplyCount" | "demandPct">>;
+
+export function areaSupply(n: SupplyArea, data: SupplyData): AreaSupplyRead {
+  const gap = supplyUnknown(data);
+  if (gap !== null) return { kind: "unknown", why: gap };
+  if (data.supply === null) return { kind: "none" };
+  const count = n.supplyCount ?? null;
+  if (count === null) return { kind: "unknown", why: "" };
+  if (data.supply.capped && count === 0) return { kind: "thin", count, cappedZero: true };
+  if (n.quadrant !== null) {
+    return BUSY.has(n.quadrant) && count < MIN_BUSY_AREA_VENUES ? { kind: "thin", count, cappedZero: false } : { kind: "label", count, quadrant: n.quadrant };
+  }
+  // A ranked area (it has a demand percentile) with no quadrant is one geo_lift withheld.
+  return n.demandPct !== null && n.demandPct !== undefined ? { kind: "thin", count, cappedZero: false } : { kind: "count", count };
+}
+
+/**
+ * Few rivals nearby: demand is high and similar venues are fewer than in most areas (the white-space
+ * "latent & open" quadrant). With the map's data, only where the supply-label rule lets the area carry
+ * its quadrant: never from a sample too thin to read, nor from a capped sample's 0.
+ */
+export function fewRivals(n: SupplyArea, data?: SupplyData): boolean {
+  if (n.quadrant !== "LATENT_OPEN") return false;
+  if (data === undefined) return true;
+  const read = areaSupply(n, data);
+  return read.kind === "label" && read.quadrant === "LATENT_OPEN";
+}
+
+/** An area the question names, as the map card lists it: its rank among the areas with a lift, or why it has none. */
+export interface NamedArea {
+  id: string;
+  name: string;
+  lift: number | null;
+  /** [rank, of] among the areas with a lift; null without a lift. */
+  rank: [number, number] | null;
+}
+
+/** The areas the question names (focusAreas), in the question's order. */
+export function namedAreas(data: Pick<GeoLiftPayload, "focusAreas" | "neighbourhoods">): NamedArea[] {
+  const ranked = data.neighbourhoods.filter((n) => n.lift !== null).sort((a, b) => (b.lift ?? 0) - (a.lift ?? 0) || (a.id < b.id ? -1 : 1));
+  return (data.focusAreas ?? []).flatMap((id) => {
+    const n = data.neighbourhoods.find((x) => x.id === id);
+    if (!n) return [];
+    const at = ranked.indexOf(n);
+    return [{ id, name: n.name, lift: n.lift, rank: at >= 0 ? ([at + 1, ranked.length] as [number, number]) : null }];
+  });
+}
+
+/** The areas the question names that have a lift, as accent pins; the top pins already mark any that rank there. */
+export function namedPins(data: GeoLiftPayload, pinned: readonly LiftLabel[] = []): LiftLabel[] {
   if (data.coarse) return [];
-  const withLift = data.neighbourhoods
-    .filter((n): n is GeoLiftNeighbourhood & { lift: number } => n.lift !== null)
-    .sort((a, b) => b.lift - a.lift || (a.id < b.id ? -1 : 1));
-  const lowCount = Math.min(2, withLift.filter((n) => n.lift < 1).length, Math.max(0, max - 1));
-  const high = withLift.slice(0, Math.max(0, max - lowCount));
-  // slice(-0) would keep every remaining area: with no lift below 1.00× there is no contrast to add.
-  const low = lowCount > 0 ? withLift.slice(high.length).slice(-lowCount) : [];
   const centres = cellCentres(data.cells);
-  return [...high, ...low].map((n, i) => ({ id: n.id, name: n.name, lift: n.lift, at: centres.get(n.id) ?? null, top: i === 0 }));
+  const taken = new Set(pinned.map((p) => p.id));
+  return (data.focusAreas ?? []).flatMap((id) => {
+    const n = data.neighbourhoods.find((x) => x.id === id);
+    if (!n || n.lift === null || taken.has(id)) return [];
+    return [{ id, name: n.name, lift: n.lift, at: centres.get(id) ?? null, top: false, named: true, fewRivals: fewRivals(n, data) }];
+  });
+}
+
+/**
+ * The numbered pins of the map card: the areas with the most extra interest (lift above 1.00×), best
+ * first, at most `max`. A coarse map makes no neighbourhood claims, so it pins none.
+ */
+export function mapPins(data: GeoLiftPayload, max = 3): LiftLabel[] {
+  if (data.coarse) return [];
+  const centres = cellCentres(data.cells);
+  return data.neighbourhoods
+    .filter((n): n is GeoLiftNeighbourhood & { lift: number } => n.lift !== null && n.lift > 1)
+    .sort((a, b) => b.lift - a.lift || (a.id < b.id ? -1 : 1))
+    .slice(0, Math.max(0, max))
+    .map((n, i) => ({
+      id: n.id,
+      name: n.name,
+      lift: n.lift,
+      at: centres.get(n.id) ?? null,
+      top: i === 0,
+      rank: i + 1,
+      fewRivals: fewRivals(n, data),
+      ...((data.focusAreas ?? []).includes(n.id) ? { named: true } : {}),
+    }));
 }
 
 /** The mean centre of each neighbourhood's cells. */
@@ -204,8 +339,15 @@ export interface ChipRequest {
  * that fits nowhere inside the box without covering another chip or marker is dropped (the table
  * still lists it). Returns each placed chip's top-left corner.
  */
-export function placeChips(chips: readonly ChipRequest[], box: { w: number; h: number }, gap = 5): Map<string, { x: number; y: number }> {
-  const taken: { x: number; y: number; w: number; h: number }[] = chips.map((c) => ({ x: c.x - c.r, y: c.y - c.r, w: c.r * 2, h: c.r * 2 }));
+export function placeChips(
+  chips: readonly ChipRequest[],
+  box: { w: number; h: number },
+  gap = 5,
+  /** Areas the map's own controls cover (legend, zoom, credits): no flag goes there. */
+  reserved: readonly { x: number; y: number; w: number; h: number }[] = [],
+): Map<string, { x: number; y: number }> {
+  const markerBoxes = chips.map((c) => ({ x: c.x - c.r, y: c.y - c.r, w: c.r * 2, h: c.r * 2 }));
+  const taken: { x: number; y: number; w: number; h: number }[] = [...markerBoxes, ...reserved];
   const overlaps = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
     a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
   const out = new Map<string, { x: number; y: number }>();
@@ -229,11 +371,61 @@ export function placeChips(chips: readonly ChipRequest[], box: { w: number; h: n
   return out;
 }
 
-/** A chip's size for a label: name and lift in 11 px Inter with 6 px padding. */
-export function chipSize(label: Pick<LiftLabel, "name" | "lift" | "top">, withLift: boolean): { w: number; h: number } {
-  const name = textWidth(label.name, 11, { weight: label.top ? 600 : 500 });
-  const lift = withLift ? 5 + textWidth(formatLift(label.lift), 11, { weight: 500 }) : 0;
-  return { w: Math.ceil(name + lift + 12), h: 18 };
+/** Below this map width the legend sits top-left and the credits fold into a button (the max-sm layout). */
+const NARROW_MAP = 640;
+
+/**
+ * Padding that keeps the areas clear of what sits over the map: the legend (top-left on a narrow map,
+ * bottom-left otherwise), the zoom buttons on the right and the credits along the bottom.
+ */
+export function fitPadding(width: number): { top: number; bottom: number; left: number; right: number } {
+  return width < NARROW_MAP ? { top: 56, bottom: 48, left: 16, right: 56 } : { top: 48, bottom: 64, left: 48, right: 56 };
+}
+
+/** The boxes the map's overlays cover, so no flag is placed under them. */
+export function overlayBoxes(w: number, h: number): { x: number; y: number; w: number; h: number }[] {
+  const narrow = w < NARROW_MAP;
+  return [
+    // Zoom buttons (36 x 73 at right 12, bottom 32) and the credits under them.
+    { x: w - 52, y: h - 109, w: 52, h: 109 },
+    { x: 0, y: h - 26, w, h: 26 },
+    // The legend.
+    narrow ? { x: 0, y: 0, w: Math.min(w, 300), h: 52 } : { x: 0, y: h - 64, w: 320, h: 64 },
+  ];
+}
+
+/** What a pin's flag says under the name: "1.42× interest". */
+export function flagValue(lift: number): string {
+  return `${formatLift(lift)} interest`;
+}
+
+/** A pin flag's size: the name 13/600 over the value 12, padding 6 10. */
+export function flagSize(label: Pick<LiftLabel, "name" | "lift">): { w: number; h: number } {
+  const w = Math.max(textWidth(flagName(label.name), 13, { weight: 600 }), textWidth(flagValue(label.lift), 12, { weight: 400 }));
+  return { w: Math.ceil(w + 20), h: 46 };
+}
+
+/** Flag names longer than this are shortened (Austin's longest planning area is 30 characters). */
+const FLAG_NAME_MAX = 30;
+
+/**
+ * An area's name on its map flag, which does not wrap: a long ZIP area reads as its bracketed name
+ * ("ZIP 77005 (West University Place)" → "West University Place"), a long hyphenated one as its first
+ * place ("Morningside Heights-Hamilton Heights" → "Morningside Heights…"), else its first words. The
+ * pin list and the table keep the full name.
+ */
+export function flagName(name: string): string {
+  if (name.length <= FLAG_NAME_MAX) return name;
+  const bracketed = /^ZIP \d{5} \((.+)\)$/.exec(name)?.[1];
+  if (bracketed !== undefined && bracketed.length <= FLAG_NAME_MAX) return bracketed;
+  const first = name.split("-")[0]?.trim() ?? "";
+  const short = first !== "" && first.length < FLAG_NAME_MAX ? first : name.slice(0, FLAG_NAME_MAX).replace(/\s+\S*$/, "");
+  return `${short}…`;
+}
+
+/** A pin's radius in px: 14, or 20 with the few-rivals ring. */
+export function pinRadius(label: Pick<LiftLabel, "fewRivals">): number {
+  return label.fewRivals ? 20 : 14;
 }
 
 /** The precision badge: "GEOHASH 6 · PRECISION 0.80", or the coarse warning. */

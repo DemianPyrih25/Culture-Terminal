@@ -5,7 +5,7 @@
 // functions of the records: no Qloo, no model, no disk.
 import { GhostPickCategory, type GhostDiff, type Report, type SafetyCategory, type TerminalRunStatus } from "@ct/contracts";
 import { normaliseName } from "@ct/quant";
-import { EVAL_METRIC_IDS } from "../../apps/web/components/launchpad/eval-summary";
+import { EVAL_METRIC_IDS } from "../../apps/web/components/method/eval-ids";
 import type { EvalUnit } from "../../apps/web/components/method/eval-summary";
 import type { SpendTally } from "../dev/cli/spend";
 import type { AdversarialKind, AdversarialQuestion, CoreQuestion, EvalQuestion, RealityCase, RealityKind } from "./cases";

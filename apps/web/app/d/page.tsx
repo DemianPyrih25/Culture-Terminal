@@ -1,19 +1,19 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { desHref, parseDesInput } from "@/components/des/des-href";
-import { DesChrome } from "@/components/des/des-chrome";
-import { DesStateView } from "@/components/des/des-view";
+import { SiteShell } from "../../components/chrome/site-shell";
+import { desHref, parseDesInput } from "../../components/des/des-href";
+import { ProfileStateView } from "../../components/des/profile-states";
 
 export const metadata: Metadata = {
-  title: "DES · Culture Terminal",
-  description: "Describe any brand, artist, show or public figure: audience DNA, cultural neighbours and travel taste, computed in code from Qloo.",
+  title: "Look up a profile · Culture Terminal",
+  description: "Look up any brand, artist, show or public figure: who its fans are, what else they love, and where their taste travels. From Qloo taste data.",
 };
 
 const INVALID = "Type a name with letters or digits, up to 80 characters.";
 
 /**
- * /d: the tearsheet's search page. The search box sends GET /d?q=<name>&type=<type>, which opens
- * /d/<name> (with ?type= for anything but a brand), so it works without a script.
+ * /d: look up a profile. The search box sends GET /d?q=<name>&type=<type>, which opens /d/<name> (with
+ * ?type= for anything but a brand), so it works without a script.
  */
 export default async function DesSearchPage(props: PageProps<"/d">) {
   const search = await props.searchParams;
@@ -24,8 +24,8 @@ export default async function DesSearchPage(props: PageProps<"/d">) {
     if (parsed !== null) redirect(desHref(parsed));
   }
   return (
-    <DesChrome>
-      <DesStateView query={null} outcome={null} error={q !== null ? INVALID : null} />
-    </DesChrome>
+    <SiteShell header="inner">
+      <ProfileStateView query={null} outcome={null} error={q !== null ? INVALID : null} />
+    </SiteShell>
   );
 }

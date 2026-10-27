@@ -3,9 +3,9 @@
 import { createContext, useContext, type ReactNode } from "react";
 
 /**
- * A permalink of a run with no finished brief answers 404 (notFound), and the 404 cannot see the run.
+ * A permalink of a run with no finished answer answers 404 (notFound), and the 404 cannot see the run.
  * The layout, which can, hands the page to show instead through this context: the run is still being
- * written, or it ended without a brief; either way /run/[id] shows it. Null for every other 404.
+ * made, or it ended without an answer; either way /run/[id] shows it. Null for every other 404.
  */
 const PendingView = createContext<ReactNode>(null);
 

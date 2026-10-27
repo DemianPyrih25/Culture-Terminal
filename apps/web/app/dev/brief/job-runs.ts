@@ -29,7 +29,7 @@ import {
   type SponsorCategory,
   type TrendWindow,
 } from "@ct/contracts";
-import { GAZETTEERS } from "@ct/geo";
+import { GAZETTEER_CATALOG } from "@ct/geo";
 import { KPI_SLOTS, pickMatches } from "@/lib/brief/kpi-slots";
 
 /**
@@ -488,7 +488,7 @@ function intentOf(job: Job, mentions: Intent["mentions"], geo: Partial<Intent["g
     pillar: JOB_PILLAR[job],
     job,
     mentions,
-    geo: { metro: null, area: null, unsupported_place: null, ...geo },
+    geo: { metro: null, area: null, unsupported_place: null, market: null, ...geo },
     constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], ...constraints },
     safety: { allowed: true, category: null, reframe: null },
     assumptions: ["US geography"],
@@ -538,11 +538,9 @@ function geohash(lat: number, lon: number, precision: number): string {
 
 /** A gazetteer area's name and centroid, by id, from @ct/geo (public geography). */
 function area(metro: "austin" | "nashville", id: string): { id: string; name: string; lat: number; lon: number } {
-  const found = GAZETTEERS[metro]?.areas.find((a) => a.id === id);
+  const found = GAZETTEER_CATALOG[metro]?.areas.find((a) => a.id === id);
   if (!found) throw new Error(`no ${metro} area ${id} in the gazetteer`);
-  const lat = found.centroid?.lat ?? 0;
-  const lon = found.centroid?.lon ?? 0;
-  return { id: found.id, name: found.name, lat, lon };
+  return { id: found.id, name: found.name, lat: found.centroid.lat, lon: found.centroid.lon };
 }
 
 // Jobs ----------------------------------------------------------------------------------------------------

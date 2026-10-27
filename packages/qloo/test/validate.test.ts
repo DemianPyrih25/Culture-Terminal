@@ -167,6 +167,18 @@ describe("validateRequest: signals", () => {
     ).not.toThrow();
   });
 
+  it("takes male or female as the gender signal, and on artists only next to seeds or tags (probe C4)", () => {
+    const gender = (type: string, value: string, extra: QlooParams = {}) =>
+      run("/v2/insights", { "filter.type": type, "signal.demographics.gender": value, ...extra });
+    expect(gender("urn:entity:brand", "female", { "filter.results.entities": ["ent-alpha-01", "ent-beta-01"] })).not.toThrow();
+    expect(gender("urn:entity:person", "male")).not.toThrow();
+    expect(paramError(gender("urn:entity:brand", "nonbinary")).param).toBe("signal.demographics.gender");
+    expect(gender("urn:entity:brand", "Female")).toThrow(/takes "male" or "female"/);
+    expect(gender("urn:entity:artist", "male")).toThrow(/only next to seeds or tags/);
+    expect(gender("urn:entity:artist", "male", { "signal.interests.entities": ["ent-alpha-01"] })).not.toThrow();
+    expect(gender("urn:entity:artist", "female", { "signal.interests.tags": ["urn:tag:genre:music:fixture"] })).not.toThrow();
+  });
+
   it("allows the probe-verified filter-only places call and nothing looser", () => {
     expect(
       run("/v2/insights", { "filter.type": "urn:entity:place", "filter.location": "loc-fixture", "filter.tags": "urn:tag:category:place:cafe" }),
@@ -187,17 +199,15 @@ describe("validateRequest: audience allowlist (D21)", () => {
     for (const desk of desks) expect(withAudience("urn:audience:leisure:political_junkie", desk)).toThrow(/denied on every desk/);
   });
 
-  it("limits the LOCATION desk to hobbies_and_interests and leisure", () => {
-    expect(withAudience("urn:audience:leisure:fixture_fans", "location")).not.toThrow();
-    expect(withAudience("urn:audience:hobbies_and_interests:fixture_fans", "location")).not.toThrow();
-    expect(withAudience("urn:audience:spending_habits:fixture_fans", "location")).toThrow(/not allowed for the location desk/);
+  it("allows the six D21 families on every desk and in standalone tools", () => {
+    const families = ["hobbies_and_interests", "leisure", "spending_habits", "professional_area", "life_stage", "investing_interests"];
+    for (const family of families) {
+      for (const desk of desks) expect(withAudience(`urn:audience:${family}:fixture_fans`, desk)).not.toThrow();
+    }
   });
 
-  it("gives investing_interests to INVESTMENT only, and standalone tools the union", () => {
-    expect(withAudience("urn:audience:investing_interests:fixture", "investment")).not.toThrow();
-    expect(withAudience("urn:audience:investing_interests:fixture", "marketing")).toThrow(/not allowed/);
-    expect(withAudience("urn:audience:investing_interests:fixture", "audience")).toThrow(/not allowed/);
-    expect(withAudience("urn:audience:investing_interests:fixture", null)).not.toThrow();
+  it("refuses a family outside the allowlist on every desk", () => {
+    expect(withAudience("urn:audience:unknown_family:fixture", "location")).toThrow(/not allowed for the location desk/);
     expect(withAudience("urn:audience:unknown_family:fixture", null)).toThrow(/not allowed for standalone tools/);
   });
 

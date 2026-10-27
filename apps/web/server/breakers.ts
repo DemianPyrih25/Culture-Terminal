@@ -179,8 +179,8 @@ function messageOf(mode: Mode, reason: string, until: string | null): string {
   const resumes = until !== null ? " It resumes at 00:00 UTC." : "";
   if (mode === "economy") {
     return until !== null
-      ? `Live briefs run on the economy analyst until 00:00 UTC: ${reason}.`
-      : `Live briefs run on the economy analyst: ${reason}.`;
+      ? `Live answers run on the economy analyst until 00:00 UTC: ${reason}.`
+      : `Live answers run on the economy analyst: ${reason}.`;
   }
   return `Live analysis is paused: ${reason}.${resumes}`;
 }

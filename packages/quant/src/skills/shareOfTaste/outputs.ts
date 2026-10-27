@@ -47,11 +47,11 @@ import {
 /** The subject's index in the set. */
 export const SUBJECT = 0;
 
-export type ShareGroup = Extract<ContextGroup, "AGE" | "AUDIENCE" | "METRO">;
-export const SHARE_GROUPS: readonly ShareGroup[] = ["AGE", "AUDIENCE", "METRO"];
+export type ShareGroup = Extract<ContextGroup, "AGE" | "GENDER" | "AUDIENCE" | "METRO">;
+export const SHARE_GROUPS: readonly ShareGroup[] = ["AGE", "GENDER", "AUDIENCE", "METRO"];
 
-const GROUP_WORD: Readonly<Record<ShareGroup, string>> = { AGE: "age", AUDIENCE: "audience", METRO: "metro" };
-const GROUP_LABEL: Readonly<Record<ShareGroup, string>> = { AGE: "Age", AUDIENCE: "Audience", METRO: "Metro" };
+const GROUP_WORD: Readonly<Record<ShareGroup, string>> = { AGE: "age", GENDER: "gender", AUDIENCE: "audience", METRO: "metro" };
+const GROUP_LABEL: Readonly<Record<ShareGroup, string>> = { AGE: "Age", GENDER: "Gender", AUDIENCE: "Audience", METRO: "Metro" };
 
 /** The who-wins-where split is drawn around an even split; this band reads as even (design A04). */
 export const SPLIT_EVEN_BAND = 0.02;
@@ -69,7 +69,7 @@ const evidenceFor = (evidence: GroupEvidence, group: ShareGroup): EvidenceId[] =
 /** One evidence bundle per context group that made a call, so each metric cites exactly the calls behind it. */
 export function recordGroupEvidence(run: RankRun, grid: ScoreGrid, type: EntityType): GroupEvidence {
   const n = grid.candidates.length;
-  const out: Record<ShareGroup, EvidenceId | null> = { AGE: null, AUDIENCE: null, METRO: null };
+  const out: Record<ShareGroup, EvidenceId | null> = { AGE: null, GENDER: null, AUDIENCE: null, METRO: null };
   for (const group of SHARE_GROUPS) {
     const rows = grid.rows.filter((r) => r.spec.group === group);
     const calls = callsOf(rows);

@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import {
   DEFAULT_RUN_LIMITS,
   METRO_LABEL,
+  MetroId,
   type CacheProbe,
   type EntityType,
   type Intent,
@@ -86,7 +87,7 @@ const SECONDS_PER_NETWORK_CALL = 1;
 const PICKER_SECONDS = 5;
 /** D24: finding-triggered follow-ups share this many network calls; the estimate assumes a run uses them. */
 const FOLLOWUP_ALLOWANCE = DEFAULT_RUN_LIMITS.followupCalls;
-const PAUSED_REASON = "Live analysis is paused. Showcases and replays still work.";
+const PAUSED_REASON = "Live analysis is paused. Answers you already have still open.";
 const NO_KEY_REASON = "Live analysis is unavailable: this server has no Anthropic API key.";
 const NO_QLOO_REASON = "Live analysis is unavailable: the Qloo client is not configured.";
 const CAPPED_REASON = "Question previews are paused for a while. You can still run the brief.";
@@ -275,10 +276,10 @@ function scopeOf(intent: Intent): string {
     case "head_to_head":
       return "US metros & ages";
     case "site_selection":
-      return city ? `${city} neighbourhoods` : "Nashville or Austin neighbourhoods";
+      return city ? `${city} neighbourhoods` : `Neighbourhoods in ${MetroId.options.length} US cities`;
     case "area_profile":
     case "tenant_mix":
-      return [area, city].filter((s): s is string => Boolean(s)).join(", ") || "A Nashville or Austin neighbourhood";
+      return [area, city].filter((s): s is string => Boolean(s)).join(", ") || `A neighbourhood in one of ${MetroId.options.length} US cities`;
     case "sponsorship":
       return "US · sponsor categories";
     case "market_selection":

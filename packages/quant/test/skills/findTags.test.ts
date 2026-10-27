@@ -1,10 +1,117 @@
 import { digestFits, ModelDigest, type QlooApi, type QlooParams, type QlooTagSearchItem } from "@ct/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { SKILL_LIMITATIONS } from "../../src/limitations";
 import { findTagsSkill, pickTags, planConcept, tagSearchParams, TAG_SEARCH_TAKE } from "../../src/skills/findTags";
 import { curatedConcept, curatedConcepts, HEATMAP_BASELINE } from "../../src/skills/findTags/curated";
 import { conceptWords, nameMatches, normaliseConcept, tagNameFromUrn, tagTypeOf, tagUse } from "../../src/skills/findTags/tags";
 import { BudgetError, fakeProbe, fakeRun, FakeRegistry, FETCHED_AT } from "./support/fakes";
+
+// find_tags runs over a fixture concept map in the pre-Part-8 shape, so the research and unverified
+// paths stay under test now that C1 verified a genre tag for every real place type (the real map is
+// checked in packages/agent/test/prompts/config.test.ts). Public taxonomy URNs only (D29).
+const FIXTURE = vi.hoisted(() => ({
+  baseline: { urn: "urn:tag:genre:place:restaurant", status: "verified" },
+  categories: [
+    {
+      key: "restaurant",
+      label: "Restaurant",
+      aliases: ["restaurant", "eatery", "dining"],
+      semantic_query: "restaurant",
+      tags: [{ urn: "urn:tag:genre:place:restaurant", status: "verified", verified_as: "heatmap_signal" }],
+    },
+    {
+      key: "cafe",
+      label: "Cafe and coffee shop",
+      aliases: ["cafe", "coffee shop", "coffee bar", "espresso bar", "run-club coffee bar"],
+      semantic_query: "coffee shop",
+      tags: [
+        { urn: "urn:tag:category:place:cafe", status: "verified", verified_as: "place_filter" },
+        { urn: "urn:tag:genre:place:restaurant:coffee_shop", status: "verified", verified_as: "heatmap_signal" },
+      ],
+    },
+    {
+      key: "bar",
+      label: "Bar",
+      aliases: ["bar", "cocktail bar", "pub", "tavern"],
+      semantic_query: "bar",
+      tags: [{ urn: "urn:tag:genre:place:restaurant:bar", status: "verified", verified_as: "heatmap_signal" }],
+    },
+    {
+      key: "lounge",
+      label: "Lounge",
+      aliases: ["lounge", "listening lounge", "listening bar"],
+      semantic_query: "lounge",
+      tags: [{ urn: "urn:tag:genre:place:lounge", status: "research" }],
+    },
+    {
+      key: "wine_bar",
+      label: "Wine bar",
+      aliases: ["wine bar", "natural-wine bar", "natural wine bar"],
+      semantic_query: "natural wine bar",
+      tags: [{ urn: "urn:tag:category:place:wine_bar", status: "unverified" }],
+    },
+    {
+      key: "record_store",
+      label: "Record store",
+      aliases: ["record store", "vinyl shop", "vinyl record store", "record shop"],
+      semantic_query: "vinyl record store",
+      tags: [{ urn: "urn:tag:category:place:record_store", status: "unverified" }],
+    },
+    {
+      key: "ramen",
+      label: "Ramen restaurant",
+      aliases: ["ramen", "ramen counter", "ramen shop", "late-night ramen counter"],
+      semantic_query: "ramen",
+      tags: [{ urn: "urn:tag:category:place:ramen_restaurant", status: "unverified" }],
+    },
+    {
+      key: "live_music_venue",
+      label: "Live music venue",
+      aliases: ["live music venue", "music venue", "listening room", "concert venue"],
+      semantic_query: "live music venue",
+      tags: [{ urn: "urn:tag:category:place:live_music_venue", status: "unverified" }],
+    },
+    {
+      key: "bakery",
+      label: "Bakery",
+      aliases: ["bakery", "pastry shop", "bread bakery"],
+      semantic_query: "bakery",
+      tags: [{ urn: "urn:tag:category:place:bakery", status: "unverified" }],
+    },
+    {
+      key: "brewery",
+      label: "Brewery and taproom",
+      aliases: ["brewery", "taproom", "brewpub", "craft beer bar"],
+      semantic_query: "brewery taproom",
+      tags: [{ urn: "urn:tag:category:place:brewery", status: "unverified" }],
+    },
+    {
+      key: "bookstore",
+      label: "Bookstore",
+      aliases: ["bookstore", "book shop", "bookshop"],
+      semantic_query: "independent bookstore",
+      tags: [{ urn: "urn:tag:category:place:book_store", status: "unverified" }],
+    },
+    {
+      key: "pizza",
+      label: "Pizzeria",
+      aliases: ["pizza", "pizzeria"],
+      semantic_query: "pizza",
+      tags: [
+        { urn: "urn:tag:genre:place:restaurant:pizza", status: "verified", verified_as: "heatmap_signal" },
+        { urn: "urn:tag:category:place:pizza_restaurant", status: "unverified", fallback: "semantic_tag_search" },
+      ],
+    },
+    {
+      key: "clothing_store",
+      label: "Clothing boutique",
+      aliases: ["clothing store", "boutique", "vintage clothing", "apparel shop"],
+      semantic_query: "clothing boutique",
+      tags: [{ urn: "urn:tag:category:place:clothing_store", status: "unverified" }],
+    },
+  ],
+}));
+vi.mock("../../../../config/categories.json", () => ({ default: FIXTURE }));
 
 // Invented tag leaves only (D29): the taxonomy namespaces are public, the leaves are made up.
 const GENRE_WINE = { id: "urn:tag:genre:place:test_wine_bar", name: "Wine Bar", type: "urn:tag:genre:place" };
@@ -170,6 +277,14 @@ describe("find_tags: live semantic search", () => {
     expect(pickTags(full, "noodle restaurant", "place").map((t) => t.id)).not.toContain(baseline.id);
   });
 
+  it("says a category tag found at run time counts no similar venues, so competitors stay unknown", async () => {
+    const run = fakeRun(tagsQloo(() => [GENRE_WINE, CATEGORY_WINE]).api);
+    const result = await findTagsSkill.run(input([{ text: "wine bar", scope: "place" }]), run.ctx);
+    expect(result.forModel.notices).toContain(
+      "'wine bar' has no verified venue category: T2 (Wine Bar) is not probe-verified, so geo_lift counts no similar venues with it and the competitor count stays unknown, never 0.",
+    );
+  });
+
   it("says when the baseline is among a concept's tags", async () => {
     const baseline = { id: HEATMAP_BASELINE.tagId, name: "Restaurant", type: "urn:tag:genre:place" };
     const noodleCategory = { id: "urn:tag:category:place:test_noodle", name: "Noodle Restaurant", type: "urn:tag:category:place" };
@@ -202,6 +317,40 @@ describe("find_tags: live semantic search", () => {
     expect(run.ledger.findings).toEqual([]);
     // Outside the curated concept the same name still fails the filter.
     expect(pickTags([{ id: candidate, name: "Shop For Books", type: "urn:tag:category:place" }], bookstore.semanticQuery, "place")).toEqual([]);
+  });
+
+  it("serves a concept whose supply filter failed its gate and looks one up live, labelled (fallback semantic_tag_search)", async () => {
+    const pizza = curatedConcept("pizzeria");
+    if (pizza === null) throw new Error("expected a curated pizza concept");
+    expect(pizza.filterFallback).toBe(true);
+    expect(curatedConcept("coffee shop")?.filterFallback).toBe(false);
+    expect(planConcept({ text: "Pizza", scope: "place" }).request).toEqual(tagSearchParams("pizza", "place"));
+    expect(planConcept({ text: "coffee shop", scope: "place" }).request).toBeNull();
+
+    const filter = { id: "urn:tag:category:place:test_pizza_place", name: "Pizza Place", type: "urn:tag:category:place" };
+    const genre = { id: "urn:tag:genre:place:test_pizza_genre", name: "Pizza", type: "urn:tag:genre:place" };
+    const qloo = tagsQloo(() => [genre, filter]);
+    const run = fakeRun(qloo.api);
+    const result = await findTagsSkill.run(input([{ text: "pizza", scope: "place" }]), run.ctx);
+    expect(qloo.calls).toHaveLength(1);
+    expect(result.forModel.top_rows.map((r) => [r.name, r.values.use, r.values.source, r.values.status])).toEqual([
+      ["Pizza", "heatmap_signal", "curated", "verified"],
+      ["Pizza Place", "place_filter", "search", "live"],
+    ]);
+    // Only the supply filter is taken from the search; its other tags are not registered.
+    expect(run.registry.tags().map((t) => t.tagId)).toEqual(["urn:tag:genre:place:restaurant:pizza", filter.id]);
+    expect(result.forModel.notices.join(" ")).toContain("Pizzeria's supply filter T2 (Pizza Place) was found by semantic search at run time, not probe-verified");
+    expect(result.forModel.notices.join(" ")).toContain("geo_lift counts no similar venues with it and the competitor count stays unknown");
+    // The fallback notice says it once; the generic unverified-filter notice does not repeat it.
+    expect(result.forModel.notices.filter((n) => n.includes("not probe-verified"))).toHaveLength(1);
+
+    // No supply filter in the answer: the genre tag still serves, and the notice says supply is not sampled.
+    const bare = fakeRun(tagsQloo(() => [genre]).api);
+    const none = await findTagsSkill.run(input([{ text: "pizza", scope: "place" }]), bare.ctx);
+    expect(none.status).toBe("ok");
+    expect(none.forModel.notices).toContain(
+      "Pizzeria has no verified supply filter and the live tag search found none, so geo_lift counts no similar venues for it: the competitor count is unknown.",
+    );
   });
 
   it("searches brand and media concepts with their own parents and taxonomy types", async () => {

@@ -20,6 +20,7 @@ import {
   showcaseEntries,
   SHOWCASES_USAGE,
   storedPins,
+  WEB_ANSWER_VERSION,
   webQuestionHash,
   type ShowcaseConfig,
   type ShowcasesDeps,
@@ -164,8 +165,9 @@ describe("the checks before a pin", () => {
 describe("the web's answer-cache key", () => {
   it("is the web's questionHash, so an adopted run meets the answer cache and the library", async () => {
     const file = path.resolve(import.meta.dirname, "../../apps/web/server/question-hash.ts");
-    const web = (await import(pathToFileURL(file).href)) as { questionHash: typeof webQuestionHash; QUESTION_HASH_PREFIX: string };
+    const web = (await import(pathToFileURL(file).href)) as { questionHash: typeof webQuestionHash; QUESTION_HASH_PREFIX: string; ANSWER_VERSION: number };
     expect(web.QUESTION_HASH_PREFIX).toBe("q1:");
+    expect(web.ANSWER_VERSION).toBe(WEB_ANSWER_VERSION);
     const pins = { "juniper cola": "synthetic-juniper-1", "brand alpha": "synthetic-alpha-1" };
     for (const [question, p, mode] of [
       ["Is the Juniper Cola audience a moat or a niche?", undefined, "live"],

@@ -1,96 +1,295 @@
 @import "tailwindcss";
 
 /*
- * Concept A · Brief (D36): a light editorial surface. Answer first, evidence second, mechanics last.
- * The tokens mirror the variables of design/concept-a-brief.pen; the type ramp follows its A00
- * Foundations frame. One accent, two data colours, 2 px radius, hairlines instead of shadows.
+ * Culture Terminal design system (design/redesign.pen, N00 Foundations). Light only: the design has one
+ * theme. Canvas pages, white cards with a hairline and a soft shadow, one violet accent, an orange second
+ * series, four topic colours. Bricolage Grotesque for display, Geist for everything else, Geist Mono for
+ * request data. `static` emits every variable, so inline styles, SVG fills and the map can read any token.
  */
-@theme {
-  --color-paper: #ffffff;
-  --color-canvas: #f7f7f5;
-  --color-ink: #121416;
-  --color-text-2: #3d4248;
-  --color-dim: #6b7178;
-  --color-faint: #a3a8ae;
-  --color-line: #e6e7e9;
-  --color-line-strong: #c9ccd0;
-  --color-accent: #1c3d6e;
-  --color-accent-soft: #e8edf4;
-  --color-negative: #8e2f2f;
-  --color-negative-soft: #f5eaea;
-  --color-data: #1c3d6e;
-  --color-data-2: #a9b0b8;
-  --color-on-ink: #ffffff;
+@theme static {
+  /* Surfaces */
+  --color-canvas: #f5f6f8;
+  --color-surface: #ffffff;
+  --color-sunken: #eff1f4;
+  --color-line: #e6e8ec;
+  --color-line-strong: #cdd2da;
 
-  --font-serif: "Source Serif 4 Variable", "Source Serif 4", Georgia, serif;
-  --font-ui: "Inter Variable", Inter, system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
-  --font-sans: var(--font-ui);
+  /* Ink */
+  --color-ink: #0e1116;
+  --color-ink-2: #4a5261;
+  --color-ink-3: #8a93a3;
+  --color-scrim: #0e111633;
 
-  --radius-brief: 2px;
+  /* Accent and second */
+  --color-accent: #5b3df5;
+  --color-accent-hover: #4a2ee0;
+  --color-accent-soft: #eeebfe;
+  --color-accent-ink: #3a22b8;
+  --color-second: #f2760b;
+  --color-second-soft: #fef0e3;
+  --color-second-ink: #a4510a;
 
-  /* The brief grid at 1440: margin 70 · outline 200 · gutter 60 · reading 680 · gutter 60 · sidenotes 300 · margin 70. */
-  --spacing-outline: 200px;
-  --spacing-reading: 680px;
-  --spacing-sidenotes: 300px;
-  --spacing-gutter: 60px;
-  --spacing-margin: 70px;
+  /* Status */
+  --color-good: #12a150;
+  --color-good-soft: #e7f6ee;
+  --color-good-ink: #0b7a3b;
+  --color-caution: #e0a100;
+  --color-caution-soft: #fff6db;
+  --color-caution-ink: #8a5a00;
+  --color-danger: #d92d20;
+  --color-danger-soft: #feeceb;
+  --color-danger-ink: #a11f16;
+
+  /* Charts and the map ramp */
+  --color-chart-muted: #c9ced6;
+  --color-chart-grid: #eef0f3;
+  --color-map-1: #f1eefe;
+  --color-map-2: #d5ccfc;
+  --color-map-3: #a897f9;
+  --color-map-4: #7c63f7;
+  --color-map-5: #5b3df5;
+
+  /* Topics */
+  --color-topic-brands: #ff7a45;
+  --color-topic-brands-soft: #ffe8dc;
+  --color-topic-brands-ink: #b43c0a;
+  --color-topic-places: #1fb57a;
+  --color-topic-places-soft: #ddf5ea;
+  --color-topic-places-ink: #08714a;
+  --color-topic-tours: #f2559b;
+  --color-topic-tours-soft: #fde3ef;
+  --color-topic-tours-ink: #a8195c;
+  --color-topic-audiences: #f5c02e;
+  --color-topic-audiences-soft: #fff3c9;
+  --color-topic-audiences-ink: #7a5c00;
+
+  /* Monogram neutrals (hard-coded in the design, not .pen variables) */
+  --color-mono-1: #e0f5f3;
+  --color-mono-1-ink: #0b6b63;
+  --color-mono-2: #e6f1fd;
+  --color-mono-2-ink: #1d5fa8;
+  --color-mono-3: #f6f0e6;
+  --color-mono-3-ink: #7a5a2b;
+  --color-mono-4: #edeff3;
+  --color-mono-4-ink: #3d4655;
+
+  --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", system-ui, sans-serif;
+  --font-sans: "Geist Variable", Geist, system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+
+  --radius-xs: 3px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-control: 12px;
+  --radius-tile: 12px;
+  --radius-card: 16px;
+  --radius-box: 20px;
+  --radius-chip: 999px;
+
+  --shadow-xs: 0 1px 2px #1018280d;
+  --shadow-md: 0 6px 18px #10182824;
+  --shadow-lg: 0 12px 32px #1018282e, 0 2px 6px #1018280f;
+  --shadow-pressed: inset 0 1px 2px #0e11163d;
+
+  /* The content column and the question box at 1440. */
+  --spacing-page: 1128px;
+  --spacing-box: 880px;
+
+  /* Entry motion of arriving cards: fade in and rise 8 px (none under reduced motion, see below). */
+  --animate-rise: ct-rise 240ms ease-out both;
+  @keyframes ct-rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
 }
 
-/* Type ramp (A00 · 04 Type): serif reads, sans operates, mono traces. */
-@utility type-question {
-  font-family: var(--font-serif);
-  font-size: 40px;
-  line-height: 48px;
-  font-weight: 500;
+/* Type scale (N00 · Type). Mobile sizes are the -sm utilities, used as `max-md:type-…-sm`. */
+@utility type-display-xl {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 96;
+  font-size: 64px;
+  line-height: 64px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
 }
-@utility type-answer {
-  font-family: var(--font-serif);
-  font-size: 20px;
-  line-height: 30px;
-  font-weight: 400;
+@utility type-hero-sm {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 96;
+  font-size: 36px;
+  line-height: 38px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
 }
-@utility type-key-figure {
-  font-family: var(--font-serif);
-  font-size: 32px;
-  line-height: 37px;
-  font-weight: 500;
+@utility type-display-l {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 96;
+  font-size: 52px;
+  line-height: 54px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+@utility type-display-l-sm {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 96;
+  font-size: 34px;
+  line-height: 36px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+@utility type-display-m {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 96;
+  font-size: 36px;
+  line-height: 40px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+@utility type-display-m-sm {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 96;
+  font-size: 28px;
+  line-height: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+@utility type-display-s {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 96;
+  font-size: 22px;
+  line-height: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+@utility type-display-s-sm {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 96;
+  font-size: 18px;
+  line-height: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+@utility type-score {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 96;
+  font-size: 64px;
+  line-height: 64px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
-@utility type-figure-title {
-  font-family: var(--font-serif);
+@utility type-number-l {
+  font-family: var(--font-sans);
+  font-size: 40px;
+  line-height: 44px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+@utility type-number-l-sm {
+  font-family: var(--font-sans);
+  font-size: 28px;
+  line-height: 32px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+@utility type-name-value {
+  font-family: var(--font-sans);
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+@utility type-name-value-sm {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  line-height: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+@utility type-title-l {
+  font-family: var(--font-sans);
+  font-size: 28px;
+  line-height: 34px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+@utility type-title-l-sm {
+  font-family: var(--font-sans);
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+@utility type-title {
+  font-family: var(--font-sans);
+  font-size: 20px;
+  line-height: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+@utility type-title-sm {
+  font-family: var(--font-sans);
   font-size: 18px;
+  line-height: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+@utility type-lead {
+  font-family: var(--font-sans);
+  font-size: 18px;
+  line-height: 28px;
+  font-weight: 400;
+}
+@utility type-body {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 24px;
+  font-weight: 400;
+}
+@utility type-body-strong {
+  font-family: var(--font-sans);
+  font-size: 15px;
   line-height: 24px;
   font-weight: 600;
 }
-@utility type-body {
-  font-family: var(--font-ui);
+@utility type-button {
+  font-family: var(--font-sans);
   font-size: 15px;
-  line-height: 22px;
-}
-@utility type-ui {
-  font-family: var(--font-ui);
-  font-size: 13px;
   line-height: 20px;
-  font-weight: 500;
+  font-weight: 600;
 }
 @utility type-label {
-  font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 1.3px;
-  text-transform: uppercase;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
 }
-@utility type-sidenote {
-  font-family: var(--font-ui);
+@utility type-caption {
+  font-family: var(--font-sans);
   font-size: 12px;
-  line-height: 17px;
+  line-height: 16px;
+  font-weight: 400;
 }
-@utility type-trace {
+@utility type-mono {
   font-family: var(--font-mono);
-  font-size: 10.5px;
-  line-height: 15px;
-  font-variant-numeric: tabular-nums slashed-zero;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 400;
+}
+
+/* "No data": sunken with 1 px ink-3 lines at 45 degrees, drawn on a 6 px SVG tile so the lines never seam.
+   The stroke is ink-3 (#8A93A3), written out because a data URL cannot read a CSS variable. */
+@utility bg-hatch {
+  background-color: var(--color-sunken);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6'%3E%3Cpath d='M-1 1l2-2M0 6l6-6M5 7l2-2' stroke='%238A93A3' stroke-width='1'/%3E%3C/svg%3E");
+  background-size: 6px 6px;
 }
 
 @layer base {
@@ -99,9 +298,9 @@
   }
 
   body {
-    background: var(--color-paper);
+    background: var(--color-canvas);
     color: var(--color-ink);
-    font-family: var(--font-ui);
+    font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
   }
 

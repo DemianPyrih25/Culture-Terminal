@@ -20,7 +20,6 @@ import {
   type MiniViz,
   type OgCard,
 } from "../../lib/og";
-import { HONESTY_SHORT } from "../../components/chrome/status-line";
 import { sampleEvents } from "../../server/samples";
 import { endedAs } from "../brief-page/support";
 import { cardOf, FAKE_UUID, idsIn, imageText, jobState, stateOf } from "./support";
@@ -110,7 +109,7 @@ describe("a showcase's card", () => {
       `${receipt.numbersTraced.traced}/${receipt.numbersTraced.total} numbers traced`,
       `LLM $${receipt.usd.toFixed(2)}`,
     ]);
-    expect(card.honesty).toBe(HONESTY_SHORT);
+    expect(card.honesty).toBe(OG_HONESTY);
 
     const text = imageText(card);
     for (const s of [card.question.text, card.signal.finding!, card.signal.conviction!.text, ...card.receipt, OG_HONESTY]) expect(text).toContain(s);

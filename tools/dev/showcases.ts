@@ -22,7 +22,7 @@ import {
   type AgentRunResult,
   type AnalystMode,
 } from "@ct/agent";
-import { DEFAULT_RUN_LIMITS, reduceRunEvents, Report, RunEvent, type RunState } from "@ct/contracts";
+import { DEFAULT_RUN_LIMITS, placeSearchMarket, reduceRunEvents, Report, RunEvent, type RunState } from "@ct/contracts";
 import {
   closeDb,
   DEFAULT_EVENT_PAGE,
@@ -163,10 +163,13 @@ const CLI_HASH_PREFIX = "cli:";
  * run gets the unpinned key (adoptedHash), so the library lists it, the answer cache serves it to the
  * same typed question and it can be followed up.
  */
+/** The web's ANSWER_VERSION (apps/web/server/question-hash.ts), which the key carries; the same test keeps it in step. */
+export const WEB_ANSWER_VERSION = 3;
+
 export function webQuestionHash(question: string, pins: Readonly<Record<string, string>> | undefined, mode: AnalystMode): string {
   const normalised = sanitizeQuestion(question).normalize("NFKC").toLowerCase();
   const sortedPins = Object.entries(pins ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  const digest = createHash("sha256").update(JSON.stringify([normalised, sortedPins, mode])).digest("hex");
+  const digest = createHash("sha256").update(JSON.stringify([normalised, sortedPins, mode, { answerVersion: WEB_ANSWER_VERSION }])).digest("hex");
   return `${AGENT_HASH_PREFIX}${digest}`;
 }
 
@@ -487,9 +490,9 @@ export async function findPins(
         findings.push({ ...base, entityId: own, source: "run pin", problem: null });
         continue;
       }
-      const params = searchParams({ text: r.mention, type: r.entityType, metro: r.entityType === "place" ? (state.intent?.geo.metro ?? null) : null });
+      const params = searchParams({ text: r.mention, type: r.entityType, metro: r.entityType === "place" && state.intent ? placeSearchMarket(state.intent.geo) : null });
       if (params === null) {
-        findings.push({ ...base, entityId: null, source: null, problem: "a place with no supported metro: no /search to read" });
+        findings.push({ ...base, entityId: null, source: null, problem: "a place with no map city or market: no /search to read" });
         continue;
       }
       session ??= await openQloo();

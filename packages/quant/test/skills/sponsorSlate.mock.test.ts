@@ -70,7 +70,7 @@ describe("sponsor_slate over the mock transport", () => {
 
     const input = sponsorSlateSkill.input.parse({
       seed: "R1",
-      categories: ["beer", "energy_drinks", "spirits"],
+      categories: ["beer", "energy_drinks", "outdoor_sporting_retail"],
       shortlist: ["R2"],
       markets: ["nashville", "austin"],
       trigger_finding_id: null,

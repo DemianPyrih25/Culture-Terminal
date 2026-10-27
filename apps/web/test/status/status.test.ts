@@ -156,10 +156,22 @@ describe("readStatus", () => {
   });
 
   it("says whether kv pins every market a run needs, by market id and count only", async () => {
-    expect((await readStatus(fakeSources())).localities).toEqual({ state: "complete", required: ["nashville", "austin"], missing: [], pinned: 2 });
-    const partial = { state: "partial" as const, required: ["nashville", "austin"], missing: ["austin"], pinned: 1 };
+    expect((await readStatus(fakeSources())).localities).toEqual({
+      state: "complete",
+      required: ["nashville", "austin"],
+      missing: [],
+      pinned: 3,
+      markets: { total: 3, missing: [] },
+    });
+    const partial = {
+      state: "partial" as const,
+      required: ["nashville", "austin"],
+      missing: ["austin"],
+      pinned: 1,
+      markets: { total: 3, missing: ["austin", "memphis"] },
+    };
     // Named fields only: anything else a source adds (here a planted locality id) never reaches the reading.
-    const planted = { ...partial, entityId: CANARY_REQUEST_ID };
+    const planted = { ...partial, entityId: CANARY_REQUEST_ID, markets: { ...partial.markets, entityId: CANARY_REQUEST_ID } };
     const report = await readStatus(fakeSources({ localities: async () => planted }));
     expect(report.localities).toEqual(partial);
     expect(JSON.stringify(report)).not.toContain(CANARY_REQUEST_ID);
@@ -267,7 +279,7 @@ describe("readStatus", () => {
   });
 
   it("passes the public lane's decision and message through when it steps down", async () => {
-    const message = "Live briefs run on the economy analyst until 00:00 UTC: today's live budget is nearly used.";
+    const message = "Live answers run on the economy analyst until 00:00 UTC: today's live budget is nearly used.";
     const report = await readStatus(
       fakeSources({
         llmUsd: async (_day, lane) => (lane === "all" ? 0.6 : 0.3),

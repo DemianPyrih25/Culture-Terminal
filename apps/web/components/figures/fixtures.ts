@@ -1,10 +1,8 @@
 import type { AxisItem, DatasetOf, MatrixCell, NoValueReason, QuadrantName, QuadrantPoint, ValueCell } from "@ct/contracts";
-import type { TasteMapPayload } from "./category-map";
 import type { FigureSource } from "./figure-frame";
 import { marketSlope, momentumStrip, tastePosition, tastePositionNoSignal, tenantSlope } from "./fixtures-desks";
 import { austinLiftMap, coarseLiftMap } from "./fixtures-geo";
 import type { ProseBindings } from "./prose";
-import type { TwinCandidate, TwinPayload } from "./twin-cards";
 
 export { MOMENTUM_WINDOW, marketSlope, momentumStrip, tastePosition, tastePositionNoSignal, tenantSlope } from "./fixtures-desks";
 export { austinLiftMap, coarseLiftMap } from "./fixtures-geo";
@@ -722,7 +720,7 @@ export const ageDumbbellSelfDescribed: DatasetOf<"Bars"> = {
   payload: { ...ageIndexPair.payload, display: "dumbbell", baseline: 0 },
 };
 
-// Constellation · cultural neighbourhood of two seeds (S9 in P1) ---------------------------------------
+// Cultural neighbourhood of two seeds (S9 in P1), a Ranked payload ---------------------------------------
 
 type DomainKey = "artist" | "podcast" | "tv_show" | "movie" | "brand";
 
@@ -850,165 +848,6 @@ export const neighbourhood: DatasetOf<"Ranked"> = {
   },
 };
 
-// Category Taste Map (S1 in P1: triangular calls, classical MDS) ----------------------------------------
-
-/** The entities of the taste map in matrix order, with their invented clusters. */
-const TASTE_MAP_ENTITIES = [
-  ["R1", "Juniper Cola", "Colas"],
-  ["R2", "Brand Alpha", "Colas"],
-  ["R3", "Brand Beta", "Colas"],
-  ["R9", "Ember Root Beer", "Colas"],
-  ["R4", "Saltmarsh Seltzer", "Waters"],
-  ["R8", "Tidewell Water", "Waters"],
-  ["R15", "Wildmint Soda", "Waters"],
-  ["R5", "Kettle Ridge Tonic", "Tonics"],
-  ["R7", "Larkspur Kombucha", "Tonics"],
-  ["R16", "Bramble Shrub Co.", "Tonics"],
-  ["R6", "Granite Hollow Ale", "Ales"],
-  ["R11", "Blackfern Rye", "Ales"],
-  ["R12", "Copper Still Ginger", "Ales"],
-] as const;
-
-/** The invented pairwise similarity behind the map (symmetric; the diagonal is null). */
-export const TASTE_MAP_SIMILARITY: readonly (readonly (number | null)[])[] = [
-  [null, 0.82, 0.8, 0.77, 0.48, 0.39, 0.49, 0.58, 0.45, 0.44, 0.53, 0.47, 0.63],
-  [0.82, null, 0.83, 0.72, 0.57, 0.5, 0.58, 0.57, 0.42, 0.49, 0.41, 0.38, 0.51],
-  [0.8, 0.83, null, 0.75, 0.63, 0.51, 0.6, 0.49, 0.36, 0.39, 0.4, 0.32, 0.54],
-  [0.77, 0.72, 0.75, null, 0.47, 0.36, 0.41, 0.41, 0.27, 0.28, 0.51, 0.42, 0.7],
-  [0.48, 0.57, 0.63, 0.47, null, 0.77, 0.75, 0.26, 0.15, 0.24, 0.07, 0.02, 0.24],
-  [0.39, 0.5, 0.51, 0.36, 0.77, null, 0.71, 0.22, 0.11, 0.26, 0.02, 0.02, 0.12],
-  [0.49, 0.58, 0.6, 0.41, 0.75, 0.71, null, 0.38, 0.29, 0.39, 0.07, 0.03, 0.19],
-  [0.58, 0.57, 0.49, 0.41, 0.26, 0.22, 0.38, null, 0.78, 0.73, 0.41, 0.45, 0.35],
-  [0.45, 0.42, 0.36, 0.27, 0.15, 0.11, 0.29, 0.78, null, 0.66, 0.33, 0.37, 0.24],
-  [0.44, 0.49, 0.39, 0.28, 0.24, 0.26, 0.39, 0.73, 0.66, null, 0.21, 0.29, 0.17],
-  [0.53, 0.41, 0.4, 0.51, 0.07, 0.02, 0.07, 0.41, 0.33, 0.21, null, 0.74, 0.71],
-  [0.47, 0.38, 0.32, 0.42, 0.02, 0.02, 0.03, 0.45, 0.37, 0.29, 0.74, null, 0.55],
-  [0.63, 0.51, 0.54, 0.7, 0.24, 0.12, 0.19, 0.35, 0.24, 0.17, 0.71, 0.55, null],
-];
-
-/** classicalMds(tasteDistances(TASTE_MAP_SIMILARITY).d) from @ct/quant, rounded to 3 places (the subject up and left). */
-const TASTE_MAP_COORDS: readonly (readonly [number, number])[] = [
-  [-0.035, 0.084],
-  [0.08, 0.042],
-  [0.118, 0.126],
-  [-0.027, 0.263],
-  [0.46, 0.133],
-  [0.501, 0.059],
-  [0.434, -0.071],
-  [-0.133, -0.301],
-  [-0.178, -0.419],
-  [0, -0.439],
-  [-0.457, 0.168],
-  [-0.486, 0.036],
-  [-0.277, 0.32],
-];
-
-function nearestPeer(i: number): { key: string; value: number } | null {
-  let best: number | null = null;
-  TASTE_MAP_SIMILARITY[i]!.forEach((s, j) => {
-    if (s !== null && (best === null || s > TASTE_MAP_SIMILARITY[i]![best]!)) best = j;
-  });
-  return best === null ? null : { key: TASTE_MAP_ENTITIES[best]![0], value: TASTE_MAP_SIMILARITY[i]![best]! };
-}
-
-export const categoryTasteMap: { id: string; title: string; formulaIds: readonly string[]; payload: TasteMapPayload } = {
-  id: "D27",
-  title: "Category Taste Map",
-  formulaIds: ["subs.similarity", "subs.near_substitutes"],
-  payload: {
-    valueLabel: "Audience similarity",
-    unit: "similarity",
-    points: TASTE_MAP_ENTITIES.map(([key, label, group], i) => ({
-      key,
-      label,
-      ref: key,
-      x: TASTE_MAP_COORDS[i]![0],
-      y: TASTE_MAP_COORDS[i]![1],
-      target: i === 0,
-      group,
-      nearest: nearestPeer(i),
-    })),
-    links: [
-      { a: "R2", b: "R3", value: 0.83 },
-      { a: "R4", b: "R8", value: 0.77 },
-      { a: "R5", b: "R7", value: 0.78 },
-    ],
-    omitted: [{ label: "Brand Gamma", ref: "R10", reason: "not_scored" }],
-    stress: 0.091,
-    explained: 0.876,
-    imputed: 0,
-    caption: "Audience taste similarity, not switching, share or sales. A flat map bends some distances; the stress says how much.",
-  },
-};
-
-// TwinCards · East Nashville against six Austin neighbourhoods (S11 in P1) -------------------------------
-
-const TWIN_TAGS = [
-  ["natural-wine", "natural wine", "WHAT"],
-  ["vinyl", "vinyl records", "SOUND"],
-  ["live-music", "live music", "SOUND"],
-  ["roasters", "coffee roasters", "WHAT"],
-  ["vintage", "vintage clothing", "WHO"],
-  ["brunch", "brunch", "WHAT"],
-  ["cocktails", "craft cocktails", "VIBE"],
-  ["bookshops", "bookshops", "WHO"],
-  ["tacos", "tacos", "WHAT"],
-  ["dive-bars", "dive bars", "VIBE"],
-  ["yoga", "yoga studios", "WHO"],
-  ["sports-bars", "sports bars", "VIBE"],
-  ["fine-dining", "fine dining", "WHAT"],
-  ["big-box", "big-box retail", "WHAT"],
-] as const;
-
-/** d(t) in the source area, aligned with TWIN_TAGS: ranks gained over Nashville, clipped at ±25. */
-export const TWIN_SOURCE_D = [21, 18, 15, 12, 11, 17, 8, 6, 3, 9, -4, -14, -9, -18] as const;
-
-/** A candidate as S11 writes it: shared traits by the rule (d ≥ 10 in both), the key difference given. */
-function twinCandidate(key: string, label: string, rho: number, d: readonly number[], difference: readonly number[]): TwinCandidate {
-  return {
-    area: { key, label, metro: "austin" },
-    rho: v(rho),
-    n: d.length,
-    tags: TWIN_TAGS.map(([tagKey, tagLabel, family], i) => ({
-      key: tagKey,
-      label: tagLabel,
-      tagRef: null,
-      family,
-      source: v(TWIN_SOURCE_D[i]!),
-      target: v(d[i]!),
-    })),
-    shared: TWIN_TAGS.flatMap(([tagKey], i) => (TWIN_SOURCE_D[i]! >= 10 && d[i]! >= 10 ? [tagKey] : [])),
-    difference: difference.map((i) => TWIN_TAGS[i]![0]),
-  };
-}
-
-export const tasteTwins: { id: string; title: string; formulaIds: readonly string[]; payload: TwinPayload } = {
-  id: "D28",
-  title: "Taste Twins · East Nashville in Austin",
-  formulaIds: ["block.rank_delta"],
-  payload: {
-    source: { key: "east-nashville", label: "East Nashville", metro: "nashville" },
-    candidates: [
-      twinCandidate("holly", "Holly", 0.75, [16, 14, 19, 10, 7, -12, 11, 4, 5, 6, -2, -16, -11, -20], [5]),
-      twinCandidate("govalle", "Govalle", 0.51, [9, 4, 12, 14, -3, 6, 2, -6, 18, 13, 5, -10, -15, -4], [4]),
-      twinCandidate("east-cesar-chavez", "East Cesar Chavez", 0.27, [12, -5, 8, 3, 14, -8, 16, 2, 11, -2, -12, -3, 6, -9], [5, 1]),
-      twinCandidate("mueller", "Mueller", -0.12, [-6, 3, -9, 11, 2, 14, -4, 9, -11, -13, 17, 5, 8, -2], [0]),
-      twinCandidate("zilker", "Zilker", -0.55, [-10, -8, 4, -12, -3, 15, 7, -6, -2, -14, 19, 12, 16, 9], [0]),
-      {
-        area: { key: "rosedale", label: "Rosedale", metro: "austin" },
-        rho: none("budget_truncated"),
-        n: 0,
-        tags: [],
-        shared: [],
-        difference: [],
-      },
-    ],
-    clip: 25,
-    sharedMin: 10,
-    caption: "Similarity of taste signals, not rent, footfall or census.",
-  },
-};
-
 /** Display text and footnotes for the scorecard prose. */
 export const SCORECARD_BINDINGS: ProseBindings = {
   metrics: {
@@ -1059,12 +898,6 @@ export const FIXTURE_SOURCES: Readonly<Record<string, FigureSource>> = {
     requestId: "0002abab0000f002",
     href: null,
   },
-  tasteMap: {
-    text: "Source: Qloo /v2/insights · 12 triangular calls · MDS computed in code",
-    requestId: "0005acac0000f005",
-    href: null,
-  },
-  twins: { text: "Source: Qloo /v2/insights · tags · 9 requests · computed in code", requestId: "0008bdbd0000f008", href: null },
   priors: { text: "Source: ANALYST priors recorded before any data", requestId: null, href: null },
 };
 

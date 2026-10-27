@@ -26,7 +26,7 @@ export const intent: Intent = {
     { text: "Juniper Cola", entity_type: "brand", role: "primary", public_figure: false },
     { text: "Aurora Footwear", entity_type: "brand", role: "peer", public_figure: false },
   ],
-  geo: { metro: null, area: null, unsupported_place: null },
+  geo: { metro: null, area: null, unsupported_place: null, market: null },
   constraints: { concepts: [], sponsor_categories: [], domains: ["artist"], ages: [], notes: [] },
   safety: { allowed: true, category: null, reframe: null },
   assumptions: ["US geography"],

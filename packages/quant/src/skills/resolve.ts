@@ -6,8 +6,8 @@ import {
   type EntityType,
   type EvidenceId,
   type Flag,
+  type MarketId,
   type Metric,
-  type MetroId,
   type QlooCallMeta,
   type QlooParams,
   type QlooSearchEntity,
@@ -23,12 +23,12 @@ import { SKILL_LIMITATIONS } from "../limitations";
 import { addSkillMetric, attemptAll, countUncached, registerEntity, searchTags, type EntityDraft } from "./common";
 import { skillResult, type DigestTarget } from "./digest";
 import { fixed2, safeText } from "./format";
-import { metroCentreLatLon, PLACE_SEARCH_RADIUS_MILES } from "./metros";
-import { normaliseName } from "./normalise";
+import { latLonParam, placeSearchArea } from "./metros";
+import { normaliseName, withoutHostBilling } from "./normalise";
 
 /**
  * S0 resolve_entities (SPEC §5.3, D20): one /search per mention, and only an exact normalised name
- * of the right type is applied. Ambiguous and unmatched names are offered with their candidates and
+ * of the right type is applied (a podcast's name may carry its host billing, withoutHostBilling). Ambiguous and unmatched names are offered with their candidates and
  * never substituted; popularity is shown but never used to choose.
  */
 
@@ -70,7 +70,12 @@ export function classifyMatches(
     distinct.push(r);
   }
 
-  const exact = wanted === "" ? [] : distinct.filter((r) => r.types.includes(urn) && normaliseName(r.name) === wanted);
+  const ofType = distinct.filter((r) => r.types.includes(urn));
+  const strict = wanted === "" ? [] : ofType.filter((r) => normaliseName(r.name) === wanted);
+  // A podcast billed with its host ("Show Nova with Dana Lee") is the show the question names, but
+  // only when no result carries the name exactly.
+  const billed = strict.length > 0 || mention.type !== "podcast" ? [] : ofType.filter((r) => withoutHostBilling(normaliseName(r.name)) === wanted);
+  const exact = strict.length > 0 ? strict : billed;
   const matchClass: ResolveMatchClass = exact.length === 1 ? "exact" : exact.length > 1 ? "ambiguous" : "not_found";
   const applied = matchClass === "exact" ? exact[0] : undefined;
   const alternatives = [...exact, ...distinct.filter((r) => !exact.includes(r))]
@@ -85,12 +90,16 @@ export function classifyMatches(
   return { matchClass, exact, alternatives };
 }
 
-/** The /search request for a mention, or null for a place with no metro (it would match anywhere). */
-export function searchParams(mention: { text: string; type: EntityType; metro: MetroId | null }): QlooParams | null {
+/**
+ * The /search request for a mention, or null for a place with no map city or market centre to search
+ * around (it would match anywhere). A place is searched within its metro's or market's radius (D44).
+ */
+export function searchParams(mention: { text: string; type: EntityType; metro: MarketId | null }): QlooParams | null {
   const base = { query: mention.text.trim(), types: entityTypeUrn(mention.type), take: SEARCH_TAKE };
   if (mention.type !== "place") return base;
-  if (mention.metro === null) return null;
-  return { ...base, "filter.location": metroCentreLatLon(mention.metro), "filter.radius": PLACE_SEARCH_RADIUS_MILES };
+  const area = mention.metro === null ? null : placeSearchArea(mention.metro);
+  if (area === null) return null;
+  return { ...base, "filter.location": latLonParam(area.centre), "filter.radius": area.radiusMiles };
 }
 
 /** The limitation for a name that was not applied (S0). */
@@ -227,7 +236,7 @@ async function runResolve(input: ResolveInput, ctx: SkillCtx): Promise<SkillResu
     }
     const truncated = attempt?.kind === "truncated";
     acc.flags.add(truncated ? "BUDGET_TRUNCATED" : "SECONDARY_ENTITY_DROPPED");
-    if (!truncated) acc.notices.push(`'${safeText(mention.text)}' is a place with no metro to search in; not searched.`);
+    if (!truncated) acc.notices.push(`'${safeText(mention.text)}' is a place with no metro or market centre to search in; not searched.`);
     acc.rows.push({
       ref: null,
       name: safeText(mention.text),

@@ -156,7 +156,7 @@ describe("buildLimitations", () => {
     expect(texts).not.toContain("Audience taste similarity, not switching, share or sales.");
     // The geo_lift supply bullet says less than the SUPPLY_SAMPLE_ONLY flag sentence.
     expect(texts).toContain(FLAG_TEXT.SUPPLY_SAMPLE_ONLY);
-    expect(texts).not.toContain("Supply counts venues Qloo indexes, not every business in the area.");
+    expect(texts).not.toContain("Supply counts a sample of venues Qloo indexes, not every business in the area.");
     expect(texts).toContain("Scores are compressed; read ranks rather than raw values.");
   });
 

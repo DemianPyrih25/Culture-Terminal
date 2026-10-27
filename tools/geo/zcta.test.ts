@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { beforeAll, describe, expect, it } from "vitest";
-import { createGeo, GAZETTEERS, MAX_WKT_VERTICES, type Gazetteer } from "../../packages/geo/src/index";
+import { createGeo, GAZETTEER_CATALOG, MAX_WKT_VERTICES, type Gazetteer } from "../../packages/geo/src/index";
 import { edgesOf, overlapProblem, polygonsOf, ringProblem, signedArea } from "../../packages/geo/test/validity";
 import { moduleText, type BuiltArea, type Shape } from "./build";
 import { buildZcta, countyGeoid, partLabelOf, tigerwebZctaQuery, zctaSpec, type Feature, type ZctaInput } from "./zcta";
@@ -154,7 +154,7 @@ describe("the ZCTA build", () => {
 
 describe("ZCTA build helpers", () => {
   it("names the source as Nashville's gazetteer does", () => {
-    expect(zctaSpec("nashville", "Davidson County", true).source).toBe(GAZETTEERS.nashville?.source);
+    expect(zctaSpec("nashville", "Davidson County", true).source).toBe(GAZETTEER_CATALOG.nashville?.source);
     expect(zctaSpec("fixture", "Fixture County", false).source).toBe("U.S. Census Bureau 2020 ZIP Code Tabulation Areas clipped to Fixture County, public domain");
     expect(zctaSpec("st_fixture", "Fixture County", false).constName).toBe("ST_FIXTURE");
   });

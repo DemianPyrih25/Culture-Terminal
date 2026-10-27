@@ -254,6 +254,22 @@ async function discover(
   return { discoveries, calls: metasOf(attempts), thin };
 }
 
+/**
+ * One notice per category whose discovery carried brands from another line (ANSWER_QUALITY §9): who
+ * was skipped and where their main line lies, and plainly when no brand that fits the category is left.
+ */
+function offCategoryNotices(discoveries: readonly CategoryDiscovery[], selection: CandidateSelection): string[] {
+  return discoveries.flatMap((d) => {
+    const skipped = selection.offCategory.filter((o) => o.category === d.category);
+    if (skipped.length === 0) return [];
+    const label = categoryLabel(d.category);
+    const names = skipped.slice(0, 4).map((o) => `${safeName(o.name)} (${o.branch.replace(/_/g, " ")})`).join(", ");
+    const more = skipped.length > 4 ? ` and ${skipped.length - 4} more` : "";
+    const none = (selection.usable.get(d.category) ?? 0) === 0 ? ` No brand that fits ${label} is left, so the slate has no ${label} pick.` : "";
+    return [`${label}: ${count(skipped.length, "discovery result")} carried the category tag only beside a main line elsewhere and ${skipped.length === 1 ? "was" : "were"} skipped: ${names}${more}.${none}`];
+  });
+}
+
 function recordDiscovery(
   run: SlateRun,
   seed: RegisteredEntity,
@@ -262,7 +278,7 @@ function recordDiscovery(
   thin: boolean,
   calls: readonly QlooCallMeta[],
 ): EvidenceId | null {
-  const { usable, gateDropped } = selection;
+  const { usable, gateDropped, offCategory } = selection;
   const flags: Flag[] = [];
   const truncated = discoveries.some((d) => d.tagId !== null && d.gap === "budget_truncated");
   const failed = discoveries.some((d) => d.tagId !== null && d.gap === "error");
@@ -274,6 +290,7 @@ function recordDiscovery(
     const n = gateDropped.length;
     run.notices.push(`${count(n, "discovery result")} below the popularity quality gate ${n === 1 ? "was" : "were"} skipped.`);
   }
+  run.notices.push(...offCategoryNotices(discoveries, selection));
 
   const answered = discoveries.filter((d) => d.results !== null);
   const parts = answered.map((d) => `${categoryLabel(d.category)} ${usable.get(d.category) ?? 0}`);
@@ -285,7 +302,8 @@ function recordDiscovery(
     status: truncated || failed ? "partial" : totalUsable === 0 ? "empty" : "ok",
     summary:
       `Usable results by category: ${parts.length > 0 ? parts.join(", ") : "none"}` +
-      `${gateDropped.length > 0 ? `; ${gateDropped.length} skipped by the quality gate` : ""}.`,
+      `${gateDropped.length > 0 ? `; ${gateDropped.length} skipped by the quality gate` : ""}` +
+      `${offCategory.length > 0 ? `; ${offCategory.length} skipped as outside their category` : ""}.`,
     flags,
     qualityGateDrops: gateDropped.length,
   });

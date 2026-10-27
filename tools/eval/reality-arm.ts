@@ -8,7 +8,7 @@
 // (gitignored, D29). A cancelled check records nothing.
 import { GhostError, runGhost } from "@ct/agent";
 import type { GeoApi } from "@ct/contracts";
-import { loadGeo } from "../dev/cli/geo";
+import { ensureMetrosIn, loadGeo } from "../dev/cli/geo";
 import { referenceProblems, type RealityCase } from "./cases";
 import type { RealityContext } from "./cli";
 import { ghostWorstCaseUsd } from "./ghost";
@@ -100,6 +100,8 @@ export function createRealityArm(ctx: RealityContext, overrides: RealityArmOverr
         hasArea: (metro, areaId) => geo.neighbourhood(metro, areaId) !== null,
       });
       if (problems.length > 0) throw new SpentError(`the registered cases point outside this build: ${problems.join("; ")}; nothing was sent`, 0);
+      // The polygons of every metro a case names (a store case's choice), before any lookup.
+      await ensureMetrosIn(geo, cases);
 
       const spend = new Map<string, GhostSpend>();
       const spent = () => [...spend.values()].reduce((usd, s) => usd + s.usd, 0);

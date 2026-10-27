@@ -2,7 +2,22 @@
 import { METRO_LABEL, MetroId } from "@ct/contracts";
 import type { Polygon } from "geojson";
 import { describe, expect, it } from "vitest";
-import { createGeo, GAZETTEERS, MAX_WKT_VERTICES, normaliseAreaName, type Gazetteer } from "../src/index";
+import {
+  createGeo,
+  ensureMetros,
+  ensureMetrosIn,
+  GAZETTEER_CATALOG,
+  GeoNotLoadedError,
+  loadGazetteers,
+  MAX_WKT_VERTICES,
+  metrosIn,
+  normaliseAreaName,
+  type CatalogMetro,
+  type Gazetteer,
+} from "../src/index";
+import { catalogEntry } from "../src/geo";
+
+const GAZETTEERS = await loadGazetteers();
 
 const square = (lon: number, lat: number, size: number): Polygon => ({
   type: "Polygon",
@@ -49,20 +64,18 @@ describe("createGeo", () => {
     }
   });
 
-  it("ships the Nashville, Austin and NYC gazetteers by default", () => {
-    expect(Object.keys(GAZETTEERS)).toEqual(["nashville", "austin", "nyc"]);
+  it("ships a gazetteer for each of the 13 map cities by default", () => {
+    expect(Object.keys(GAZETTEERS)).toEqual(MetroId.options);
+    expect(Object.keys(GAZETTEER_CATALOG)).toEqual(MetroId.options);
     const geo = createGeo();
-    expect(geo.neighbourhoods("nashville").length).toBeGreaterThan(0);
-    expect(geo.neighbourhoods("austin").length).toBeGreaterThan(0);
+    for (const metro of geo.metros()) expect(geo.neighbourhoods(metro).length, metro).toBeGreaterThan(0);
     for (const metro of geo.metros()) expect(geo.boundarySource(metro)).not.toMatch(/^No neighbourhood boundaries/);
   });
 
-  it("serves a shipped gazetteer once contracts MetroId takes its metro, and not before", () => {
+  it("serves every shipped gazetteer under its contracts MetroId", () => {
     const geo = createGeo();
     for (const [metro, gazetteer] of Object.entries(GAZETTEERS)) {
-      const served = MetroId.safeParse(metro);
-      if (served.success) expect(geo.neighbourhoods(served.data), metro).toHaveLength(gazetteer.areas.length);
-      else expect(geo.metros(), metro).not.toContain(metro);
+      expect(geo.neighbourhoods(MetroId.parse(metro)), metro).toHaveLength(gazetteer.areas.length);
     }
   });
 
@@ -185,6 +198,116 @@ describe("createGeo", () => {
     );
     const clash = { ...area, id: "other", aliases: [] };
     expect(() => createGeo({ gazetteers: { nashville: { ...SYNTHETIC, areas: [area, clash] } } })).toThrow(/names both/);
+  });
+});
+
+/** SYNTHETIC's catalog entry, and a loader that counts its calls and can be held open or made to fail. */
+function lazyFixture() {
+  const catalog: Record<string, CatalogMetro> = { nashville: catalogEntry(SYNTHETIC) };
+  const state = { calls: 0, fail: false, release: null as (() => void) | null, hold: false };
+  const loader = async (): Promise<Gazetteer> => {
+    state.calls += 1;
+    if (state.hold) await new Promise<void>((resolve) => (state.release = resolve));
+    if (state.fail) throw new Error("load failed");
+    return SYNTHETIC;
+  };
+  const geo = createGeo({ catalog, loaders: { nashville: loader } });
+  return { geo, state };
+}
+
+describe("createGeo, lazy polygons", () => {
+  const inHollow = { lat: 36.11, lon: -86.79 };
+
+  it("answers names, lists and captions from the catalog without loading a polygon", () => {
+    const { geo, state } = lazyFixture();
+    expect(geo.neighbourhoods("nashville").map((n) => n.id)).toEqual(["maple_hollow", "cedar_bend"]);
+    expect(geo.matchNeighbourhood("nashville", "the hollow")?.id).toBe("maple_hollow");
+    expect(geo.neighbourhood("nashville", "cedar_bend")?.name).toBe("Cédar Bend");
+    expect(geo.boundarySource("nashville")).toBe("Synthetic test boundaries");
+    expect(geo.ready("nashville")).toBe(false);
+    expect(state.calls).toBe(0);
+  });
+
+  it("refuses locate and polygonWkt before ensure, instead of answering 'no neighbourhood'", () => {
+    const { geo } = lazyFixture();
+    expect(() => geo.locate("nashville", inHollow)).toThrow(GeoNotLoadedError);
+    expect(() => geo.polygonWkt("nashville", "maple_hollow")).toThrow(/await geo.ensure\("nashville"\)/);
+    // Unknown ids and metros without neighbourhoods need no polygons.
+    expect(geo.polygonWkt("nashville", "nowhere")).toBeNull();
+    expect(geo.locate("austin", inHollow)).toBeNull();
+    expect(geo.ready("austin")).toBe(true);
+  });
+
+  it("loads a metro once, on first ensure, and then answers like an eager index", async () => {
+    const { geo, state } = lazyFixture();
+    await geo.ensure("nashville");
+    await geo.ensure("nashville");
+    expect(state.calls).toBe(1);
+    expect(geo.ready("nashville")).toBe(true);
+    const eager = createGeo({ gazetteers: { nashville: SYNTHETIC } });
+    expect(geo.locate("nashville", inHollow)).toBe("maple_hollow");
+    expect(geo.polygonWkt("nashville", "cedar_bend")).toBe(eager.polygonWkt("nashville", "cedar_bend"));
+    expect(geo.neighbourhoods("nashville")).toEqual(eager.neighbourhoods("nashville"));
+  });
+
+  it("shares one load between concurrent first calls", async () => {
+    const { geo, state } = lazyFixture();
+    state.hold = true;
+    const first = geo.ensure("nashville");
+    const second = geo.ensure("nashville");
+    expect(second).toBe(first);
+    await Promise.resolve();
+    state.release?.();
+    await Promise.all([first, second, ensureMetros(geo, ["nashville", "nashville"])]);
+    expect(state.calls).toBe(1);
+  });
+
+  it("tries a failed load again on the next call", async () => {
+    const { geo, state } = lazyFixture();
+    state.fail = true;
+    await expect(geo.ensure("nashville")).rejects.toThrow("load failed");
+    expect(geo.ready("nashville")).toBe(false);
+    state.fail = false;
+    await geo.ensure("nashville");
+    expect(state.calls).toBe(2);
+    expect(geo.locate("nashville", inHollow)).toBe("maple_hollow");
+  });
+
+  it("refuses a gazetteer that no longer matches the catalog", async () => {
+    const stale = { nashville: { ...catalogEntry(SYNTHETIC), areas: catalogEntry(SYNTHETIC).areas.slice(0, 1) } };
+    const geo = createGeo({ catalog: stale, loaders: { nashville: async () => SYNTHETIC } });
+    await expect(geo.ensure("nashville")).rejects.toThrow(/does not match catalog\.ts/);
+    expect(() => createGeo({ catalog: stale, loaders: {} })).toThrow(/no gazetteer loads it/);
+  });
+
+  it("loads only the metros a tool input names", async () => {
+    expect(metrosIn({ metro: "nashville", concept_tags: ["T1"] })).toEqual(["nashville"]);
+    expect(metrosIn({ area: { kind: "nbhd", metro: "austin", ref: "x" }, contexts: [{ kind: "city", metro: "nyc" }, { kind: "city", metro: "nyc" }] })).toEqual([
+      "austin",
+      "nyc",
+    ]);
+    // Market ids that are not gazetteer metros, and metro lists, load nothing.
+    expect(metrosIn({ metro: "london", metros: ["nashville"], market: "nashville" })).toEqual([]);
+    expect(metrosIn(null)).toEqual([]);
+    const { geo, state } = lazyFixture();
+    await ensureMetrosIn(geo, { set: ["R1"] });
+    expect(state.calls).toBe(0);
+    await ensureMetrosIn(geo, { area: { kind: "nbhd", metro: "nashville", ref: "maple_hollow" } });
+    expect(state.calls).toBe(1);
+    // A GeoApi without a loader (a test double) is used as it is.
+    await ensureMetros(createGeo({ gazetteers: {} }), ["nashville"]);
+  });
+
+  it("serves the shipped gazetteers lazily, each metro's polygons on its own", async () => {
+    const geo = createGeo();
+    for (const metro of MetroId.options) expect(geo.ready(metro), metro).toBe(false);
+    await geo.ensure("austin");
+    expect(MetroId.options.filter((m) => geo.ready(m))).toEqual(["austin"]);
+    const eager = createGeo({ gazetteers: { austin: GAZETTEERS.austin as Gazetteer } });
+    for (const n of geo.neighbourhoods("austin")) {
+      expect(geo.locate("austin", n.centroid), n.id).toBe(eager.locate("austin", n.centroid));
+      expect(geo.polygonWkt("austin", n.id), n.id).toBe(eager.polygonWkt("austin", n.id));
+    }
   });
 });
 

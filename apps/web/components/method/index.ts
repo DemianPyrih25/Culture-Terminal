@@ -1,21 +1,11 @@
-// /method (A11 · Method & sources) and the reference-page layout /trust shares. Server components and
-// pure helpers; the outline is the one client part.
+// /method (the analysts' reference) and /how-it-works. Server components and pure helpers.
 export { MethodView } from "./method-view";
 export type { MethodViewProps } from "./method-view";
-export {
-  Colophon,
-  NoteRef,
-  REFERENCE_ANCHOR,
-  REFERENCE_STICKY_TOP,
-  ReferenceChrome,
-  ReferenceGrid,
-  ReferenceHead,
-  SideNote,
-  SideNotes,
-  TraceNote,
-  noteId,
-} from "./reference";
-export type { ColophonRow, ReferenceChromeProps, ReferenceGridProps, ReferenceHeadProps, SideNoteProps, TraceNoteProps } from "./reference";
+export { HowItWorksView, Bullets } from "./how-it-works-view";
+export { RulesSections, RULES_INDEX, audienceLabel, familyLabel } from "./rules-sections";
+export type { AudienceAllowlistView, RulesFacts } from "./rules-sections";
+export { Colophon, REFERENCE_ANCHOR, ReferenceLayout, RefNote, RefSection, TermList } from "./reference";
+export type { ColophonRow, IndexItem, RefNoteProps, RefSectionProps } from "./reference";
 export { TexFormula, parseTex, texClauses, texToText } from "./tex";
 export type { TexFormulaProps, TexNode } from "./tex";
 export { EvalMetric, EvalSummary, EvalUnit, formatEvalValue, parseEvalSummary } from "./eval-summary";

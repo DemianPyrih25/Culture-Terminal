@@ -1,9 +1,9 @@
-// The brief page tests: the recorded sample runs (invented entities, D29) rendered to static markup.
+// The answer page tests: the recorded sample runs (invented entities, D29) rendered to static markup.
 // Test files that import this mock "server-only" (server/samples) and "next/navigation" first.
 import { renderToStaticMarkup } from "react-dom/server";
 import { reduceRunEvents, stampEvent, type EventInput, type RunEvent, type RunState } from "@ct/contracts";
 import { buildBriefModel, type BriefModel } from "../../lib/brief";
-import { BriefDocument, type BriefDocumentProps, type BriefDocumentView } from "../../components/brief";
+import { PermalinkAnswer } from "../../components/answer";
 import { sampleEvents, sampleRunId, type SampleName } from "../../server/samples";
 
 export { decode, text } from "../figures/markup";
@@ -40,28 +40,23 @@ export interface Rendered {
   state: RunState;
 }
 
-/** The brief page for a state, as the server's first paint prints it. */
-export function renderState(
-  state: RunState,
-  now: number,
-  view?: BriefDocumentView,
-  extra: Partial<Pick<BriefDocumentProps, "replay" | "connection" | "unlisted" | "isFresh">> = {},
-): Rendered {
+/** The finished answer for a state (with its How we know drawer), as the server's first paint prints it. */
+export function renderState(state: RunState, now: number): Rendered {
   const model = buildBriefModel(state, now);
   const html = renderToStaticMarkup(
-    <BriefDocument
+    <PermalinkAnswer
       model={model}
       state={state}
-      view={view ?? (model.live ? "live" : "final")}
-      links={{ permalink: `/run/${state.runId}`, replay: `/run/${state.runId}?replay=1` }}
-      {...extra}
+      runId={state.runId}
+      mode="static"
+      links={{ permalink: `/r/${state.runId}`, replay: `/run/${state.runId}?replay=1` }}
     />,
   );
   return { html, model, state };
 }
 
-export function render(list: readonly RunEvent[], view?: BriefDocumentView): Rendered {
-  return renderState(stateOf(list), after(list), view);
+export function render(list: readonly RunEvent[]): Rendered {
+  return renderState(stateOf(list), after(list));
 }
 
 export const SAMPLE_RUN = (name: SampleName) => sampleRunId(name);

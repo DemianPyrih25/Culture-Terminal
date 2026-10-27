@@ -1,8 +1,9 @@
 import type { CellText } from "./format";
 
 /**
- * The ⧉ table view every figure carries (PLAN §8.3): the same numbers as the plot, one row per
- * mark, with every absence spelled out ("not scored") instead of a blank or a 0.
+ * The Table view every figure carries (PLAN §8.3): the same numbers as the plot, one row per
+ * mark, with every absence spelled out ("not scored") instead of a blank or a 0. The bare table:
+ * the frame around it decides whether it scrolls (a visible Table view) or is visually hidden.
  */
 
 export interface TableColumn {
@@ -43,59 +44,57 @@ function bodiesOf(rows: readonly TableRow[]): { key: string; section: string | n
 
 export function FigureTable({ spec }: { spec: TableSpec }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full border-collapse font-ui text-[12px] text-text-2">
-        <caption className="sr-only">{spec.caption}</caption>
-        <thead>
-          <tr className="border-b border-line-strong">
-            {spec.columns.map((c, i) => (
+    <table className="w-full border-collapse text-left tabular-nums">
+      <caption className="sr-only">{spec.caption}</caption>
+      <thead>
+        <tr className="h-8 border-b border-line">
+          {spec.columns.map((c, i) => (
+            <th
+              key={`${i}-${c.label}`}
+              scope="col"
+              className={`px-2 text-[12px] leading-4 font-semibold text-ink-2 first:pl-0 last:pr-0 ${
+                c.numeric ? "text-right" : "text-left"
+              }`}
+            >
+              {c.label}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      {bodiesOf(spec.rows).map((body) => (
+        <tbody key={body.key}>
+          {body.section !== null ? (
+            <tr className="border-b border-line">
               <th
-                key={`${i}-${c.label}`}
-                scope="col"
-                className={`px-2 py-1.5 text-[10px] font-semibold tracking-[1px] text-dim uppercase ${
-                  c.numeric ? "text-right" : "text-left"
-                }`}
+                scope="rowgroup"
+                colSpan={spec.columns.length}
+                className="px-0 pt-4 pb-1 text-left text-[12px] leading-4 font-semibold text-ink-2"
               >
-                {c.label}
+                {body.section}
               </th>
-            ))}
-          </tr>
-        </thead>
-        {bodiesOf(spec.rows).map((body) => (
-          <tbody key={body.key}>
-            {body.section !== null ? (
-              <tr className="border-b border-line">
-                <th
-                  scope="rowgroup"
-                  colSpan={spec.columns.length}
-                  className="px-2 pt-2.5 pb-1 text-left text-[9.5px] font-semibold tracking-[1px] text-dim uppercase"
-                >
-                  {body.section}
-                </th>
-              </tr>
-            ) : null}
-            {body.rows.map((row) => (
-              <tr key={row.key} className="border-b border-line">
-                {row.cells.map((cell, i) => {
-                  const numeric = spec.columns[i]?.numeric ?? false;
-                  const content = renderCell(cell);
-                  const cls = `px-2 py-1 align-top ${numeric ? "text-right tabular-nums" : "text-left"}`;
-                  return i === 0 ? (
-                    <th key={i} scope="row" className={`${cls} font-medium text-ink`}>
-                      {content}
-                    </th>
-                  ) : (
-                    <td key={i} className={cls}>
-                      {content}
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
-        ))}
-      </table>
-    </div>
+            </tr>
+          ) : null}
+          {body.rows.map((row) => (
+            <tr key={row.key} className="h-9 border-b border-line">
+              {row.cells.map((cell, i) => {
+                const numeric = spec.columns[i]?.numeric ?? false;
+                const content = renderCell(cell);
+                const cls = `px-2 py-1.5 type-body first:pl-0 last:pr-0 ${numeric ? "text-right tabular-nums" : "text-left"}`;
+                return i === 0 ? (
+                  <th key={i} scope="row" className={`${cls} font-normal text-ink`}>
+                    {content}
+                  </th>
+                ) : (
+                  <td key={i} className={`${cls} ${numeric ? "text-ink" : "text-ink-2"}`}>
+                    {content}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      ))}
+    </table>
   );
 }
 
@@ -103,7 +102,7 @@ function renderCell(cell: TableCell) {
   if (typeof cell === "string") return cell;
   if (cell.kind === "value") return cell.text;
   return (
-    <span className="text-dim italic" data-missing="true">
+    <span className="text-ink-2" data-missing="true">
       {cell.reason}
     </span>
   );

@@ -1,13 +1,12 @@
-// /r/[id], the read-only permalink of a finished brief (PLAN Part 6, D31), rendered as the server renders
-// it from the recorded sample runs (invented entities, D29). Only the snapshot read is stubbed (the
-// database behind GET /api/runs/[id]); the loader, the brief model, the layout and the page are real.
+// /r/[id], the read-only permalink of a finished answer (D31; design/redesign.pen N05), rendered as the
+// server renders it from the recorded sample runs (invented entities, D29). Only the snapshot read is
+// stubbed (the database behind GET /api/runs/[id]); the loader, the models, the layout and the page are real.
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reduceRunEvents, type RunEvent, type RunState } from "@ct/contracts";
 import { buildBriefModel, inlineText, type BriefModel } from "../../lib/brief";
-import { FAKE_MODEL } from "../../lib/test-run";
 import { sampleEvents } from "../../server/samples";
-import { attrValues, endedAs, slice, text, upTo } from "../brief-page/support";
+import { endedAs, slice, text, upTo } from "../brief-page/support";
 import PermalinkLayout from "../../app/r/[id]/layout";
 import PermalinkNotFound from "../../app/r/[id]/not-found";
 import PermalinkPage, { generateMetadata } from "../../app/r/[id]/page";
@@ -20,11 +19,11 @@ const { runSnapshot } = vi.hoisted(() => ({ runSnapshot: vi.fn<(runId: string) =
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
+  usePathname: () => "/r/x",
   notFound: () => {
     throw new Error("NEXT_NOT_FOUND");
   },
 }));
-vi.mock("../../components/ask/top-bar-ask", () => ({ TopBarAsk: () => null }));
 vi.mock("../../server/http", () => ({ runSnapshot }));
 
 const RUN_ID = "run-0000-permalink";
@@ -66,51 +65,44 @@ beforeEach(() => {
   runSnapshot.mockReset();
 });
 
-describe("a finished brief", () => {
-  it("prints LLM alone vs Culture Terminal when the stored report carries a GHOST", async () => {
+describe("a finished answer", () => {
+  it("prints the AI-alone card when the stored report carries a GHOST", async () => {
     const stored = stateOf(BRIEF);
     if (!stored.report) throw new Error("no report");
     serve(stateOf(BRIEF, { report: { ...stored.report, ghost: GHOST_SAMPLES.brand_health ?? null } }));
     const html = await renderPage();
-    expect(html).toContain('id="ghost"');
-    expect(html).toContain('href="#ghost"');
+    expect(html).toContain('data-ghost="competitors"');
+    expect(text(html)).toContain("AI alone");
+    // Without one, no card.
+    serve(stateOf(BRIEF));
+    expect(await renderPage()).not.toContain("data-ghost=");
   });
 
-  it("renders as stored, read-only: the final brief, its replay on /run", async () => {
+  it("renders as stored, read-only: the answer, its replay on /run in the menu", async () => {
     serve(stateOf(BRIEF));
     const html = await renderPage();
     expect(runSnapshot).toHaveBeenCalledWith(RUN_ID);
-    expect(html).toContain('data-answer="final"');
+    expect(html).toContain('data-verdict="answer"');
     expect(text(html)).toContain("Is the Juniper Cola audience a moat or a niche?");
-    expect(html).toContain(`href="/run/${RUN_ID}?replay=1"`);
-    // The outline's link and the follow-up bar's.
-    expect(attrValues(html, "data-replay-link")).toEqual(["true", "true"]);
-    // Nothing streams and nothing can be stopped: no live progress, no Stop run, no REPLAY marker.
-    expect(html).not.toContain("data-progress");
-    expect(text(html)).not.toContain("Stop run");
-    expect(attrValues(html, "data-marker")).not.toContain("REPLAY");
-    // The same brief /run/[id] prints once finished, from the same model.
+    // Nothing streams and nothing can be stopped.
+    expect(html).not.toContain("role=\"progressbar\"");
+    expect(text(html)).not.toContain("Stop");
+    // The same answer /run/[id] prints once finished, from the same model.
     const model = buildBriefModel(stateOf(BRIEF), Date.parse(BRIEF.at(-1)!.ts));
-    expect(text(html)).toContain(inlineText(model.answer.headline));
+    expect(text(html)).toContain(inlineText(model.answer.headline).replace(/\s+/g, " ").trim().slice(0, 40));
+    expect(html).toContain('data-key-numbers=');
   });
 
-  it("marks a reader's own run unlisted and keeps it out of the index (D31)", async () => {
+  it("keeps a reader's own run out of the index (D31)", async () => {
     serve(stateOf(BRIEF));
-    const html = await renderPage();
-    expect(text(slice(html, 'data-marker="UNLISTED"', "</span>"))).toBe("Unlisted · user question");
+    await renderPage();
     const metadata = await generateMetadata(pageProps());
     expect(metadata).toEqual({ title: "Is the Juniper Cola audience a moat or a niche? · Culture Terminal", robots: { index: false, follow: false } });
   });
 
-  it("marks a test run unlisted as one", async () => {
-    serve(stateOf(BRIEF, { model: FAKE_MODEL }));
-    expect(text(slice(await renderPage(), 'data-marker="UNLISTED"', "</span>"))).toBe("Unlisted · test run");
-  });
-
-  it("indexes a curated showcase, with no marker, its question as the title and its answer as the description", async () => {
+  it("indexes a curated showcase, its question as the title and its answer as the description", async () => {
     serve(stateOf(BRIEF), true);
-    const html = await renderPage();
-    expect(html).not.toContain('data-marker="UNLISTED"');
+    await renderPage();
     const metadata = await generateMetadata(pageProps());
     expect(metadata).not.toHaveProperty("robots");
     expect(metadata.title).toBe("Is the Juniper Cola audience a moat or a niche? · Culture Terminal");
@@ -121,14 +113,14 @@ describe("a finished brief", () => {
     expect(metadata.twitter).toEqual({ card: "summary_large_image" });
   });
 
-  it("renders an INCOMPLETE evidence digest too: it ended with a note", async () => {
+  it("renders an INCOMPLETE evidence digest with the partial card in the verdict's place", async () => {
     serve(stateOf(INCOMPLETE));
     const html = await renderPage();
-    expect(html).toContain('data-marker="INCOMPLETE"');
-    expect(html).toContain(`href="/run/${RUN_ID}?replay=1"`);
+    expect(html).not.toContain('data-verdict="answer"');
+    expect(text(html)).toContain("Partial answer");
   });
 
-  it("renders the trust example's refusal as an indexed showcase, its refusal message as the description", async () => {
+  it("renders a refusal as an indexed showcase: the declined card, its refusal message as the description", async () => {
     const clerk = NEEDS_INPUT.find((e) => e.type === "clerk");
     if (clerk?.type !== "clerk") throw new Error("no clerk event");
     const refusedClerk: RunEvent = { ...clerk, intent: { ...clerk.intent, safety: { allowed: false, category: "political_targeting", reframe: null } } };
@@ -136,8 +128,8 @@ describe("a finished brief", () => {
     expect(refused.ended?.status).toBe("refused");
     serve(refused, true);
     const html = await renderPage();
-    expect(text(slice(html, 'aria-label="Question refused"', "</section>"))).toContain("Not answered · Political targeting");
-    expect(html).not.toContain('data-marker="UNLISTED"');
+    expect(text(html)).toMatch(/We don.t answer/);
+    expect(html).not.toContain("data-key-numbers");
     const metadata = await generateMetadata(pageProps());
     expect(metadata).not.toHaveProperty("robots");
     const terminal = buildBriefModel(refused, 0).terminal;
@@ -147,27 +139,27 @@ describe("a finished brief", () => {
   });
 });
 
-describe("no finished brief", () => {
+describe("no finished answer", () => {
   it("answers 404 for a run still being written, with the way to follow it live", async () => {
     const running = stateOf(upTo(BRIEF, "plan"));
     serve(running);
     await expect(renderPage()).rejects.toThrow("NEXT_NOT_FOUND");
     const html = await render404();
     expect(html).toContain('data-missing="running"');
-    expect(text(html)).toContain("This brief is still being written.");
-    expect(slice(html, 'data-run-link="true"', "</a>")).toContain("Follow it live");
+    expect(text(html)).toContain("This answer is still being made.");
+    expect(text(slice(html, 'data-missing-action="running"', "</a>"))).toContain("Follow it live");
     expect(html).toContain(`href="/run/${RUN_ID}"`);
     const metadata = await generateMetadata(pageProps());
     expect(metadata.robots).toEqual({ index: false, follow: false });
   });
 
-  it("answers 404 for a run that ended without a brief, pointing to the run", async () => {
+  it("answers 404 for a run that ended without an answer, pointing to the run", async () => {
     serve(stateOf(NEEDS_INPUT));
     await expect(renderPage()).rejects.toThrow("NEXT_NOT_FOUND");
     const html = await render404();
-    expect(html).toContain('data-missing="no_brief"');
-    expect(text(html)).toContain("This run ended without a brief.");
-    expect(slice(html, 'data-run-link="true"', "</a>")).toContain("Open the run");
+    expect(html).toContain('data-missing="no_answer"');
+    expect(text(html)).toContain("This answer wasn't finished.");
+    expect(text(slice(html, 'data-missing-action="no_answer"', "</a>"))).toContain("Open the run");
     expect(html).toContain(`href="/run/${RUN_ID}"`);
   });
 
@@ -176,7 +168,7 @@ describe("no finished brief", () => {
     await expect(renderPage()).rejects.toThrow("NEXT_NOT_FOUND");
     const missing = await render404();
     expect(missing).toContain('data-missing="not_found"');
-    expect(missing).not.toContain("data-run-link");
+    expect(missing).not.toContain(`href="/run/`);
 
     runSnapshot.mockClear();
     await expect(renderPage("../x")).rejects.toThrow("NEXT_NOT_FOUND");
@@ -189,7 +181,7 @@ describe("no finished brief", () => {
     failWith(503);
     const html = await renderPage();
     expect(html).toContain('data-missing="unavailable"');
-    expect(html).toContain(`Run ${RUN_ID}`);
+    expect(html).toContain(`href="/run/${RUN_ID}"`);
   });
 
   it("shows the not-found file's own 404 when the layout found no pending run", () => {

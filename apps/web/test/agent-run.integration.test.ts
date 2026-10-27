@@ -87,7 +87,7 @@ const REFUSED_INTENT: Intent = {
   pillar: "audience",
   job: "audience_discovery",
   mentions: [{ text: "Rowan Vale", entity_type: "person", role: "primary", public_figure: false }],
-  geo: { metro: null, area: null, unsupported_place: null },
+  geo: { metro: null, area: null, unsupported_place: null, market: null },
   constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
   safety: { allowed: false, category: "private_individual", reframe: null },
   assumptions: [],

@@ -3,7 +3,7 @@
 //   --level nta   the 197 tabulation areas                              -> packages/geo/src/data/nyc-ntas.ts
 //   --level cdta  the 59 community districts they make up (their CDTAs) -> packages/geo/src/data/nyc-districts.ts
 // ATTRIBUTION.md records the source, edition, licence, retrieval date and every transformation. Which
-// level GAZETTEERS serves depends on the geohash precision of Qloo's NYC heatmaps: packages/geo/src/gazetteer.ts.
+// level GAZETTEER_LOADERS serves depends on the geohash precision of Qloo's NYC heatmaps: packages/geo/src/gazetteer.ts.
 //
 // Usage: pnpm exec tsx tools/geo/nyc.ts --level nta|cdta --nta <ntas.geojson> --gnis <DomesticNames_NY.txt> [--interval <m>] [--out <file>] [--dry]
 //
@@ -39,6 +39,7 @@ import {
   type ModuleSpec,
   type Shape,
   type SourceArea,
+  WIRE_UP,
 } from "./build";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -338,7 +339,7 @@ async function main(): Promise<void> {
   if (values.dry !== true) {
     const outFile = values.out ?? path.join(ROOT, "packages/geo/src/data", spec.file);
     writeFileSync(outFile, text, "utf8");
-    console.log(`wrote ${path.relative(ROOT, outFile)}`);
+    console.log(`wrote ${path.relative(ROOT, outFile)}\n${WIRE_UP}`);
   }
 }
 

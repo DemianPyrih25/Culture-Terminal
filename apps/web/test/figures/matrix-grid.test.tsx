@@ -12,7 +12,6 @@ const data = similarityMap.payload;
 const html = render(
   <MatrixGrid
     data={data}
-    number={2}
     title="Its two nearest peers are not its rivals"
     caption="Pairwise audience similarity."
     source={FIXTURE_SOURCES.pairs}
@@ -28,8 +27,8 @@ function marks(markup: string): Map<number, number> {
 }
 
 describe("MatrixGrid", () => {
-  it("frames the plot with its number, title, source and method link", () => {
-    expect(html).toContain(">FIGURE 2<");
+  it("frames the plot with its title, source and method link", () => {
+    expect(html).not.toContain("FIGURE");
     expect(html).toContain("Its two nearest peers are not its rivals");
     expect(html).toContain('href="/method#subs.similarity"');
     expect(html).toContain("req 0002…f002");
@@ -60,10 +59,10 @@ describe("MatrixGrid", () => {
 
   it("prints white only where it reads better than text-2 on the ramp", () => {
     const plot = plotView(html);
-    expect(groupByTitle(plot, "Brand Alpha × Brand Beta: .71")).toContain("fill-on-ink");
-    expect(groupByTitle(plot, "Kettle Ridge Tonic × Granite Hollow Ale: .64")).toContain("fill-on-ink");
+    expect(groupByTitle(plot, "Brand Alpha × Brand Beta: .71")).toContain("fill-white");
+    expect(groupByTitle(plot, "Kettle Ridge Tonic × Granite Hollow Ale: .64")).toContain("fill-white");
     // .53 is mid-ramp: white would sit near 2.9:1, text-2 near 3.5:1.
-    expect(groupByTitle(plot, "Brand Beta × Saltmarsh Seltzer: .53")).toContain("fill-text-2");
+    expect(groupByTitle(plot, "Brand Beta × Saltmarsh Seltzer: .53")).toContain("fill-ink-2");
   });
 
   it("lists every value and every absence in the table view", () => {
@@ -96,8 +95,8 @@ describe("MatrixGrid", () => {
   it("draws a share grid with sections and the subject column outlined", () => {
     const share = render(<MatrixGrid data={shareGrid.payload} title="Share" width={680} />);
     const plot = plotView(share);
-    expect(plot).toContain("METRO");
-    expect(plot).toContain("AGE");
+    expect(plot).toContain("Metro");
+    expect(plot).toContain("Age");
     expect(plot).toContain('data-target="column"');
     expect(plot).toContain("Nashville");
     const rows = tableRows(tableView(share));

@@ -3,11 +3,12 @@ import { Job, type EntityRef, type GeoApi, type Intent, type RegisteredEntity, t
 import { createGeo } from "@ct/geo";
 import { describe, expect, it } from "vitest";
 import { isSkillAvailable } from "../../src/run/catalogue";
-import { askedTier, MARKET_CATALOGUE, marketTier } from "../../src/run/markets";
+import { askedTier, MARKET_CATALOGUE, marketTier, namedMarkets } from "../../src/run/markets";
 import {
   describeChainedStep,
   describeDeferredStep,
   describeScanStep,
+  namedAreaIds,
   planScan,
   SCAN_AGES,
   SCAN_DOMAINS,
@@ -29,9 +30,11 @@ const entity = (n: number, type: RegisteredEntity["type"] = "brand"): Registered
   tags: [],
 });
 
-/** The gazetteer metros with no polygons: MARKETS stays nashville and austin, no neighbourhood matches. */
+/** The 13 gazetteer metros with no polygons: MARKETS defaults to them, and no neighbourhood matches. */
 const GEO = createGeo({ gazetteers: {} });
 const MARKETS = GEO.metros();
+/** The first of the default MARKETS, one per state: the share grids' markets (four for a pair, eight for a market grid). */
+const BY_STATE = ["nashville", "austin", "nyc", "los_angeles", "chicago", "atlanta", "denver", "seattle"];
 const NO_STEP = { trigger_finding_id: null, step_id: null };
 
 /** One invented neighbourhood in Nashville, matched by name. */
@@ -76,13 +79,13 @@ describe("planScan", () => {
   it("head_to_head reads the set by age and across MARKETS and mirrors the first peer, ranking the pair only in a named metro", () => {
     const plan = scanOf("head_to_head", { peers: [entity(2), entity(3, "artist")] });
     expect(plan.steps.map((s) => s.tool)).toEqual(["peer_landscape", "share_of_taste", "audience_dna"]);
-    expect(plan.steps[1]?.input).toEqual({ type: "brand", set: ["R1", "R2"], ages: [...SCAN_AGES], audiences: [], metros: [...MARKETS], ...NO_STEP });
+    expect(plan.steps[1]?.input).toEqual({ type: "brand", set: ["R1", "R2"], ages: [...SCAN_AGES], audiences: [], genders: [], metros: BY_STATE.slice(0, 4), ...NO_STEP });
     expect(plan.steps[2]?.input).toEqual({ set: ["R1", "R2", "R3"], compare_with: "R2", ...NO_STEP });
     expect(plan.skipped).toEqual([{ tool: "rank_candidates", reason: "needs a metro in the question and a peer of the primary's type" }]);
-    expect(describeScanStep(plan.steps[1]!)).toBe(`share_of_taste (SHARE) for R1, R2 by ages ${SCAN_AGES.join(", ")} and markets ${MARKETS.join(", ")}`);
+    expect(describeScanStep(plan.steps[1]!)).toBe(`share_of_taste (SHARE) for R1, R2 by ages ${SCAN_AGES.join(", ")} and markets ${BY_STATE.slice(0, 4).join(", ")}`);
 
     const metro = scanOf("head_to_head", {
-      intent: intentFor({ job: "head_to_head", geo: { metro: "nashville", area: null, unsupported_place: null } }),
+      intent: intentFor({ job: "head_to_head", geo: { metro: "nashville", area: null, unsupported_place: null, market: null } }),
       peers: [entity(2)],
     });
     const pair = metro.steps.find((s) => s.tool === "rank_candidates");
@@ -121,26 +124,24 @@ describe("planScan", () => {
     expect(describeScanStep(plan.steps[0]!)).toBe("find_tags (TAGS) for 1 concept(s)");
     // No metro in the question: the concept heatmap has nowhere to go.
     expect(plan.chained).toEqual([]);
-    expect(plan.skipped).toEqual([{ tool: "geo_lift", reason: "needs a concept and a gazetteer metro (nashville or austin) in the question" }]);
+    expect(plan.skipped).toEqual([{ tool: "geo_lift", reason: "needs a concept and a gazetteer metro (one of the 13 map cities) in the question" }]);
     expect(scanOf("site_selection").skipped.map((s) => s.reason)).toEqual([
       "needs a concept in the question",
-      "needs a concept and a gazetteer metro (nashville or austin) in the question",
+      "needs a concept and a gazetteer metro (one of the 13 map cities) in the question",
     ]);
   });
 
   it("site_selection chains geo_lift after find_tags on the place taxonomy tags it registers", () => {
     const intent = intentFor({
       job: "site_selection",
-      geo: { metro: "austin", area: null, unsupported_place: null },
+      geo: { metro: "austin", area: null, unsupported_place: null, market: null },
       constraints: { ...intentFor().constraints, concepts: ["listening bar"] },
     });
     const plan = scanOf("site_selection", { intent });
     expect(plan.steps.map((s) => s.toolCallId)).toEqual(["scan-1"]);
     const [lift] = plan.chained;
     expect(lift).toMatchObject({ toolCallId: "scan-2", tool: "geo_lift", after: "find_tags", estimate: SCAN_LIFT_ESTIMATE });
-    expect(describeChainedStep(lift!)).toBe(
-      "geo_lift (LIFT) in austin on the place tags find_tags returns, with supply when a category tag comes back",
-    );
+    expect(describeChainedStep(lift!)).toBe("geo_lift (LIFT) in austin on the place tags find_tags returns, with supply");
     const tag = (n: number, tagId: string): RegisteredTag => ({ ref: `T${n}` as TagRef, tagId, name: tagId, type: "taxonomy", signalCapable: true });
     const tags = [
       tag(1, "urn:tag:category:place:wine_bar"),
@@ -148,12 +149,30 @@ describe("planScan", () => {
       tag(3, "urn:tag:keyword:qloo:cozy"),
     ];
     expect(lift?.input(tags)).toEqual({ metro: "austin", concept_tags: ["T2", "T1"], concept_entities: [], supply: true, ...NO_STEP });
-    expect(lift?.input([tags[1]!])).toMatchObject({ concept_tags: ["T2"], supply: false });
+    // Supply is always asked for: without a verified category tag geo_lift says the competitor count is unknown, and why.
+    expect(lift?.input([tags[1]!])).toMatchObject({ concept_tags: ["T2"], supply: true });
     expect(lift?.input([tags[2]!])).toBeNull();
   });
 
+  it("site_selection passes the areas the question names to geo_lift, so each gets its own numbers", () => {
+    const intent = intentFor({
+      job: "site_selection",
+      geo: { metro: "nashville", area: "Riverbend", unsupported_place: null, market: null },
+      constraints: { ...intentFor().constraints, concepts: ["listening bar"], notes: ["area also named: Riverbend", "area also named: Nowhere Flats", "budget is tight"] },
+    });
+    const [lift] = scanOf("site_selection", { intent, geo: AREA_GEO }).chained;
+    expect(describeChainedStep(lift!)).toBe("geo_lift (LIFT) in nashville on the place tags find_tags returns, with supply, and the question's area riverbend first");
+    const genre: RegisteredTag = { ref: "T1" as TagRef, tagId: "urn:tag:genre:place:restaurant:bar", name: "Bar", type: "taxonomy", signalCapable: true };
+    // A repeat and a name the gazetteer does not hold are left out.
+    expect(lift?.input([genre])).toEqual({ metro: "nashville", concept_tags: ["T1"], concept_entities: [], supply: true, focus_areas: ["riverbend"], ...NO_STEP });
+    expect(namedAreaIds(intent, AREA_GEO)).toEqual(["riverbend"]);
+    expect(namedAreaIds({ ...intent, geo: { ...intent.geo, metro: null } }, AREA_GEO)).toEqual([]);
+    // Without an area in the gazetteer, no focus_areas at all.
+    expect(scanOf("site_selection", { intent }).chained[0]?.input([genre])).not.toHaveProperty("focus_areas");
+  });
+
   it("area_profile and tenant_mix read the question's neighbourhood with local brands", () => {
-    const intent = (job: Job) => intentFor({ job, geo: { metro: "nashville", area: "Riverbend", unsupported_place: null } });
+    const intent = (job: Job) => intentFor({ job, geo: { metro: "nashville", area: "Riverbend", unsupported_place: null, market: null } });
     for (const job of ["area_profile", "tenant_mix"] as const) {
       const plan = scanOf(job, { intent: intent(job), geo: AREA_GEO });
       expect(plan.steps).toEqual([
@@ -171,7 +190,7 @@ describe("planScan", () => {
     const plan = scanOf("sponsorship", { intent, primary: entity(1, "artist"), peers: [entity(2), entity(3, "artist")] });
     // No market named: the slate checks the gazetteer metros, so its alignment can point to a block.
     expect(plan.steps.map((s) => s.input)).toEqual([
-      { seed: "R1", categories: [...SCAN_SPONSOR_CATEGORIES], shortlist: ["R2"], markets: [...MARKETS], ...NO_STEP },
+      { seed: "R1", categories: [...SCAN_SPONSOR_CATEGORIES], shortlist: ["R2"], markets: MARKETS.slice(0, 4), ...NO_STEP },
       { seeds: ["R1"], seed_tags: [], domains: ["brand"], popularity_max: 1, ...NO_STEP },
     ]);
     const tour = intentFor({ job: "sponsorship", constraints: { ...intentFor().constraints, notes: ["markets: Denver, Chicago"] } });
@@ -188,7 +207,7 @@ describe("planScan", () => {
     const plan = scanOf("market_selection", { intent, peers: [entity(2)] });
     expect(plan.steps.map((s) => s.input)).toEqual([
       { seeds: ["R1"], ...NO_STEP },
-      { type: "brand", set: ["R1", "R2"], ages: [], audiences: [], metros: [...MARKETS], ...NO_STEP },
+      { type: "brand", set: ["R1", "R2"], ages: [], audiences: [], genders: [], metros: BY_STATE, ...NO_STEP },
     ]);
     expect(plan.deferred).toEqual([]);
   });
@@ -199,9 +218,9 @@ describe("planScan", () => {
     expect(plan.steps.map((s) => s.tool)).toEqual(["destination_affinity"]);
     expect(plan.skipped).toEqual([]);
     const [grid] = plan.deferred;
-    expect(grid).toMatchObject({ toolCallId: "scan-2", tool: "share_of_taste", estimate: MARKETS.length });
+    expect(grid).toMatchObject({ toolCallId: "scan-2", tool: "share_of_taste", estimate: BY_STATE.length });
     expect(describeDeferredStep(grid!)).toBe(
-      `share_of_taste (SHARE) for R1 and the person peers your wave-1 resolve_entities registers, by markets ${MARKETS.join(", ")}`,
+      `share_of_taste (SHARE) for R1 and the person peers your wave-1 resolve_entities registers, by markets ${BY_STATE.join(", ")}`,
     );
     // Peers of another type do not count, so nothing runs; a person peer joins the set.
     expect(grid!.input([entity(3, "brand")])).toBeNull();
@@ -210,7 +229,8 @@ describe("planScan", () => {
       set: ["R1", "R4"],
       ages: [],
       audiences: [],
-      metros: [...MARKETS],
+      genders: [],
+      metros: BY_STATE,
       ...NO_STEP,
     });
     // An artist cannot be shared: no deferred grid, the step is skipped as before.
@@ -219,19 +239,22 @@ describe("planScan", () => {
     expect(artist.skipped).toEqual([{ tool: "share_of_taste", reason: "needs a brand or person primary with a peer of the same type" }]);
   });
 
-  it("audience_discovery reads the named domains (else three) and the target's Audience DNA", () => {
+  it("audience_discovery reads the named domains (else three) plus the target's own type, and its Audience DNA", () => {
     const plan = scanOf("audience_discovery", { intent: intentFor({ job: "audience_discovery" }) });
     expect(plan.steps.map((s) => s.input)).toEqual([
       { seeds: ["R1"], seed_tags: [], domains: [...SCAN_DOMAINS], popularity_max: 1, ...NO_STEP },
       { set: ["R1"], compare_with: null, ...NO_STEP },
     ]);
     const named = intentFor({ job: "audience_discovery", constraints: { ...intentFor().constraints, domains: ["movie", "tv_show"] } });
-    expect(scanOf("audience_discovery", { intent: named }).steps[0]?.input).toMatchObject({ domains: ["movie", "tv_show"] });
+    // The brand target's own domain is read too: its neighbours of that type are the age read's fallback peers.
+    expect(scanOf("audience_discovery", { intent: named }).steps[0]?.input).toMatchObject({ domains: ["movie", "tv_show", "brand"] });
+    const artist = scanOf("audience_discovery", { intent: named, primary: entity(1, "artist") });
+    expect(artist.steps[0]?.input).toMatchObject({ domains: ["movie", "tv_show", "artist"] });
   });
 
   it("audience_discovery reads the set by three ages: in the scan with a named peer, else once wave 1 resolves one", () => {
     const intent = intentFor({ job: "audience_discovery" });
-    const byAge = { type: "brand", ages: [...SCAN_AGES], audiences: [], metros: [], ...NO_STEP };
+    const byAge = { type: "brand", ages: [...SCAN_AGES], audiences: [], genders: [], metros: [], ...NO_STEP };
     const withPeer = scanOf("audience_discovery", { intent, peers: [entity(2)] });
     expect(withPeer.steps.map((s) => s.input).at(-1)).toEqual({ ...byAge, set: ["R1", "R2"] });
     expect(withPeer.deferred).toEqual([]);
@@ -244,9 +267,21 @@ describe("planScan", () => {
     expect(ages!.input([entity(5), entity(6)])).toEqual({ ...byAge, set: ["R1", "R5", "R6"] });
   });
 
+  it("reads 'Washington' after a city as the state, and as Washington DC otherwise", () => {
+    const named = (...notes: string[]) => namedMarkets(intentFor({ job: "market_selection", constraints: { ...intentFor().constraints, notes } }), MARKET_CATALOGUE);
+    expect(named("markets: Spokane, Washington")).toEqual(["spokane"]);
+    expect(named("markets: Walla Walla, Washington")).toEqual([]);
+    expect(named("markets: Seattle, Washington, Portland")).toEqual(["seattle", "portland"]);
+    expect(named("markets: Boston, Washington, Chicago")).toEqual(["boston", "washington_dc", "chicago"]);
+    expect(named("markets: Baltimore, Washington, DC")).toEqual(["baltimore", "washington_dc"]);
+    expect(named("markets: Washington, Denver")).toEqual(["washington_dc", "denver"]);
+    // A name that is its own state's name still counts after a comma.
+    expect(named("markets: Boise, New York")).toEqual(["boise", "nyc"]);
+  });
+
   it("market_selection and head_to_head read the markets the question names first", () => {
     const intent = (job: Job) =>
-      intentFor({ job, geo: { metro: "austin", area: null, unsupported_place: null }, constraints: { ...intentFor().constraints, notes: ["markets: Boise, New York"] } });
+      intentFor({ job, geo: { metro: "austin", area: null, unsupported_place: null, market: null }, constraints: { ...intentFor().constraints, notes: ["markets: Boise, New York"] } });
     const share = (job: Job) =>
       scanOf(job, { intent: intent(job), peers: [entity(2)], markets: MARKET_CATALOGUE }).steps.find((s) => s.tool === "share_of_taste")?.input;
     // Past the named ones, one market per state first: Houston and Dallas wait behind Atlanta and Denver.

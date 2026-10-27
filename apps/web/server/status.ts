@@ -1,10 +1,11 @@
 import "server-only";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import type { Lane, Mode, RunStatus } from "@ct/contracts";
+import { MarketId, type Lane, type Mode, type RunStatus } from "@ct/contracts";
 import { countQlooCallsByCache, countRunsSince, getKv, getQlooUsage, pingDb, recentRunStatuses, type Queryable } from "@ct/db";
 import { LANE_SHARE, MOCK_QUOTA_KV_KEY, QUOTA_KV_KEY, QuotaSnapshot, utcDay, type QlooClient, type QlooEnv } from "@ct/qloo";
 import { z } from "zod";
+import metros from "../../../config/metros.json";
 import { QLOO_RUN_MARGIN, type LaneBudget, type ModeDecision } from "./breakers";
 import {
   agentRunHourlyCapFromEnv,
@@ -27,7 +28,7 @@ import {
   lastKnownMode,
 } from "./container";
 import { LLM_USD_METRIC } from "./llm-spend";
-import { readLocalityCoverage, type LocalityCoverage } from "./localities";
+import { localitiesKvKey, localityCoverage, type LocalityCoverage } from "./localities";
 import { log } from "./log";
 import type { StoredModeValue } from "./mode";
 import { QUESTION_HASH_PREFIX } from "./question-hash";
@@ -157,10 +158,24 @@ export interface StatusReport {
   db: { ok: boolean; latencyMs: number | null };
   migrations: { state: "applied" | "pending" | "skipped"; journal: MigrationJournal | null };
   /**
-   * kv metro_localities against the markets every run needs (localities.ts): market ids and counts,
-   * never a locality id. Null when it could not be read.
+   * kv metro_localities against the map cities every run needs (localities.ts) and every market in
+   * config/metros.json: market ids and counts, never a locality id. Null when it could not be read.
    */
-  localities: LocalityCoverage | null;
+  localities: LocalityStatus | null;
+}
+
+/**
+ * The locality pins on /status. The coverage fields are the map cities every run needs
+ * (REQUIRED_LOCALITY_MARKETS); `markets` is the same kv value against every market in
+ * config/metros.json, which share, slate and the place search read.
+ */
+export interface LocalityStatus extends LocalityCoverage {
+  markets: {
+    /** Markets in config/metros.json. */
+    total: number;
+    /** Of those, the ones kv does not pin, in config order: all of them when the value is missing or malformed. */
+    missing: MarketId[];
+  };
 }
 
 export interface HourCount {
@@ -252,8 +267,8 @@ export interface StatusSources {
   runsSince(hashPrefix: string, sinceMs: number): Promise<number>;
   recentStatuses(hashPrefix: string, limit: number): Promise<RunStatus[]>;
   qlooCache(env: QlooEnv, since: Date): Promise<QlooCacheCount>;
-  /** kv metro_localities' coverage of the markets every run needs. */
-  localities(): Promise<LocalityCoverage>;
+  /** kv metro_localities' coverage of the map cities every run needs and of every config market. */
+  localities(): Promise<LocalityStatus>;
   /**
    * The Qloo client's view; null when it cannot be configured (live Qloo without a key). The stored
    * snapshot may be read only when `storedReadable` (the database answered the ping).
@@ -294,6 +309,19 @@ export async function readRecentStatuses(db: Queryable, hashPrefix: string, limi
 export async function readQlooCache(db: Queryable, env: QlooEnv, since: Date): Promise<QlooCacheCount> {
   const { total, network } = await countQlooCallsByCache(db, { env, since });
   return { total, served: total - network, sampled: false };
+}
+
+/** Every market in config/metros.json, in config order (the map cities are markets too). */
+export const CONFIG_MARKETS: readonly MarketId[] = metros.markets.map((m) => MarketId.parse(m.id));
+
+/**
+ * The pins under `key`, read once, against the map cities every run needs and against every config
+ * market. Rejects when kv cannot be read.
+ */
+export async function readLocalityStatus(db: Queryable, key: string = localitiesKvKey(), markets: readonly MarketId[] = CONFIG_MARKETS): Promise<LocalityStatus> {
+  const raw = await getKv(db, key);
+  const all = localityCoverage(raw, markets);
+  return { ...localityCoverage(raw), markets: { total: markets.length, missing: all.missing } };
 }
 
 const Journal = z.object({ entries: z.array(z.object({ tag: z.string() })) });
@@ -393,7 +421,7 @@ export function defaultStatusSources(): StatusSources {
     runsSince: (hashPrefix, sinceMs) => countRunsSince(getDatabase(), { hashPrefix, sinceMs }),
     recentStatuses: (hashPrefix, limit) => readRecentStatuses(getDatabase(), hashPrefix, limit),
     qlooCache: (env, since) => readQlooCache(getDatabase(), env, since),
-    localities: () => readLocalityCoverage(getDatabase()),
+    localities: () => readLocalityStatus(getDatabase()),
     qloo: (storedReadable) => readQlooView(storedReadable),
   };
 }
@@ -656,7 +684,13 @@ export async function readStatus(sources: StatusSources = defaultStatusSources()
       state: migrations.skipped ? "skipped" : migrations.applied ? "applied" : "pending",
       journal: migrations.journal && { count: migrations.journal.count, latest: migrations.journal.latest },
     },
-    localities: pins && { state: pins.state, required: [...pins.required], missing: [...pins.missing], pinned: pins.pinned },
+    localities: pins && {
+      state: pins.state,
+      required: [...pins.required],
+      missing: [...pins.missing],
+      pinned: pins.pinned,
+      markets: { total: pins.markets.total, missing: [...pins.markets.missing] },
+    },
   };
 }
 

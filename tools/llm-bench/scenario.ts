@@ -10,6 +10,7 @@ import {
   isId,
   isToolName,
   makeId,
+  MetroId,
   parseToolInput,
   SkillId,
   wrapQlooData,
@@ -165,9 +166,14 @@ const SPONSOR_BRANDS: Readonly<Record<SponsorCategory, readonly [string, string]
   auto: ["Calder Motors", "Ferrow Auto"],
   telecom: ["Cobalt Mile Telecom", "Relay Mobile"],
   fintech: ["Tallyleaf", "Harborline Pay"],
+  beauty: ["Petalforge Skin", "Lumiere Lane Beauty"],
+  gaming: ["Stormkettle Games", "Pixelbarrow Studios"],
+  travel: ["Wayfern Air", "Driftmoor Hotels"],
+  food_delivery: ["Platehop", "Courierleaf Eats"],
+  consumer_tech: ["Quillwave Devices", "Brightknot Audio"],
 };
 
-/** Market ids the tools may use (MarketId); nashville and austin are also gazetteer metros. */
+/** Market ids the tools may use (MarketId); all but portland are also gazetteer metros (map cities). */
 export const MARKETS = ["nashville", "austin", "denver", "portland", "chicago", "atlanta"] as const;
 /** City and state per market, as config/metros.json labels them and the agent's run context lists them. */
 const MARKET_LABEL: Readonly<Record<(typeof MARKETS)[number], string>> = {
@@ -178,7 +184,7 @@ const MARKET_LABEL: Readonly<Record<(typeof MARKETS)[number], string>> = {
   chicago: "Chicago, IL",
   atlanta: "Atlanta, GA",
 };
-const GAZETTEER_METROS: readonly string[] = ["nashville", "austin"];
+const GAZETTEER_METROS: readonly string[] = MARKETS.filter((m) => MetroId.safeParse(m).success);
 /** Invented audience leaves in the allowlisted URN shape. */
 export const AUDIENCES = [
   "urn:audience:leisure:fixture_trail_runners",
@@ -986,7 +992,7 @@ const BENCH_INTENT_BASE: Omit<Intent, "mnemonic"> = {
     { text: PRIMARY_BRAND, entity_type: "brand", role: "primary", public_figure: false },
     { text: NAMED_PEER, entity_type: "brand", role: "peer", public_figure: false },
   ],
-  geo: { metro: null, area: null, unsupported_place: null },
+  geo: { metro: null, area: null, unsupported_place: null, market: null },
   constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
   safety: { allowed: true, category: null, reframe: null },
   assumptions: ["US geography"],
@@ -1180,6 +1186,7 @@ export function sampleInputs(): { [K in SkillId]: ToolInput<K> } {
       set: ["R1", "R2"],
       ages: ["24_and_younger", "25_to_29", "30_to_34", "35_to_44", "45_to_54", "55_and_older"],
       audiences: [...AUDIENCES],
+      genders: ["female", "male"],
       metros: [...MARKETS],
       ...meta,
     },

@@ -5,10 +5,11 @@ import type { ImageResponse } from "next/og";
 import { OG_FONT } from "./tokens";
 
 /**
- * The share card's fonts (Concept A type ramp: serif reads, sans operates, mono traces), read from
- * lib/og/fonts once per process. They are the app's own Inter and Source Serif 4 as static WOFF
- * instances at the card's weights (fonts/build-fonts.mjs: next/og reads neither WOFF2 nor variable
- * weights) and IBM Plex Mono as published. Nothing is fetched at render.
+ * The share card's fonts (serif reads, sans operates, mono traces), read from lib/og/fonts once per
+ * process. They are Inter and Source Serif 4 as static WOFF instances at the card's weights
+ * (fonts/build-fonts.mjs: next/og reads neither WOFF2 nor variable weights) and IBM Plex Mono as
+ * published, committed with the card; the pages themselves set Bricolage Grotesque, Geist and Geist
+ * Mono. Nothing is fetched at render.
  */
 
 type ImageOptions = NonNullable<ConstructorParameters<typeof ImageResponse>[1]>;

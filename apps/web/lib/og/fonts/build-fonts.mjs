@@ -26,7 +26,7 @@ const SERIF = path.join(modules, "@fontsource-variable/source-serif-4");
 const MONO = path.join(modules, "@fontsource/ibm-plex-mono");
 
 /**
- * The faces the card sets (lib/og/fonts.ts), from the same files the app loads in app/layout.tsx.
+ * The faces the card sets (lib/og/fonts.ts), from the Fontsource packages of their families.
  * `metrics` names a face whose advance widths go to metrics.json.
  */
 const FACES = [

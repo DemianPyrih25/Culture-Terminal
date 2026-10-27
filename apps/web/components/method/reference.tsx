@@ -1,159 +1,127 @@
-// The italic serif: /method sets its formulas in it and /trust its example questions. The root layout
-// loads only the upright face.
-import "@fontsource-variable/source-serif-4/wght-italic.css";
 import type { ReactNode } from "react";
-import { TopBarAsk } from "../ask/top-bar-ask";
-import { StatusLine } from "../chrome/status-line";
-import { TopBar, type NavKey } from "../chrome/top-bar";
-import { GRID_COLUMNS_MD, GRID_COLUMNS_XL } from "../layout/grid";
-import { CheckIcon } from "../ui/icons";
+import { Card } from "../ui/card";
 import { cx } from "../ui/cx";
-import { MetaLine } from "../ui/meta-line";
+import { Icon } from "../ui/icons";
 
 /**
- * The reference pages, /method and /trust (A11 · Method & sources): the brief grid without a running
- * head. An outline on the left, the reading column, and numbered sidenotes level with what they
- * annotate. Server components only; the outline is the one client part.
+ * The reference page's parts (/method): a sticky index of its sections on the left (a <details> on
+ * phones), then one card per section, each with its title, an aside and an optional note.
  */
 
-/** Only the 56 px top bar sticks (from 768 px up), so an anchor clears that and a little air. */
-export const REFERENCE_ANCHOR = "scroll-mt-20 max-md:scroll-mt-4";
+/** Section anchors clear a little air when the index jumps to them. */
+export const REFERENCE_ANCHOR = "scroll-mt-6";
 
-/** Where the outline rests and where the scrollspy's activation line sits: under the top bar. */
-export const REFERENCE_STICKY_TOP = 56;
+/** Body text, 15 ink-2. */
+export const BODY = "type-body text-ink-2";
+/** A heading inside a section: 13/600 ink-2. */
+export const SUBHEAD = "text-[13px] leading-[18px] font-semibold text-ink-2";
+/** A small label in a row: 13/500 ink-2. */
+export const LABEL = "type-label text-ink-2";
+export const LIST = "flex flex-col";
+/** A table row's rule. */
+export const ROW = "border-t border-line align-baseline";
 
-export interface ReferenceChromeProps {
-  /** The top bar section the page belongs to. */
-  active?: NavKey | null;
-  /** The trending window for the status line, e.g. "Apr–Sep 2025". */
-  trendWindow?: string | null;
-  /** The status line's right side, replacing the trend window. */
-  statusRight?: ReactNode;
-  children: ReactNode;
+export interface IndexItem {
+  id: string;
+  label: string;
 }
 
-/** The top bar with its question field, the page, and the status line with the honesty line. */
-export function ReferenceChrome({ active = null, trendWindow = null, statusRight, children }: ReferenceChromeProps) {
+function IndexLinks({ items }: { items: readonly IndexItem[] }) {
   return (
-    <>
-      <TopBar active={active} command={<TopBarAsk />} />
-      <main id="main" className="flex w-full flex-1 flex-col bg-paper">
-        {children}
-      </main>
-      <StatusLine trendWindow={trendWindow} right={statusRight} />
-    </>
+    <ol className="flex flex-col">
+      {items.map((item) => (
+        <li key={item.id}>
+          <a href={`#${item.id}`} className="block rounded-sm py-1.5 type-label text-ink-2 transition-colors hover:text-ink">
+            {item.label}
+          </a>
+        </li>
+      ))}
+    </ol>
   );
 }
 
-export interface ReferenceGridProps {
-  /** The outline column, usually an <Outline>: sticky from 768 px up, hidden below. */
-  outline: ReactNode;
-  /** BriefRow elements. */
-  children: ReactNode;
-}
-
-/**
- * The brief grid of A00 · 02: margin · outline 200 · gutter · reading 680 · gutter · sidenotes 300 ·
- * margin. Below 1280 px the sidenotes fold under their rows; below 768 px the outline is hidden.
- */
-export function ReferenceGrid({ outline, children }: ReferenceGridProps) {
+/** The sticky index (desktop) and its <details> (phones), with the sections beside or under it. */
+export function ReferenceLayout({ items, head, children }: { items: readonly IndexItem[]; head: ReactNode; children: ReactNode }) {
   return (
-    <div className={cx("w-full px-4 pt-7 pb-16 md:grid md:px-0", GRID_COLUMNS_MD, "xl:grid", GRID_COLUMNS_XL)}>
-      <div className="hidden md:col-start-2 md:row-start-1 md:block">
-        <div className="sticky pt-[2px]" style={{ top: REFERENCE_STICKY_TOP + 28 }}>
-          {outline}
-        </div>
-      </div>
-      <div className="flex min-w-0 flex-col gap-[22px] md:col-start-4 md:row-start-1 xl:col-[4/span_3] xl:grid xl:grid-cols-subgrid xl:content-start">
-        {children}
+    <div className="flex flex-col gap-6 pt-12 pb-12 max-md:gap-4 max-md:pt-6 max-md:pb-8">
+      {head}
+      <details className="rounded-card border border-line bg-surface px-5 py-3 shadow-xs md:hidden" data-index="phone">
+        <summary className="flex cursor-pointer list-none items-center justify-between type-label font-semibold text-ink">
+          On this page
+          <Icon name="chevron-down" size={16} className="text-ink-3" />
+        </summary>
+        <nav aria-label="On this page" className="pt-2">
+          <IndexLinks items={items} />
+        </nav>
+      </details>
+      <div className="md:grid md:grid-cols-[200px_minmax(0,1fr)] md:gap-12">
+        <aside className="max-md:hidden">
+          <nav aria-label="On this page" className="sticky top-6 flex flex-col gap-2" data-index="desktop">
+            <p className="text-[13px] leading-[18px] font-semibold text-ink">On this page</p>
+            <IndexLinks items={items} />
+          </nav>
+        </aside>
+        <div className="flex min-w-0 flex-col gap-6 max-md:gap-4">{children}</div>
       </div>
     </div>
   );
 }
 
-export interface ReferenceHeadProps {
-  /** "Appendix": accent small caps. */
-  kicker: string;
-  /** "Method & sources": dim small caps. */
-  section: string;
-  /** Plain parts after them, e.g. "Applies to every brief". */
-  extra?: readonly ReactNode[];
-  title: string;
-  lede: string;
-}
-
-/** The meta line, the 40 px serif title and the serif lede. */
-export function ReferenceHead({ kicker, section, extra, title, lede }: ReferenceHeadProps) {
-  return (
-    <header className="flex flex-col gap-[22px]">
-      <MetaLine desk={kicker} job={section} extra={extra} />
-      <div className="flex flex-col gap-2">
-        <h1 className="m-0 font-serif text-[32px] leading-[38px] font-medium tracking-[-0.4px] text-ink md:text-[40px] md:leading-[48px]">
-          {title}
-        </h1>
-        <p className="m-0 font-serif text-[18px] leading-[27px] text-text-2">{lede}</p>
-      </div>
-    </header>
-  );
-}
-
-/** A section's anchor and the hairline gap below the one before it. */
-export const SECTION_CLASS = cx("flex flex-col gap-3 pt-3", REFERENCE_ANCHOR);
-
-/** The note's id on the page, so its number in the text can link to it. */
-export const noteId = (n: number) => `note-${n}`;
-
-/** A/Note ref: the accent superscript that points to a sidenote. */
-export function NoteRef({ n }: { n: number }) {
-  return (
-    <sup className="ml-px align-super text-[9px] leading-none font-semibold">
-      <a href={`#${noteId(n)}`} className="text-accent hover:underline" aria-label={`Note ${n}`}>
-        {n}
-      </a>
-    </sup>
-  );
-}
-
-export interface SideNoteProps {
-  n: number;
-  text: ReactNode;
-  /** The mono trace line under the note, e.g. where the rule lives in the code. */
+export interface RefNoteProps {
+  children: ReactNode;
+  /** Where the rule lives in the code, in mono. */
   trace?: string;
 }
 
-/** A/Sidenote: the number, the note and its mono trace line. */
-export function SideNote({ n, text, trace }: SideNoteProps) {
+/** A note under a section: what to keep in mind, and where it lives in the code. */
+export function RefNote({ children, trace }: RefNoteProps) {
   return (
-    <div id={noteId(n)} className={cx("flex gap-2", REFERENCE_ANCHOR)} data-sidenote={n}>
-      <span className="w-3 shrink-0 text-[11px] leading-[17px] font-semibold text-accent tabular-nums">{n}</span>
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <p className="m-0 type-sidenote text-dim">{text}</p>
-        {trace ? <p className="m-0 type-trace text-faint [overflow-wrap:anywhere]">{trace}</p> : null}
-      </div>
+    <div className="flex gap-2 border-t border-line pt-4" data-note="true">
+      <Icon name="lightbulb" size={16} className="mt-0.5 shrink-0 text-ink-2" />
+      <p className={LABEL}>
+        {children}
+        {trace ? <span className="block pt-0.5 font-mono text-[12px] leading-[18px] text-ink-2 [overflow-wrap:anywhere]">{trace}</span> : null}
+      </p>
     </div>
   );
 }
 
-/** Notes in a column, 16 px apart. */
-export function SideNotes({ children }: { children: ReactNode }) {
-  return <div className="flex flex-col gap-4">{children}</div>;
+export interface RefSectionProps {
+  id: string;
+  title: string;
+  aside?: string;
+  note?: ReactNode;
+  children: ReactNode;
+  className?: string;
 }
 
-export interface TraceNoteProps {
-  head: string;
-  detail: string;
-}
-
-/** A/Trace note: the check, a count in ink and a dim detail line, over a hairline. */
-export function TraceNote({ head, detail }: TraceNoteProps) {
+/** One section: a card with its h2 and aside, the body, then its note. */
+export function RefSection({ id, title, aside, note, children, className }: RefSectionProps) {
   return (
-    <div className="flex flex-col gap-1 border-b border-line pb-3" data-trace-note="true">
-      <p className="m-0 flex items-center gap-2 text-[13px] leading-[18px] font-semibold text-ink">
-        <CheckIcon className="shrink-0 text-accent" />
-        {head}
-      </p>
-      <p className="m-0 pl-[22px] text-[11px] leading-[15px] text-dim">{detail}</p>
-    </div>
+    <Card id={id} aria-labelledby={`${id}-title`} data-section={id} className={cx("flex flex-col gap-4", REFERENCE_ANCHOR, className)}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 id={`${id}-title`} className="type-title text-ink max-md:type-title-sm">
+          {title}
+        </h2>
+        {aside ? <p className={LABEL}>{aside}</p> : null}
+      </div>
+      {children}
+      {note}
+    </Card>
+  );
+}
+
+/** Term and text rows: the term 15/600 ink, the text 15 ink-2. */
+export function TermList({ rows }: { rows: readonly { term: string; text: ReactNode }[] }) {
+  return (
+    <dl className="grid gap-x-4 gap-y-3 sm:grid-cols-[160px_minmax(0,1fr)]">
+      {rows.map((r) => (
+        <div key={r.term} className="contents">
+          <dt className="type-body-strong text-ink">{r.term}</dt>
+          <dd className={cx(BODY, "max-sm:pb-1")}>{r.text}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 
@@ -162,22 +130,16 @@ export interface ColophonRow {
   value: ReactNode;
 }
 
-/** A/Colophon: SOURCES, then key · value rows. */
-export function Colophon({ heading, rows }: { heading: string; rows: readonly ColophonRow[] }) {
+/** Key and value rows, as the sources card lists them. */
+export function Colophon({ rows }: { rows: readonly ColophonRow[] }) {
   return (
-    <div className="flex flex-col gap-2.5">
-      <p className="m-0 text-[10px] leading-none font-semibold tracking-[1.2px] text-dim uppercase">{heading}</p>
-      <dl className="m-0 flex flex-col gap-1.5">
-        {rows.map((row) => (
-          <div key={row.key} className="flex gap-3 text-[12px] leading-[17px]">
-            <dt className="w-[76px] shrink-0 text-dim">{row.key}</dt>
-            <dd className="m-0 min-w-0 text-ink">{row.value}</dd>
-          </div>
-        ))}
-      </dl>
-    </div>
+    <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-[120px_minmax(0,1fr)]">
+      {rows.map((row) => (
+        <div key={row.key} className="contents">
+          <dt className={LABEL}>{row.key}</dt>
+          <dd className="type-body text-ink max-sm:pb-1">{row.value}</dd>
+        </div>
+      ))}
+    </dl>
   );
 }
-
-/** Small caps for a row's label: a step's agent, a rule's action. */
-export const SMALL_CAPS = "text-[10px] leading-[14px] font-semibold tracking-[0.9px] uppercase";

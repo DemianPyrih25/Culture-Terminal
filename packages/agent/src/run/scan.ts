@@ -1,8 +1,8 @@
 import {
   ANALYST_TOOLS,
+  Domain,
   SponsorCategory,
   type AgeBucket,
-  type Domain,
   type GeoApi,
   type Intent,
   type Job,
@@ -12,6 +12,7 @@ import {
   type SkillId,
   type ToolInput,
 } from "@ct/contracts";
+import { AREA_ALSO_NAMED } from "./areaMentions";
 import { isSkillAvailable, toolLabel } from "./catalogue";
 import { gazetteer } from "./gazetteer";
 import { askedTier, isGazetteerMetro, MARKET_CATALOGUE, marketTier, namedMarkets, type RunMarket } from "./markets";
@@ -190,7 +191,7 @@ function shareSet(ages: readonly AgeBucket[], marketsMax: number): (ctx: ScanInp
   return (ctx) => {
     const set = sameTypeSet(ctx, SHARE_SET_MAX);
     if (ctx.primary === null || set.length < 2) return null;
-    return { type: ctx.primary.type, set, ages: [...ages], audiences: [], metros: scanMarkets(ctx, marketsMax), ...NO_STEP };
+    return { type: ctx.primary.type, set, ages: [...ages], audiences: [], genders: [], metros: scanMarkets(ctx, marketsMax), ...NO_STEP };
   };
 }
 
@@ -247,40 +248,76 @@ function slate({ intent, primary, peers, markets }: ScanInputs): ToolInput<"spon
 /** Place taxonomy tags: genre:place shapes a heatmap, category:place filters the supply sample (P5). */
 const GENRE_PLACE = "urn:tag:genre:place:";
 const CATEGORY_PLACE = "urn:tag:category:place:";
+/** geo_lift focus_areas (the tool's maximum). */
+const FOCUS_AREAS_MAX = 3;
+
+/**
+ * The gazetteer ids of the areas the question names in its metro: geo.area first, then any other
+ * area CLERK's reading kept in constraints.notes (areaMentionsToGeo), at most FOCUS_AREAS_MAX. A name
+ * the gazetteer does not hold is left out.
+ */
+export function namedAreaIds(intent: Intent, geo: Pick<GeoApi, "matchNeighbourhood">): string[] {
+  const metro = intent.geo.metro;
+  if (metro === null) return [];
+  const texts = [
+    intent.geo.area,
+    ...intent.constraints.notes.flatMap((n) => (n.startsWith(AREA_ALSO_NAMED) ? [n.slice(AREA_ALSO_NAMED.length)] : [])),
+  ];
+  const ids = texts.flatMap((t) => (t === null || t.trim() === "" ? [] : [geo.matchNeighbourhood(metro, t)?.id ?? null])).filter((id) => id !== null);
+  return [...new Set(ids)].slice(0, FOCUS_AREAS_MAX);
+}
 
 /**
  * geo_lift chained after find_tags in the question's gazetteer metro (PLAN §4.1: curated tags plus
  * the concept heatmap, baseline pinned): the place taxonomy tags find_tags returned, genre tags
- * first, with supply when a category tag came back, so white space and LATENT_DEMAND reach turn 2.
+ * first, so white space and LATENT_DEMAND reach turn 2. Supply is always asked for: a site question
+ * is about competition, and without a verified category tag geo_lift says the competitor count is
+ * unknown and why, rather than nothing. The areas the question names get their own numbers.
  */
-function liftFromTags({ intent }: ScanInputs): ChainBuild<"geo_lift"> | null {
+function liftFromTags({ intent, geo }: ScanInputs): ChainBuild<"geo_lift"> | null {
   const metro = intent.geo.metro;
   if (metro === null || intent.constraints.concepts.length === 0) return null;
+  const focus = namedAreaIds(intent, geo);
   return {
     after: "find_tags",
     estimate: SCAN_LIFT_ESTIMATE,
-    describe: `in ${metro} on the place tags find_tags returns, with supply when a category tag comes back`,
+    describe:
+      `in ${metro} on the place tags find_tags returns, with supply` +
+      (focus.length > 0 ? `, and the question's ${focus.length === 1 ? "area" : "areas"} ${focus.join(", ")} first` : ""),
     input: (tags) => {
       const refs = (prefix: string) => tags.filter((t) => t.tagId.startsWith(prefix)).map((t) => t.ref);
       const genre = refs(GENRE_PLACE);
       const category = refs(CATEGORY_PLACE);
       if (genre.length + category.length === 0) return null;
-      return { metro, concept_tags: [...genre, ...category].slice(0, LIFT_TAGS_MAX), concept_entities: [], supply: category.length > 0, ...NO_STEP };
+      return {
+        metro,
+        concept_tags: [...genre, ...category].slice(0, LIFT_TAGS_MAX),
+        concept_entities: [],
+        supply: true,
+        ...(focus.length > 0 ? { focus_areas: focus } : {}),
+        ...NO_STEP,
+      };
     },
   };
 }
 
 /** cross_domain from the primary over the given domains plus any the question names, at most five. */
-function neighbourhood(base: readonly Domain[], replaceWithNamed: boolean): (ctx: ScanInputs) => ToolInput<"cross_domain"> | null {
+function neighbourhood(
+  base: readonly Domain[],
+  replaceWithNamed: boolean,
+  withOwnType = false,
+): (ctx: ScanInputs) => ToolInput<"cross_domain"> | null {
   return ({ intent, primary }) => {
     if (primary === null) return null;
     const named = intent.constraints.domains;
     const domains = replaceWithNamed && named.length > 0 ? named : [...base, ...named];
-    return { seeds: [primary.ref], seed_tags: [], domains: [...new Set(domains)].slice(0, 5), popularity_max: SCAN_POPULARITY_MAX, ...NO_STEP };
+    const own = withOwnType ? Domain.options.find((d) => d === primary.type) : undefined;
+    const all = own === undefined ? domains : [...domains, own];
+    return { seeds: [primary.ref], seed_tags: [], domains: [...new Set(all)].slice(0, 5), popularity_max: SCAN_POPULARITY_MAX, ...NO_STEP };
   };
 }
 
-const LIFT_WHY = "needs a concept and a gazetteer metro (nashville or austin) in the question";
+const LIFT_WHY = "needs a concept and a gazetteer metro (one of the 13 map cities) in the question";
 
 /**
  * The scan skills per job, in PLAN §4.1 order. Where it differs from the SPEC §4.1 scan table, on
@@ -292,10 +329,11 @@ const LIFT_WHY = "needs a concept and a gazetteer metro (nashville or austin) in
  * names; site_selection chains geo_lift after find_tags (PLAN §4.1's concept heatmap), so its lift
  * findings reach turn 2, where a pivot can profile the top pocket; sponsorship checks its slate in
  * the markets the question names, else the gazetteer metros; sponsorship and audience_discovery add
- * the domains the question names to cross_domain; market_selection's market grid and
- * audience_discovery's read by age wait for the peers wave 1 resolves when the question names none
- * (`defer`), since those questions rarely name the comparison set: run as turn-2 steps they would
- * spend the follow-up allowance, and nothing they found could be followed. director.md §5 describes
+ * the domains the question names to cross_domain, and audience_discovery always reads the primary's
+ * own type there too; market_selection's market grid and audience_discovery's read by age wait for
+ * the peers wave 1 resolves when the question names none (`defer`), else take the scan's own
+ * neighbours of the primary's type, since those questions rarely name the comparison set: run as
+ * turn-2 steps they would spend the follow-up allowance, and nothing they found could be followed. director.md §5 describes
  * these scans, so wave 1 does not repeat them.
  */
 export const SCAN_TABLE: Readonly<Record<Job, readonly ScanEntry[]>> = {
@@ -325,7 +363,7 @@ export const SCAN_TABLE: Readonly<Record<Job, readonly ScanEntry[]>> = {
     { tool: "share_of_taste", build: shareSet([], SHARE_MARKETS_MAX), defer: shareAfterWave1([], SHARE_MARKETS_MAX), why: SET_WHY },
   ],
   audience_discovery: [
-    { tool: "cross_domain", build: neighbourhood(SCAN_DOMAINS, true), why: PRIMARY_WHY },
+    { tool: "cross_domain", build: neighbourhood(SCAN_DOMAINS, true, true), why: PRIMARY_WHY },
     { tool: "audience_dna", build: dnaSet(false), why: PRIMARY_WHY },
     { tool: "share_of_taste", build: shareSet(SCAN_AGES, 0), defer: shareAfterWave1(SCAN_AGES, 0), why: SET_WHY },
   ],
@@ -354,7 +392,8 @@ export interface ChainedScanStep {
 
 /**
  * A scan step that waits for the peers the ANALYST's wave-1 resolve_entities registers: it runs once
- * wave 1 returns, before turn 1 closes, or not at all when wave 1 resolved no peer it can use.
+ * wave 1 returns, before turn 1 closes, on those peers, else on the scan's own neighbours of the
+ * primary's type, or not at all when neither holds a peer it can use.
  */
 export interface DeferredScanStep {
   toolCallId: string;

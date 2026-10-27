@@ -360,6 +360,7 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
       "Supply is a capped sample of venues Qloo indexes, not a full count of businesses.",
       "Relative within the metro; not rent, footfall or sales.",
       "Without a supply sample (none asked for, no category tag, or a first page that did not come back) white space is not measured, never 0.",
+      "A quadrant needs enough venues: at least 10 counted in at least three compared areas, never an area with none in a capped sample, and at least 3 in the area for Proven & crowded or Saturated. Otherwise the area reads Not enough venue data.",
     ],
   },
   "block.rank_delta": {

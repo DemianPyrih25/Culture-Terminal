@@ -669,7 +669,7 @@ export function aggregateReality(run: RealityRun): RealityAggregate {
 
 // Export -----------------------------------------------------------------------------------------------
 
-/** EvalSummary.realityCheck, the block /method#eval and the launchpad read. */
+/** EvalSummary.realityCheck, the block /method#eval reads. */
 export type RealityCheckSummary = NonNullable<EvalSummary["realityCheck"]>;
 
 /** One row of the Reality Check table (SPEC §6.7): names, the rank of N and the GHOST hit, no raw score. */

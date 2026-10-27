@@ -1,6 +1,6 @@
 // Small run pieces: the unavailable-skill list, picker keys, CLERK refusals, the meters and one skill call.
 import { DEFAULT_RUN_LIMITS, SkillId, type EventInput, type SafetyCategory, type Skill, type SkillCtx } from "@ct/contracts";
-import { createGeo } from "@ct/geo";
+import { createGeo, type Geo } from "@ct/geo";
 import { SKILL_LIMITATIONS, SKILLS, unavailableSkill } from "@ct/quant";
 import type { QlooCallRecord } from "@ct/qloo";
 import { describe, expect, it } from "vitest";
@@ -13,7 +13,7 @@ import { createFollowupDeadline } from "../../src/run/followup";
 import { MARKET_CATALOGUE, unknownMarketIssues } from "../../src/run/markets";
 import { RunEvents, RunMeter } from "../../src/run/meter";
 import { findPickerChoice, pickerKey } from "../../src/run/picker";
-import { QLOO_DISABLED_NOTICE, runSkillCall, shortError, SkillsRan, type SkillRunnerDeps } from "../../src/run/tools";
+import { QLOO_DISABLED_NOTICE, runSkillCall, shortError, SkillsRan, withQuestionFocus, type SkillCall, type SkillRunnerDeps } from "../../src/run/tools";
 import { intentFor, mockQloo } from "./support";
 
 describe("UNAVAILABLE_SKILLS", () => {
@@ -136,6 +136,7 @@ describe("runSkillCall", () => {
       registry,
       geo: createGeo(),
       localities: null,
+      audiences: new Set(["urn:audience:leisure:synthetic_trail_runners"]),
       budget: createRunBudget({
         limits: DEFAULT_RUN_LIMITS,
         qlooNetworkUsed: () => runQloo.networkUsed(),
@@ -159,6 +160,19 @@ describe("runSkillCall", () => {
     stepId: "S1" as const,
     triggerFindingId: null,
   };
+
+  it("loads the polygons of the metro a tool names before the skill runs, and no other metro's", async () => {
+    const geo = createGeo();
+    const asked: string[] = [];
+    const spy: Geo = { ...geo, ensure: (metro) => (asked.push(metro), geo.ensure(metro)) };
+    const { d } = deps({ geo: spy });
+    const lift = { ...call, tool: "geo_lift" as const, input: { metro: "austin", concept_tags: [], concept_entities: ["R1"], supply: false, trigger_finding_id: null, step_id: "S1" } };
+    await runSkillCall(d, lift, new AbortController().signal);
+    expect(asked.length).toBeGreaterThan(0);
+    expect(new Set(asked)).toEqual(new Set(["austin"]));
+    expect(geo.ready("austin")).toBe(true);
+    expect(geo.ready("nashville")).toBe(false);
+  });
 
   it("turns a throwing skill into a short is_error result and a typed tool.end", async () => {
     const { d, events } = deps({}, [{ match: "filter.type=urn:entity:brand", status: 400 }]);
@@ -233,6 +247,43 @@ describe("runSkillCall", () => {
     await Promise.allSettled(tracked);
   });
 
+  it("refuses a call that sends an audience outside AUDIENCES before any Qloo call (D21)", async () => {
+    const share = (audiences: string[]) => ({
+      ...call,
+      tool: "share_of_taste" as const,
+      input: { type: "brand", set: ["R1", "R2"], ages: [], audiences, metros: [], trigger_finding_id: null, step_id: "S1" },
+    });
+    const { d, events } = deps();
+    const outcome = await runSkillCall(d, share(["urn:audience:leisure:synthetic_other", "urn:audience:leisure:synthetic_trail_runners"]), new AbortController().signal);
+    expect(outcome).toMatchObject({ isError: true, result: null });
+    expect(outcome.content).toContain("'urn:audience:leisure:synthetic_other' is not in the AUDIENCES list, so no Qloo call ran");
+    expect(outcome.content).not.toContain("synthetic_trail_runners");
+    expect(events.map((e) => e.type)).toEqual(["tool.start", "tool.end"]);
+    expect(events[1]).toMatchObject({ error: { code: "invalid_tool_input" } });
+    expect(d.qloo.networkUsed()).toBe(0);
+
+    const listed = deps();
+    const ok = await runSkillCall(listed.d, share(["urn:audience:leisure:synthetic_trail_runners"]), new AbortController().signal);
+    expect(ok.content).not.toContain("AUDIENCES list");
+
+    const none = deps({ audiences: new Set() });
+    const rank = {
+      ...call,
+      tool: "rank_candidates" as const,
+      input: {
+        type: "brand",
+        candidates: ["R1", "R2"],
+        signal_entities: [],
+        signal_tags: [],
+        contexts: [{ kind: "audience", audience: "urn:audience:leisure:synthetic_trail_runners" }],
+        trigger_finding_id: null,
+        step_id: "S1",
+      },
+    };
+    const refused = await runSkillCall(none.d, rank, new AbortController().signal);
+    expect(refused.content).toContain("this run has no AUDIENCES, so call again without audiences");
+  });
+
   it("keeps only the first line of an error message, cut short", () => {
     expect(shortError(new Error(`first line\n    at stack (file.ts:1:1)`))).toBe("first line");
     expect(shortError("x".repeat(500))).toHaveLength(200);
@@ -289,5 +340,31 @@ describe("unknownMarketIssues", () => {
     const share = { type: "brand", set: ["R1", "R2"], ages: [], audiences: [], metros: ["nashville", "dallas"], ...meta };
     expect(unknownMarketIssues("share_of_taste", share, markets)).toEqual([]);
     expect(unknownMarketIssues("audience_dna", { set: ["R1"], compare_with: null, ...meta }, markets)).toEqual([]);
+  });
+});
+
+describe("withQuestionFocus", () => {
+  const lift = (input: Record<string, unknown>): SkillCall => ({
+    toolCallId: "toolu_synthetic_lift",
+    tool: "geo_lift",
+    input: { metro: "austin", concept_tags: ["T1"], concept_entities: [], supply: false, trigger_finding_id: null, step_id: "S2", ...input },
+    phase: "wave1",
+    stepId: null,
+    triggerFindingId: null,
+  });
+  const deps = { questionAreas: { metro: "austin" as const, ids: ["quarry_glen", "mill_row"] } };
+
+  it("gives an ANALYST geo_lift call in the question's city the question's areas", () => {
+    expect((withQuestionFocus(deps, lift({})).input as { focus_areas?: string[] }).focus_areas).toEqual(["quarry_glen", "mill_row"]);
+  });
+
+  it("keeps a call's own focus areas, another city's call and every other tool as they are", () => {
+    const own = lift({ focus_areas: ["mill_row"] });
+    expect(withQuestionFocus(deps, own)).toBe(own);
+    const elsewhere = lift({ metro: "nashville" });
+    expect(withQuestionFocus(deps, elsewhere)).toBe(elsewhere);
+    const other: SkillCall = { ...lift({}), tool: "find_tags", input: { query: "wine bar" } };
+    expect(withQuestionFocus(deps, other)).toBe(other);
+    expect(withQuestionFocus({ questionAreas: null }, lift({}))).toEqual(lift({}));
   });
 });

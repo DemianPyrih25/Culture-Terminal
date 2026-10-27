@@ -147,6 +147,7 @@ export function interpretation(state: RunState): Interpretation | null {
     mnemonic: intent.mnemonic,
     subjects: intent.mentions.map((m) => m.text),
     scope: scope.length > 0 ? scope.join(" · ") : null,
+    area: geo.area !== null && geo.area.trim() !== "" ? geo.area.trim() : null,
     detail: [`${DESK_LABEL[intent.pillar]} lens`, names].filter(Boolean).join(" · "),
     assumptions: intent.assumptions,
     reframe: intent.safety.reframe,

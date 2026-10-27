@@ -10,6 +10,7 @@ import {
   baselineHeatParams,
   comedianCaseScore,
   loadSecondaryMarkets,
+  REGISTERED_SECONDARY_MARKETS,
   matchArea,
   matchMarket,
   panelPercentiles,
@@ -33,6 +34,12 @@ describe("loadSecondaryMarkets", () => {
     expect(markets.length).toBeGreaterThan(0);
     expect(markets.map((m) => m.id)).not.toContain("nashville");
     expect(markets.every((m) => m.label.length > 0 && /^[A-Z]{2}$/.test(m.state))).toBe(true);
+  });
+
+  it("keeps the 22 markets the cases were registered on, every one still a secondary market, and no later one", () => {
+    expect(loadSecondaryMarkets().map((m) => m.id)).toEqual(REGISTERED_SECONDARY_MARKETS);
+    expect(REGISTERED_SECONDARY_MARKETS).toHaveLength(22);
+    expect(loadSecondaryMarkets().map((m) => m.id)).not.toContain("st_louis");
   });
 });
 

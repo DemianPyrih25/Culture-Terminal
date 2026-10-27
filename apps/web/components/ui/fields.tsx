@@ -1,20 +1,23 @@
-// Form controls of A·C Components: A/Input, A/Select, A/Search and A/Checkbox. Input, Select and Checkbox
-// are plain elements styled to the masters; they hold no state, so server and client components can both
-// render them. Search, which can bind the global "/" key, is a client component (./search).
+// Form controls: Input, Select and Checkbox, on the redesign tokens (r12 fields, 1.5 px line-strong,
+// accent focus ring). They are plain elements and hold no state, so server and client components can
+// both render them.
 import { useId, type InputHTMLAttributes, type ReactNode, type Ref, type SelectHTMLAttributes } from "react";
 import { cx } from "./cx";
-import { CheckIcon, ChevronIcon } from "./icons";
+import { Icon } from "./icons";
 
-const FIELD_FRAME = "flex h-9 w-full items-center rounded-brief border bg-paper transition-colors";
+const FIELD_FRAME =
+  "flex h-11 w-full items-center rounded-control border-[1.5px] bg-surface transition-[border-color,box-shadow]";
 
-/** Border colours of a field frame: accent while focused, negative on error. */
+/** Border colours of a field frame: accent with the soft ring while focused, danger on error. */
 function frameTone(error: ReactNode): string {
-  return error ? "border-negative" : "border-line-strong focus-within:border-accent";
+  return error
+    ? "border-danger"
+    : "border-line-strong focus-within:border-accent focus-within:shadow-[0_0_0_4px_var(--color-accent-soft)]";
 }
-const FIELD_LABEL = "text-[10px] leading-none font-semibold tracking-[1.1px] text-dim uppercase";
+const FIELD_LABEL = "type-label text-ink-2";
 
 interface FieldChrome {
-  /** The small uppercase label above the field. */
+  /** The label above the field (13/500 ink-2). */
   label: string;
   /** Help text under the field. */
   help?: ReactNode;
@@ -34,13 +37,13 @@ function FieldShell({
 }: FieldChrome & { id: string; children: ReactNode }) {
   const note = error ?? help;
   return (
-    <div className={cx("flex w-full flex-col gap-[6px]", className)}>
+    <div className={cx("flex w-full flex-col gap-1.5", className)}>
       <label htmlFor={id} className={FIELD_LABEL}>
         {label}
       </label>
       {children}
       {note ? (
-        <p id={`${id}-note`} className={cx("text-[11px]", error ? "text-negative" : "text-dim")}>
+        <p id={`${id}-note`} className={cx("type-caption", error ? "text-danger-ink" : "text-ink-2")}>
           {note}
         </p>
       ) : null}
@@ -51,19 +54,19 @@ function FieldShell({
 export type InputProps = FieldChrome &
   Omit<InputHTMLAttributes<HTMLInputElement>, "className"> & { ref?: Ref<HTMLInputElement> };
 
-/** A/Input: label, 36 px field, help line. */
+/** Input: label, 44 px field, help line. */
 export function Input({ label, help, error, className, id, ref, ...rest }: InputProps) {
   const autoId = useId();
   const inputId = id ?? `input-${autoId}`;
   return (
     <FieldShell id={inputId} label={label} help={help} error={error} className={className}>
-      <div className={cx(FIELD_FRAME, "gap-2 pr-[10px] pl-3", frameTone(error))}>
+      <div className={cx(FIELD_FRAME, "gap-2 pr-3 pl-4", frameTone(error))}>
         <input
           ref={ref}
           id={inputId}
           aria-invalid={error ? true : undefined}
           aria-describedby={error || help ? `${inputId}-note` : undefined}
-          className="h-full min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-faint disabled:cursor-not-allowed disabled:text-faint"
+          className="h-full min-w-0 flex-1 bg-transparent text-[15px] text-ink outline-none placeholder:text-ink-3 disabled:cursor-not-allowed disabled:text-ink-3"
           {...rest}
         />
       </div>
@@ -74,7 +77,7 @@ export function Input({ label, help, error, className, id, ref, ...rest }: Input
 export type SelectProps = FieldChrome &
   Omit<SelectHTMLAttributes<HTMLSelectElement>, "className"> & { children: ReactNode; ref?: Ref<HTMLSelectElement> };
 
-/** A/Select: a native select drawn as the 36 px field with a chevron. */
+/** Select: a native select drawn as the 44 px field with a chevron. */
 export function Select({ label, help, error, className, id, children, ref, ...rest }: SelectProps) {
   const autoId = useId();
   const selectId = id ?? `select-${autoId}`;
@@ -86,20 +89,16 @@ export function Select({ label, help, error, className, id, children, ref, ...re
           id={selectId}
           aria-invalid={error ? true : undefined}
           aria-describedby={error || help ? `${selectId}-note` : undefined}
-          className="h-full w-full min-w-0 cursor-pointer appearance-none bg-transparent pr-8 pl-3 text-[13px] text-ink outline-none disabled:cursor-not-allowed disabled:text-faint"
+          className="h-full w-full min-w-0 cursor-pointer appearance-none bg-transparent pr-9 pl-4 text-[15px] text-ink outline-none disabled:cursor-not-allowed disabled:text-ink-3"
           {...rest}
         >
           {children}
         </select>
-        <ChevronIcon className="pointer-events-none absolute right-[10px] text-dim" />
+        <Icon name="chevron-down" size={16} className="pointer-events-none absolute right-3 text-ink-2" />
       </div>
     </FieldShell>
   );
 }
-
-// A/Search binds a global key, so it is a client component of its own.
-export { Search } from "./search";
-export type { SearchProps } from "./search";
 
 export type CheckboxProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "className" | "children"> & {
   /** The label beside the box. */
@@ -108,28 +107,29 @@ export type CheckboxProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type" |
   ref?: Ref<HTMLInputElement>;
 };
 
-/** A/Checkbox: a 14 px box, ink when checked, with a 13 px label. A native checkbox underneath. */
+/** Checkbox: a 16 px box, accent when checked, with a 15 px label. A native checkbox underneath. */
 export function Checkbox({ children, className, disabled, ref, ...rest }: CheckboxProps) {
   return (
     <label
       className={cx(
-        "inline-flex items-center gap-[10px] text-[13px] text-text-2",
+        "inline-flex items-center gap-2.5 text-[15px] text-ink",
         disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
         className,
       )}
     >
-      <span className="relative inline-flex size-[14px] shrink-0">
+      <span className="relative inline-flex size-4 shrink-0">
         <input
           ref={ref}
           type="checkbox"
           disabled={disabled}
-          className="peer size-[14px] cursor-[inherit] appearance-none rounded-brief border border-line-strong bg-paper checked:border-ink checked:bg-ink"
+          className="peer size-4 cursor-[inherit] appearance-none rounded-[4px] border-[1.5px] border-line-strong bg-surface checked:border-accent checked:bg-accent"
           {...rest}
         />
-        <CheckIcon
-          size={10}
+        <Icon
+          name="check"
+          size={12}
           strokeWidth={3}
-          className="pointer-events-none absolute top-[2px] left-[2px] hidden text-on-ink peer-checked:block"
+          className="pointer-events-none absolute top-[2px] left-[2px] hidden text-white peer-checked:block"
         />
       </span>
       <span>{children}</span>

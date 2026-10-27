@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
+import { SiteShell } from "../../../components/chrome/site-shell";
+import { PlotsSection } from "./plots-section";
 import {
-  CategoryMap,
-  Constellation,
   DivergingBars,
   Exhibit,
   FigurePending,
@@ -16,15 +16,12 @@ import {
   ScorecardList,
   ScorecardTable,
   SlopeChart,
-  TwinCards,
   geoLiftBars,
   slateToRanked,
 } from "../../../components/figures";
 import {
   EXPECTED_RIVALS,
   FIXTURE_SOURCES as SRC,
-  NEIGHBOURHOOD_HALO,
-  NEIGHBOURHOOD_SEEDS,
   SCORECARD_BINDINGS,
   ageDumbbellSelfDescribed,
   ageIndexPair,
@@ -33,7 +30,6 @@ import {
   areaBrandShifts,
   austinLiftMap,
   blockDna,
-  categoryTasteMap,
   coarseLiftMap,
   codedSimilarityMap,
   domainLists,
@@ -43,7 +39,6 @@ import {
   metroSplitSelfDescribed,
   momentumStrip,
   nearestAudiences,
-  neighbourhood,
   nearestWithRivals,
   priorsScorecard,
   shareGrid,
@@ -51,13 +46,12 @@ import {
   sponsorQuadrant,
   sponsorSlate,
   tastePosition,
-  tasteTwins,
   tastePositionNoSignal,
   tenantSlope,
 } from "../../../components/figures/fixtures";
 
-// Development gallery: every figure family in every mode, drawn from invented fixtures (D29), laid
-// out at the widths the Concept A frames use so it can be compared with design/exports/concept-a.
+// Development gallery: the answer-page plots and maps in their ChartCards, then every legacy figure family
+// in every mode (the chart sheet and Table views use them), drawn from invented fixtures (D29).
 
 export const metadata: Metadata = {
   title: "Figures · dev gallery",
@@ -67,25 +61,27 @@ export const metadata: Metadata = {
 export default function FiguresGallery() {
   if (process.env.NODE_ENV === "production") notFound();
   return (
-    <main className="mx-auto w-full max-w-[1100px] px-4 pt-10 pb-24 md:px-[70px]">
-      <header className="flex flex-col gap-2 border-b border-line pb-6">
-        <span className="type-label text-accent">Culture Terminal · dev</span>
-        <h1 className="m-0 font-serif text-[32px] leading-[40px] font-medium text-ink">Figures</h1>
-        <p className="m-0 max-w-reading type-body text-dim">
-          All nine families (MatrixGrid, RankedTable, DivergingBars, QuadrantScatter, ScorecardTable, SlopeChart,
-          LiftMap, MomentumStrip and PositionCard) in every mode, then the P1 figures (Constellation, CategoryMap and
-          TwinCards), from invented fixtures. Each figure has a table view and a method link; nothing here is Qloo data.
+    <SiteShell mainClassName="pt-10 pb-24">
+      <header className="flex flex-col gap-3 pb-8">
+        <span className="type-label text-ink-2">Culture Terminal · dev</span>
+        <h1 className="m-0 type-display-m text-ink">Charts and maps</h1>
+        <p className="m-0 max-w-[744px] type-lead text-ink-2">
+          The answer-page plots, the map card and the area map, then every figure family the chart sheet and the
+          Table views use, all from invented rows. Nothing here is Qloo data.
         </p>
       </header>
 
+      <Section id="plots" title="Answer charts" note="Every plot primitive in its ChartCard, at the answer grid spans">
+        <PlotsSection />
+      </Section>
+
       <Section id="a05" title="A05 · Brief, brand health" note="Lollipop at 384 px beside the pairwise matrix at 272 px">
-        <div className="flex max-w-reading flex-wrap items-start gap-6">
-          <div className="w-[384px] max-w-full">
+        <div className="flex max-w-page flex-wrap items-start gap-6">
+          <div className="w-[552px] max-w-full">
             <RankedTable
               data={nearestAudiences.payload}
               variant="lollipop"
               width={384}
-              number={1}
               id="fig-1"
               title={
                 <>
@@ -100,10 +96,9 @@ export default function FiguresGallery() {
               formulaId="subs.similarity"
             />
           </div>
-          <div className="w-[272px] max-w-full">
+          <div className="w-[360px] max-w-full">
             <MatrixGrid
               data={similarityMap.payload}
-              number={2}
               id="fig-2"
               title="Its two nearest peers are not its rivals"
               caption="Pairwise audience similarity."
@@ -121,7 +116,6 @@ export default function FiguresGallery() {
             data={annotatedSimilarityMap.payload}
             width={680}
             glyph="rank"
-            number={3}
             id="fig-3"
             title="Brand Alpha and Brand Beta share an audience"
             caption="Pairwise audience similarity, 0–1, with each cell's rank in its row and the hub score per column."
@@ -131,7 +125,6 @@ export default function FiguresGallery() {
           <MatrixGrid
             data={shareGrid.payload}
             width={680}
-            number={4}
             id="fig-4"
             title="Juniper Cola leads in two metros and under 30"
             caption="Share of taste within each call; rows sum to 1 across the three brands."
@@ -145,7 +138,6 @@ export default function FiguresGallery() {
         <Column>
           <RankedTable
             data={nearestAudiences.payload}
-            number={5}
             id="fig-5"
             title="Brand Alpha ranks fourth and Brand Beta sixth"
             caption="Audience similarity, 0–1. Grey: rivals we expected."
@@ -161,7 +153,6 @@ export default function FiguresGallery() {
             sublabelHeader="Category"
             tick={0.7}
             flagNotes={{ UTR: 5 }}
-            number={6}
             id="fig-6"
             title="Beer leads, and its best fit is an ale most sponsors would miss"
             caption="Best fit per category. Fit = taste overlap with The Velvet Lanterns listeners, 0–1; tick at 0.70."
@@ -170,7 +161,6 @@ export default function FiguresGallery() {
           />
           <QuadrantScatter
             data={sponsorQuadrant.payload}
-            number={7}
             id="fig-7"
             title="Only one category winner sits in the under-the-radar corner"
             caption="Fit (0–1) against popularity percentile within category. Grey: other candidates."
@@ -186,7 +176,6 @@ export default function FiguresGallery() {
             data={metroSplit.payload}
             display="split"
             labelHeader="Metro"
-            number={8}
             id="fig-8"
             title="Juniper Cola leads in Portland and Seattle; Brand Alpha holds Austin and Atlanta"
             caption="Share of taste by metro, within call. Bar = Juniper Cola's lead within the pair; the shaded band (±.02) reads as even."
@@ -198,7 +187,6 @@ export default function FiguresGallery() {
             display="dumbbell"
             labelHeader="Age"
             baselineLabel="0 = avg"
-            number={9}
             id="fig-9"
             title="Juniper Cola peaks at 25–29; Brand Alpha from 35 to 54"
             caption="Age index, −1 to 1 (0 = average audience). The line is the gap between the two brands."
@@ -218,7 +206,6 @@ export default function FiguresGallery() {
               deltaHeader="VS PEERS"
               labelWidth={72}
               baselineLabel="0 = avg"
-              number={10}
               id="fig-10"
               title="The audience peaks at 25–29 and thins after 45"
               caption="Affinity index, −1 to 1 (0 = average). Grey: average of 6 beverage peers, within call."
@@ -228,7 +215,6 @@ export default function FiguresGallery() {
             <RankedTable
               data={domainLists.payload}
               variant="lists"
-              number={11}
               id="fig-11"
               title="Its neighbourhood: slow radio and quiet drama"
               caption="Percentile within each domain's call, top items per domain."
@@ -236,13 +222,10 @@ export default function FiguresGallery() {
               formulaId="xdom.under_the_radar"
             />
           </Column>
-          <div className="flex w-sidenotes max-w-full flex-col gap-7">
+          <div className="flex w-[300px] max-w-full flex-col gap-7">
             <RankedTable
               data={marginBrands.payload}
               variant="bars"
-              size="margin"
-              aside="Percentile in call"
-              number={12}
               id="fig-12"
               title="Outdoor goods and clean beauty"
               source={SRC.brands}
@@ -251,10 +234,7 @@ export default function FiguresGallery() {
             <RankedTable
               data={areaBrandShifts.payload}
               variant="bars"
-              size="margin"
-              aside="Rank gain vs city"
               numberStyle={{ digits: 0 }}
-              number={13}
               id="fig-13"
               title="Cafés gain on the block; chains lose"
               source={SRC.insights}
@@ -269,7 +249,6 @@ export default function FiguresGallery() {
           <DivergingBars
             data={blockDna.payload}
             labelHeader="Tag"
-            number={14}
             id="fig-14"
             title="Natural wine and live music are new on the block"
             caption="Rank gain of each tag in the area over its rank city-wide. NEW: absent from the city top 50."
@@ -280,7 +259,6 @@ export default function FiguresGallery() {
             data={ageIndexPair.payload}
             display="butterfly"
             labelHeader="Age"
-            number={15}
             id="fig-15"
             title="Two age profiles, mirrored"
             caption="Age index, −1 to 1. Each panel reads outward from its zero line (the average audience); bars below zero point to the centre."
@@ -295,7 +273,6 @@ export default function FiguresGallery() {
           <ScorecardTable
             data={priorsScorecard.payload}
             bindings={SCORECARD_BINDINGS}
-            number={16}
             id="fig-16"
             title="Four priors, written before any data"
             caption="Each prior is judged against the metrics it cites."
@@ -312,11 +289,10 @@ export default function FiguresGallery() {
         </Column>
       </Section>
 
-      <Section id="a06" title="A06 · Brief, location" note="The lift map (keys 1/2/3 switch RAW / BASE / LIFT), the lift per neighbourhood as dots, the tenant slope">
+      <Section id="a06" title="A06 · Brief, location" note="The lift map with its Extra interest / All interest switch, the lift per neighbourhood as dots, the tenant slope">
         <Column>
           <LiftMap
             data={austinLiftMap.payload}
-            number={19}
             id="fig-19"
             title="The fit sits east of the interstate, strongest in Govalle"
             caption="Lift vs the restaurant baseline (1.00×) for a natural-wine and vinyl audience. Circle size = lift; confidence is the cells' opacity."
@@ -329,7 +305,6 @@ export default function FiguresGallery() {
             labelHeader="Neighbourhood"
             directionLabels={["← UNDER", "OVER →"]}
             baselineLabel="1.00"
-            number={20}
             id="fig-20"
             title="Downtown sits just under the baseline; the east side over-indexes"
             caption="Lift vs the restaurant baseline; dots right of the 1.00 line over-index. Two neighbourhoods have too few cells to claim a lift."
@@ -338,7 +313,6 @@ export default function FiguresGallery() {
           />
           <SlopeChart
             data={tenantSlope.payload}
-            number={21}
             id="fig-21"
             title="A wine bar and a record shop climb most from the city to the site"
             caption="FIT among the 9 brands ranked in both calls, Austin → East Cesar Chavez. Highlighted: the three largest climbs."
@@ -348,11 +322,10 @@ export default function FiguresGallery() {
         </Column>
       </Section>
 
-      <Section id="liftmap" title="LiftMap" note="A coarse map (no neighbourhood claims) opens on RAW, press 3 for its faint lift; the half-width map; the static schematic without map code">
+      <Section id="liftmap" title="LiftMap" note="A coarse map (no neighbourhood claims) opens on all interest; the half-width map; the static schematic without map code">
         <Column>
           <LiftMap
             data={coarseLiftMap.payload}
-            number={22}
             id="fig-22"
             title="At geohash 4 the map cannot name a neighbourhood"
             caption="Coarse cells only: the precision factor is 0, so no neighbourhood gets a lift."
@@ -363,7 +336,6 @@ export default function FiguresGallery() {
             <LiftMap
               data={austinLiftMap.payload}
               width={328}
-              number={23}
               id="fig-23"
               title="The map at half width"
               caption="The compact map labels four neighbourhoods."
@@ -375,7 +347,6 @@ export default function FiguresGallery() {
               width={328}
               interactive={false}
               initialMode="BASE"
-              number={24}
               id="fig-24"
               title="Static schematic"
               caption="interactive={false}: the server drawing, without the map code."
@@ -390,18 +361,16 @@ export default function FiguresGallery() {
         <Column>
           <SlopeChart
             data={marketSlope.payload}
-            number={25}
             id="fig-25"
             title="Larkspur Kombucha gains most outside the national ranking"
             caption="FIT within each market's call, re-ranked over the slate. One brand was dropped from the Austin call."
             source={SRC.slate}
             formulaId="slate.market_alignment"
           />
-          <div className="w-[328px] max-w-full">
+          <div className="w-[360px] max-w-full">
             <SlopeChart
               data={tenantSlope.payload}
               width={328}
-              number={26}
               id="fig-26"
               title="Tenant slope, half width"
               caption="Without the score column."
@@ -417,18 +386,16 @@ export default function FiguresGallery() {
           <MomentumStrip
             data={momentumStrip.payload}
             asOf="2026-10-14"
-            number={27}
             id="fig-27"
             title="Juniper Cola rose through the window; Brand Beta fell"
             caption="Population percentile by ISO week, Mar–Aug 2026. Historical: nothing after the window is drawn."
             source={SRC.trending}
             formulaId="mom.delta_26w"
           />
-          <div className="w-[328px] max-w-full">
+          <div className="w-[360px] max-w-full">
             <MomentumStrip
               data={momentumStrip.payload}
               width={328}
-              number={28}
               id="fig-28"
               title="The strip at half width"
               source={SRC.trending}
@@ -444,7 +411,6 @@ export default function FiguresGallery() {
             <PositionCard
               data={tastePosition.payload}
               figureHrefs={{ D1: "#fig-2", D8: "#fig-9", D7: "#fig-8", D19: "#fig-27" }}
-              number={29}
               id="fig-29"
               title="Distinctive and young, mid-pack on reach"
               caption="Each axis is measured against the same 6 peers; there is no overall score."
@@ -452,12 +418,9 @@ export default function FiguresGallery() {
               formulaId="subs.distinctiveness"
             />
           </Column>
-          <div className="flex w-sidenotes max-w-full flex-col gap-7">
+          <div className="flex w-[300px] max-w-full flex-col gap-7">
             <PositionCard
               data={tastePositionNoSignal.payload}
-              size="margin"
-              aside="Among 7"
-              number={30}
               id="fig-30"
               title="Momentum has no signal"
               source={SRC.position}
@@ -468,10 +431,9 @@ export default function FiguresGallery() {
 
       <Section id="contract" title="Contract fields" note="AxisItem.code, RankedRow.comparison, and BarsPayload.display / baseline / evenBand, with no display options passed">
         <div className="flex flex-wrap items-start gap-6">
-          <div className="w-[272px] max-w-full">
+          <div className="w-[360px] max-w-full">
             <MatrixGrid
               data={codedSimilarityMap.payload}
-              number={31}
               id="fig-31"
               title="Codes from the payload"
               caption="JNP, ALF, BET … come from AxisItem.code."
@@ -480,11 +442,10 @@ export default function FiguresGallery() {
               formulaId="subs.similarity"
             />
           </div>
-          <div className="w-[384px] max-w-full">
+          <div className="w-[552px] max-w-full">
             <RankedTable
               data={nearestWithRivals.payload}
               width={384}
-              number={32}
               id="fig-32"
               title="Grey rows from the payload"
               caption="The rivals carry RankedRow.comparison; no comparisonKeys passed."
@@ -496,7 +457,6 @@ export default function FiguresGallery() {
             <DivergingBars
               data={metroSplitSelfDescribed.payload}
               labelHeader="Metro"
-              number={33}
               id="fig-33"
               title="A split the payload asked for, with a ±.03 even band"
               caption="display, baseline and evenBand come from the payload."
@@ -507,7 +467,6 @@ export default function FiguresGallery() {
               data={ageDumbbellSelfDescribed.payload}
               labelHeader="Age"
               baselineLabel="0 = avg"
-              number={34}
               id="fig-34"
               title="A dumbbell the payload asked for"
               caption="display: dumbbell, baseline 0, from the payload."
@@ -520,117 +479,14 @@ export default function FiguresGallery() {
 
       <Section id="exhibit" title="Exhibit" note="The dispatcher picks the family from the dataset kind and carries the fixed caption; one envelope per kind">
         <Column>
-          <Exhibit dataset={sponsorSlate} id="fig-17" number={17} title="A Slate envelope through Exhibit" display={{ Slate: { tick: 0.7 } }} />
-          <FigurePending id="fig-18" number={18} title="A figure still computing" note="Plot · computing in QUANT" />
+          <Exhibit dataset={sponsorSlate} id="fig-17" title="A Slate envelope through Exhibit" display={{ Slate: { tick: 0.7 } }} />
+          <FigurePending id="fig-18" title="A figure still computing" note="Plot · computing in QUANT" />
           {EXHIBIT_KINDS.map((dataset, i) => (
-            <Exhibit key={dataset.id} dataset={dataset} id={`fig-${35 + i}`} number={35 + i} display={{ GeoLift: { interactive: false } }} />
+            <Exhibit key={dataset.id} dataset={dataset} id={`fig-${35 + i}`} display={{ GeoLift: { interactive: false } }} />
           ))}
         </Column>
       </Section>
-
-      <Section
-        id="constellation"
-        title="Constellation"
-        note="S9 in P1: two seeds with explainability edges, a domain the budget skipped and a gated result; one seed with spokes at half width. Tab to a domain to name all of it"
-      >
-        <Column>
-          <Constellation
-            data={neighbourhood.payload}
-            seeds={NEIGHBOURHOOD_SEEDS}
-            halo={NEIGHBOURHOOD_HALO}
-            number={45}
-            id="fig-45"
-            title="Both brands live next to slow radio and outdoor goods"
-            caption="Cultural neighbourhood of the two seeds. Distance from the centre = 1 − FIT within each domain's call; ringed: the domain's under-the-radar pick."
-            source={SRC.neighbourhood}
-            formulaId="xdom.edge"
-          />
-          <div className="w-[328px] max-w-full">
-            <Constellation
-              data={domainLists.payload}
-              seeds={[{ ref: "R1", label: "Juniper Cola" }]}
-              width={328}
-              number={46}
-              id="fig-46"
-              title="One seed, half width"
-              caption="Spokes carry the distance when there are no edges."
-              source={SRC.insights}
-              formulaId="xdom.under_the_radar"
-            />
-          </div>
-        </Column>
-      </Section>
-
-      <Section
-        id="taste-map"
-        title="CategoryMap"
-        note="Category Taste Map: 13 entities by classical MDS on 1 − similarity, near-substitutes joined, stress on the map; half width with coded labels. Tab to a point for its nearest peer"
-      >
-        <Column>
-          <CategoryMap
-            data={categoryTasteMap.payload}
-            number={47}
-            id="fig-47"
-            title="Juniper Cola sits with the colas, a long way from the ales"
-            caption="Category Taste Map: nearer means a more similar audience. Ringed: the subject. Lines join near-substitutes."
-            source={SRC.tasteMap}
-            formulaId="subs.similarity"
-          />
-          <div className="w-[328px] max-w-full">
-            <CategoryMap
-              data={categoryTasteMap.payload}
-              width={328}
-              number={48}
-              id="fig-48"
-              title="The taste map at half width"
-              source={SRC.tasteMap}
-              formulaId="subs.near_substitutes"
-            />
-          </div>
-        </Column>
-      </Section>
-
-      <Section
-        id="twins"
-        title="TwinCards"
-        note="S11 in P1: East Nashville and its Austin twin with mirrored DNA bars; a runner-up drawn against the same source; a candidate the budget never measured at half width"
-      >
-        <Column>
-          <TwinCards
-            data={tasteTwins.payload}
-            number={49}
-            id="fig-49"
-            title="East Nashville's twin in Austin is Holly"
-            caption="Rank gain of each tag over its own city (d, clipped at ±25). Twin score = Spearman ρ between the two areas' d over 14 tags."
-            source={SRC.twins}
-            formulaId="block.rank_delta"
-          />
-          <TwinCards
-            data={tasteTwins.payload}
-            candidateKey="east-cesar-chavez"
-            maxRows={8}
-            number={50}
-            id="fig-50"
-            title="East Cesar Chavez shares the wine, not the brunch"
-            caption="The third candidate against the same source."
-            source={SRC.twins}
-            formulaId="block.rank_delta"
-          />
-          <div className="w-[328px] max-w-full">
-            <TwinCards
-              data={tasteTwins.payload}
-              candidateKey="rosedale"
-              number={51}
-              id="fig-51"
-              title="Rosedale was never measured"
-              caption="No bars and no callouts for a candidate without a BLOCK call: only its reason."
-              source={SRC.twins}
-              formulaId="block.rank_delta"
-            />
-          </div>
-        </Column>
-      </Section>
-    </main>
+    </SiteShell>
   );
 }
 
@@ -651,11 +507,11 @@ const EXHIBIT_KINDS = [
 function Section({ id, title, note, children }: { id: string; title: string; note: string; children: ReactNode }) {
   return (
     <section id={id} aria-labelledby={`${id}-title`} className="flex flex-col gap-6 pt-12">
-      <div className="flex flex-wrap items-baseline gap-x-3 border-b border-line-strong pb-2">
-        <h2 id={`${id}-title`} className="m-0 type-label text-ink">
+      <div className="flex flex-col gap-1 border-b border-line pb-3">
+        <h2 id={`${id}-title`} className="m-0 type-title text-ink">
           {title}
         </h2>
-        <span className="font-ui text-[12px] text-dim">{note}</span>
+        <span className="type-label text-ink-2">{note}</span>
       </div>
       {children}
     </section>
@@ -663,5 +519,5 @@ function Section({ id, title, note, children }: { id: string; title: string; not
 }
 
 function Column({ children }: { children: ReactNode }) {
-  return <div className="flex w-full max-w-reading flex-col gap-7">{children}</div>;
+  return <div className="flex w-full max-w-[744px] flex-col gap-6">{children}</div>;
 }

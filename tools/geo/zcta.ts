@@ -23,27 +23,28 @@
 //    tools/geo/nashville-aliases.json reproduces packages/geo/src/data/nashville.ts with the same ids,
 //    names, aliases, centroids and areas. 25 of its rings start at another vertex, which changes their
 //    query WKT and so the Qloo cache keys of those areas, so the shipped module is kept as it is.
-// 4. Wire it in. In packages/geo: import the module into GAZETTEERS (src/gazetteer.ts), give the metro rows
-//    in test/gazetteers.test.ts (box, largest area, centroids outside, size budget, landmarks) and a
-//    section in ATTRIBUTION.md. The rest is outside this package, and the build or the tests fail
+// 4. Wire it in. In packages/geo: add its loader to GAZETTEER_LOADERS (src/gazetteer.ts), which loads a
+//    city's polygons only on first use, then regenerate the polygon-free catalog every metro is matched
+//    from, src/catalog.ts, with `pnpm --filter @ct/geo test -u` (its test fails while it is stale; the
+//    build prints this step). Give the metro rows in test/gazetteers.test.ts (box, largest area,
+//    centroids outside, size budget, landmarks) and a section in ATTRIBUTION.md. The rest is outside this package, and the build or the tests fail
 //    until each is done:
 //    - packages/contracts/src/enums.ts: the id joins MetroId and METRO_LABEL; createGeo serves the
 //      gazetteer from then on. packages/contracts/test/tools.test.ts must not use it as an unsupported metro.
-//    - config/metros.json: a gazetteer entry (status "built", source as the module's) and a market with
-//      the same id, label, state and query.
-//    - packages/quant/src/skills/metros.ts: its centre in METRO_CENTRES, a Record over MetroId.
-//    - packages/agent/prompts/clerk.md (the metro field names every MetroId) and director.md (the
-//      gazetteer metros), then `pnpm prompts:build`.
-//    - Copy that names the metros: packages/agent/src/run/gate.ts and scan.ts (and test/run/scan.test.ts),
-//      apps/web/components/ask/fixtures.ts, and the ask tests that spell out the city list
-//      (apps/web/test/ask/ask-machine.test.ts, ask-panel.test.tsx).
+//    - config/metros.json: a gazetteer entry (status "built", source as the module's, centre, and the
+//      gazetteer's bounds rounded outward to two decimals as its bbox: the place search radius reaches
+//      its farthest corner, D44) and a major market with the same id, names, centre and bbox.
+//    - packages/quant/src/skills/metros.ts: its centre in METRO_CENTRES, a Record over MetroId;
+//      apps/web/lib/answer/copy.ts: its state in METRO_STATE.
+//    - packages/agent/prompts/clerk.md (the metro field names every MetroId), then `pnpm prompts:build`.
+//    - Copy and tests that count or name the map cities: the city lists in apps/web/test/ask/ask-machine.test.ts
+//      and home/home.test.tsx, content/how-it-works.ts, e2e/map.spec.ts and tools/llm-bench/prompts.ts.
 //    - Locality pins: every MetroId is a required market (apps/web/server/localities.ts), so pin it in kv,
-//      live and mock (tools/dev/localities.ts pin <id>, and again with --mock), and add it to the
-//      required markets in apps/web/test/localities.test.ts, startup.test.ts and
-//      status/status.integration.test.tsx.
-//    - The sample runs: pnpm exec tsx tools/dev/sample-run.ts.
-//    - Optional: GAZETTEER_METROS in tools/llm-bench/scenario.ts, and a mock metro in
-//      packages/qloo/src/mock/metros.ts for mock runs there.
+//      live and mock (tools/dev/localities.ts pin <id>, and again with --mock).
+//    - A mock metro in packages/qloo/src/mock/metros.ts (and the city out of mock/cities.ts), so mock runs
+//      there have heatmap cells, then the sample runs: pnpm exec tsx tools/dev/sample-run.ts.
+//    A county of more than 60 ZIP areas (AREAS_MAX, packages/agent/src/run/areas.ts) shows the model the
+//    question's area and its nearest neighbours only.
 //
 // Cells outside every ZIP area (water, a county the build leaves out, a skipped sliver) locate to no area
 // and stay out of the lift rollup, as in every gazetteer. The files are data: parsed, never run.
@@ -52,7 +53,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { areaKm2 } from "../../packages/geo/src/measure";
-import { bboxOfShapes, buildAreas, describeAreas, km2, moduleText, prepare, readFeatures, type Bbox, type BuiltArea, type ModuleSpec, type Parts, type Shape } from "./build";
+import {
+  bboxOfShapes,
+  buildAreas,
+  describeAreas,
+  km2,
+  moduleText,
+  prepare,
+  readFeatures,
+  WIRE_UP,
+  type Bbox,
+  type BuiltArea,
+  type ModuleSpec,
+  type Parts,
+  type Shape,
+} from "./build";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -235,9 +250,10 @@ async function main(): Promise<void> {
   report.push(...describeAreas(built));
   console.log(report.join("\n"));
   if (values.dry !== true) {
-    const outFile = values.out ?? path.join(ROOT, `packages/geo/src/data/${metro}.ts`);
+    // Data modules are named in kebab case: los_angeles builds packages/geo/src/data/los-angeles.ts.
+    const outFile = values.out ?? path.join(ROOT, `packages/geo/src/data/${metro.replace(/_/g, "-")}.ts`);
     writeFileSync(outFile, text, "utf8");
-    console.log(`wrote ${outFile}`);
+    console.log(`wrote ${outFile}\n${WIRE_UP}`);
   }
 }
 

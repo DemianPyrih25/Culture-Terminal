@@ -10,6 +10,9 @@
  *   "verified Sx"  exercised live by skill Sx before it shipped (same host, compared with and without the parameter);
  *   "verified P5"  exercised live by the Part 5 parameter probe before the remaining skills were built (same
  *                  host, compared with and without the parameter; docs/PROBE_FINDINGS.md "Verified after the gates");
+ *   "verified Cx"  exercised live by gate Cx of the Part 8 coverage probe (tools/probe/coverage.ts, same host;
+ *                  docs/PROBE_FINDINGS.md "Coverage probe (Part 8)"). A parameter a gate tested before it was listed
+ *                  went on the probe's own copy of the allowlist only, and lands here once the gate verified it;
  *   "UNVERIFIED"   needed by a P0 skill but not covered by a gate. The skill that first uses it verifies
  *                  it live before the skill is built, then this entry is updated.
  *
@@ -54,7 +57,10 @@ export const ALLOW: Readonly<Record<QlooPath, Readonly<Record<string, ParamTable
       "signal.interests.entities": "verified G1",
       "signal.interests.tags":
         "verified P5 (taxonomy tags only: a seed plus a genre:brand tag replaced 9 of 20 rows; G1: a descriptive *:qloo:* tag gave a flat floor row)",
-      "signal.demographics.audiences": "verified G1",
+      "signal.demographics.audiences":
+        "verified G1; verified C5 (an investing_interests and a spending_habits audience over 8 brands: every brand scored under each, and the audiences discriminate)",
+      "signal.demographics.gender":
+        "verified C4 (male and female over 8 brands with filter.results.entities: every brand scored under each, every affinity differs between the two)",
       "signal.demographics.age": "verified G4 (rows come back unsorted by affinity, as for persons in P5: rank by affinity, never by row order)",
       "signal.location":
         "verified G2 (locality UUID, POLYGON, POINT); verified P5 with signal.interests.entities (both apply: the order differs from either signal alone, the location decides which candidates are scored)",
@@ -62,7 +68,7 @@ export const ALLOW: Readonly<Record<QlooPath, Readonly<Record<string, ParamTable
       "filter.results.entities": "verified G1",
       "filter.popularity.max": "verified G9",
       "filter.tags":
-        "verified S1, P5 (a urn:tag:genre:brand:* tag or a descriptive urn:tag:product_category:qloo:* tag restricts results to brands carrying it, 20/20 each; two tags combine as a union, 20/20 rows carrying either and 9/20 both; S1 same-category discovery, S10 sponsor categories)",
+        "verified S1, P5 (a urn:tag:genre:brand:* tag or a descriptive urn:tag:product_category:qloo:* tag restricts results to brands carrying it, 20/20 each; two tags combine as a union, 20/20 rows carrying either and 9/20 both; S1 same-category discovery, S10 sponsor categories); verified C2 (one genre:brand leaf per category with a seed: every row carried it)",
       "filter.exclude.entities": "verified S1 (an excluded entity drops out of results; the signal entity is absent even without it)",
       "filter.exclude.tags": "verified P5 (rows carrying the excluded genre:brand tag fell from 9/20 to 0/20; S9 brand domain)",
       "feature.explainability": "verified G15 (on urn:entity:artist)",
@@ -76,6 +82,9 @@ export const ALLOW: Readonly<Record<QlooPath, Readonly<Record<string, ParamTable
       "filter.results.entities": "verified P5 (5/5 candidates returned, same affinities as the open call; rank_candidates)",
       "feature.explainability": "verified G15",
       "filter.popularity.max": "verified P5 (cap 0.97: rows above it fell from 6/15 to 0/15, all 9 rows under it kept)",
+      // Gender as the only signal answered HTTP 400 for both values: send it next to seeds or tags.
+      "signal.demographics.gender":
+        "verified C4 (with a seed: male and female gave different top-15 lists, every row scored; gender as the only signal answered HTTP 400)",
       take: "verified G15",
     },
     "urn:entity:podcast": {
@@ -84,6 +93,8 @@ export const ALLOW: Readonly<Record<QlooPath, Readonly<Record<string, ParamTable
       "signal.interests.tags": "verified P5 (seeds plus a genre:media tag: rows carrying it rose from 4/15 to 8/15, 10 of 15 rows replaced)",
       "feature.explainability": "verified G15 (on urn:entity:artist)",
       "filter.popularity.max": "verified P5 (cap 0.99: rows above it fell from 5/15 to 0/15, all 10 rows under it kept)",
+      "filter.results.entities": "verified C3 (5 candidates from an open seed rank: 5/5 returned, none outside, affinities identical to the open call)",
+      "signal.demographics.age": "verified C3 (24_and_younger over the same 5 candidates: every candidate scored, and they discriminate; sort by affinity)",
       take: "verified G15 (on urn:entity:artist)",
     },
     "urn:entity:tv_show": {
@@ -93,6 +104,9 @@ export const ALLOW: Readonly<Record<QlooPath, Readonly<Record<string, ParamTable
         "verified P5 (seeds plus a genre:media tag: rows carrying it rose from 3/15 to 12/15, 13 of 15 rows replaced; one row had popularity null)",
       "feature.explainability": "verified G15 (on urn:entity:artist)",
       "filter.popularity.max": "verified P5 (cap 0.8: rows above it fell from 6/15 to 0/15, all 9 rows under it kept)",
+      "filter.results.entities": "verified C3 (5 candidates from an open seed rank: 5/5 returned, none outside, affinities identical to the open call)",
+      "signal.demographics.age": "verified C3 (24_and_younger over the same 5 candidates: every candidate scored, and they discriminate; sort by affinity)",
+      "signal.demographics.audiences": "verified C5 (a life_stage audience over 5 candidates: every candidate scored, and they discriminate)",
       take: "verified G15 (on urn:entity:artist)",
     },
     "urn:entity:movie": {
@@ -102,6 +116,8 @@ export const ALLOW: Readonly<Record<QlooPath, Readonly<Record<string, ParamTable
         "verified P5 (applied: seeds plus a genre:media tag replaced 9 and 7 of 15 rows for two tags; the direction depends on the tag, rows carrying it fell from 3/15 to 0/15 for one and rose from 5/15 to 10/15 for the other, so it is never a genre steer)",
       "feature.explainability": "verified G15 (on urn:entity:artist)",
       "filter.popularity.max": "verified P5 (cap 0.99: rows above it fell from 6/15 to 0/15, all 9 rows under it kept)",
+      "filter.results.entities": "verified C3 (5 candidates from an open seed rank: 5/5 returned, none outside, affinities identical to the open call)",
+      "signal.demographics.age": "verified C3 (24_and_younger over the same 5 candidates: every candidate scored, and they discriminate; sort by affinity)",
       take: "verified G15 (on urn:entity:artist)",
     },
 
@@ -109,6 +125,8 @@ export const ALLOW: Readonly<Record<QlooPath, Readonly<Record<string, ParamTable
       "filter.type": "verified G3",
       "signal.location": "verified G3 (locality UUID); verified P5 (POINT and POLYGON: 5/5 scored, identical to each other, order differs from the locality UUID)",
       "signal.demographics.age": "verified P5 (5/5 scored, affinities differ by bucket; rows come back unsorted, so sort by affinity)",
+      "signal.demographics.gender": "verified C4 (male and female over 5 comedians: every comedian scored under each, every affinity differs between the two)",
+      "signal.demographics.audiences": "verified C5 (a hobbies_and_interests audience over 5 comedians: every comedian scored, and they discriminate)",
       "filter.results.entities": "verified G3",
       take: "verified G3",
     },
@@ -129,7 +147,8 @@ export const ALLOW: Readonly<Record<QlooPath, Readonly<Record<string, ParamTable
     "urn:entity:place": {
       "filter.type": "verified G10",
       "filter.location": "verified G10 (locality UUID)",
-      "filter.tags": "verified G10 (taxonomy category tag)",
+      "filter.tags":
+        "verified G10 (taxonomy category tag); verified C1 (more category:place tags with a Nashville locality UUID, every returned place carrying its tag; a few returned no places)",
       "signal.location":
         "verified P5 (a north Austin POINT reordered the scored places, rho 0.26 against the city locality; an East Austin POINT and POLYGON kept the city order; city affinities saturate near 1, so read ranks)",
       "signal.interests.entities": "verified P5 (12/12 candidates scored, order differs from a location signal; venues that fit, SPEC §7.3 step 3)",
@@ -144,9 +163,9 @@ export const ALLOW: Readonly<Record<QlooPath, Readonly<Record<string, ParamTable
     // top 160 places, so the analog's footprint, not the concept, set the hot spots.
     "urn:heatmap": {
       "filter.type": "verified G6",
-      "filter.location": "verified G6 (locality UUID)",
+      "filter.location": "verified G6 (locality UUID); verified C6 (the New York locality pinned in kv)",
       "signal.interests.tags":
-        "verified G6, P5 (urn:tag:genre:place:* tags only: each gave ~1k cells with tag_affinity and two combine; a urn:tag:category:place:* tag returned 0 cells, like *:qloo:* tags)",
+        "verified G6, P5 (urn:tag:genre:place:* tags only: each gave ~1k cells with tag_affinity and two combine; a urn:tag:category:place:* tag returned 0 cells, like *:qloo:* tags); verified C1 (more genre:place tags in Nashville: every tag gave cells, tag_affinity on every cell); verified C6 (New York baseline)",
       "signal.interests.entities":
         "verified P5 (alone: 199 of ~1k cells, 176 of them among the 199 most popular, carrying entity_<type>_affinity; with a tag, its cells took the top 160 places while tag_affinity stayed identical to the tag alone; S6 analog-only concept calls)",
     },
@@ -170,7 +189,7 @@ export const ALLOW: Readonly<Record<QlooPath, Readonly<Record<string, ParamTable
 
   "/v2/tags": {
     [ANY_TYPE]: {
-      "filter.query": "verified G14",
+      "filter.query": "verified G14; verified C1, C2 (place and brand semantic searches for the Part 8 categories)",
       "feature.semantic_search": "verified G14",
       "filter.parents.types": "verified G14",
       "filter.tag.types": "verified P5 (10/10 results of the requested tag types, against 4/10 and 1/10 without; find_tags taxonomy-only search)",
@@ -180,8 +199,8 @@ export const ALLOW: Readonly<Record<QlooPath, Readonly<Record<string, ParamTable
 
   "/v2/audiences": {
     [ANY_TYPE]: {
-      "filter.parents.types": "verified SWEEP",
-      take: "verified SWEEP",
+      "filter.parents.types": "verified SWEEP; verified C5 (each of the six D21 families: every id an urn:audience:<family>:<leaf> key of that family)",
+      take: "verified SWEEP; verified C5 (take 100 covers every D21 family)",
     },
   },
 

@@ -19,8 +19,10 @@ import {
   type ValidationIssue,
   type ValidationRule,
 } from "@ct/contracts";
+import { MIN_BUSY_AREA_VENUES } from "@ct/quant";
 import type { z } from "zod";
 import { indexSnapshot, type LedgerLookup, type LedgerSnapshot } from "./ledger";
+import { competitionClaimsOf, countsSupply, mapCountsSupply, measuresSupply } from "./report/competition";
 import {
   datasetMeasuresDemographics,
   demographicEvidence,
@@ -31,6 +33,7 @@ import {
 import { wordList } from "./report/format";
 import { areaAliases, mergedAgeBuckets, numberWords, numeralNames, numeralValues, numeralViolations } from "./report/numerals";
 import { phraseHits, type PhraseHit } from "./report/phrases";
+import { misattributedTokens, type SubjectEntity } from "./report/subjects";
 import {
   argumentUnit,
   citedIds,
@@ -76,6 +79,11 @@ export interface CheckReportInput<D extends ReportDraftShape = ReportDraftShape>
   registry?: Pick<EntityRegistry, "entities" | "tags">;
   /** The gazetteer area names of the question's metro: digits inside them are allowed outside tokens (V3). */
   areas?: readonly string[];
+  /**
+   * True when the question is about opening a venue (site_selection): a competitor claim then needs a
+   * counted supply metric even when no geo_lift call ran, since nothing else counts competitors (V10).
+   */
+  competitionAsked?: boolean;
   /** 2 for the draft submitted in the repair turn: rejections become warnings. Defaults to 1. */
   attempt?: 1 | 2;
 }
@@ -116,6 +124,7 @@ export function checkReport<D extends ReportDraftShape>(input: CheckReportInput<
     ...(input.registry?.tags() ?? []).map((t) => t.name),
   ];
   const names = numeralNames([...registered, ...areaAliases(input.areas ?? [])]);
+  const entities = (input.registry?.entities() ?? []).map((e) => ({ ref: e.ref, name: e.name }));
   // Follow-up questions are parameters of a new run, not claims: their numbers are not V3's concern.
   const numerals = fields
     .filter((field) => field.role !== "followup")
@@ -134,21 +143,26 @@ export function checkReport<D extends ReportDraftShape>(input: CheckReportInput<
   const unmeasured = unmeasuredDemographics(draft, lookup, demographicEvidence(ledger.metrics), namePatterns(registered));
   // The tag names the finding the headline states, so V10 judges it with the headline's part.
   const tag: DemographicField = { path: TAG_PATH, role: "claim", unit: "headline", text: draft.verdict_tag };
+  // Competition is judged in the claims, the exhibit titles (a title states what its map shows) and the tag.
+  const uncounted = uncountedCompetition(draft, ledger, lookup, input.competitionAsked === true);
+  const competitionFields = fields.filter((f) => f.role === "claim" || EXHIBIT_TITLE.test(f.path));
 
   const issues: ValidationIssue[] = [
     ...schemaIssues(draft, blocking).filter((i) => !tagSettled || i.path !== TAG_PATH),
     ...(tagSettled ? [] : tagNumberIssues(draft.verdict_tag, blocking)),
     ...referenceIssues(draft, plan, lookup, blocking),
     ...fields.flatMap((f) => tokenIssues(f, lookup, blocking)),
+    ...fields.flatMap((f) => subjectIssues(f, lookup, entities, blocking)),
     ...numeralIssues(numerals, lookup, bareCount > V3_REJECT_ABOVE ? blocking : "warn"),
     ...phrases.flatMap(({ path, hits }) => phraseIssues(path, hits, blocking)),
     ...citationIssues(draft, plan, blocking),
     ...claimUnits(draft, fields).flatMap((u) => affinityIssues(u, lookup, blocking)),
     ...demographicIssues(tagSettled ? fields : [...fields, tag], unmeasured, blocking),
+    ...competitionIssues(tagSettled ? competitionFields : [...competitionFields, tag], uncounted, gapOf(ledger), blocking),
   ];
 
   if (forced) issues.push(forced);
-  else if (tagSettled) issues.push(...settleVerdictTag(patched, unmeasured(tag)));
+  else if (tagSettled) issues.push(...settleVerdictTag(patched, unmeasured(tag), uncounted(tag)));
   issues.push(...injectWindows(claimUnits(patched, draftProse(patched)), ledger));
   issues.sort((a, b) => a.rule.localeCompare(b.rule, "en", { numeric: true }));
 
@@ -293,6 +307,20 @@ function tokenIssues(field: ProseField, ledger: LedgerLookup, blocking: Blocking
     out.push(issue("V2", blocking, message, field.path, p.malformed));
   }
   return out;
+}
+
+/**
+ * A token set beside the wrong entity: its sentence names registered entities but none the metric
+ * measures (report/subjects). Next moves carry no tokens; V2 above already rejects any there.
+ */
+function subjectIssues(field: ProseField, ledger: LedgerLookup, entities: readonly SubjectEntity[], blocking: Blocking): ValidationIssue[] {
+  if (field.role === "followup") return [];
+  return misattributedTokens(field.text, (id) => ledger.metric(id), entities).map((t) => {
+    const message =
+      `${field.path}: {{${t.id}}} measures ${wordList(t.subjects)}, but its sentence names ${wordList(t.named)} instead; ` +
+      `set each token beside the entity it measures, or name ${wordList(t.subjects)} in that sentence.`;
+    return issue("V2", blocking, message, field.path, [t.id]);
+  });
 }
 
 /** A next move launches a child run whose ledger has other ids, so any token in it is an issue. */
@@ -496,11 +524,12 @@ export function trimVerdictTag(tag: string): string {
 }
 
 /**
- * The last attempt's verdict tag, settled by code: dropped when it uses a banned phrase (V4) or claims
- * a demographic the headline does not measure (V10, `unmeasured` the terms), else cut to its rule
- * (V9). The brief prints the signal label in its place, so the fix is `forced` and costs no confidence.
+ * The last attempt's verdict tag, settled by code: dropped when it uses a banned phrase (V4), claims
+ * a demographic the headline does not measure (V10, `unmeasured` the terms) or states a competitor
+ * count nobody counted (V10, `uncounted` the claims), else cut to its rule (V9). The brief prints the
+ * signal label in its place, so the fix is `forced` and costs no confidence.
  */
-function settleVerdictTag(draft: ReportDraftShape, unmeasured: readonly string[]): ValidationIssue[] {
+function settleVerdictTag(draft: ReportDraftShape, unmeasured: readonly string[], uncounted: readonly string[] = []): ValidationIssue[] {
   const from = draft.verdict_tag;
   const hits = phraseHits(from);
   if (hits.length > 0) {
@@ -517,6 +546,14 @@ function settleVerdictTag(draft: ReportDraftShape, unmeasured: readonly string[]
       `${TAG_PATH} "${from}" dropped: ${listed} ${unmeasured.length === 1 ? "claims" : "claim"} an audience's age, ` +
       "gender or generation that no metric the headline cites measures; the brief prints the signal instead.";
     return [issue("V10", "forced", message, TAG_PATH, [...unmeasured])];
+  }
+  if (uncounted.length > 0) {
+    draft.verdict_tag = "";
+    const listed = uncounted.map((t) => `"${t}"`).join(", ");
+    const message =
+      `${TAG_PATH} "${from}" dropped: ${listed} ${uncounted.length === 1 ? "states" : "state"} a competitor count or supply ` +
+      "level that no counted supply metric the headline cites backs; the brief prints the signal instead.";
+    return [issue("V10", "forced", message, TAG_PATH, [...uncounted])];
   }
   const problems = tagProblems(from);
   if (problems.length === 0) return [];
@@ -556,7 +593,7 @@ function injectWindows(units: readonly ClaimUnit[], ledger: LedgerSnapshot): Val
   return out;
 }
 
-// V10: audience demographics need a metric that measures them -------------------------------------------
+// V10: claims need a metric that measures them: audience demographics, and competitor counts (competitionIssues) ---
 
 /** What one part of the note cites, beyond the tokens of the field being judged. */
 interface CitingPart {
@@ -595,7 +632,7 @@ type DemographicField = Pick<ProseField, "path" | "role" | "unit" | "text">;
 /**
  * V10's judge for one draft: the demographic terms a field claims that no metric of its part measures,
  * empty when it passes. A claim that names an audience's age, gender or generation needs a metric in
- * the same part that measures it (SPEC §6.2): an audience_dna index or a share_of_taste age metric
+ * the same part that measures it (SPEC §6.2): an audience_dna index or an age or gender context metric
  * with a value; a caption's dataset counts when it shows one (`calls`: the evidence behind them).
  * Limitation sentences and registered names are not claims (report/demographics). Next moves and
  * other labels are not judged, they state no finding; the verdict tag names the headline's.
@@ -636,12 +673,91 @@ function demographicIssues(
     const message =
       field.path === TAG_PATH
         ? `${field.path}: ${claims} an audience's age, gender or generation, but no metric the headline cites measures ` +
-          "it; name the finding without it, or cite a metric that measures it (audience_dna, or a share_of_taste age " +
-          "context) in the headline."
+          "it; name the finding without it, or cite a metric that measures it (audience_dna, or a share_of_taste age or " +
+          "gender context) in the headline."
         : `${field.path}: ${claims} an audience's age, gender or generation, but no metric this part cites measures ` +
           "it; remove the claim or write that it was not measured, or cite a metric that measures it (audience_dna, or a " +
-          "share_of_taste age context) in the same part.";
+          "share_of_taste age or gender context) in the same part. A tag named for a group may stay, written exactly as REGISTRY " +
+          "prints it.";
     return [issue("V10", blocking, message, field.path, terms)];
+  });
+}
+
+/** An exhibit's title: a label, but one that states what its figure shows, so competition judges it. */
+const EXHIBIT_TITLE = /^exhibits\[(\d+)\]\.title$/;
+
+/**
+ * Why a competition claim lacks a count, for V10's messages: the UNAVAILABLE lift.supply metric that says
+ * why similar venues were not counted, else that no venue sample counted them, else (venues were counted)
+ * what a citable count needs.
+ */
+function gapOf(ledger: LedgerSnapshot): string {
+  const gap = ledger.metrics.find((m) => m.key === "lift.supply" && m.value === null);
+  if (gap !== undefined) return `similar venues were not counted (${gap.id}: ${gap.label})`;
+  if (!ledger.metrics.some((m) => countsSupply(m))) return "similar venues were not counted (no venue sample in this run counted them)";
+  return (
+    "only a cited supply or white-space metric counts similar venues (a capped sample's 0 counts none, and crowded or saturated " +
+    `needs at least ${MIN_BUSY_AREA_VENUES} venues in the area)`
+  );
+}
+
+/**
+ * V10's judge for competition: the competitor-count claims a field makes that its part does not back,
+ * empty when it passes. On in every run that measured supply (any geo_lift supply or white-space metric,
+ * with a value or not) or whose question asks about competition (`asked`). A claim is backed when its
+ * part cites a supply or white-space metric that counts similar venues (report/competition countsSupply:
+ * never a capped sample's 0, and a crowded reading from a venue count needs several venues), or, for an
+ * exhibit caption or title, shows a lift map that counted venues; the tag is judged with the headline's part.
+ */
+function uncountedCompetition(
+  draft: ReportDraftShape,
+  ledger: LedgerSnapshot,
+  lookup: LedgerLookup,
+  asked: boolean,
+): (field: DemographicField) => string[] {
+  if (!asked && !ledger.metrics.some(measuresSupply)) return () => [];
+  const parts = citingParts(draft);
+  const counted = (part: CitingPart, busy: boolean): boolean =>
+    citedIds("M", part.metricIds, part.texts).some((id) => {
+      const m = lookup.metric(id);
+      return m !== undefined && countsSupply(m, busy);
+    }) ||
+    part.datasetIds.some((id) => {
+      const d = isId("D", id) ? lookup.dataset(id) : undefined;
+      return d !== undefined && d.kind === "GeoLift" && mapCountsSupply(d.payload);
+    });
+  return (field) => {
+    const title = EXHIBIT_TITLE.test(field.path);
+    if (field.role !== "claim" && !title) return [];
+    const claims = competitionClaimsOf(field.text);
+    if (claims.length === 0) return [];
+    const unit = title ? field.path.replace(/\.title$/, ".caption") : field.unit;
+    const part = parts.get(unit) ?? { metricIds: [], texts: [field.text], datasetIds: [] };
+    return claims.filter((c) => !counted(part, c.busy)).map((c) => c.text);
+  };
+}
+
+/**
+ * V10 for competition: a claim, exhibit title or verdict tag that states a competitor count or supply
+ * level ("no competitors", "the only bookstore", "white space", "crowded") claims what no metric measures,
+ * unless its part cites a counted one. A clause that says the count is unknown, or only a sample, passes.
+ */
+function competitionIssues(
+  fields: readonly DemographicField[],
+  uncounted: (field: DemographicField) => string[],
+  why: string,
+  blocking: Blocking,
+): ValidationIssue[] {
+  return fields.flatMap((field) => {
+    const claims = uncounted(field);
+    if (claims.length === 0) return [];
+    const listed = `${claims.map((c) => `"${c}"`).join(", ")} ${claims.length === 1 ? "states" : "state"} a competitor count or supply level`;
+    const message =
+      field.path === TAG_PATH
+        ? `${field.path}: ${listed}, but ${why}; name the finding without it.`
+        : `${field.path}: ${listed}, but ${why} and this part cites no counted supply metric that backs it. ` +
+          "Write plainly that the number of competitors is unknown and why, or remove the claim; never read an unknown count or a thin sample as none, few or crowded.";
+    return [issue("V10", blocking, message, field.path, claims)];
   });
 }
 

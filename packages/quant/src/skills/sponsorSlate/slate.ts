@@ -45,11 +45,13 @@ export interface Candidate {
 
 export interface CandidateSelection {
   candidates: Candidate[];
-  /** Per category, in input order: usable discovery rows (after the gate, without the seed). */
+  /** Per category, in input order: usable discovery rows (after the gates, without the seed). */
   usable: Map<SponsorCategory, number>;
   /** Discovery results the quality gate skipped, by name (each a QUALITY_GATE_DROPPED). */
   gateDropped: string[];
-  /** Per category: discovery rows the quality gate skipped. */
+  /** Discovery results whose main line lies in another category (offCategoryBranch), by category, in order. */
+  offCategory: { category: SponsorCategory; name: string; branch: string }[];
+  /** Per category: discovery rows the quality gate or the category check skipped. */
   gated: Map<SponsorCategory, number>;
   /** Shortlist brands left out because the candidate cap was reached. */
   overCap: string[];
@@ -58,6 +60,33 @@ export interface CandidateSelection {
    * category's dropped picks can be substituted from (SPEC §4.4 DROPPED_CANDIDATES).
    */
   pool: Map<SponsorCategory, EntityDraft[]>;
+}
+
+const BRAND_GENRE = "urn:tag:genre:brand:";
+/** Tags under one other genre:brand branch that make it a brand's main line (offCategoryBranch). */
+export const MAIN_LINE_MIN_TAGS = 3;
+
+/**
+ * The genre:brand branch a discovery row's main line lies in, when that is not its category's
+ * (ANSWER_QUALITY §9): the row carries the category tag but no tag under it, and at least
+ * MAIN_LINE_MIN_TAGS tags under one other top-level branch, as a fashion house with a fragrance line
+ * does under a beauty tag. The filter guarantees only that the row carries the tag, not that the
+ * brand belongs to the category. Null when the row belongs, or when the category tag is not a
+ * genre:brand tag (a descriptive product tag has no branches to compare).
+ */
+export function offCategoryBranch(row: Pick<QlooEntity, "tags">, tagId: string): string | null {
+  if (!tagId.startsWith(BRAND_GENRE)) return null;
+  const category = tagId.slice(BRAND_GENRE.length);
+  const top = category.split(":")[0];
+  const paths = (row.tags ?? []).flatMap((t) => (t.id?.startsWith(BRAND_GENRE) === true ? [t.id.slice(BRAND_GENRE.length)] : []));
+  if (paths.some((p) => p.startsWith(`${category}:`))) return null;
+  const others = new Map<string, number>();
+  for (const p of new Set(paths)) {
+    const branch = p.split(":")[0] ?? p;
+    if (branch !== top) others.set(branch, (others.get(branch) ?? 0) + 1);
+  }
+  const [main] = [...others].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return main !== undefined && main[1] >= MAIN_LINE_MIN_TAGS ? main[0] : null;
 }
 
 function affinityOf(r: QlooEntity): number | null {
@@ -75,7 +104,8 @@ function byAffinity(results: readonly QlooEntity[]): QlooEntity[] {
 
 /**
  * The candidate set: for each category in input order its top two discovery results not already
- * taken by an earlier category (a brand fills one category only), then the shortlist. A shortlist
+ * taken by an earlier category (a brand fills one category only) and past the quality gate and the
+ * category check (offCategoryBranch), then the shortlist. A shortlist
  * brand fills the first requested category that discovery found it in or whose tag it carries, and
  * none otherwise. The seed is never a candidate.
  */
@@ -87,6 +117,7 @@ export function selectCandidates(args: {
   const { seedEntityId, discoveries, shortlist } = args;
   const taken = new Map<string, Candidate>();
   const gateDropped = new Map<string, string>();
+  const offCategory: CandidateSelection["offCategory"] = [];
   const usable = new Map<SponsorCategory, number>();
   const gated = new Map<SponsorCategory, number>();
   const members = new Map<SponsorCategory, Set<string>>();
@@ -97,11 +128,14 @@ export function selectCandidates(args: {
     let skipped = 0;
     for (const r of byAffinity(d.results ?? [])) {
       if (r.entity_id === seedEntityId || rows.some((x) => x.entity_id === r.entity_id)) continue;
-      if (passesQualityGate(r)) rows.push(r);
-      else {
+      const branch = d.tagId === null ? null : offCategoryBranch(r, d.tagId);
+      if (!passesQualityGate(r)) {
         gateDropped.set(r.entity_id, r.name);
         skipped += 1;
-      }
+      } else if (branch !== null) {
+        offCategory.push({ category: d.category, name: r.name, branch });
+        skipped += 1;
+      } else rows.push(r);
     }
     usable.set(d.category, rows.length);
     gated.set(d.category, skipped);
@@ -136,7 +170,7 @@ export function selectCandidates(args: {
   const pool = new Map(
     discoveries.map((d) => [d.category, (pools.get(d.category) ?? []).filter((r) => !taken.has(r.entity_id)).map(draftFromInsight)] as const),
   );
-  return { candidates: [...taken.values()].slice(0, MAX_CANDIDATES), usable, gateDropped: [...gateDropped.values()], gated, overCap, pool };
+  return { candidates: [...taken.values()].slice(0, MAX_CANDIDATES), usable, gateDropped: [...gateDropped.values()], offCategory, gated, overCap, pool };
 }
 
 /** A within-call score for one candidate: a value, or why there is none. */

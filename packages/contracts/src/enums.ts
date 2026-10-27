@@ -88,6 +88,8 @@ export const COMPARATOR_LABEL: Readonly<Record<Comparator, string>> = {
  * - DROPPED_CANDIDATES: Qloo omitted requested candidates from a context (G2).
  * - NOT_SCORED: candidates tied at the row's floor value, treated as unscored, never ranked (G1).
  * - THIN_RESULT: a call returned fewer than 5 rows (a §6.4 confidence penalty).
+ * - SUPPLY_UNAVAILABLE: similar venues could not be counted (no verified category tag for the place
+ *   type), so the competitor count is unknown, never 0.
  */
 export const Flag = z.enum([
   "TRENDING_HISTORICAL_WINDOW",
@@ -97,6 +99,7 @@ export const Flag = z.enum([
   "LOCATION_FALLBACK",
   "DEMOGRAPHICS_ARE_INDICES",
   "SUPPLY_SAMPLE_ONLY",
+  "SUPPLY_UNAVAILABLE",
   "STALE_CACHE",
   "BUDGET_TRUNCATED",
   "SECONDARY_ENTITY_DROPPED",
@@ -277,7 +280,7 @@ export type MatchClass = z.infer<typeof MatchClass>;
 export const MentionRole = z.enum(["primary", "peer", "secondary"]);
 export type MentionRole = z.infer<typeof MentionRole>;
 
-/** Sponsor categories (S10, built from probe G14). A run uses at most six. */
+/** Sponsor categories (S10, built from probes G14, P5 and C2). A run uses at most six. */
 export const SponsorCategory = z.enum([
   "beer",
   "spirits",
@@ -289,20 +292,53 @@ export const SponsorCategory = z.enum([
   "auto",
   "telecom",
   "fintech",
+  "beauty",
+  "gaming",
+  "travel",
+  "food_delivery",
+  "consumer_tech",
 ]);
 export type SponsorCategory = z.infer<typeof SponsorCategory>;
 
 // Geography (D28) ------------------------------------------------------------------------------------
 
 /**
- * Gazetteer metros: the ones with neighbourhood polygons (LIFT, BLOCK, areas). "nyc" is reserved
- * for P1 and joins this enum then; it is deliberately absent so P0 tools cannot accept it.
+ * Gazetteer metros, the 13 map cities: the ones with neighbourhood polygons (LIFT, BLOCK, areas), D28.
+ * Nashville ships Census ZIP areas (D37), Austin its planning areas, New York its community districts,
+ * and the other ten Census ZIP areas clipped to their core counties (D39).
  */
-export const MetroId = z.enum(["nashville", "austin"]);
+export const MetroId = z.enum([
+  "nashville",
+  "austin",
+  "nyc",
+  "los_angeles",
+  "chicago",
+  "miami",
+  "san_francisco",
+  "seattle",
+  "boston",
+  "denver",
+  "atlanta",
+  "houston",
+  "dallas",
+]);
 export type MetroId = z.infer<typeof MetroId>;
-export const RESERVED_METRO_IDS = ["nyc"] as const;
 
-export const METRO_LABEL: Readonly<Record<MetroId, string>> = { nashville: "Nashville", austin: "Austin" };
+export const METRO_LABEL: Readonly<Record<MetroId, string>> = {
+  nashville: "Nashville",
+  austin: "Austin",
+  nyc: "New York City",
+  los_angeles: "Los Angeles",
+  chicago: "Chicago",
+  miami: "Miami",
+  san_francisco: "San Francisco",
+  seattle: "Seattle",
+  boston: "Boston",
+  denver: "Denver",
+  atlanta: "Atlanta",
+  houston: "Houston",
+  dallas: "Dallas",
+};
 
 /**
  * A market metro for locality-signal contexts (SHARE metros, SLATE markets, RANK metro contexts).

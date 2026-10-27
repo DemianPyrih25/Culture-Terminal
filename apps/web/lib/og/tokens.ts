@@ -1,21 +1,22 @@
 /**
- * The share card's tokens (Concept A · Brief, D36): the colours of app/globals.css's @theme, which
- * next/og cannot read, and the card's frame. One accent, two data colours, hairlines, no shadows.
+ * The share card's colours: the redesign palette of app/globals.css's @theme (design/redesign.pen), which
+ * next/og cannot read. The keys are the card's roles: paper the card, canvas its strips, text2 and dim
+ * the secondary inks, faint the placeholder ink, data the subject series and data2 the others.
  */
 export const OG_COLOR = {
   paper: "#ffffff",
-  canvas: "#f7f7f5",
-  ink: "#121416",
-  text2: "#3d4248",
-  dim: "#6b7178",
-  faint: "#a3a8ae",
-  line: "#e6e7e9",
-  lineStrong: "#c9ccd0",
-  accent: "#1c3d6e",
-  accentSoft: "#e8edf4",
-  negative: "#8e2f2f",
-  data: "#1c3d6e",
-  data2: "#a9b0b8",
+  canvas: "#f5f6f8",
+  ink: "#0e1116",
+  text2: "#4a5261",
+  dim: "#4a5261",
+  faint: "#8a93a3",
+  line: "#e6e8ec",
+  lineStrong: "#cdd2da",
+  accent: "#5b3df5",
+  accentSoft: "#eeebfe",
+  negative: "#a11f16",
+  data: "#5b3df5",
+  data2: "#c9ced6",
 } as const;
 
 /** The families the card sets (lib/og/fonts.ts loads them); the instances carry their own names (OFL reserved names). */

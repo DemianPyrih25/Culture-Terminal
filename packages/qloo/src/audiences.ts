@@ -1,5 +1,15 @@
 import { AudienceKey, DENIED_AUDIENCE_FAMILIES, DENIED_AUDIENCES as DENIED_AUDIENCE_KEYS, type Pillar } from "@ct/contracts";
 
+/** The audience families D21 allows on every desk, in the order the catalogue lists them. */
+const SIX_FAMILIES = [
+  "hobbies_and_interests",
+  "leisure",
+  "spending_habits",
+  "professional_area",
+  "life_stage",
+  "investing_interests",
+] as const;
+
 /**
  * The desk audience allowlist (D21, SPEC §0.1 D21). This module is the source of truth; the file
  * config/audiences.allow.json mirrors it for readers outside the code, and a test keeps the two equal.
@@ -11,18 +21,12 @@ export const AUDIENCE_ALLOWLIST = {
     "Audience families each desk may send to Qloo (D21). Denied families and audiences are refused on every desk. Mirror of packages/qloo/src/audiences.ts.",
   // The denied set lives in contracts so skills can tell a sensitive segment from an off-desk family.
   denied: { families: DENIED_AUDIENCE_FAMILIES, audiences: DENIED_AUDIENCE_KEYS },
+  // D21: the six families are allowed on every desk; the desk table stays so a desk can be narrowed.
   desks: {
-    investment: [
-      "hobbies_and_interests",
-      "leisure",
-      "spending_habits",
-      "professional_area",
-      "investing_interests",
-      "life_stage",
-    ],
-    location: ["hobbies_and_interests", "leisure"],
-    marketing: ["hobbies_and_interests", "leisure", "spending_habits", "professional_area", "life_stage"],
-    audience: ["hobbies_and_interests", "leisure", "spending_habits", "professional_area", "life_stage"],
+    investment: SIX_FAMILIES,
+    location: SIX_FAMILIES,
+    marketing: SIX_FAMILIES,
+    audience: SIX_FAMILIES,
   },
 } as const satisfies {
   description: string;

@@ -49,7 +49,7 @@ const TWIN_INTENT: Intent = {
   pillar: "investment",
   job: "brand_health",
   mentions: [{ text: TWIN_MENTION, entity_type: "brand", role: "primary", public_figure: false }],
-  geo: { metro: null, area: null, unsupported_place: null },
+  geo: { metro: null, area: null, unsupported_place: null, market: null },
   constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
   safety: { allowed: true, category: null, reframe: null },
   assumptions: [],

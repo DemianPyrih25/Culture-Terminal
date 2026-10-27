@@ -31,6 +31,8 @@ import { createEntityRegistry } from "../registry";
 import type { AgentRunOptions, AgentRunResult } from "../run";
 import { POSITION_FAILED, recordPosition } from "../report/position";
 import { recordScorecard } from "../scorecard";
+import { areaMentionsToGeo } from "./areaMentions";
+import { loadRunAudiences, NO_RUN_AUDIENCES } from "./audiences";
 import { ALL_SKILLS, toolLabel, UNAVAILABLE_SKILLS } from "./catalogue";
 import { buildRunContext, evidenceStatus, findingLeads, type RanCall } from "./context";
 import { createFollowupDeadline, type FollowupDeadline } from "./followup";
@@ -38,7 +40,7 @@ import { gazetteer } from "./gazetteer";
 import { gateEvidence, privatePersonNames, privatePersonRefusal, runResolutionGate, type GateResolved } from "./gate";
 import { RunEvents, RunMeter } from "./meter";
 import { runMarkets, unknownMarketIssues } from "./markets";
-import { emptyScan, planScan, type ScanPlan } from "./scan";
+import { emptyScan, namedAreaIds, planScan, type ScanPlan } from "./scan";
 import { estimateSkillCalls, runSkillCall, shortError, SkillsRan, type SkillCallOutcome, type SkillRunnerDeps } from "./tools";
 
 /**
@@ -188,7 +190,8 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
     let read: Intent;
     if (options.intent !== undefined) {
       if (options.signal.aborted) return cancelled();
-      read = normalizeIntent(options.intent);
+      // A preview's intent may predate CLERK's area backstop, so it is applied again (it is idempotent).
+      read = areaMentionsToGeo(normalizeIntent(options.intent), gazetteer());
       events.emit({ type: "clerk", intent: read, ms: 0 });
     } else {
       const clerkStarted = now();
@@ -258,6 +261,9 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       skillsRan.add(drops.skill, drops.flags);
     }
 
+    // The desk's AUDIENCES from the pinned catalogue (D21): read once, offered to the ANALYST and checked on every call.
+    const audiences = qlooEnabled ? await loadRunAudiences(options.qloo, pillar) : NO_RUN_AUDIENCES;
+
     // C: the opening scan, started before the ANALYST so it runs alongside turn 1 -------------------
     const deps: SkillRunnerDeps = {
       runId: options.runId,
@@ -268,6 +274,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       registry,
       geo,
       localities: options.localities ?? null,
+      audiences: audiences.keys,
       budget: createRunBudget({
         limits,
         qlooNetworkUsed: () => runQloo.networkUsed(),
@@ -285,6 +292,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       onResult: (tool, result) => {
         if (result.evidenceIds.length > 0) skillsRan.add(tool, result.flags);
       },
+      questionAreas: read.geo.metro === null ? null : { metro: read.geo.metro, ids: namedAreaIds(read, geo) },
     };
     const markets = await runMarkets(deps.localities, geo);
     const scan: ScanPlan = qlooEnabled
@@ -319,25 +327,29 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
     };
     /** Entities wave-1 resolve_entities calls matched exactly: the peers a deferred scan step waits for. */
     const wavePeers: RegisteredEntity[] = [];
-    const notePeers = (outcome: SkillCallOutcome): void => {
+    /** Entities the opening scan's own rows registered (cultural neighbours): a deferred step's fallback peers. */
+    const scanPeers: RegisteredEntity[] = [];
+    const notePeers = (outcome: SkillCallOutcome, into: RegisteredEntity[] = wavePeers): void => {
       const digest = outcome.result?.forModel;
       const refs = [...(digest?.top_rows ?? []).map((row) => row.ref), ...(digest?.registered ?? []).map((r) => r.ref)];
       for (const ref of refs) {
         const entity = ref !== null && isId("R", ref) ? registry.entity(ref) : null;
-        if (entity !== null && !wavePeers.includes(entity)) wavePeers.push(entity);
+        if (entity !== null && !into.includes(entity)) into.push(entity);
       }
     };
     /**
-     * The deferred scan steps, once wave 1 has returned, on the peers it resolved: each digest, or a
-     * note when it found none to use. They run before turn 1 closes, so what they find is listed for
-     * turn 2 and their calls stay out of turn 2's allowance.
+     * The deferred scan steps, once wave 1 has returned, on the peers it resolved, else on the scan's
+     * own neighbours of the primary's type (an audience question often names no peer, and the age read
+     * behind GENERATIONAL_SPLIT should not wait on the ANALYST naming one): each digest, or a note when
+     * neither holds one to use. They run before turn 1 closes, so what they find is listed for turn 2
+     * and their calls stay out of turn 2's allowance.
      */
     const deferredDigests = async (): Promise<string[]> => {
       const digests: string[] = [];
       for (const step of scan.deferred) {
-        const input = step.input(wavePeers);
+        const input = step.input(wavePeers) ?? step.input(scanPeers);
         if (input === null) {
-          digests.push(`SCAN NOTE: ${toolLabel(step.tool)} did not run: wave 1 resolved no peer of the primary's type to compare.`);
+          digests.push(`SCAN NOTE: ${toolLabel(step.tool)} did not run: neither wave 1 nor the scan holds a peer of the primary's type to compare.`);
           continue;
         }
         const outcome = await track(scanCall(step.toolCallId, step.tool, input, await estimateSkillCalls(deps, step.tool, input)));
@@ -348,6 +360,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
     const scanDigests = track(
       (async () => {
         const outcomes = await Promise.all(scan.steps.map((s) => scanCall(s.toolCallId, s.tool, s.input, scanEstimates.get(s.toolCallId) ?? null)));
+        for (const o of outcomes) notePeers(o, scanPeers);
         const digests = outcomes.map((o) => o.content);
         // Chained steps read the tags their scan step returned (geo_lift on find_tags' rows), not the
         // whole registry, which wave-1 calls running alongside may already have added to.
@@ -378,6 +391,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       geo,
       scan: { plan: scan, estimates: scanEstimates },
       markets,
+      audiences: audiences.segments,
       unavailable: qlooEnabled ? UNAVAILABLE_SKILLS : ALL_SKILLS,
       qlooEnabled,
       caseSummary: options.parent?.caseSummary ?? null,
@@ -461,6 +475,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
           qlooEnabled,
           registry,
           areas,
+          competitionAsked: job === "site_selection",
           attempt: context.final ? 2 : 1,
         });
         lastCheck = check;
@@ -510,7 +525,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
     // The accepted draft is the one the CHECKER saw last; checking it again is only a fallback.
     const check =
       outcome.status === "completed" && outcome.draft !== null
-        ? (lastCheck ?? checkReport({ draft: outcome.draft, plan, ledger: runLedger.snapshot(), qlooEnabled, registry, areas, attempt: 2 }))
+        ? (lastCheck ?? checkReport({ draft: outcome.draft, plan, ledger: runLedger.snapshot(), qlooEnabled, registry, areas, competitionAsked: job === "site_selection", attempt: 2 }))
         : null;
     let report: Report;
     try {

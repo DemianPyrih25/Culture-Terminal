@@ -21,7 +21,11 @@ describe("audience allowlist", () => {
   it("gives standalone tools the union of the desk families", () => {
     const union = new Set(Object.values(AUDIENCE_ALLOWLIST.desks).flat());
     expect([...audienceFamiliesFor(null)].sort()).toEqual([...union].sort());
-    expect([...audienceFamiliesFor("location")].sort()).toEqual(["hobbies_and_interests", "leisure"]);
+  });
+
+  it("allows the six D21 families on every desk", () => {
+    const six = ["hobbies_and_interests", "investing_interests", "leisure", "life_stage", "professional_area", "spending_habits"];
+    for (const desk of Pillar.options) expect([...audienceFamiliesFor(desk)].sort(), desk).toEqual(six);
   });
 
   it("explains each denial", () => {
@@ -42,8 +46,8 @@ describe("audience allowlist", () => {
       const everywhere = Pillar.options.every((desk) => /denied on every desk/.test(audienceDenial(key, desk) ?? ""));
       expect(isDeniedAudience(key), key).toBe(everywhere);
     }
-    // Off the location desk's list, yet not a sensitive segment.
-    expect(audienceDenial("urn:audience:investing_interests:fixture", "location")).toMatch(/not allowed/);
-    expect(isDeniedAudience("urn:audience:investing_interests:fixture")).toBe(false);
+    // Off every desk's list, yet not a sensitive segment.
+    expect(audienceDenial("urn:audience:unknown_family:fixture", "location")).toMatch(/not allowed/);
+    expect(isDeniedAudience("urn:audience:unknown_family:fixture")).toBe(false);
   });
 });

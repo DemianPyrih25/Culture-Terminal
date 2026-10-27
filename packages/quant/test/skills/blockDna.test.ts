@@ -367,6 +367,17 @@ describe("block_dna location ladder", () => {
     if (!far.ok) expect(far.message).toContain("km from central Austin");
   });
 
+  it("takes a far point only when the map city's gazetteer holds it, never on the place search radius alone", () => {
+    // About 85 km from central Los Angeles: inside the place search radius, outside the county.
+    const outsideCounty = resolveArea({ kind: "point", ref: "-117.40,33.95", metro: "los_angeles" }, fakeGeo());
+    expect(outsideCounty.ok).toBe(false);
+    // The same distance on an island the gazetteer holds resolves.
+    const island: GeoApi = { ...fakeGeo(), locate: (metro) => (metro === "los_angeles" ? RIVERBEND.id : null), neighbourhood: () => RIVERBEND };
+    expect(resolveArea({ kind: "point", ref: "-117.40,33.95", metro: "los_angeles" }, island).ok).toBe(true);
+    // A near point outside every area still resolves, as before.
+    expect(resolveArea({ kind: "point", ref: "-97.60,30.40", metro: "austin" }, fakeGeo()).ok).toBe(true);
+  });
+
   it("reads a neighbourhood of a metro without boundaries as a place-name search", () => {
     const resolved = resolveArea({ kind: "nbhd", ref: "east_side", metro: "nashville" }, fakeGeo());
     if (!resolved.ok) throw new Error(resolved.message);

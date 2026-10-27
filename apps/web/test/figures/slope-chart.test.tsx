@@ -13,7 +13,6 @@ vi.mock("@/lib/routes", () => ({ ROUTE_LIVE: { method: true, following: false } 
 const html = render(
   <SlopeChart
     data={tenantSlope.payload}
-    number={4}
     title="A wine bar and a record shop climb most"
     caption="FIT among the 9 brands ranked in both calls."
     source={FIXTURE_SOURCES.tenant}
@@ -34,10 +33,10 @@ describe("SlopeChart · tenant slope", () => {
     expect(plot).toContain('role="img"');
     for (const key of ["R21", "R22", "R25"]) expect(rowMarkup(plot, key)).toContain('data-tone="highlight"');
     expect(rowMarkup(plot, "R29")).toContain('data-tone="default"');
-    expect(rowMarkup(plot, "R22")).toContain("stroke-data");
-    expect(rowMarkup(plot, "R29")).toContain("stroke-data-2");
-    expect(text(plot)).toContain("AUSTIN");
-    expect(text(plot)).toContain("EAST CESAR CHAVEZ");
+    expect(rowMarkup(plot, "R22")).toContain("stroke-accent");
+    expect(rowMarkup(plot, "R29")).toContain("stroke-chart-muted");
+    expect(text(plot)).toContain("Austin");
+    expect(text(plot)).toContain("East Cesar Chavez");
   });
 
   it("labels both ends with name and value, and the right end with the shift and the score", () => {
@@ -46,14 +45,14 @@ describe("SlopeChart · tenant slope", () => {
     expect(endLabel(plot, "R22", "end")).toBe(".88Low Tide Records▲ .6393");
     expect(endLabel(plot, "R29", "end")).toBe(".00Granite Outfitters▼ .880");
     expect(endLabel(plot, "R26", "end")).toContain("= .00");
-    expect(text(plot)).toContain("Δ VS AUSTIN");
-    expect(text(plot)).toContain("TENANT FIT");
+    expect(text(plot)).toContain("Δ vs Austin");
+    expect(text(plot)).toContain("Tenant fit");
   });
 
   it("lists a candidate with no point under the plot, with its reason", () => {
     const plot = plotView(html);
     expect(plot).not.toContain('data-row="R30"');
-    expect(text(plot)).toContain("NOT PLACEDSaltmarsh Seltzer Bar (not scored)");
+    expect(text(plot)).toContain("Not placedSaltmarsh Seltzer Bar (not scored)");
   });
 
   it("keeps the table view complete: both axes with ranks, the shift, the score", () => {
@@ -83,12 +82,12 @@ describe("SlopeChart · three contexts", () => {
   const plot = plotView(render(<SlopeChart data={marketSlope.payload} title="Markets" />));
 
   it("draws every axis and breaks a line at a dropped point, explaining it at the end", () => {
-    for (const axis of ["NATIONAL", "NASHVILLE", "AUSTIN"]) expect(text(plot)).toContain(axis);
+    for (const axis of ["National", "Nashville", "Austin"]) expect(text(plot)).toContain(axis);
     const dropped = rowMarkup(plot, "R9");
     // National → Nashville is drawn; the Austin end has no circle.
     expect([...dropped.matchAll(/<circle/g)]).toHaveLength(2);
     expect(endLabel(plot, "R9", "end")).toBe("Ember Root Beer · dropped by Qloo—");
-    expect(text(plot)).toContain("Δ VS NATIONAL");
+    expect(text(plot)).toContain("Δ vs National");
   });
 
   it("highlights only the lines that climb", () => {
@@ -167,7 +166,7 @@ describe("slope helpers", () => {
   });
 
   it("names the comparator in the shift head", () => {
-    expect(shiftHead(tenantSlope.payload)).toBe("Δ VS AUSTIN");
+    expect(shiftHead(tenantSlope.payload)).toBe("Δ vs Austin");
   });
 
   it("prints rank-scale points as ranks and shifts in places", () => {

@@ -453,13 +453,13 @@ export interface TexFormulaProps {
 }
 
 /**
- * A formula set in the serif: clauses separated by \quad wrap as units. Screen readers get the plain
+ * A formula set in the body face: clauses separated by \quad wrap as units. Screen readers get the plain
  * text reading instead of the drawn fractions and scripts.
  */
 export function TexFormula({ tex, className }: TexFormulaProps) {
   const clauses = texClauses(parseTex(tex));
   return (
-    <span className={cx("block font-serif text-[16px] leading-[30px] text-ink", className)}>
+    <span className={cx("block font-sans text-[16px] leading-[30px] text-ink", className)}>
       <span className="sr-only">{texToText(tex)}</span>
       <span aria-hidden="true" className="flex flex-wrap items-baseline gap-x-7">
         {clauses.map((clause, i) => (

@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
-import { BriefMissing } from "@/components/brief";
+import { AnswerMissing } from "@/components/working/missing";
 
 export const metadata: Metadata = {
-  title: "No brief here · Culture Terminal",
+  title: "No answer here · Culture Terminal",
   robots: { index: false, follow: false },
 };
 
-/** A run id that does not exist: the styled 404, with the chrome to ask again. */
+/** A run id that does not exist: one line and the way to ask. */
 export default function RunNotFound() {
-  return <BriefMissing kind="not_found" />;
+  return <AnswerMissing kind="not_found" />;
 }

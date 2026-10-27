@@ -15,7 +15,7 @@ const NOVA_PLUS: Invented = { id: "ent-nova-03", name: "Brand Nova Plus", catego
 const ORBIT: Invented = { id: "ent-orbit-04", name: "Orbit Goods", category: null, popularity: 0.6 };
 const CAFE: Invented = { id: "ent-cafe-05", name: "Café Lumen", category: null, popularity: 0.2 };
 
-const mention = (text: string, type: "brand" | "artist" | "place" = "brand") => ({ text, type });
+const mention = (text: string, type: "brand" | "artist" | "place" | "podcast" = "brand") => ({ text, type });
 
 function parse(raw: unknown) {
   return resolveEntitiesSkill.input.parse(raw);
@@ -62,6 +62,32 @@ describe("classifyMatches", () => {
     expect(classifyMatches(mention("!!!"), [searchResult({ ...NOVA, name: "???" })]).matchClass).toBe("not_found");
   });
 
+  it("reads a podcast billed with its host as the show, only when no result carries the name exactly", () => {
+    const billed: Invented = { id: "ent-pod-06", name: "Night Shift Notes with Dana Vale", category: null, popularity: 0.5 };
+    const plain: Invented = { id: "ent-pod-07", name: "Night Shift Notes", category: null, popularity: 0.2 };
+    const pod = (r: Invented) => searchResult(r, "urn:entity:podcast");
+    const one = classifyMatches(mention("Night Shift Notes", "podcast"), [pod(billed)]);
+    expect(one.matchClass).toBe("exact");
+    expect(one.exact.map((r) => r.entity_id)).toEqual([billed.id]);
+    // The exact name wins over the billed one; other types never drop a "with" clause.
+    expect(classifyMatches(mention("Night Shift Notes", "podcast"), [pod(billed), pod(plain)]).exact.map((r) => r.entity_id)).toEqual([plain.id]);
+    expect(classifyMatches(mention("Night Shift Notes", "brand"), [searchResult(billed)]).matchClass).toBe("not_found");
+    // The full billed title still matches itself, and another show's billing is no match.
+    expect(classifyMatches(mention("Night Shift Notes with Dana Vale", "podcast"), [pod(billed)]).matchClass).toBe("exact");
+    expect(classifyMatches(mention("Night Shift", "podcast"), [pod(billed)]).matchClass).toBe("not_found");
+  });
+
+  it("keeps a 'with' clause that is part of a podcast's title, so a shorter name never matches it (D20)", () => {
+    const pod = (id: string, name: string) => searchResult({ id, name, category: null, popularity: 0.4 }, "urn:entity:podcast");
+    // One word, a pronoun, an article or a common noun is a title, not a host's name.
+    expect(classifyMatches(mention("Nap", "podcast"), [pod("ent-pod-11", "Nap With Me")]).matchClass).toBe("not_found");
+    expect(classifyMatches(mention("Chats", "podcast"), [pod("ent-pod-12", "Chats with Ondine")]).matchClass).toBe("not_found");
+    expect(classifyMatches(mention("Supper", "podcast"), [pod("ent-pod-13", "Supper with the Comets")]).matchClass).toBe("not_found");
+    expect(classifyMatches(mention("Drinks", "podcast"), [pod("ent-pod-14", "Drinks with Friends Like Us")]).matchClass).toBe("not_found");
+    // Two hosts still bill.
+    expect(classifyMatches(mention("Late Lane", "podcast"), [pod("ent-pod-15", "Late Lane with Dana Vale and Sam Ortiz")]).matchClass).toBe("exact");
+  });
+
   it("caps alternatives at five", () => {
     const many = Array.from({ length: 8 }, (_, i) => searchResult({ id: `ent-other-${i}`, name: `Other ${i}`, category: null }));
     expect(classifyMatches(mention("Brand Nova"), many).alternatives).toHaveLength(5);
@@ -87,8 +113,20 @@ describe("searchParams", () => {
     });
   });
 
-  it("does not search a place without a metro", () => {
+  it("searches places in a large county or a market with a radius that reaches its bbox (D44)", () => {
+    expect(searchParams({ text: "Café Lumen", type: "place", metro: "los_angeles" })).toMatchObject({
+      "filter.location": "34.0522,-118.2437",
+      "filter.radius": 84,
+    });
+    expect(searchParams({ text: "Café Lumen", type: "place", metro: "portland" })).toMatchObject({
+      "filter.location": "45.52,-122.68",
+      "filter.radius": 25,
+    });
+  });
+
+  it("does not search a place without a metro, or in a market config/metros.json does not list", () => {
     expect(searchParams({ text: "Café Lumen", type: "place", metro: null })).toBeNull();
+    expect(searchParams({ text: "Café Lumen", type: "place", metro: "riverton" })).toBeNull();
   });
 });
 

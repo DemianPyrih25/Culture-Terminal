@@ -1,6 +1,7 @@
 import type { EvidenceId, ReportDraft, ReportDraftShape, ValidationIssue, ValidationRule } from "@ct/contracts";
 import { describe, expect, it } from "vitest";
 import { checkReport, repairMessage, REWRITE_TIGHT_SHARE, trimVerdictTag, type CheckReportInput } from "../../src/checker";
+import { competitionClaims, competitionClaimsOf } from "../../src/report/competition";
 import { datasetMeasuresDemographics, demographicEvidence, measuresDemographics } from "../../src/report/demographics";
 import { brandHealthLedger, brandHealthRegistry, emptyLedger, plan, validDraft } from "../ledger/fixtures";
 
@@ -154,6 +155,30 @@ describe("V2: tokens resolve", () => {
     const result = check(draft);
     expect(of(result.issues, "V2")[0]?.subjects).toEqual(["{{ M1 }}", "[E1, E2]", "{M12}"]);
     expect(of(result.issues, "V3")).toEqual([]);
+  });
+
+  it("rejects a metric token set beside another entity's name", () => {
+    // M2 is Brand Alpha's distinctiveness rank; "Beta" alone names Brand Beta.
+    const draft = edit((d) => (d.arguments[0]!.qloo_fact = "Similarity with Brand Beta is {{M1}} [E1]. In the matrix Beta sits at {{M2}} [E1]."));
+    const v2 = of(check(draft).issues, "V2");
+    expect(v2).toEqual([expect.objectContaining({ action: "reject", path: "arguments[0].qloo_fact", subjects: ["M2"] })]);
+    expect(v2[0]?.message).toContain("{{M2}} measures Brand Alpha, but its sentence names Brand Beta instead");
+    expect(of(check(draft, { attempt: 2 }).issues, "V2")).toEqual([expect.objectContaining({ action: "warn" })]);
+  });
+
+  it("lets a token stand when its sentence names a subject, its lead-up names no one, or a pronoun points back", () => {
+    for (const text of [
+      "Brand Alpha ranks {{M2}} for distinctiveness, unlike Brand Beta [E1].",
+      "Next to Brand Beta, it ranks {{M2}} for distinctiveness [E1].",
+      "Brand Beta is close {{M1}}; the leader ranks {{M2}} [E1].",
+      "Alpha ranks {{M2}}. Beta trails it [E1].",
+    ]) {
+      const draft = edit((d) => (d.arguments[0]!.qloo_fact = text));
+      expect(of(check(draft).issues, "V2"), text).toEqual([]);
+    }
+    // Without a registry nothing can be named, so nothing is judged.
+    const beta = edit((d) => (d.arguments[0]!.qloo_fact = "In the matrix Brand Beta sits at {{M2}} [E1]."));
+    expect(of(check(beta, { registry: undefined }).issues, "V2")).toEqual([]);
   });
 
   it("rejects any token in a next move, resolvable or not: the child run has other ids", () => {
@@ -713,7 +738,7 @@ describe("V10: audience demographics need a metric that measures them", () => {
     expect(first.reject).toBe(true);
     const message = of(first.issues, "V10")[0]?.message ?? "";
     expect(message).toContain("remove the claim");
-    expect(message).toContain("cite a metric that measures it (audience_dna, or a share_of_taste age context)");
+    expect(message).toContain("cite a metric that measures it (audience_dna, or a share_of_taste age or gender context)");
     expect(repairMessage(first.issues)).toContain('- V10 headline: "young", "male" claim an audience\'s age, gender or generation');
 
     const second = check(draft, { attempt: 2 });
@@ -788,6 +813,20 @@ describe("V10: audience demographics need a metric that measures them", () => {
     expect(of(check(draft, { registry: undefined }).issues, "V10")[0]?.subjects).toEqual(["Young"]);
   });
 
+  it("reads a registered tag name as prose writes it: any case, hyphenated, singular or plural", () => {
+    const withTag = brandHealthRegistry();
+    withTag.registerTag({ tagId: "urn:tag:audience:invented:early_careers", name: "Young Professionals", type: "audience", signalCapable: false });
+    for (const written of ["the city's young-professional tag", "fewer young professional signals", "a Young_Professionals crowd"]) {
+      const draft = edit((d) => (d.arguments[0]!.our_read = `Venue-goers lean away from ${written} here.`));
+      expect(of(check(draft, { registry: withTag }).issues, "V10"), written).toEqual([]);
+    }
+    // A demographic word beside the name, or a longer word that only starts with it, is still a claim.
+    const claim = edit((d) => (d.arguments[0]!.our_read = "A young crowd, unlike the Young Professionals tag."));
+    expect(of(check(claim, { registry: withTag }).issues, "V10")[0]?.subjects).toEqual(["young"]);
+    const longer = edit((d) => (d.arguments[0]!.our_read = "Younger Professionalsville fans sit next to Brand Alpha."));
+    expect(of(check(longer, { registry: withTag }).issues, "V10")[0]?.subjects).toEqual(["Younger"]);
+  });
+
   it("still reads a registered name made only of demographic words as a claim", () => {
     const withTag = brandHealthRegistry();
     withTag.registerTag({ tagId: "urn:tag:lifestyle:invented:gen_z", name: "Gen Z", type: "lifestyle", signalCapable: false });
@@ -795,7 +834,7 @@ describe("V10: audience demographics need a metric that measures them", () => {
     expect(of(check(draft, { registry: withTag }).issues, "V10")[0]?.subjects).toEqual(["Gen Z"]);
   });
 
-  it("counts audience_dna indices, the youth tilt and share_of_taste percentiles in an age context only", () => {
+  it("counts audience_dna indices, the youth tilt and within-call percentiles in an age or gender context only", () => {
     const m = (formulaId: string, key = formulaId, subjectRefs = ["R1"], value: number | null = 0.2) => ({ formulaId, key, subjectRefs, value });
     expect(measuresDemographics(m("dna.gender_index"))).toBe(true);
     expect(measuresDemographics(m("share.youth_tilt"))).toBe(true);
@@ -804,6 +843,13 @@ describe("V10: audience demographics need a metric that measures them", () => {
     expect(measuresDemographics(m("share.pct", "share.pct", ["R1", "nashville"]))).toBe(false);
     expect(measuresDemographics(m("dna.age_index", "dna.age_index", ["R1"], null))).toBe(false);
     expect(measuresDemographics(m("dna.distinctive_tags"))).toBe(false);
+    // Gender contexts (C4): SHARE and FIT name the gender as a subject ref, matched exactly.
+    expect(measuresDemographics(m("share.pct", "share.pct", ["R1", "female"]))).toBe(true);
+    expect(measuresDemographics(m("pct.within_call", "rank.fit", ["R1", "male"]))).toBe(true);
+    expect(measuresDemographics(m("pct.within_call", "rank.fit", ["R1", "25_to_29"]))).toBe(true);
+    expect(measuresDemographics(m("pct.within_call", "rank.fit", ["R1", "nashville"]))).toBe(false);
+    expect(measuresDemographics(m("share.pct", "share.pct", ["R1", "urn:audience:leisure:invented_male_league"]))).toBe(false);
+    expect(measuresDemographics(m("popularity", "popularity", ["R1", "female"]))).toBe(false);
     expect(datasetMeasuresDemographics({ formulaIds: ["dna.age_index", "dna.gender_index"], evidenceIds: ["E4"] })).toBe(true);
     expect(datasetMeasuresDemographics({ formulaIds: ["subs.similarity", "share.pct"], evidenceIds: ["E1"] })).toBe(false);
   });
@@ -867,6 +913,218 @@ describe("V10: audience demographics need a metric that measures them", () => {
     expect(v10((d) => (d.exhibits[0]!.caption = "Gen Z fans cluster near Brand Beta {{M1}}."))).toEqual([
       expect.objectContaining({ path: "exhibits[0].caption", subjects: ["Gen Z"] }),
     ]);
+  });
+});
+
+describe("V10: competitor counts need a counted supply sample", () => {
+  /**
+   * The brand-health ledger plus a geo_lift run that could not count similar venues (invented values): M11
+   * an area lift, M12 the UNAVAILABLE lift.supply metric that says why.
+   */
+  function uncountedLedger(measured = false, countedElsewhere = false) {
+    const fx = brandHealthLedger();
+    const base = { conf: null, window: null, comparator: null } as const;
+    fx.ledger.addMetric({ ...base, key: "lift.area", label: "lift of Lark Hill vs the restaurant baseline", subjectRefs: ["lark_hill", "T1"], value: 1.4, reason: null, display: "1.40×", unit: "lift", badge: "ESTIMATED", formulaId: "lift.area", evidenceIds: ["E5"], n: 9 });
+    fx.ledger.addMetric({
+      ...base,
+      key: "lift.supply",
+      label: "similar venues (competitors) in Nashville: unknown, never 0. We can't count similar venues in Nashville: Qloo's venue data has no verified category for Pottery Studio, so the number of competitors here is unknown, not zero.",
+      subjectRefs: ["nashville", "T1"],
+      value: measured ? 4 : null,
+      reason: measured ? null : "unavailable",
+      display: measured ? "4 in the sample" : "not measured",
+      unit: "count",
+      badge: measured ? "MEASURED" : "UNAVAILABLE",
+      formulaId: "lift.white_space",
+      evidenceIds: ["E5"],
+      n: null,
+    });
+    // M13: another geo_lift call (another metro) that did count: white space with a value.
+    if (countedElsewhere) {
+      fx.ledger.addMetric({ ...base, key: "lift.white_space", label: "white space in Mill Row (from a sample of Qloo-indexed venues)", subjectRefs: ["mill_row", "T1"], value: 0.81, reason: null, display: "0.81 · Latent & open", unit: "score", badge: "ESTIMATED", formulaId: "lift.white_space", evidenceIds: ["E5"], n: 12 });
+    }
+    return fx.snapshot();
+  }
+  const v10 = (change: (d: ReportDraft) => void, extra: Partial<CheckReportInput<ReportDraft>> = {}) =>
+    of(check(edit(change), { ledger: uncountedLedger(), ...extra }).issues, "V10");
+
+  it("rejects a competitor count or supply level once, and warns on the repair", () => {
+    const draft = edit((d) => {
+      d.headline = "Lark Hill leads with no direct competitors {{M11}}";
+      d.arguments[0]!.our_read = "Three similar venues sit nearby, so the block is underserved.";
+      d.bear_case[0] = { text: "Competition is thin, which may not last {{M11}}.", metric_ids: ["M11"] };
+    });
+    const first = check(draft, { ledger: uncountedLedger() });
+    const issues = of(first.issues, "V10");
+    expect(issues.map((i) => [i.path, i.subjects, i.action])).toEqual([
+      ["headline", ["no direct competitors"], "reject"],
+      // One claim per clause.
+      ["arguments[0].our_read", ["Three similar venues", "underserved"], "reject"],
+      ["bear_case[0].text", ["Competition is thin"], "reject"],
+    ]);
+    expect(first.reject).toBe(true);
+    expect(issues[0]?.message).toContain("similar venues were not counted (M12: similar venues (competitors) in Nashville: unknown");
+    expect(issues[0]?.message).toContain("Write plainly that the number of competitors is unknown and why");
+    expect(repairMessage(first.issues)).toContain('- V10 headline: "no direct competitors" states a competitor count');
+
+    const second = check(draft, { ledger: uncountedLedger(), attempt: 2 });
+    expect(of(second.issues, "V10").every((i) => i.action === "warn")).toBe(true);
+    expect(second.reject).toBe(false);
+  });
+
+  it("passes sentences that say the competitor count is unknown", () => {
+    expect(
+      v10((d) => {
+        d.headline = "Lark Hill leads for pottery studios {{M11}}; competitors there are unknown";
+        d.arguments[0]!.our_read = "We can't count similar venues: Qloo has no verified category for this place type, so white space is not measured.";
+        d.bear_case[0] = { text: "Competition could not be counted, so a crowded block cannot be ruled out {{M11}}.", metric_ids: ["M11"] };
+      }),
+    ).toEqual([]);
+  });
+
+  it("judges nothing when no supply was measured or asked for, and needs a cited count when it was counted", () => {
+    const claim = (d: ReportDraft) => (d.arguments[0]!.our_read = "Few rivals operate in Lark Hill.");
+    expect(v10(claim, { ledger })).toEqual([]);
+    // Counted supply backs only the part that cites it.
+    expect(v10(claim, { ledger: uncountedLedger(true) }).map((i) => [i.subjects, i.message.includes("only a cited supply or white-space metric counts similar venues")])).toEqual([
+      [["Few rivals"], true],
+    ]);
+    const cited = (d: ReportDraft) => {
+      d.arguments[0]!.our_read = "Few rivals operate in Lark Hill {{M12}}.";
+      d.arguments[0]!.metric_ids = [...d.arguments[0]!.metric_ids, "M12"];
+    };
+    expect(v10(cited, { ledger: uncountedLedger(true) })).toEqual([]);
+  });
+
+  /** A counted run (invented values): M11 an area lift, M12 a named area's sampled venues as geo_lift writes them. */
+  function sampledLedger(supply: { value: number | null; label: string }) {
+    const fx = brandHealthLedger();
+    const base = { conf: null, window: null, comparator: null } as const;
+    fx.ledger.addMetric({ ...base, key: "lift.area", label: "lift of Lark Hill vs the restaurant baseline", subjectRefs: ["lark_hill", "T1"], value: 1.4, reason: null, display: "1.40×", unit: "lift", badge: "ESTIMATED", formulaId: "lift.area", evidenceIds: ["E5"], n: 9 });
+    fx.ledger.addMetric({
+      ...base,
+      key: "lift.supply",
+      label: supply.label,
+      subjectRefs: ["lark_hill", "T1"],
+      value: supply.value,
+      reason: supply.value === null ? "insufficient_n" : null,
+      display: supply.value === null ? "not measured" : `${supply.value} in the sample`,
+      unit: "count",
+      badge: supply.value === null ? "UNAVAILABLE" : "MEASURED",
+      formulaId: "lift.white_space",
+      evidenceIds: ["E5"],
+      n: null,
+    });
+    return fx.snapshot();
+  }
+  const citing = (text: string) => (d: ReportDraft) => {
+    d.arguments[0]!.our_read = text;
+    d.arguments[0]!.metric_ids = [...d.arguments[0]!.metric_ids, "M12"];
+  };
+
+  it("never lets a capped sample's 0 back a supply claim, as geo_lift writes it now or as runs stored it", () => {
+    const now = sampledLedger({
+      value: null,
+      label: "similar venues in Lark Hill: unknown, not 0 (not enough venue data). None of the venues in Qloo's capped sample is in Lark Hill",
+    });
+    const stored = sampledLedger({ value: 0, label: "similar venues in Lark Hill in a capped sample of Qloo-indexed venues, not every business" });
+    const claim = citing("The sample suggests little coffee supply is indexed in Lark Hill {{M12}}.");
+    for (const ledger of [now, stored]) {
+      expect(v10(claim, { ledger }).map((i) => [i.path, i.subjects, i.action])).toEqual([["arguments[0].our_read", ["little coffee supply"], "reject"]]);
+    }
+    // An uncapped 0 is a count of the sample, and can back it.
+    const uncapped = sampledLedger({ value: 0, label: "similar venues in Lark Hill in a sample of Qloo-indexed venues, not every business" });
+    expect(v10(claim, { ledger: uncapped })).toEqual([]);
+  });
+
+  it("passes sentences that say the count is unknown or only a sample", () => {
+    const ledger = sampledLedger({ value: null, label: "similar venues in Lark Hill: unknown, not 0 (not enough venue data)" });
+    expect(v10(citing("Lark Hill reads Not enough venue data, so we cannot claim few competitors there {{M12}}."), { ledger })).toEqual([]);
+    expect(v10(citing("Competitors in Lark Hill are unknown: none of the capped sample sits there {{M12}}."), { ledger })).toEqual([]);
+    expect(v10(citing("Lark Hill shows no similar venues in what is only a capped sample {{M12}}."), { ledger })).toEqual([]);
+  });
+
+  it("needs several counted venues for a crowded reading", () => {
+    const claim = citing("Lark Hill is crowded with similar venues {{M12}}.");
+    const one = sampledLedger({ value: 1, label: "similar venues in Lark Hill in a capped sample of Qloo-indexed venues, not every business" });
+    expect(v10(claim, { ledger: one }).map((i) => i.subjects)).toEqual([["crowded"]]);
+    const five = sampledLedger({ value: 5, label: "similar venues in Lark Hill in a capped sample of Qloo-indexed venues, not every business" });
+    expect(v10(claim, { ledger: five })).toEqual([]);
+    // The same one venue backs a count or a low level.
+    expect(v10(citing("Lark Hill holds one similar venue in Qloo's sample, so competition looks thin {{M12}}."), { ledger: one })).toEqual([]);
+  });
+
+  it("leaves follow-up questions and open questions alone", () => {
+    expect(v10((d) => (d.next_moves[0] = { ...d.next_moves[0]!, question: "Are there no competitors in Lark Hill?" }))).toEqual([]);
+    expect(v10((d) => (d.open_questions = ["Is Lark Hill underserved?"]))).toEqual([]);
+  });
+
+  it("excuses only the clause that says the count is unknown, not an unknown about something else", () => {
+    // Every one of these passed when any unknown word anywhere in the sentence skipped it.
+    const claims = (text: string) => competitionClaims(text);
+    expect(claims("The number of competitors is unknown, but East Side looks underserved.")).toEqual(["underserved"]);
+    expect(claims("Age was not measured, and there are no direct competitors nearby.")).toEqual(["no direct competitors"]);
+    expect(claims("Foot traffic is unknown, but Lark Hill has no direct competitors.")).toEqual(["no direct competitors"]);
+    expect(claims("It is unknown whether Lark Hill has no direct competitors.")).toEqual([]);
+  });
+
+  it("reads the common ways to state a count or a supply level", () => {
+    expect(competitionClaims("There are no other bookstores in Lark Hill.")).toEqual(["no other bookstores"]);
+    expect(competitionClaims("Lark Hill has no coffee shops yet.")).toEqual(["no coffee shops"]);
+    expect(competitionClaims("It would be the only bookstore in Lark Hill.")).toEqual(["the only bookstore"]);
+    expect(competitionClaims("Competition in Lark Hill is low.")).toEqual(["Competition in Lark Hill is low"]);
+    expect(competitionClaims("Lark Hill shows little to no competition.")).toEqual(["little to no competition"]);
+    expect(competitionClaims("The sample suggests little coffee supply is indexed in Lark Hill.")).toEqual(["little coffee supply"]);
+    expect(competitionClaims("Coffee supply in Lark Hill looks thin.")).toEqual(["supply in Lark Hill looks thin"]);
+    expect(competitionClaims("Lark Hill is a proven & crowded market.")).toEqual(["crowded"]);
+    expect(competitionClaims("Competition in Lark Hill is heavy.")).toEqual(["Competition in Lark Hill is heavy"]);
+    expect(competitionClaimsOf("Lark Hill is saturated; Mill Row has few rivals.")).toEqual([
+      { text: "saturated", busy: true },
+      { text: "few rivals", busy: false },
+    ]);
+  });
+
+  it("reads a statement about the sample itself as no supply level", () => {
+    expect(competitionClaims("The supply sample is thin in Lark Hill.")).toEqual([]);
+    expect(competitionClaims("Lark Hill is uncrowded by our reading.")).toEqual(["uncrowded"]);
+  });
+
+  it("does not read plain site comparison as a competitor count", () => {
+    expect(competitionClaims("Compare two similar spots before signing: Riverbend and Oak Hill.")).toEqual([]);
+    expect(competitionClaims("Shortlist three similar options and visit each at night.")).toEqual([]);
+  });
+
+  it("judges the verdict tag and exhibit titles, and drops the tag on the repair", () => {
+    const draft = edit((d) => {
+      d.verdict_tag = "Underserved, open now";
+      d.exhibits[0]!.title = "Where the white space is";
+    });
+    const first = of(check(draft, { ledger: uncountedLedger() }).issues, "V10");
+    expect(first.map((i) => [i.path, i.subjects, i.action])).toEqual([
+      ["exhibits[0].title", ["white space"], "reject"],
+      ["verdict_tag", ["Underserved"], "reject"],
+    ]);
+    const second = check(draft, { ledger: uncountedLedger(), attempt: 2 });
+    expect(second.patchedDraft.verdict_tag).toBe("");
+    expect(of(second.issues, "V10").find((i) => i.path === "verdict_tag")).toMatchObject({ action: "forced", subjects: ["Underserved"] });
+  });
+
+  it("judges a site question's competitor claims even when no geo_lift call ran", () => {
+    const claim = (d: ReportDraft) => (d.arguments[0]!.our_read = "Lark Hill has no other wine bars.");
+    expect(of(check(edit(claim), { ledger, competitionAsked: true }).issues, "V10").map((i) => [i.subjects, i.message.includes("no venue sample in this run counted them")])).toEqual([
+      [["no other wine bars"], true],
+    ]);
+    expect(of(check(edit(claim), { ledger }).issues, "V10")).toEqual([]);
+  });
+
+  it("judges every uncited claim when another metro was counted, and passes a claim that cites the counted metric", () => {
+    const ledger = uncountedLedger(false, true);
+    const uncited = (d: ReportDraft) => (d.arguments[0]!.our_read = "Nashville has no direct competitors.");
+    expect(v10(uncited, { ledger }).map((i) => i.subjects)).toEqual([["no direct competitors"]]);
+    const cited = (d: ReportDraft) => {
+      d.arguments[0]!.our_read = "Mill Row has few rivals in Qloo's venue sample {{M13}}.";
+    };
+    expect(v10(cited, { ledger })).toEqual([]);
   });
 });
 

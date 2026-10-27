@@ -3,6 +3,7 @@
 // the SIGTERM handler's order: drain, flush the Qloo client's writes, close the pool, exit. And the
 // housekeeping after migrations: old fake runs, old visitor hashes, and the market locality pins.
 import { fileURLToPath } from "node:url";
+import { MetroId } from "@ct/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -15,6 +16,7 @@ const fake = vi.hoisted(() => ({
   closeDb: vi.fn(async () => {}),
   localitiesKey: "metro_localities",
   localities: undefined as unknown,
+  audiences: undefined as unknown,
 }));
 
 vi.mock("@ct/db", async (importOriginal) => ({
@@ -25,8 +27,9 @@ vi.mock("@ct/db", async (importOriginal) => ({
   purgeRuns: fake.purgeRuns,
   clearIpHashes: fake.clearIpHashes,
   closeDb: fake.closeDb,
-  // Only the locality pins are answered here; any other key reads as unset.
-  getKv: async (_db: unknown, key: string) => (key === fake.localitiesKey ? fake.localities : undefined),
+  // Only the locality pins and the audience catalogue are answered here; any other key reads as unset.
+  getKv: async (_db: unknown, key: string) =>
+    key === fake.localitiesKey ? fake.localities : key.startsWith("audience_catalogue") ? fake.audiences : undefined,
 }));
 
 const { afterMigrations, HOUSEKEEPING_EVERY_MS, installShutdownHandler, migrationsApplied, startServer } = await import("../server/startup");
@@ -45,6 +48,7 @@ beforeEach(() => {
   fake.clearIpHashes.mockClear();
   fake.localitiesKey = "metro_localities";
   fake.localities = undefined;
+  fake.audiences = undefined;
   vi.stubEnv("NODE_ENV", "production");
   // Live Qloo data, whatever the shell exports: QLOO_MOCK=1 reads the mock pins (the last housekeeping test).
   vi.stubEnv("QLOO_MOCK", "");
@@ -141,7 +145,7 @@ describe("housekeeping after migrations", () => {
       expect(fake.clearIpHashes).toHaveBeenCalledWith(expect.anything(), { olderThanMs: 25 * 3_600_000 });
       const lines = warn.mock.calls.map((call) => JSON.stringify(call));
       expect(lines.filter((line) => line.includes("metro_localities"))).toEqual([
-        expect.stringContaining('"missing":["nashville","austin"]'),
+        expect.stringContaining(`"missing":${JSON.stringify(MetroId.options)}`),
       ]);
     } finally {
       warn.mockRestore();
@@ -179,8 +183,29 @@ describe("housekeeping after migrations", () => {
       afterMigrations();
       await vi.advanceTimersByTimeAsync(0);
       const lines = warn.mock.calls.map((call) => JSON.stringify(call)).filter((line) => line.includes("metro_localities"));
-      expect(lines).toEqual([expect.stringContaining('"missing":["austin"]')]);
+      expect(lines).toEqual([expect.stringContaining(`"missing":${JSON.stringify(MetroId.options.slice(1))}`)]);
       expect(lines.join(" ")).not.toContain("invented-locality");
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("says when the audience catalogue is not pinned, and nothing once it is", async () => {
+    const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
+    const audienceLines = () => warn.mock.calls.map((call) => JSON.stringify(call)).filter((line) => line.includes("audience_catalogue"));
+    try {
+      afterMigrations();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(audienceLines()).toEqual([expect.stringContaining('kv \\"audience_catalogue\\" is not set')]);
+      warn.mockClear();
+      fake.audiences = {
+        version: 1,
+        fetchedAt: "2026-10-01T00:00:00.000Z",
+        families: { leisure: [{ key: "urn:audience:leisure:invented_board_games", label: "Board games" }] },
+      };
+      afterMigrations();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(audienceLines()).toEqual([]);
     } finally {
       warn.mockRestore();
     }
@@ -195,7 +220,7 @@ describe("housekeeping after migrations", () => {
       afterMigrations();
       await vi.advanceTimersByTimeAsync(0);
       const lines = warn.mock.calls.map((call) => JSON.stringify(call)).filter((line) => line.includes("metro_localities"));
-      expect(lines).toEqual([expect.stringMatching(/"key":"metro_localities\.mock".*"missing":\["austin"\]/)]);
+      expect(lines).toEqual([expect.stringMatching(/"key":"metro_localities\.mock".*"missing":\["austin","nyc",/)]);
     } finally {
       warn.mockRestore();
     }

@@ -1,17 +1,12 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { askQuestionOf } from "../../components/ask/ask-href";
-import type { AskParent } from "../../components/ask/ask-panel";
-import { AskView } from "../../components/ask/ask-view";
+import type { AskParent } from "../../components/ask/ask-parent";
+import { SiteShell } from "../../components/chrome/site-shell";
 import { desCommandHref } from "../../components/des/des-href";
-import { AppChrome } from "../../components/home/app-chrome";
-import { qlooRequestsToday } from "../../components/home/qloo-usage";
-import { RecentBriefs } from "../../components/home/recent-briefs";
-import { PAGE_GUTTER } from "../../components/layout/grid";
-import { cx } from "../../components/ui/cx";
+import { HomeView } from "../../components/home/home-view";
 import { isRunId } from "../../lib/run-id";
-import { qlooDailyFreshCapFromEnv } from "../../server/config";
-import { getDatabase, getQlooClient, peekQlooClient } from "../../server/container";
+import { getDatabase } from "../../server/container";
 import { log } from "../../server/log";
 import { getFollowUpParent } from "../../server/run-list";
 
@@ -24,7 +19,7 @@ export const metadata: Metadata = {
 const one = (value: string | string[] | undefined): string => (Array.isArray(value) ? (value[0] ?? "") : (value ?? ""));
 
 /**
- * The brief a follow-up hangs from, with its question and whether POST /api/runs will take it as the
+ * The answer a follow-up hangs from, with its question and whether POST /api/runs will take it as the
  * parent; null when the id names no run.
  */
 async function parentOf(runId: string): Promise<AskParent | null> {
@@ -33,29 +28,25 @@ async function parentOf(runId: string): Promise<AskParent | null> {
     const found = await getFollowUpParent(getDatabase(), runId);
     return found === null ? null : { runId, ...found };
   } catch (err) {
-    log.warn({ err }, "ask: could not read the parent brief");
+    log.warn({ err }, "ask: could not read the parent answer");
     return { runId, question: null, blocked: "unreadable" };
   }
 }
 
-/** A02 Ask: /ask?q=…&parent=…, the question read back before a brief runs. */
+/**
+ * /ask?q=…&parent=…: Home with the question in the box, sent at once (the same flow as "Get answer"),
+ * and a follow-up's parent above the field.
+ */
 export default async function AskPage(props: PageProps<"/ask">) {
   const params = await props.searchParams;
   const question = askQuestionOf(one(params.q));
-  // "<NAME> DES" is a page, not a run (§8.2): every way here (top bar, hero, follow-up, link) opens the tearsheet.
+  // "<NAME> DES" is a profile, not a run: every way here opens it.
   const des = desCommandHref(question);
   if (des !== null) redirect(des);
   const parent = await parentOf(one(params.parent));
   return (
-    <AppChrome qlooCap={qlooDailyFreshCapFromEnv()} qlooUsed={qlooRequestsToday(peekQlooClient, getQlooClient)}>
-      {/* Home's column, in the top bar's gutter. */}
-      <div className={cx("w-full", PAGE_GUTTER)}>
-        <div className="mx-auto flex w-full max-w-[960px] flex-col pt-10 pb-16 md:pt-16">
-          {/* Another parent is another page: the composer starts over. Another ?q= is read in place. */}
-          <AskView key={parent?.runId ?? ""} initialQuestion={question} parent={parent} />
-          <RecentBriefs limit={3} className="pt-12" />
-        </div>
-      </div>
-    </AppChrome>
+    <SiteShell header="home">
+      <HomeView key={`${parent?.runId ?? ""}|${question}`} initialQuestion={question} parent={parent} />
+    </SiteShell>
   );
 }

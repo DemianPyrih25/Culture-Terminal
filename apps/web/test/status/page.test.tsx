@@ -1,8 +1,8 @@
-// /status rendered from a fake reading: noindex, the answer first, the five sections with their rows,
-// meters, tags and outcome strips, and nothing that names a question, an entity or a request id.
+// /status rendered from a fake reading: noindex, the answer first, the five section cards with their
+// rows, meters, state pills and outcome strips, and nothing that names a question, an entity or a request id.
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CANARY_API_KEY, CANARY_ENTITY, CANARY_QUESTION, CANARY_REQUEST_ID, decision, statusReport } from "./fixtures";
+import { CANARY_API_KEY, CANARY_ENTITY, CANARY_QUESTION, CANARY_REQUEST_ID, decision, LOCALITIES, statusReport } from "./fixtures";
 
 const status = vi.hoisted(() => ({ current: vi.fn() }));
 
@@ -33,13 +33,13 @@ describe("/status", () => {
     expect(metadata.title).toBe("Status · Culture Terminal");
   });
 
-  it("renders the chrome, the heading, the answer and the five sections", async () => {
+  it("renders the new shell, the heading, the answer and the five section cards", async () => {
     const html = await render();
     expect(html).toContain('aria-label="Main"');
     expect(html).toMatch(/<h1[^>]*>Status<\/h1>/);
     expect(html).toContain("Read 12:00:00 UTC");
     expect(html).toContain('href="/status"');
-    expect(html).toMatch(/data-live-state="live"[^>]*>Live analysis is on: Sonnet 5.5 writes each brief\.<\/p>/);
+    expect(html).toMatch(/data-live-state="live"[^>]*>Live analysis is on: Sonnet 5.5 writes each answer\.<\/p>/);
     for (const [id, title] of [
       ["mode", "Mode"],
       ["spend", "LLM spend"],
@@ -49,10 +49,11 @@ describe("/status", () => {
     ]) {
       expect(html).toContain(`id="${id}"`);
       expect(html).toContain(`href="#${id}"`);
-      expect(html).toMatch(new RegExp(`<h2[^>]*>.*?<span class="text-ink">${title}</span></h2>`));
+      expect(html).toMatch(new RegExp(`<h2[^>]*>${title}</h2>`));
     }
-    // The status line carries today's Qloo requests from the same reading.
-    expect(html).toContain("Qloo 120 / 1,900 req today");
+    // The new shell, and no Concept A remnants.
+    expect(html).toContain('data-header="inner"');
+    expect(html).not.toMatch(/font-serif|text-dim|text-faint|rounded-brief|bg-paper|text-negative/);
   });
 
   it("shows each lane's mode and every breaker with its state", async () => {
@@ -61,6 +62,9 @@ describe("/status", () => {
     expect((html.match(/data-breaker="/g) ?? []).length).toBe(9);
     expect(html).toContain("$0.12 today · public economy at $0.49, paused at $0.79");
     expect(html).toContain('data-state="clear"');
+    // States are soft pills in their tone.
+    expect(html).toMatch(/data-state="clear" data-tone="good"/);
+    expect(html).toMatch(/data-state="live" data-tone="good"/);
   });
 
   it("draws the usage meters against their caps, with the thresholds as ticks", async () => {
@@ -93,7 +97,7 @@ describe("/status", () => {
       }),
     );
     expect(html).toContain('data-live-state="paused"');
-    expect(html).toContain("Showcases, replays and cached answers still work.");
+    expect(html).toContain("Answers already made, replays and cached answers still work.");
     expect((html.match(/data-state="replay_only"/g) ?? []).length).toBe(2);
     expect(html).toMatch(/data-state="tripped"[^>]*>.*?Tripped/);
   });
@@ -130,7 +134,7 @@ describe("/status", () => {
   it("never shows a lane as live on a server that takes no live run", async () => {
     const html = await render(statusReport({ live: { state: "unavailable", blocks: ["no_anthropic"], message: null } }));
     expect(html).toContain("this server has no Anthropic API key");
-    expect(html).not.toContain("Sonnet 5.5 writes each brief");
+    expect(html).not.toContain("Sonnet 5.5 writes each answer");
     expect(html).not.toContain('data-state="live"');
     expect((html.match(/data-state="unavailable"/g) ?? []).length).toBe(2);
     expect(html).toContain("Live by the breakers · this server takes no live runs");
@@ -152,17 +156,35 @@ describe("/status", () => {
 
   it("shows the market locality pins by market id and count: complete, partial, missing, malformed and not read", async () => {
     const required = ["nashville", "austin"] as const;
-    expect(await render()).toMatch(/data-localities="complete"[^>]*>.*?2 of 2 pinned.*?· 2 markets in all/);
-    const partial = await render(statusReport({ localities: { state: "partial", required: [...required], missing: ["austin"], pinned: 1 } }));
+    const all = ["nashville", "austin", "memphis"] as const;
+    expect(await render()).toMatch(/data-localities="complete"[^>]*>.*?3 of 3 markets pinned.*?· 2 of 2 map cities/);
+    expect(await render()).toMatch(/data-state="clear"[^>]*>/);
+    const partial = await render(
+      statusReport({ localities: { state: "partial", required: [...required], missing: ["austin"], pinned: 1, markets: { total: 3, missing: ["austin", "memphis"] } } }),
+    );
     expect(partial).toContain('data-localities="partial"');
-    expect(partial).toContain("1 of 2 pinned");
-    expect(partial).toContain("not pinned: austin");
+    expect(partial).toContain("1 of 3 markets pinned");
+    expect(partial).toContain("1 of 2 map cities · not pinned: austin, memphis");
     expect(partial).toMatch(/data-state="warn"[^>]*>.*?Warning/);
-    const missing = await render(statusReport({ localities: { state: "missing", required: [...required], missing: [...required], pinned: 0 } }));
+    // Every map city pinned but a market not: a warning, not clear.
+    const market = await render(statusReport({ localities: { ...LOCALITIES, markets: { total: 3, missing: ["memphis"] } } }));
+    expect(market).toContain("2 of 3 markets pinned");
+    expect(market).toContain("2 of 2 map cities · not pinned: memphis");
+    expect(market).toMatch(/data-state="warn"[^>]*>.*?Warning/);
+    // A long list is cut after six ids.
+    const many = Array.from({ length: 9 }, (_, i) => `market_${i + 1}`);
+    const long = await render(statusReport({ localities: { ...LOCALITIES, markets: { total: 12, missing: many } } }));
+    expect(long).toContain("not pinned: market_1, market_2, market_3, market_4, market_5, market_6 and 3 more");
+    const missing = await render(
+      statusReport({ localities: { state: "missing", required: [...required], missing: [...required], pinned: 0, markets: { total: 3, missing: [...all] } } }),
+    );
     expect(missing).toContain('data-localities="missing"');
-    expect(missing).toContain("not pinned: nashville, austin");
+    expect(missing).toContain("Not set");
+    expect(missing).toContain("3 markets and 2 map cities to pin");
     expect(missing).toMatch(/data-state="tripped"[^>]*>.*?Tripped/);
-    const malformed = await render(statusReport({ localities: { state: "malformed", required: [...required], missing: [...required], pinned: 0 } }));
+    const malformed = await render(
+      statusReport({ localities: { state: "malformed", required: [...required], missing: [...required], pinned: 0, markets: { total: 3, missing: [...all] } } }),
+    );
     expect(malformed).toContain("every locality lookup fails");
     expect(malformed).toMatch(/data-state="tripped"[^>]*>.*?Tripped/);
     const unread = await render(statusReport({ localities: null }));

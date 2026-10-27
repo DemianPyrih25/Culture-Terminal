@@ -20,6 +20,7 @@ import {
   ToolName,
   TOOL_MNEMONIC,
 } from "@ct/contracts";
+import { MIN_BUSY_AREA_VENUES, THIN_SUPPLY_LABEL } from "@ct/quant";
 import { describe, expect, it } from "vitest";
 import { CLERK_PROMPT, DIRECTOR_PROMPT, PROMPT_HASHES } from "../../src/prompts";
 import { PHRASE_RULES } from "../../src/report/phrases";
@@ -76,13 +77,13 @@ describe("frozen prompts", () => {
 });
 
 describe("director.md (ANALYST)", () => {
-  // Planned at six to seven thousand tokens (PLAN §4.5); the eight full job playbooks and the
-  // cross-desk next-move rule take it to at most 7,500. The prompt is the cached prefix, so the
-  // extra tokens cost a cache read per response, not a fresh input.
-  it("stays within about six to seven and a half thousand tokens", () => {
+  // PLAN §4.5: up to about 11,000 tokens, room for the 13 job playbooks and the new tools. The prompt
+  // is the cached prefix, so the extra tokens cost a cache read per response, not a fresh input; a
+  // cap raise is preferred to trimming rules out of it.
+  it("stays within about six to eleven thousand tokens", () => {
     const tokens = approxTokens(DIRECTOR_PROMPT);
     expect(tokens).toBeGreaterThanOrEqual(6000);
-    expect(tokens).toBeLessThanOrEqual(7500);
+    expect(tokens).toBeLessThanOrEqual(11000);
   });
 
   it("has the ten planned sections in order", () => {
@@ -173,8 +174,14 @@ describe("director.md (ANALYST)", () => {
 
   it("states CHECKER V10: demographics only where the same part cites a metric that measures them", () => {
     expect(DIRECTOR_PROMPT).toContain(
-      "Claim an audience's age, gender or generation only where the same part cites an audience_dna or share_of_taste age metric (V10)",
+      "Claim an audience's age, gender or generation only where the same part cites an audience_dna or an age or gender context metric (V10)",
     );
+  });
+
+  it("states CHECKER V10 for competitors with geo_lift's supply-label rule", () => {
+    expect(DIRECTOR_PROMPT).toContain(`An area whose quadrant reads "${THIN_SUPPLY_LABEL}" has too few counted venues for any supply label`);
+    expect(DIRECTOR_PROMPT).toContain(`"crowded" from a lift.supply count needs at least ${MIN_BUSY_AREA_VENUES} venues`);
+    expect(DIRECTOR_PROMPT).toContain("A sentence that says the count is unknown, or only a sample, passes.");
   });
 
   it("keeps wave 1 to refs that exist in turn 1, since the scan runs alongside it", () => {
@@ -260,17 +267,17 @@ describe("clerk.md (CLERK)", () => {
     const site = intents.find((i) => i.job === "site_selection");
     expect(site?.constraints.concepts.length).toBeGreaterThan(0);
     expect(site?.geo.metro).not.toBeNull();
-    // On the marketing desk a named Nashville or Austin is a candidate market too.
+    // On the marketing desk a named map city is a candidate market too.
     for (const i of intents.filter((x) => x.pillar === "marketing" && x.geo.metro !== null)) {
       expect(i.constraints.notes.join("; ").toLowerCase(), i.mnemonic).toContain(`markets: ${i.geo.metro}`);
     }
   });
 
-  // Planned at about 3,500 tokens; a worked example per job takes it to at most 3,800. CLERK runs
-  // on Haiku without caching, so each example adds about 130 input tokens, a small fraction of a
-  // cent per run, and the examples are what teach a small model the job-specific fields (concepts,
-  // metro, markets in notes, domains).
+  // PLAN §4.5: at most about 5,500 tokens. A worked example per job, the 13 map city ids and the
+  // market field (D28, D44) take it near 3,900; the rest is room for the 13-job taxonomy. CLERK runs on
+  // Haiku without caching, so each example adds about 130 input tokens, a small fraction of a cent per
+  // run, and the examples are what teach a small model the job-specific fields.
   it("stays compact for a small model", () => {
-    expect(approxTokens(CLERK_PROMPT)).toBeLessThanOrEqual(3800);
+    expect(approxTokens(CLERK_PROMPT)).toBeLessThanOrEqual(5500);
   });
 });

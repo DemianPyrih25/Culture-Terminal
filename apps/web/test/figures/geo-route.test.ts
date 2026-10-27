@@ -1,6 +1,6 @@
 // /api/geo/[metro]: the LiftMap outlines from the @ct/geo gazetteers, one cached response per metro.
 import { MetroId } from "@ct/contracts";
-import { GAZETTEERS, type Gazetteer } from "@ct/geo";
+import { GAZETTEER_CATALOG, type Gazetteer } from "@ct/geo";
 import { describe, expect, it } from "vitest";
 import { GET, dynamicParams, generateStaticParams } from "../../app/api/geo/[metro]/route";
 import { outlinesFor, outlinesResponse } from "../../app/api/geo/outlines";
@@ -28,8 +28,8 @@ const TEST_GAZETTEER: Gazetteer = {
 };
 
 describe("outlinesFor", () => {
-  it("serves each area's display polygon with its id, name and centroid", () => {
-    const out = outlinesFor("austin", { austin: TEST_GAZETTEER });
+  it("serves each area's display polygon with its id, name and centroid", async () => {
+    const out = await outlinesFor("austin", { austin: TEST_GAZETTEER });
     expect(out.type).toBe("FeatureCollection");
     expect(out.source).toBe("Invented test boundaries, public domain");
     expect(out.features).toHaveLength(1);
@@ -42,13 +42,16 @@ describe("outlinesFor", () => {
     expect(f.properties.centroid[1]).toBeCloseTo(30.255, 3);
   });
 
-  it("answers an empty collection for a metro without a gazetteer", () => {
-    expect(outlinesFor("nashville", {})).toEqual({ type: "FeatureCollection", metro: "nashville", source: null, features: [] });
+  it("answers an empty collection for a metro without a gazetteer", async () => {
+    expect(await outlinesFor("nashville", {})).toEqual({ type: "FeatureCollection", metro: "nashville", source: null, features: [] });
   });
 
-  it("covers every neighbourhood the Austin fixture names, from the shipped gazetteer", () => {
-    if (!GAZETTEERS.austin) return;
-    const ids = new Set(outlinesFor("austin").features.map((f) => f.id));
+  it("covers every neighbourhood the Austin fixture names, from the shipped gazetteer", async () => {
+    if (!GAZETTEER_CATALOG.austin) return;
+    const out = await outlinesFor("austin");
+    const ids = new Set(out.features.map((f) => f.id));
+    // Centroids come from the catalog, as the gazetteer index computes them.
+    expect(out.features.map((f) => f.properties.centroid)).toEqual(GAZETTEER_CATALOG.austin.areas.map((a) => [a.centroid.lon, a.centroid.lat]));
     for (const n of austinLiftMap.payload.neighbourhoods) expect(ids.has(n.id), n.id).toBe(true);
   });
 });
@@ -62,7 +65,7 @@ describe("GET /api/geo/[metro]", () => {
     expect(res.headers.get("cache-control")).toContain("max-age=86400");
     const body = (await res.json()) as { type: string; metro: string };
     expect(body).toMatchObject({ type: "FeatureCollection", metro: "austin" });
-    expect(outlinesResponse("atlantis").status).toBe(404);
+    expect((await outlinesResponse("atlantis")).status).toBe(404);
   });
 
   it("is where the LiftMap looks", () => {

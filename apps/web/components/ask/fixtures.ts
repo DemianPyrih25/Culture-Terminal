@@ -1,5 +1,5 @@
-import type { AlreadyHave, AskState, PreviewResponse } from "./ask-machine";
-import type { AskParent } from "./ask-panel";
+import type { AccessPause, AlreadyHave, AskState, PreviewResponse } from "./ask-machine";
+import type { AskParent } from "./ask-parent";
 
 /**
  * Invented previews for the /dev/ask gallery and the tests (D29: no real entities, values or ids).
@@ -42,13 +42,6 @@ export const FIXTURE_PREVIEW: PreviewResponse = {
 };
 
 export const FIXTURE_PREVIEW_HAVE: PreviewResponse = { ...FIXTURE_PREVIEW, alreadyHave: FIXTURE_HAVE };
-
-/** The economy breaker has tripped: the brief would run on the economy ANALYST. */
-export const FIXTURE_PREVIEW_ECONOMY: PreviewResponse = {
-  ...FIXTURE_PREVIEW,
-  mode: "economy",
-  modeNote: "Live briefs run on the economy analyst until 00:00 UTC: today's live budget is nearly used.",
-};
 
 /** What a paused lane says (the LLM spend breaker's message). */
 export const FIXTURE_PAUSED_MESSAGE = "Live analysis is paused: today's budget is used up. It resumes at 00:00 UTC.";
@@ -104,7 +97,7 @@ export const FIXTURE_PREVIEW_NO_CITY: PreviewResponse = {
     mnemonic: "RAMEN COUNTER SITE <CITY>",
     mentions: [],
     metros: [],
-    scope: "Nashville or Austin neighbourhoods",
+    scope: "Neighbourhoods in 13 US cities",
     lens: "Location lens · vs the city",
   },
   estimate: { networkCalls: 8, cachedCalls: 0, seconds: 40, quotaShare: 0.0042 },
@@ -120,7 +113,7 @@ export const FIXTURE_REFUSAL: PreviewResponse = {
     mnemonic: "<AREA>, <CITY> DNA",
     mentions: [],
     metros: [],
-    scope: "A Nashville or Austin neighbourhood",
+    scope: "A neighbourhood in one of 13 US cities",
     lens: "Location lens · vs the city",
   },
   refusal: {
@@ -136,170 +129,80 @@ export const FIXTURE_REFUSAL: PreviewResponse = {
 
 export const FIXTURE_PARENT: AskParent = { runId: "run-fixture-c3d4", question: "Who really competes with Juniper Cola?", blocked: null };
 
-/** A parent the server would refuse: its brief is still being written. */
-export const FIXTURE_PARENT_RUNNING: AskParent = { ...FIXTURE_PARENT, runId: "run-fixture-e5f6", blocked: "running" };
+
+/** A paused lane that says when it reopens (GET /api/access, replay only). */
+export const FIXTURE_PAUSE: AccessPause = { until: "2026-07-06T20:00:00.000Z", message: FIXTURE_PAUSED_MESSAGE };
 
 const at = FIXTURE_AT;
+const idle: AskState["run"] = { kind: "idle" };
 
-/** Every state the gallery shows, with the field's text. */
-export const ASK_GALLERY: ReadonlyArray<{ name: string; draft: string; state: AskState; parent?: AskParent }> = [
-  { name: "Loading", draft: FIXTURE_QUESTION, state: { phase: { kind: "loading", question: FIXTURE_QUESTION }, run: { kind: "idle" } } },
+/** One state of the question box for the gallery: the text in the box and the state behind it. */
+export interface AskGalleryEntry {
+  name: string;
+  draft: string;
+  state: AskState;
+  pause?: AccessPause;
+  parent?: AskParent;
+  /** Draw the focused look (the gallery has no focus). */
+  focus?: boolean;
+}
+
+const REFUSED_QUESTION = "Which Riverside voters should a campaign target?";
+
+/** Every state of the box the gallery shows (N01, N02, N16 1-3), from invented previews. */
+export const ASK_GALLERY: readonly AskGalleryEntry[] = [
+  { name: "Idle", draft: "", state: { phase: { kind: "idle" }, run: idle } },
+  { name: "Typing", draft: "Juniper Cola", state: { phase: { kind: "idle" }, run: idle }, focus: true },
+  { name: "Loading", draft: FIXTURE_QUESTION, state: { phase: { kind: "loading", question: FIXTURE_QUESTION }, run: idle } },
   {
-    name: "Loading · a mnemonic compiles at once",
-    draft: "JUNIPER COLA HLTH",
-    state: { phase: { kind: "loading", question: "JUNIPER COLA HLTH" }, run: { kind: "idle" } },
-  },
-  {
-    name: "Understood",
+    name: "Starting the run",
     draft: FIXTURE_QUESTION,
-    state: { phase: { kind: "ready", question: FIXTURE_QUESTION, preview: FIXTURE_PREVIEW, at }, run: { kind: "idle" } },
+    state: { phase: { kind: "ready", question: FIXTURE_QUESTION, preview: FIXTURE_PREVIEW, at }, run: { kind: "starting", message: null } },
   },
+  { name: "Paused, with the reopen time", draft: FIXTURE_QUESTION, state: { phase: { kind: "idle" }, run: idle }, pause: FIXTURE_PAUSE },
   {
-    name: "You already have",
+    name: "Paused by the preview (503), no reopen time",
     draft: FIXTURE_QUESTION,
-    state: { phase: { kind: "ready", question: FIXTURE_QUESTION, preview: FIXTURE_PREVIEW_HAVE, at }, run: { kind: "idle" } },
+    state: { phase: { kind: "paused", question: FIXTURE_QUESTION, message: FIXTURE_PAUSED_MESSAGE, alreadyHave: null, at }, run: idle },
   },
   {
-    name: "A subject with more than one match: picked when the brief runs",
-    draft: "Junipr Cola vs Brand Beta",
-    state: { phase: { kind: "ready", question: "Junipr Cola vs Brand Beta", preview: FIXTURE_PREVIEW_PICK, at }, run: { kind: "idle" } },
+    name: "Refused, with a reframe",
+    draft: REFUSED_QUESTION,
+    state: { phase: { kind: "ready", question: REFUSED_QUESTION, preview: FIXTURE_REFUSAL, at }, run: idle },
   },
   {
-    name: "Still needed: the second name has no exact match",
+    name: "Needs input: a second brand",
+    draft: "Juniper Cola: who wins?",
+    state: { phase: { kind: "ready", question: "Juniper Cola: who wins?", preview: FIXTURE_PREVIEW_ONE_NAME, at }, run: idle },
+    focus: true,
+  },
+  {
+    name: "Needs input: a name not found",
     draft: "Juniper Cola vs Brand Betta",
-    state: { phase: { kind: "ready", question: "Juniper Cola vs Brand Betta", preview: FIXTURE_PREVIEW_UNMATCHED, at }, run: { kind: "idle" } },
+    state: { phase: { kind: "ready", question: "Juniper Cola vs Brand Betta", preview: FIXTURE_PREVIEW_UNMATCHED, at }, run: idle },
+    focus: true,
   },
   {
-    name: "Still needed: two brands to compare, one named",
-    draft: "Is Juniper Cola winning?",
-    state: { phase: { kind: "ready", question: "Is Juniper Cola winning?", preview: FIXTURE_PREVIEW_ONE_NAME, at }, run: { kind: "idle" } },
-  },
-  {
-    name: "Still needed: where to open, no city",
-    draft: "Where should a ramen counter open?",
-    state: { phase: { kind: "ready", question: "Where should a ramen counter open?", preview: FIXTURE_PREVIEW_NO_CITY, at }, run: { kind: "idle" } },
-  },
-  {
-    name: "Refusal, with a reframe",
-    draft: "Which Riverside residents vote, and how?",
-    state: { phase: { kind: "ready", question: "Which Riverside residents vote, and how?", preview: FIXTURE_REFUSAL, at }, run: { kind: "idle" } },
-  },
-  {
-    name: "Economy: today's live budget is nearly used",
-    draft: FIXTURE_QUESTION,
-    state: { phase: { kind: "ready", question: FIXTURE_QUESTION, preview: FIXTURE_PREVIEW_ECONOMY, at }, run: { kind: "idle" } },
-  },
-  {
-    name: "Paused by a breaker (503): showcases and replays still work",
-    draft: FIXTURE_QUESTION,
-    state: {
-      phase: { kind: "paused", question: FIXTURE_QUESTION, message: FIXTURE_PAUSED_MESSAGE, alreadyHave: FIXTURE_HAVE, at },
-      run: { kind: "idle" },
-    },
-  },
-  {
-    name: "Paused (503): live analysis off or out of budget",
-    draft: FIXTURE_QUESTION,
-    state: {
-      phase: {
-        kind: "paused",
-        question: FIXTURE_QUESTION,
-        message: "Today's budget for live analysis is used up. Live runs resume at 00:00 UTC.",
-        alreadyHave: FIXTURE_HAVE,
-        at,
-      },
-      run: { kind: "idle" },
-    },
-  },
-  {
-    name: "Paused (503), with no brief to open",
-    draft: "Who drinks Brand Gamma?",
-    state: {
-      phase: {
-        kind: "paused",
-        question: "Who drinks Brand Gamma?",
-        message: "Live analysis is unavailable: this server has no Anthropic API key.",
-        alreadyHave: null,
-        at,
-      },
-      run: { kind: "idle" },
-    },
-  },
-  {
-    name: "Previews capped (429)",
-    draft: FIXTURE_QUESTION,
-    state: {
-      phase: {
-        kind: "limited",
-        question: FIXTURE_QUESTION,
-        message: "Question previews are paused for a while. You can still run the brief.",
-        retryAfterS: 900,
-        alreadyHave: null,
-        at,
-      },
-      run: { kind: "idle" },
-    },
+    name: "Needs input: a city",
+    draft: "Where to open a ramen counter?",
+    state: { phase: { kind: "ready", question: "Where to open a ramen counter?", preview: FIXTURE_PREVIEW_NO_CITY, at }, run: idle },
+    focus: true,
   },
   {
     name: "Error, with Try again",
     draft: FIXTURE_QUESTION,
     state: {
       phase: { kind: "error", question: FIXTURE_QUESTION, message: "The question could not be sent: the connection failed.", retry: true },
-      run: { kind: "idle" },
+      run: idle,
     },
   },
   {
-    name: "Follow-up",
-    draft: "Where does Brand Beta win?",
-    parent: FIXTURE_PARENT,
-    state: {
-      phase: {
-        kind: "ready",
-        question: "Where does Brand Beta win?",
-        preview: {
-          ...FIXTURE_PREVIEW,
-          understood: {
-            ...FIXTURE_PREVIEW.understood!,
-            job: "market_selection",
-            pillar: "marketing",
-            jobLabel: "Launch & tour cities",
-            mnemonic: "BRAND BETA <BRAND> MKTS",
-            mentions: [{ text: "Brand Beta", type: "brand", role: "primary", match: "exact", name: "Brand Beta" }],
-            scope: "US markets",
-            lens: "Marketing lens · the name matched exactly · vs US baseline",
-          },
-          estimate: { networkCalls: 6, cachedCalls: 11, seconds: 40, quotaShare: 0.0032 },
-        },
-        at,
-      },
-      run: { kind: "idle" },
-    },
-  },
-  {
-    name: "Follow-up on a brief still being written",
-    draft: "Where does Brand Beta win?",
-    parent: FIXTURE_PARENT_RUNNING,
-    state: { phase: { kind: "loading", question: "Where does Brand Beta win?" }, run: { kind: "idle" } },
-  },
-  {
-    name: "Edited: a new question waits for ↵",
-    draft: "BRAND BETA, AUSTIN DNA",
-    state: { phase: { kind: "ready", question: FIXTURE_QUESTION, preview: FIXTURE_PREVIEW, at }, run: { kind: "idle" } },
-  },
-  {
-    name: "Starting: the server asks to wait",
+    name: "The run did not start",
     draft: FIXTURE_QUESTION,
     state: {
       phase: { kind: "ready", question: FIXTURE_QUESTION, preview: FIXTURE_PREVIEW, at },
-      run: { kind: "starting", message: "Too many runs are active. Try again shortly." },
+      run: { kind: "failed", message: "You have started a lot of answers this hour. Try again in a few minutes." },
     },
   },
-  {
-    name: "Run refused",
-    draft: FIXTURE_QUESTION,
-    state: {
-      phase: { kind: "ready", question: FIXTURE_QUESTION, preview: FIXTURE_PREVIEW, at },
-      run: { kind: "failed", message: "Live analysis is paused. Recorded runs are still available." },
-    },
-  },
+  { name: "Follow-up", draft: "", state: { phase: { kind: "idle" }, run: idle }, parent: FIXTURE_PARENT },
 ];

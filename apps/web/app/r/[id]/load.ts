@@ -1,8 +1,8 @@
 import "server-only";
 import { cache } from "react";
-import type { RunState } from "@ct/contracts";
+import { DatasetEnvelope, type RunState } from "@ct/contracts";
 import { buildBriefModel, inlineText, type BriefModel } from "@/lib/brief";
-import { runSnapshot } from "@/server/http";
+import { runDataset, runSnapshot } from "@/server/http";
 
 /**
  * A finished brief for its permalink, /r/[id] (PLAN Part 6, SPEC §8.1): the snapshot GET /api/runs/[id]
@@ -35,6 +35,46 @@ export const loadPermalink = cache(async (runId: string): Promise<Permalink> => 
   const model = buildBriefModel(state, Date.now());
   return { kind: "brief", question: body.run.question, state, model, showcase: body.run.isShowcase === true };
 });
+
+/** The most dataset JSON a permalink inlines for its first paint; any more is fetched in the browser as before. */
+export const FIRST_PAINT_DATASET_BYTES = 2_000_000;
+
+/**
+ * The datasets too large to stream inline (a lift map, a big matrix) read on the server for the first
+ * paint, lift maps first: the answer's map row and its "Your area" and competition numbers need them,
+ * and fetched after hydration they would push the page down. A failed read is left to the browser.
+ */
+export async function loadFirstPaintDatasets(runId: string, model: BriefModel): Promise<Record<string, DatasetEnvelope>> {
+  const wanted = model.evidence.figures
+    .filter((f) => f.needsFetch && f.dataset === null)
+    .sort((a, b) => Number(b.kind === "GeoLift") - Number(a.kind === "GeoLift"));
+  const read = await Promise.all(
+    wanted.map(async (f) => {
+      try {
+        const res = await runDataset(runId, f.datasetId);
+        return res.ok ? { id: f.datasetId, text: await res.text() } : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  const out: Record<string, DatasetEnvelope> = {};
+  let bytes = 0;
+  for (const r of read) {
+    if (r === null || bytes + r.text.length > FIRST_PAINT_DATASET_BYTES) continue;
+    let json: unknown;
+    try {
+      json = JSON.parse(r.text);
+    } catch {
+      continue;
+    }
+    const parsed = DatasetEnvelope.safeParse(json);
+    if (!parsed.success) continue;
+    out[r.id] = parsed.data;
+    bytes += r.text.length;
+  }
+  return out;
+}
 
 /** One plain line for a showcase's description: its answer's headline, else the refusal's message. */
 export function permalinkSummary(model: BriefModel): string | null {

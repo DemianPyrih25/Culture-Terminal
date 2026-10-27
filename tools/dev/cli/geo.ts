@@ -4,6 +4,10 @@
 // and its absence never breaks the tools typecheck.
 import type { GeoApi } from "@ct/contracts";
 
+// createGeo loads a metro's polygons on first use: a skill's caller loads the metros its input names
+// first. Data-free, so importing it by path loads no gazetteer.
+export { ensureMetrosIn } from "../../../packages/geo/src/ensure";
+
 const GEO_ENTRY = new URL("../../../packages/geo/src/index.ts", import.meta.url).href;
 
 export interface LoadedGeo {

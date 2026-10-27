@@ -1,6 +1,7 @@
 import {
   AGE_BUCKET_LABEL,
   AgeBucket,
+  type Gender,
   METRO_LABEL,
   MetroId,
   type AreaArg,
@@ -26,8 +27,8 @@ import { marketLabel } from "../metros";
 
 export type ContextKind = RankContext["kind"];
 
-/** Grid sections; SHARE shows AGE, AUDIENCE and METRO, RANK any of them. */
-export type ContextGroup = "AGE" | "AUDIENCE" | "METRO" | "CITY" | "SITE" | "SIGNAL";
+/** Grid sections; SHARE shows AGE, GENDER, AUDIENCE and METRO, RANK any of them. */
+export type ContextGroup = "AGE" | "GENDER" | "AUDIENCE" | "METRO" | "CITY" | "SITE" | "SIGNAL";
 
 /**
  * What building a context needs beyond its input: the run's pinned market localities and the
@@ -93,6 +94,16 @@ export function ageContext(bucket: AgeBucket): ContextSpec {
   return callable(
     { key: `age:${bucket}`, kind: "age", group: "AGE", label: AGE_BUCKET_LABEL[bucket], subject: bucket, metro: null },
     { "signal.demographics.age": bucket },
+  );
+}
+
+const GENDER_LABEL: Readonly<Record<Gender, string>> = { male: "Male audience", female: "Female audience" };
+
+/** An audience gender context (C4): Qloo's gender signal, binary in the source. */
+export function genderContext(gender: Gender): ContextSpec {
+  return callable(
+    { key: `gender:${gender}`, kind: "gender", group: "GENDER", label: GENDER_LABEL[gender], subject: gender, metro: null },
+    { "signal.demographics.gender": gender },
   );
 }
 
@@ -211,19 +222,26 @@ export async function rankContexts(
               ? metroContext(c.market, pins.get(c.market), env)
               : c.kind === "audience"
                 ? audienceContext(c.audience)
-                : ageContext(c.age);
+                : c.kind === "gender"
+                  ? genderContext(c.gender)
+                  : ageContext(c.age);
     if (specs.some((s) => s.key === spec.key)) repeated.push(spec.label);
     else specs.push(spec);
   }
   return { specs, repeated };
 }
 
-/** SHARE's contexts in grid order: ages youngest first, then audiences and metros as given. */
+/** SHARE's contexts in grid order: ages youngest first, then genders, audiences and metros as given. */
 export async function shareContexts(
-  input: { ages: readonly AgeBucket[]; audiences: readonly AudienceKey[]; metros: readonly MarketId[] },
+  input: { ages: readonly AgeBucket[]; genders?: readonly Gender[]; audiences: readonly AudienceKey[]; metros: readonly MarketId[] },
   env: ContextEnv,
 ): Promise<ContextSpec[]> {
   const pins = await pinsFor(input.metros, env.localities);
   const ages = AgeBucket.options.filter((b) => input.ages.includes(b));
-  return [...ages.map(ageContext), ...input.audiences.map(audienceContext), ...input.metros.map((m) => metroContext(m, pins.get(m), env))];
+  return [
+    ...ages.map(ageContext),
+    ...(input.genders ?? []).map(genderContext),
+    ...input.audiences.map(audienceContext),
+    ...input.metros.map((m) => metroContext(m, pins.get(m), env)),
+  ];
 }

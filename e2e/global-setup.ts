@@ -9,12 +9,18 @@ import type { FullConfig } from "@playwright/test";
 const WARM_UP = [
   "/",
   "/ask",
+  "/briefs",
+  "/how-it-works",
   "/method",
-  "/trust",
   "/status",
+  "/d",
   "/dev/ask",
   "/dev/brief?sample=brand-health",
+  "/dev/brief?job=brand_health",
   "/dev/brief?job=site_selection",
+  "/dev/working?state=start",
+  "/dev/ui",
+  "/dev/figures",
   "/run/smoke-warm-up",
   "/r/smoke-warm-up",
 ] as const;
@@ -23,8 +29,9 @@ const WARM_UP = [
 const WARM_UP_TIMEOUT_MS = 180_000;
 
 /**
- * Fails the smoke at once, with what to do, when no server answers at the base URL: the smoke never
- * starts one. Then warms the routes. Health and the pages are read only; no Qloo or model call.
+ * Fails the smoke at once, with what to do, when no server answers at the base URL, or it answers but is
+ * not ready for another reason than its database: the smoke never starts one. Then warms the routes.
+ * Health and the pages are read only; no Qloo or model call.
  */
 export default async function globalSetup(config: FullConfig): Promise<void> {
   const base = config.projects[0]?.use.baseURL;
@@ -36,7 +43,13 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
   } catch (err) {
     throw new Error(`No server answers at ${base}. Start the dev server first (pnpm dev), or point SMOKE_BASE_URL at one.`, { cause: err });
   }
-  if (!res.ok) throw new Error(`${health} answered ${res.status}: the server is up but not ready.`);
+  if (!res.ok) {
+    // 503 with the database down is a server that still serves every page and the dev samples: the specs
+    // that need a stored run skip with that reason. Any other answer is a server that is not ready.
+    const body = (await res.json().catch(() => null)) as { db?: { ok?: boolean } } | null;
+    if (res.status !== 503 || body?.db?.ok !== false) throw new Error(`${health} answered ${res.status}: the server is up but not ready.`);
+    console.warn(`${health}: the database is not reachable; the test run and its permalink will skip (pnpm db:up).`);
+  }
 
   for (const path of WARM_UP) {
     // The status is the specs' to check, with a better message; only a server that stops answering fails here.

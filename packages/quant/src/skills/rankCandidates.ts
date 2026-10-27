@@ -52,20 +52,29 @@ interface RankRule {
   tags: boolean;
   /** Seeds only under a none context: a location and a seed together are not verified for the type. */
   seedsAlone: boolean;
+  /** Seeds and tags only under a none context: the other contexts are verified with no interest signal. */
+  signalsAlone?: boolean;
 }
+
+/** Podcasts, TV shows and movies (C3): seeds or tags under a none context, else age contexts alone. */
+const MEDIA_RULE: RankRule = { contexts: ["none", "age"], seeds: true, tags: true, seedsAlone: false, signalsAlone: true };
 
 /**
  * The allowlist per type. Brands take every context, with seeds and taxonomy tags riding along (G1,
- * G2, G4, P5). Persons rank by location and age with no interest signal (G3, P5). Artists rank from
- * seeds and tags (P5). Places rank by location (site vs city, P5) or from seeds, never both at once.
- * Destinations rank from seeds (G5). TV shows, movies and podcasts take no candidate list.
+ * G2, G4, P5, C4, C5). Persons rank by location, age, audience and gender with no interest signal (G3,
+ * P5, C4, C5). Artists rank from seeds and tags (P5). Places rank by location (site vs city, P5) or
+ * from seeds, never both at once. Destinations rank from seeds (G5). Podcasts, TV shows and movies
+ * rank as named lists from seeds and tags, or by age with no signal; TV shows also by audience (C3, C5).
  */
 export const RANK_RULES: Partial<Readonly<Record<EntityType, RankRule>>> = {
-  brand: { contexts: ["none", "site", "city", "metro", "audience", "age"], seeds: true, tags: true, seedsAlone: false },
-  person: { contexts: ["site", "city", "metro", "age"], seeds: false, tags: false, seedsAlone: false },
+  brand: { contexts: ["none", "site", "city", "metro", "audience", "age", "gender"], seeds: true, tags: true, seedsAlone: false },
+  person: { contexts: ["site", "city", "metro", "age", "audience", "gender"], seeds: false, tags: false, seedsAlone: false },
   artist: { contexts: ["none"], seeds: true, tags: true, seedsAlone: false },
   place: { contexts: ["none", "site", "city", "metro"], seeds: true, tags: false, seedsAlone: true },
   destination: { contexts: ["none"], seeds: true, tags: false, seedsAlone: false },
+  podcast: MEDIA_RULE,
+  tv_show: { ...MEDIA_RULE, contexts: ["none", "age", "audience"] },
+  movie: MEDIA_RULE,
 };
 
 const LOCATION_KINDS: readonly ContextKind[] = ["site", "city", "metro"];
@@ -74,7 +83,7 @@ const LOCATION_KINDS: readonly ContextKind[] = ["site", "city", "metro"];
 function refusal(input: RankInput): string | null {
   const rule = RANK_RULES[input.type];
   if (rule === undefined) {
-    return `rank_candidates cannot rank ${input.type}s: Qloo takes no candidate list for them. Rank brands, persons, artists, places or destinations.`;
+    return `rank_candidates cannot rank ${input.type}s: Qloo takes no candidate list for them. Rank brands, persons, artists, places, destinations, podcasts, TV shows or movies.`;
   }
   const bad = [...new Set(input.contexts.map((c) => c.kind).filter((k) => !rule.contexts.includes(k)))];
   if (bad.length > 0) return `${input.type}s rank under ${rule.contexts.join(", ")} contexts only; not ${bad.join(", ")}.`;
@@ -82,6 +91,10 @@ function refusal(input: RankInput): string | null {
   if (!rule.tags && input.signal_tags.length > 0) return `${input.type}s take no signal_tags.`;
   if (rule.seedsAlone && input.signal_entities.length > 0 && input.contexts.some((c) => c.kind !== "none")) {
     return `${input.type}s take signal_entities under a none context only: a location and a seed together are not verified for them.`;
+  }
+  const signals = input.signal_entities.length + input.signal_tags.length > 0;
+  if (rule.signalsAlone === true && signals && input.contexts.some((c) => c.kind !== "none")) {
+    return `${input.type}s take signal_entities and signal_tags under a none context only; their other contexts are verified with no signal.`;
   }
   return null;
 }

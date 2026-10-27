@@ -1,5 +1,5 @@
 {
-  "$comment": "The ten sponsor categories of SPEC §5.3 S10, keyed by the contracts SponsorCategory enum; a run uses at most six. Names, query strings and public taxonomy URNs only (D29). semantic_query is the /v2/tags semantic search (filter.parents.types=urn:entity:brand) that finds each category's tags at runtime; probe gate G14 matched it for the eight categories marked G14, telecom and fintech were not probed. G14 returned mostly descriptive *:qloo:* tags, which are not taste signals. The P5 probe verified both a urn:tag:product_category:qloo:* tag and a urn:tag:genre:brand:* leaf as filter.tags on brand insights (20/20 results carry the tag; verified_as brand_filter, never a signal), so tags lists the filter tag P5 exercised and stays empty for the other categories until one is verified. Several filter.tags values combine as a union (P5: 20/20 rows carried either energy tag, 9/20 both), so each category lists one tag and S10 sends one category per call. aliases help CLERK and the command grammar map question words to a category.",
+  "$comment": "The fifteen sponsor categories of SPEC §5.3 S10 and PLAN §5.5 S10, keyed by the contracts SponsorCategory enum; a run uses at most six. Names, query strings and public taxonomy URNs only (D29). semantic_query is the /v2/tags semantic search (filter.parents.types=urn:entity:brand, filter.tag.types=urn:tag:genre:brand) that finds a category's tag at runtime; probe names the gate that first ran it (G14 for the original eight, C2 for telecom, fintech and the five Part 8 categories). G14 returned mostly descriptive *:qloo:* tags, which are not taste signals. A verified tag is a brand filter (verified_as brand_filter, never a signal): P5 verified the beer product_category:qloo tag and the energy genre:brand leaf, and the coverage probe (C2) verified one genre:brand leaf per category with a seeded discovery call where every returned brand carried the tag (10/10) and at least 8 in 10 belonged to the category. Carrying a tag is not belonging: a brand whose main line lies in another genre:brand branch (offCategoryBranch in S10, e.g. a fashion house under the beauty tag) is skipped at run time with a notice. Where the runtime lookup's first tag does not fit the category (qsr, fintech, gaming), the verified tag in tags replaces it. A category with no fitting tag keeps tags empty, tag_status unverified and fallback semantic_tag_search: its tag is looked up at run time and labelled as such. Several filter.tags values combine as a union (P5: 20/20 rows carried either energy tag, 9/20 both), so each category lists one tag and S10 sends one category per call. aliases help CLERK and the command grammar map question words to a category.",
   "categories": {
     "beer": {
       "label": "Beer",
@@ -14,17 +14,16 @@
       "semantic_query": "whiskey",
       "probe": "G14",
       "aliases": ["spirits", "whiskey", "whisky", "bourbon", "tequila", "vodka", "liquor"],
-      "tags": [],
-      "tag_status": "unverified",
-      "note": "G14 returned a genre:brand taxonomy tag for this query; it is resolved at runtime and has not been tested as a filter."
+      "tags": [{ "urn": "urn:tag:genre:brand:wine_and_spirits:spirits:whiskey", "status": "verified", "verified_by": "C2", "verified_as": "brand_filter" }],
+      "tag_status": "verified"
     },
     "rtd_seltzer": {
       "label": "RTD and hard seltzer",
       "semantic_query": "hard seltzer",
       "probe": "G14",
       "aliases": ["hard seltzer", "seltzer", "canned cocktail", "ready to drink", "rtd"],
-      "tags": [],
-      "tag_status": "unverified"
+      "tags": [{ "urn": "urn:tag:genre:brand:wine_and_spirits:spirits:hard_seltzer", "status": "verified", "verified_by": "C2", "verified_as": "brand_filter" }],
+      "tag_status": "verified"
     },
     "outdoor_sporting_retail": {
       "label": "Outdoor and sporting retail",
@@ -32,23 +31,26 @@
       "probe": "G14",
       "aliases": ["outdoor gear", "outdoor retail", "sporting goods", "camping gear", "hunting and fishing"],
       "tags": [],
-      "tag_status": "unverified"
+      "tag_status": "unverified",
+      "fallback": "semantic_tag_search",
+      "note": "C2: no genre:brand tag in the lookup (take 5, then take 20) fits outdoor or sporting retail, and the runtime pick is a home accessories tag. Named fallback: semantic tag search at run time, labelled."
     },
     "apparel_footwear": {
       "label": "Apparel and footwear",
       "semantic_query": "boots and footwear",
       "probe": "G14",
       "aliases": ["apparel", "clothing", "footwear", "boots", "sneakers", "denim"],
-      "tags": [],
-      "tag_status": "unverified"
+      "tags": [{ "urn": "urn:tag:genre:brand:fashion:footwear", "status": "verified", "verified_by": "C2", "verified_as": "brand_filter" }],
+      "tag_status": "verified"
     },
     "qsr": {
       "label": "Quick-service restaurants",
       "semantic_query": "fast food",
       "probe": "G14",
       "aliases": ["fast food", "quick service", "qsr", "burger chain", "fast casual"],
-      "tags": [],
-      "tag_status": "unverified"
+      "tags": [{ "urn": "urn:tag:genre:brand:dining", "status": "verified", "verified_by": "C2", "verified_as": "brand_filter" }],
+      "tag_status": "verified",
+      "note": "C2: the taxonomy has no fast-food leaf; the dining leaf (restaurant brands) is the verified filter. The runtime lookup's first tag is a packaged-food tag, so the verified tag replaces it."
     },
     "energy_drinks": {
       "label": "Energy drinks",
@@ -63,24 +65,66 @@
       "semantic_query": "pickup trucks",
       "probe": "G14",
       "aliases": ["auto", "automotive", "cars", "pickup trucks", "trucks", "car brand"],
-      "tags": [],
-      "tag_status": "unverified"
+      "tags": [{ "urn": "urn:tag:genre:brand:automotive:car_and_suv", "status": "verified", "verified_by": "C2", "verified_as": "brand_filter" }],
+      "tag_status": "verified"
     },
     "telecom": {
       "label": "Telecom",
       "semantic_query": "wireless carrier",
-      "probe": null,
+      "probe": "C2",
       "aliases": ["telecom", "wireless carrier", "mobile carrier", "phone plan", "mobile network"],
-      "tags": [],
-      "tag_status": "unverified"
+      "tags": [{ "urn": "urn:tag:genre:brand:telecom", "status": "verified", "verified_by": "C2", "verified_as": "brand_filter" }],
+      "tag_status": "verified"
     },
     "fintech": {
       "label": "Fintech",
       "semantic_query": "mobile payments app",
-      "probe": null,
+      "probe": "C2",
       "aliases": ["fintech", "payments app", "mobile payments", "banking app", "credit card"],
-      "tags": [],
-      "tag_status": "unverified"
+      "tags": [{ "urn": "urn:tag:genre:brand:mobile_app:financial_services", "status": "verified", "verified_by": "C2", "verified_as": "brand_filter" }],
+      "tag_status": "verified",
+      "note": "C2: the runtime lookup's first tag is the whole mobile-app genre; the verified financial-services leaf replaces it."
+    },
+    "beauty": {
+      "label": "Beauty and personal care",
+      "semantic_query": "beauty and cosmetics",
+      "probe": "C2",
+      "aliases": ["beauty", "cosmetics", "makeup", "skincare", "personal care"],
+      "tags": [{ "urn": "urn:tag:genre:brand:health_and_beauty", "status": "verified", "verified_by": "C2", "verified_as": "brand_filter" }],
+      "tag_status": "verified"
+    },
+    "gaming": {
+      "label": "Gaming",
+      "semantic_query": "video games",
+      "probe": "C2",
+      "aliases": ["gaming", "video games", "video game", "game publisher", "esports"],
+      "tags": [{ "urn": "urn:tag:genre:brand:entertainment:video_game_developer", "status": "verified", "verified_by": "C2", "verified_as": "brand_filter" }],
+      "tag_status": "verified",
+      "note": "C2: the runtime lookup's first tag is a broader games tag; the verified video game developer leaf replaces it."
+    },
+    "travel": {
+      "label": "Travel",
+      "semantic_query": "travel booking",
+      "probe": "C2",
+      "aliases": ["travel", "airline", "hotel", "travel booking", "cruise line"],
+      "tags": [{ "urn": "urn:tag:genre:brand:travel", "status": "verified", "verified_by": "C2", "verified_as": "brand_filter" }],
+      "tag_status": "verified"
+    },
+    "food_delivery": {
+      "label": "Food delivery",
+      "semantic_query": "food delivery app",
+      "probe": "C2",
+      "aliases": ["food delivery", "delivery app", "meal delivery", "grocery delivery"],
+      "tags": [{ "urn": "urn:tag:genre:brand:mobile_app:food_and_dining", "status": "verified", "verified_by": "C2", "verified_as": "brand_filter" }],
+      "tag_status": "verified"
+    },
+    "consumer_tech": {
+      "label": "Consumer tech",
+      "semantic_query": "consumer electronics",
+      "probe": "C2",
+      "aliases": ["consumer tech", "consumer electronics", "electronics", "smartphone", "gadgets"],
+      "tags": [{ "urn": "urn:tag:genre:brand:electronics", "status": "verified", "verified_by": "C2", "verified_as": "brand_filter" }],
+      "tag_status": "verified"
     }
   }
 }

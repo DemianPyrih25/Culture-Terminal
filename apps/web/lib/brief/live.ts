@@ -21,10 +21,11 @@ function stage(role: StageRole, state: StageState, word: string): StageView {
   return { role, label: STAGE_LABEL[role], state, word: shown, text: `${STAGE_LABEL[role]} ${shown}` };
 }
 
-const happened = (state: RunState, type: RunState["timeline"][number]["type"]) => state.timeline.some((t) => t.type === type);
+/** An event of this type has been applied. */
+export const happened = (state: RunState, type: RunState["timeline"][number]["type"]) => state.timeline.some((t) => t.type === type);
 
 /** The latest draft has a CHECKER verdict. */
-function checkedDraft(state: RunState): RunState["validation"] {
+export function checkedDraft(state: RunState): RunState["validation"] {
   const v = state.validation;
   if (v === null || state.draftAttempt === null) return v;
   return v.attempt >= state.draftAttempt ? v : null;
@@ -87,7 +88,7 @@ const phaseOf = (state: RunState, t: ToolCallState): Phase => t.phase ?? (t.pivo
  * response can only be submit_report (turn 3), so no more Qloo calls will come. After wave 1 the
  * ANALYST may still ask for follow-ups, so that wait still counts as gathering.
  */
-function followUpsDone(state: RunState): boolean {
+export function followUpsDone(state: RunState): boolean {
   if (state.toolCalls.some((t) => t.status === "running")) return false;
   return state.toolCalls.some((t) => phaseOf(state, t) === "followup");
 }

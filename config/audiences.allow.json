@@ -10,11 +10,32 @@
       "leisure",
       "spending_habits",
       "professional_area",
-      "investing_interests",
-      "life_stage"
+      "life_stage",
+      "investing_interests"
     ],
-    "location": ["hobbies_and_interests", "leisure"],
-    "marketing": ["hobbies_and_interests", "leisure", "spending_habits", "professional_area", "life_stage"],
-    "audience": ["hobbies_and_interests", "leisure", "spending_habits", "professional_area", "life_stage"]
+    "location": [
+      "hobbies_and_interests",
+      "leisure",
+      "spending_habits",
+      "professional_area",
+      "life_stage",
+      "investing_interests"
+    ],
+    "marketing": [
+      "hobbies_and_interests",
+      "leisure",
+      "spending_habits",
+      "professional_area",
+      "life_stage",
+      "investing_interests"
+    ],
+    "audience": [
+      "hobbies_and_interests",
+      "leisure",
+      "spending_habits",
+      "professional_area",
+      "life_stage",
+      "investing_interests"
+    ]
   }
 }

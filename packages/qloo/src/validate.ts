@@ -36,6 +36,9 @@ const TAKE_MAX: Readonly<Record<QlooPath, number>> = {
 };
 
 const AUDIENCE_PREFIX = "urn:audience:";
+const GENDER = "signal.demographics.gender";
+/** The values probe C4 verified; Qloo would ignore any other value silently. */
+const GENDER_VALUES: ReadonlySet<string> = new Set(["male", "female"]);
 
 /** `filter.type` for /v2/insights and /v2/trending (as sent), else null. Assumes the request is valid. */
 export function filterTypeOf(path: QlooPath, params: QlooParams): string | null {
@@ -72,6 +75,16 @@ export function validateRequest(path: QlooPath, params: QlooParams, ctx: Validat
       "urn:heatmap takes signal.interests.tags or signal.interests.entities, not both: the analog's cells set the top of a combined map (probe P5)",
       "signal.interests.entities",
     );
+  }
+
+  // Probe C4: an artist rank with gender as its only signal answered HTTP 400 (both values).
+  if (
+    filterType === "urn:entity:artist" &&
+    params[GENDER] !== undefined &&
+    params["signal.interests.entities"] === undefined &&
+    params["signal.interests.tags"] === undefined
+  ) {
+    throw new QlooParamError("urn:entity:artist takes signal.demographics.gender only next to seeds or tags (probe C4: HTTP 400 alone)", GENDER);
   }
 
   if (path === "/v2/insights") requireSignal(filterType ?? "", params);
@@ -121,6 +134,9 @@ function checkValue(
   if (LOCATION_PARAMS.has(param)) checkLocation(path, param, text);
   if (DATE_PARAMS.has(param) && !/^\d{4}-\d{2}-\d{2}$/.test(text)) {
     throw new QlooParamError(`${param} must be a YYYY-MM-DD date`, param);
+  }
+  if (param === GENDER && !GENDER_VALUES.has(text)) {
+    throw new QlooParamError(`${param} takes "male" or "female" (probe C4); "${text}" would be ignored`, param);
   }
   if (text.startsWith(AUDIENCE_PREFIX)) checkAudience(param, text, ctx);
 }

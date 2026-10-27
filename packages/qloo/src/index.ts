@@ -4,6 +4,7 @@ export * from "./transport-types";
 export * from "./mock";
 export * from "./errors";
 export * from "./audiences";
+export * from "./audience-catalogue";
 export * from "./validate";
 export * from "./canonical";
 export { formatNumber } from "./geometry";

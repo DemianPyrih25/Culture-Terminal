@@ -7,7 +7,8 @@ import { normaliseConcept, tagNameFromUrn, tagTypeOf, tagUse, type TagUse } from
  * The curated concept map for find_tags (scope place) and the geo_lift baseline, read from
  * config/categories.json (PLAN §4.3, §5.3 S6). It is ours, so a malformed file fails loudly at
  * start-up. Verified and research tags are served at zero cost; a concept whose tags are all
- * unverified is looked up live with its semantic query until a probe verifies them.
+ * unverified is looked up live with its semantic query until a probe verifies them, and so is a
+ * concept whose supply filter failed its gate (fallback semantic_tag_search, PLAN §11.2).
  */
 
 const TagStatus = z.enum(["verified", "research", "unverified"]);
@@ -18,6 +19,8 @@ const CuratedTagEntry = z.object({
   status: TagStatus,
   verified_by: z.string().nullable().optional(),
   verified_as: z.enum(["heatmap_signal", "place_filter"]).optional(),
+  /** The named fallback of an unverified tag (PLAN §11.2): a live semantic search, labelled. */
+  fallback: z.literal("semantic_tag_search").optional(),
 });
 
 const CategoryEntry = z.object({
@@ -52,6 +55,12 @@ export interface CuratedConcept {
   /** Verified and research tags; empty when every tag is still unverified. */
   served: CuratedTag[];
   /**
+   * True when the entry's supply filter (a category:place tag) failed its gate and names the
+   * semantic_tag_search fallback, and no served tag filters supply: the served tags still answer, and
+   * a live lookup of the semantic query looks for a supply filter, labelled live.
+   */
+  filterFallback: boolean;
+  /**
    * Every tag the entry names, unverified ones included. A live lookup keeps these whatever their
    * display name, since a name such as "Book Store" can miss the all-words filter for its own query.
    */
@@ -79,6 +88,9 @@ const CONCEPTS: readonly CuratedConcept[] = config.categories.map((c) => ({
   label: c.label,
   semanticQuery: c.semantic_query,
   served: c.tags.flatMap((t) => (t.status === "unverified" ? [] : [curatedTag(t.urn, t.status)])),
+  filterFallback:
+    c.tags.some((t) => t.status === "unverified" && t.fallback === "semantic_tag_search" && tagUse(t.urn) === "place_filter") &&
+    !c.tags.some((t) => t.status !== "unverified" && tagUse(t.urn) === "place_filter"),
   candidates: c.tags.map((t) => t.urn),
 }));
 
@@ -97,6 +109,26 @@ const BY_NAME: ReadonlyMap<string, CuratedConcept> = (() => {
   });
   return byName;
 })();
+
+/**
+ * The category:place tags a probe gate verified as place filters (G10, C1, C1b): the only tags
+ * geo_lift counts similar venues with. A category tag found at run time, or one still unverified in
+ * the config, may return no venue where many exist (C1: the first bookstore and pizza candidates gave
+ * 0 Nashville places), so a count from it could read as "no competitors"; without a verified filter
+ * the competitor count is unknown, never 0 (PLAN §8.3).
+ */
+const VERIFIED_PLACE_FILTERS: ReadonlySet<string> = new Set(
+  config.categories.flatMap((c) => c.tags.filter((t) => t.status === "verified" && t.verified_as === "place_filter").map((t) => t.urn)),
+);
+
+export function isVerifiedPlaceFilter(tagId: string): boolean {
+  return VERIFIED_PLACE_FILTERS.has(tagId);
+}
+
+/** The curated concept that serves a tag (its label names the place type in plain words), or null. */
+export function curatedConceptOfTag(tagId: string): CuratedConcept | null {
+  return CONCEPTS.find((c) => c.served.some((t) => t.tagId === tagId) || c.candidates.includes(tagId)) ?? null;
+}
 
 /** The curated concept a place concept names exactly (its key, label or an alias, normalised), or null. */
 export function curatedConcept(text: string): CuratedConcept | null {

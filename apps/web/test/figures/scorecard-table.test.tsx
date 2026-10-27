@@ -7,7 +7,7 @@ import { plotView, render, tableRows, tableView, text } from "./markup";
 const data = priorsScorecard.payload;
 
 describe("ScorecardTable", () => {
-  const html = render(<ScorecardTable data={data} bindings={SCORECARD_BINDINGS} number={1} title="Four priors" />);
+  const html = render(<ScorecardTable data={data} bindings={SCORECARD_BINDINGS} title="Four priors" />);
 
   it("writes each prior as an expectation with its verdict", () => {
     const plot = plotView(html);
@@ -15,7 +15,7 @@ describe("ScorecardTable", () => {
     expect(plot).toContain('data-state="REFUTED"');
     expect(plot).toContain('data-state="CONFIRMED"');
     expect(plot).toContain('data-state="INCONCLUSIVE"');
-    expect(text(plot)).toContain("CONFIRMED");
+    expect(text(plot)).toContain("Confirmed");
   });
 
   it("binds metric tokens and turns citations into footnotes", () => {
@@ -29,7 +29,7 @@ describe("ScorecardTable", () => {
 
   it("lists every prior as text in a table view hidden until toggled", () => {
     // The list is readable HTML already, so the table is not a second copy for screen readers.
-    expect(html).toContain('<div hidden="" class="pt-2" data-view="table">');
+    expect(html).toContain('<div hidden="" data-view="table" class="min-w-0 overflow-x-auto">');
     const rows = tableRows(tableView(html));
     expect(rows).toHaveLength(4);
     expect(rows[1]).toEqual([
@@ -46,7 +46,7 @@ describe("ScorecardTable", () => {
       <ScorecardList data={data} pending={{ H3: "AWAITING_DATA", H4: "AWAITING_CHECK" }} waitingNote="Written before data · 09:12:04" />,
     );
     expect(list).toContain('data-state="AWAITING_DATA"');
-    expect(text(list)).toContain("AWAITING CHECK");
+    expect(text(list)).toContain("Awaiting check");
     expect(text(list)).toContain("Written before data · 09:12:04");
     expect(text(list)).not.toContain("folk holds");
   });

@@ -50,7 +50,7 @@ const notFound = () => json({ error: "Run not found." }, 404);
 function failure(err: unknown, what: string): Response {
   if (isConnectionError(err)) {
     log.warn({ err }, `${what}: database unavailable`);
-    return json({ error: "The database is unavailable. Try again shortly.", retry: true }, 503, { "Retry-After": "5" });
+    return json({ error: "We can't take new questions right now. Please try again in a moment.", retry: true }, 503, { "Retry-After": "5" });
   }
   log.error({ err }, `${what} failed`);
   return json({ error: "Something went wrong." }, 500);
@@ -121,7 +121,7 @@ function humanRefusal(kind: Extract<HumanCheck, { ok: false }>["kind"]): Respons
   }
   const error =
     kind === "missing"
-      ? "Confirm you are a person to run live analysis. Showcases and replays need no check."
+      ? "Confirm you are a person to run live analysis. Answers you already have need no check."
       : "The check that you are a person did not pass. Try again.";
   return json({ error, turnstile: true, retry: false }, 403);
 }

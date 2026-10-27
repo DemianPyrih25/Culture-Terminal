@@ -236,6 +236,7 @@ describe("skill input issues (INVALID_INPUT)", () => {
     set: ["R1", "R2"],
     ages: ["24_and_younger"],
     audiences: [],
+    genders: [],
     metros: [],
     trigger_finding_id: null,
     step_id: null,
@@ -298,7 +299,7 @@ describe("skill input issues (INVALID_INPUT)", () => {
     // The other issues still come back, about the unwrapped input.
     expect(readSkillInput("share_of_taste", share({ step_id: '"S2"', ages: [], metros: [] }))).toEqual({
       ok: false,
-      issues: ["(input): give at least one age, audience or metro context"],
+      issues: ["(input): give at least one age, audience, gender or metro context"],
     });
     // Quotes around anything but an id are reported, never stripped.
     expect(readSkillInput("share_of_taste", share({ set: ['"Brand Gamma"', "R2"] }))).toEqual({

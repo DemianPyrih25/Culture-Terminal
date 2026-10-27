@@ -12,7 +12,6 @@ const html = render(
   <PositionCard
     data={tastePosition.payload}
     figureHrefs={{ D1: "#figure-2", D19: "#figure-6" }}
-    number={1}
     title="Distinctive and young"
     source={FIXTURE_SOURCES.position}
     formulaId="subs.distinctiveness"
@@ -41,7 +40,7 @@ describe("PositionCard", () => {
     const strip = axisRow(plot, "reach");
     expect(strip).toContain('aria-label="rank 4 of 7 among peers"');
     expect([...strip.matchAll(/<circle/g)]).toHaveLength(7);
-    expect(strip).toMatch(/<circle cx="35" cy="5" r="3.75" class="fill-data" data-subject="true"/);
+    expect(strip).toMatch(/<circle cx="35" cy="5" r="3.75" class="fill-accent" data-subject="true"/);
     // The words repeat only where the display says something else.
     expect(text(axisRow(plot, "reach"))).not.toContain("4 of 74 of 7");
     expect(text(axisRow(plot, "momentum"))).toContain("1 of 3");
@@ -64,17 +63,17 @@ describe("PositionCard", () => {
     expect(words).not.toContain("score");
   });
 
-  it("explains an axis without a value, momentum with the NO SIGNAL hatch", () => {
-    const card = plotView(render(<PositionCard data={tastePositionNoSignal.payload} size="margin" title="No signal" />));
+  it("explains an axis without a value, momentum with the No signal hatch", () => {
+    const card = plotView(render(<PositionCard data={tastePositionNoSignal.payload} compact title="No signal" />));
     const row = axisRow(card, "momentum");
     expect(row).toContain('data-badge="UNAVAILABLE"');
     expect(text(row)).toContain("No signal");
     expect(text(row)).toContain("Not measured");
-    expect(row).toContain("<path");
+    expect(row).toContain("bg-hatch");
   });
 
   it("keeps the HTML card out of the reading order twice: the table view waits for the toggle", () => {
-    expect(html).toMatch(/<div hidden="" class="pt-2" data-view="table">/);
+    expect(html).toMatch(/<div hidden="" data-view="table" class="min-w-0 overflow-x-auto">/);
     const table = tableView(html);
     expect(tableHeads(table)).toEqual(["Axis", "Shown", "Value", "Peer rank", "Badge", "Note"]);
     const rows = tableRows(table);

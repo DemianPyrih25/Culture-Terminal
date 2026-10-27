@@ -45,6 +45,8 @@ export const FLAG_TEXT: Readonly<Record<Flag, string>> = {
     "A neighbourhood boundary could not be used, so the area was read from its centre point or a place-name search (a CODE FALLBACK).",
   DEMOGRAPHICS_ARE_INDICES: DEMOGRAPHIC_INDICES,
   SUPPLY_SAMPLE_ONLY: "Supply counts a capped sample of venues Qloo indexes, not every business in the area.",
+  SUPPLY_UNAVAILABLE:
+    "Similar venues could not be counted area by area (no verified venue category for the place type, or a venue sample that came back empty or too thin), so the number of competitors is unknown, not zero.",
   STALE_CACHE:
     "Some Qloo responses were served from an older cached copy because a fresh call failed; their fetch times show their real age.",
   BUDGET_TRUNCATED:
@@ -71,6 +73,7 @@ export const FLAG_SEVERITY: Readonly<Record<Flag, Severity>> = {
   INCOMPLETE_RUN: "high",
   BUDGET_TRUNCATED: "high",
   SECONDARY_ENTITY_DROPPED: "high",
+  SUPPLY_UNAVAILABLE: "high",
   TRENDING_HISTORICAL_WINDOW: "medium",
   NO_TREND_SIGNAL: "medium",
   COARSE_GEOHASH: "medium",
@@ -131,7 +134,7 @@ export const SKILL_LIMITATIONS: Readonly<Record<SkillId, readonly string[]>> = {
   audience_dna: [DEMOGRAPHIC_INDICES, "Facet tags are qualitative descriptors from Qloo's entity tags, not survey answers."],
   momentum: ["Qloo trending covers brands and TV shows only; artists and people have no trend data."],
   destination_affinity: ["Only Qloo's top US destinations for this audience are compared.", TRAVEL_TASTE],
-  geo_lift: [RELATIVE_WITHIN_METRO, "Supply counts venues Qloo indexes, not every business in the area."],
+  geo_lift: [RELATIVE_WITHIN_METRO, "Supply counts a sample of venues Qloo indexes, not every business in the area."],
   block_dna: [
     "Affinities are compressed, so only rank differences against the city are shown.",
     VENUE_GOERS,

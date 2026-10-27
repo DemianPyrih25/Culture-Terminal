@@ -1,4 +1,5 @@
 import { PROBE_FACTS } from "./allowlist";
+import { looksLikeWkt } from "./geometry";
 import type { CanonicalRequest } from "./transport-types";
 
 /**
@@ -17,9 +18,30 @@ export const ERROR_TTL_MS = DAY_MS;
 export const STALE_TTL_MULTIPLE = 4;
 
 export interface TtlOptions {
-  /** Metro locality ids whose city fingerprints are pinned: urn:tag lists and the Block DNA city brand list. */
+  /**
+   * When non-empty, only these locality ids count as pinned cities for the urn:tag fingerprints and the
+   * Block DNA city brand list (tests). Empty or absent, every locality id does (a WKT area never does).
+   */
   pinnedLocalities?: ReadonlySet<string>;
 }
+
+/** The parameters a city fingerprint may carry besides its locality (Block DNA tagParams: take, the SOUND tag type). */
+const FINGERPRINT_KEYS: ReadonlySet<string> = new Set(["filter.type", "signal.location", "take", "filter.tag.types"]);
+/** The parameters of the Block DNA city brand list (brandParams: the G9 popularity cap). */
+const CITY_BRAND_KEYS: ReadonlySet<string> = new Set(["filter.type", "signal.location", "take", "filter.popularity.max"]);
+
+/**
+ * True when signal.location is a whole city: a Qloo locality id, not a WKT point or polygon (an area
+ * or a site, kept 14 d), and one of `pinnedLocalities` when that set is given.
+ */
+function isCityLocation(location: string | undefined, options: TtlOptions): boolean {
+  if (location === undefined || location === "" || looksLikeWkt(location)) return false;
+  const only = options.pinnedLocalities;
+  return only === undefined || only.size === 0 || only.has(location);
+}
+
+const keysWithin = (query: Readonly<Record<string, string>>, allowed: ReadonlySet<string>): boolean =>
+  Object.keys(query).every((k) => allowed.has(k));
 
 /** Whether a successful answer to this request is pinned (D25). */
 export function isPinnedRequest(request: CanonicalRequest, options: TtlOptions = {}): boolean {
@@ -32,15 +54,13 @@ export function isPinnedRequest(request: CanonicalRequest, options: TtlOptions =
     return q["signal.interests.tags"] === PROBE_FACTS.heatmapBaselineTag && q["signal.interests.entities"] === undefined;
   }
   if (request.filterType === "urn:tag") {
-    const location = q["signal.location"];
-    return location !== undefined && options.pinnedLocalities?.has(location) === true;
+    // The city fingerprints of Block DNA (whole list and SOUND list): a locality and nothing that narrows it.
+    return isCityLocation(q["signal.location"], options) && keysWithin(q, FINGERPRINT_KEYS);
   }
   if (request.filterType === "urn:entity:brand") {
-    // The Block DNA city brand list (D25): a pinned locality under the popularity cap and nothing else,
-    // so tenant-fit rank calls with a city context (filter.results.entities) stay at 14 days.
-    const location = q["signal.location"];
-    const rest = Object.keys(q).filter((k) => k !== "filter.type" && k !== "take" && k !== "signal.location");
-    return location !== undefined && options.pinnedLocalities?.has(location) === true && rest.length === 1 && rest[0] === "filter.popularity.max";
+    // The Block DNA city brand list (D25): a locality under the popularity cap and nothing else, so
+    // tenant-fit rank calls with a city context (filter.results.entities) stay at 14 days.
+    return isCityLocation(q["signal.location"], options) && q["filter.popularity.max"] !== undefined && keysWithin(q, CITY_BRAND_KEYS);
   }
   return false;
 }

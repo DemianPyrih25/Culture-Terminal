@@ -133,7 +133,7 @@ describe.skipIf(!available)("lanes and breakers against Postgres", () => {
     const first = await runs.startAgentRun({ question: QUESTION, lane: "public", client: "visitor-a" });
     expect(await refusal(runs.startAgentRun({ question: QUESTION, lane: "public", client: "visitor-a" }))).toEqual({
       code: "limited",
-      message: "Your last live brief is still running. Ask again once it ends.",
+      message: "Your last live question is still running. Ask again once it ends.",
     });
     const other = await runs.startAgentRun({ question: QUESTION, lane: "public", client: "visitor-b" });
     // The same address on the judge lane is the lane's to limit, not the visitor's.
@@ -145,7 +145,7 @@ describe.skipIf(!available)("lanes and breakers against Postgres", () => {
     }
     expect(await refusal(runs.startAgentRun({ question: QUESTION, lane: "public", client: "visitor-a" }))).toEqual({
       code: "limited",
-      message: "You have started 3 live briefs in the last hour. Try again in about 1 hour; showcases and replays still work.",
+      message: "You have started 3 live questions in the last hour. Try again in about 1 hour; answers you already have still open.",
     });
     // Trusted callers and unknown addresses have no visitor to count.
     const trusted = await runs.startAgentRun({ question: QUESTION, lane: "public" });
@@ -174,7 +174,7 @@ describe.skipIf(!available)("lanes and breakers against Postgres", () => {
     const refused = await refusal(after.runs.startAgentRun({ question: QUESTION, lane: "public", client: "visitor-s" }));
     expect(refused).toEqual({
       code: "limited",
-      message: "You have started 3 live briefs in the last hour. Try again in about 1 hour; showcases and replays still work.",
+      message: "You have started 3 live questions in the last hour. Try again in about 1 hour; answers you already have still open.",
     });
     let retryAfterS: number | null = null;
     try {
@@ -207,7 +207,7 @@ describe.skipIf(!available)("lanes and breakers against Postgres", () => {
     for (let i = 0; i < 2; i++) await visitor.runs.whenDone((await visitor.runs.startAgentRun({ question: QUESTION, lane: "public", client: "visitor-c" })).runId);
     expect(await refusal(visitor.runs.startAgentRun({ question: QUESTION, lane: "public", client: "visitor-c" }))).toMatchObject({
       code: "limited",
-      message: "You have started 2 live briefs in the last day. Try again in about 24 hours; showcases and replays still work.",
+      message: "You have started 2 live questions in the last day. Try again in about 24 hours; answers you already have still open.",
     });
 
     const judgeDay = await countLaneRunsSince(db, "judge", 24 * HOUR);
@@ -215,7 +215,7 @@ describe.skipIf(!available)("lanes and breakers against Postgres", () => {
     await judges.runs.whenDone((await judges.runs.startAgentRun({ question: QUESTION, lane: "judge" })).runId);
     expect(await refusal(judges.runs.startAgentRun({ question: QUESTION, lane: "judge" }))).toEqual({
       code: "limited",
-      message: "The judge lane's daily limit for live runs is reached. Showcases and replays still work.",
+      message: "The judge lane's daily limit for live runs is reached. Answers you already have still open.",
     });
 
     const day = (await countLaneRunsSince(db, "public", 24 * HOUR)) + (await countLaneRunsSince(db, "judge", 24 * HOUR));
@@ -223,7 +223,7 @@ describe.skipIf(!available)("lanes and breakers against Postgres", () => {
     await all.runs.whenDone((await all.runs.startAgentRun({ question: QUESTION, lane: "judge" })).runId);
     expect(await refusal(all.runs.startAgentRun({ question: QUESTION, lane: "public" }))).toEqual({
       code: "limited",
-      message: "Today's limit for live runs is reached. Showcases and replays still work.",
+      message: "Today's limit for live runs is reached. Answers you already have still open.",
     });
   }, 30_000);
 

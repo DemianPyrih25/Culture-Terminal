@@ -1,5 +1,5 @@
 {
-  "$comment": "Curated concept map for find_tags (scope place) and the geo_lift baseline (PLAN §4.3, §5.3 S6; PROBE_FINDINGS G6, G10, G14). Names, query strings and public taxonomy URNs only (D29). Only taxonomy tags (urn:tag:genre:*, urn:tag:category:*) act as signals; descriptive *:qloo:* tags gave flat or empty results, so none appear here. status: verified = exercised live by the named probe gate; research = named as working during research, not re-checked by a gate; unverified = a candidate URN that must be verified live before it is served. verified_as records the use the probe exercised: heatmap_signal (G6, the restaurant baseline heatmap; P5, concept heatmaps) or place_filter (G10, places filter.tags). P5 found that only urn:tag:genre:place:* tags shape a heatmap: a urn:tag:category:place:* tag returned no cells, so category tags serve the supply filter only and geo_lift takes heatmap_signal tags as concept_tags. find_tags serves verified and research tags at zero cost and looks up unverified concepts live with semantic_query (/v2/tags, filter.parents.types=urn:entity:place) until a probe verifies them.",
+  "$comment": "Curated concept map for find_tags (scope place) and the geo_lift baseline (PLAN §4.3, §5.3 S6, §11.1; PROBE_FINDINGS G6, G10, G14, C1, C1b). 18 place types. Names, query strings and public taxonomy URNs only (D29). Only taxonomy tags (urn:tag:genre:*, urn:tag:category:*) act as signals; descriptive *:qloo:* tags gave flat or empty results, so none appear here. status: verified = exercised live by the named probe gate; research = named as working during research, not re-checked by a gate; unverified = a candidate URN that must be verified live before it is served. verified_as records the use the probe exercised: heatmap_signal (G6, the restaurant baseline heatmap; P5 and C1, concept heatmaps in Nashville with tag_affinity on every cell) or place_filter (G10, C1 and C1b, a filter-only places call in a metro where every returned place carries the tag). P5 found that only urn:tag:genre:place:* tags shape a heatmap: a urn:tag:category:place:* tag returned no cells, so category tags serve the supply filter only and geo_lift takes heatmap_signal tags as concept_tags. The coverage probe (C1) verified a genre tag for every type. For bookstore and pizza the first category tag the search returned gave 0 Nashville places; C1b verified their other candidates (book_store, pizza_restaurant) as place filters in two map cities. A category tag that is not verified names the gate's fallback (fallback semantic_tag_search, PLAN §11.2): find_tags serves the verified genre tag and looks up a supply filter live, labelled as found at run time, but geo_lift counts similar venues only with a verified place_filter tag, so without one the competitor count is unknown, never 0. fitness_studio is verified through its yoga studio tags. find_tags serves verified and research tags at zero cost and looks up unverified concepts live with semantic_query (/v2/tags, filter.parents.types=urn:entity:place) until a probe verifies them.",
   "baseline": {
     "urn": "urn:tag:genre:place:restaurant",
     "status": "verified",
@@ -37,63 +37,150 @@
       "label": "Lounge",
       "aliases": ["lounge", "listening lounge", "listening bar"],
       "semantic_query": "lounge",
-      "tags": [{ "urn": "urn:tag:genre:place:lounge", "status": "research", "verified_by": null }]
+      "tags": [
+        { "urn": "urn:tag:genre:place:lounge", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:lounge", "status": "verified", "verified_by": "C1", "verified_as": "place_filter" }
+      ]
     },
     {
       "key": "wine_bar",
       "label": "Wine bar",
       "aliases": ["wine bar", "natural-wine bar", "natural wine bar"],
       "semantic_query": "natural wine bar",
-      "tags": [{ "urn": "urn:tag:category:place:wine_bar", "status": "unverified", "verified_by": null }]
+      "tags": [
+        { "urn": "urn:tag:genre:place:restaurant:wine_bar", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:wine_bar", "status": "verified", "verified_by": "C1", "verified_as": "place_filter" }
+      ]
     },
     {
       "key": "record_store",
       "label": "Record store",
       "aliases": ["record store", "vinyl shop", "vinyl record store", "record shop"],
       "semantic_query": "vinyl record store",
-      "tags": [{ "urn": "urn:tag:category:place:record_store", "status": "unverified", "verified_by": null }]
+      "tags": [
+        { "urn": "urn:tag:genre:place:record_store", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:record_store", "status": "verified", "verified_by": "C1", "verified_as": "place_filter" }
+      ]
     },
     {
       "key": "ramen",
       "label": "Ramen restaurant",
       "aliases": ["ramen", "ramen counter", "ramen shop", "late-night ramen counter"],
       "semantic_query": "ramen",
-      "tags": [{ "urn": "urn:tag:category:place:ramen_restaurant", "status": "unverified", "verified_by": null }]
+      "tags": [
+        { "urn": "urn:tag:genre:place:restaurant:ramen", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:ramen_restaurant", "status": "verified", "verified_by": "C1", "verified_as": "place_filter" }
+      ]
     },
     {
       "key": "live_music_venue",
       "label": "Live music venue",
       "aliases": ["live music venue", "music venue", "listening room", "concert venue"],
       "semantic_query": "live music venue",
-      "tags": [{ "urn": "urn:tag:category:place:live_music_venue", "status": "unverified", "verified_by": null }]
+      "tags": [
+        { "urn": "urn:tag:genre:place:live_music_venue", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:live_music_venue", "status": "verified", "verified_by": "C1", "verified_as": "place_filter" }
+      ]
     },
     {
       "key": "bakery",
       "label": "Bakery",
       "aliases": ["bakery", "pastry shop", "bread bakery"],
       "semantic_query": "bakery",
-      "tags": [{ "urn": "urn:tag:category:place:bakery", "status": "unverified", "verified_by": null }]
+      "tags": [
+        { "urn": "urn:tag:genre:place:restaurant:bakery", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:bakery", "status": "verified", "verified_by": "C1", "verified_as": "place_filter" }
+      ]
     },
     {
       "key": "brewery",
       "label": "Brewery and taproom",
       "aliases": ["brewery", "taproom", "brewpub", "craft beer bar"],
       "semantic_query": "brewery taproom",
-      "tags": [{ "urn": "urn:tag:category:place:brewery", "status": "unverified", "verified_by": null }]
+      "tags": [
+        { "urn": "urn:tag:genre:place:brewery", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:brewery", "status": "verified", "verified_by": "C1", "verified_as": "place_filter" }
+      ]
     },
     {
       "key": "bookstore",
       "label": "Bookstore",
       "aliases": ["bookstore", "book shop", "bookshop"],
       "semantic_query": "independent bookstore",
-      "tags": [{ "urn": "urn:tag:category:place:book_store", "status": "unverified", "verified_by": null }]
+      "tags": [
+        { "urn": "urn:tag:genre:place:book_store", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:book_store", "status": "verified", "verified_by": "C1b", "verified_as": "place_filter" }
+      ]
     },
     {
       "key": "clothing_store",
       "label": "Clothing boutique",
       "aliases": ["clothing store", "boutique", "vintage clothing", "apparel shop"],
       "semantic_query": "clothing boutique",
-      "tags": [{ "urn": "urn:tag:category:place:clothing_store", "status": "unverified", "verified_by": null }]
+      "tags": [
+        { "urn": "urn:tag:genre:place:clothing_store", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:clothing_store", "status": "verified", "verified_by": "C1", "verified_as": "place_filter" }
+      ]
+    },
+    {
+      "key": "gym",
+      "label": "Gym",
+      "aliases": ["gym", "fitness center", "health club", "weight room"],
+      "semantic_query": "gym",
+      "tags": [
+        { "urn": "urn:tag:genre:place:gym", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:gym", "status": "verified", "verified_by": "C1", "verified_as": "place_filter" }
+      ]
+    },
+    {
+      "key": "beauty_salon",
+      "label": "Beauty salon",
+      "aliases": ["beauty salon", "salon", "hair salon", "nail salon"],
+      "semantic_query": "beauty salon",
+      "tags": [
+        { "urn": "urn:tag:genre:place:beauty_salon", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:beauty_salon", "status": "verified", "verified_by": "C1", "verified_as": "place_filter" }
+      ]
+    },
+    {
+      "key": "pizza",
+      "label": "Pizzeria",
+      "aliases": ["pizza", "pizzeria", "pizza place", "pizza shop"],
+      "semantic_query": "pizza",
+      "tags": [
+        { "urn": "urn:tag:genre:place:restaurant:pizza", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:pizza_restaurant", "status": "verified", "verified_by": "C1b", "verified_as": "place_filter" }
+      ]
+    },
+    {
+      "key": "fitness_studio",
+      "label": "Fitness studio",
+      "aliases": ["fitness studio", "yoga studio", "pilates studio", "boutique fitness"],
+      "semantic_query": "fitness studio",
+      "tags": [
+        { "urn": "urn:tag:genre:place:yoga_studio", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:yoga_studio", "status": "verified", "verified_by": "C1", "verified_as": "place_filter" }
+      ]
+    },
+    {
+      "key": "burger",
+      "label": "Burger restaurant",
+      "aliases": ["burger", "burger joint", "burger bar", "hamburger restaurant"],
+      "semantic_query": "burger",
+      "tags": [
+        { "urn": "urn:tag:genre:place:restaurant:burgers", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:hamburger_restaurant", "status": "verified", "verified_by": "C1", "verified_as": "place_filter" }
+      ]
+    },
+    {
+      "key": "sushi",
+      "label": "Sushi restaurant",
+      "aliases": ["sushi", "sushi bar", "sushi restaurant", "omakase"],
+      "semantic_query": "sushi",
+      "tags": [
+        { "urn": "urn:tag:genre:place:restaurant:sushi", "status": "verified", "verified_by": "C1", "verified_as": "heatmap_signal" },
+        { "urn": "urn:tag:category:place:sushi_restaurant", "status": "verified", "verified_by": "C1", "verified_as": "place_filter" }
+      ]
     }
   ]
 }

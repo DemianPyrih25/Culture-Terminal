@@ -1,12 +1,12 @@
-// /method (A11 · Method & sources), generated from the code: an anchor per FORMULAS id (the target of
-// every figure's ⓘ link), the seven steps with the opening scan and the analyst's turns, the checker
-// rules V1–V10, the conviction penalties, the evaluation in each of its states, and Method enabled in
-// the top bar. Eval numbers here are invented for the fixture.
+// /method, the analysts' reference generated from the code: an anchor per FORMULAS id (the target of
+// every "How it's calculated" link), the seven steps with the opening scan and the analyst's turns, the
+// checker rules V1–V10, the confidence penalties, the evaluation in each of its states, the rules moved
+// from /trust, and the new shell. Eval numbers here are invented for the fixture.
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { CONFIDENCE_PENALTY, ConfidenceRule, GHOST_HONESTY_LINE, Job, ValidationRule } from "@ct/contracts";
-import { CONFIDENCE_RULE_LABEL, FORMULA_IDS, FORMULAS } from "@ct/quant";
+import { CONFIDENCE_RULE_LABEL, FORMULA_IDS, FORMULAS, MIN_BUSY_AREA_VENUES, MIN_SUPPLY_VENUES, THIN_SUPPLY_LABEL } from "@ct/quant";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { decode } from "../figures/markup";
@@ -17,15 +17,15 @@ vi.mock("next/navigation", async (importOriginal) => ({
   useRouter: () => ({ push: vi.fn() }),
 }));
 
-const { default: MethodPage } = await import("../../app/method/page");
-const { methodFacts, openingScan, qlooEndpoints, trendWindowText } = await import("../../app/method/facts");
+const MethodPageModule = await import("../../app/method/page");
+const MethodPage = MethodPageModule.default;
+const { methodFacts, openingScan, qlooEndpoints, rulesFacts, trendWindowText } = await import("../../app/method/facts");
 const { evalSummaryCandidates, loadEvalSummary } = await import("../../app/method/load-eval");
 const { MethodView } = await import("../../components/method/method-view");
 const { formatEvalValue, parseEvalSummary } = await import("../../components/method/eval-summary");
 const { FORMULA_GROUPS, FORMULA_META, METHOD_SECTION_ORDER, SCAN_COPY, checkerRules, methodSteps } = await import("../../content/method");
 const { methodHref } = await import("../../components/figures");
-const { ROUTE_LIVE } = await import("../../lib/routes");
-const { NAV_ENABLED } = await import("../../components/chrome/top-bar");
+const { RULES_INDEX } = await import("../../components/method/rules-sections");
 
 type EvalState = import("../../components/method/eval-summary").EvalState;
 
@@ -36,13 +36,20 @@ afterEach(() => {
 
 function view(evaluation: EvalState = { state: "missing" }): string {
   return renderToStaticMarkup(
-    <MethodView facts={methodFacts()} scan={openingScan()} endpoints={qlooEndpoints()} trendWindow={trendWindowText()} evaluation={evaluation} />,
+    <MethodView
+      facts={methodFacts()}
+      scan={openingScan()}
+      endpoints={qlooEndpoints()}
+      trendWindow={trendWindowText()}
+      evaluation={evaluation}
+      rules={rulesFacts({} as NodeJS.ProcessEnv)}
+    />,
   );
 }
 
-/** The markup of one section, from its id to the next section. */
+/** The markup of one section card, from its marker to its end. */
 function section(html: string, id: string): string {
-  const start = html.indexOf(`<section id="${id}"`);
+  const start = html.indexOf(`data-section="${id}"`);
   if (start < 0) throw new Error(`no section ${id}`);
   const end = html.indexOf("</section>", start);
   return html.slice(start, end);
@@ -55,23 +62,30 @@ const SUMMARY = {
   metrics: [
     { id: "refutation_rate", label: "Priors refuted or qualified", unit: "rate", grounded: 0.42, ghost: null },
     { id: "latency_p50", label: "Latency, p50", unit: "seconds", grounded: 61, ghost: 9.5 },
-    { id: "usd_per_run", label: "Model cost per brief", unit: "usd", grounded: 0.21, ghost: 0.04 },
+    { id: "usd_per_run", label: "Model cost per answer", unit: "usd", grounded: 0.21, ghost: 0.04 },
   ],
   realityCheck: { cases: 12, medianPercentile: 0.77, ghostHitRate: 0.25 },
 };
 
 describe("the /method page", () => {
-  it("renders with Method active in the top bar and links to /trust", () => {
+  it("renders in the new shell with an index of every section, How it works marked current", () => {
+    expect(MethodPageModule.dynamic).toBe("force-dynamic");
+    expect(MethodPageModule.metadata.title).toBe("Method · Culture Terminal");
     const html = renderToStaticMarkup(<MethodPage />);
-    expect(html).toMatch(/<h1[^>]*>How a brief is made<\/h1>/);
-    const nav = html.match(/<a[^>]*data-nav="method"[^>]*>/)?.[0] ?? "";
-    expect(nav).toContain('href="/method"');
+    expect(html).toMatch(/<h1[^>]*>Every formula and rule<\/h1>/);
+    const nav = html.match(/<a[^>]*data-nav="how"[^>]*>/)?.[0] ?? "";
+    expect(nav).toContain('href="/how-it-works"');
     expect(nav).toContain('aria-current="page"');
-    expect(html).toContain('href="/trust"');
-    for (const id of METHOD_SECTION_ORDER) expect(html).toContain(`<section id="${id}"`);
-    // The status line names the trending window.
-    expect(html).toContain(`Trend window ${trendWindowText()}`);
+    expect(html).not.toContain('href="/trust"');
+    for (const id of [...METHOD_SECTION_ORDER, ...RULES_INDEX.map((r) => r.id)]) {
+      expect(html).toContain(`data-section="${id}"`);
+      expect(html).toContain(`href="#${id}"`);
+    }
+    // The sources name the trending window; the evaluation is in one of its states.
+    expect(decode(html)).toContain(`${trendWindowText()}; nothing after it`);
     expect(html).toMatch(/data-eval="(missing|invalid|ok)"/);
+    // No Concept A remnants.
+    expect(html).not.toMatch(/font-serif|text-dim|text-faint|rounded-brief|bg-paper/);
   });
 
   it("gives every formula an anchor equal to its id, where each figure's method link lands", () => {
@@ -100,15 +114,15 @@ describe("the /method page", () => {
     for (const g of FORMULA_GROUPS.filter((g) => g.skill)) expect(html).toContain(g.skill!);
   });
 
-  it("says name matching runs at the gate on every brief, not only when the analyst calls it", () => {
+  it("says name matching runs at the gate on every answer, not only when the analyst calls it", () => {
     const html = view();
     const start = html.indexOf(`data-formula-group="resolve"`);
     const head = decode(html.slice(start, html.indexOf("<article", start)));
-    expect(head).toContain("Run by the resolution gate on every brief");
+    expect(head).toContain("Run by the resolution gate on every answer");
     expect(head).not.toContain(SCAN_COPY.analystOnly);
   });
 
-  it("explains how a brief is made from the code: steps, models, scans and turns", () => {
+  it("explains how an answer is made from the code: steps, models, scans and turns", () => {
     const facts = methodFacts();
     expect(facts.clerkModel).toBe("Haiku 5.5");
     expect(facts.analystModel).toBe("Sonnet 5.5");
@@ -117,14 +131,14 @@ describe("the /method page", () => {
       expect(html).toContain(step.name);
       expect(html).toContain(step.who);
     }
-    expect(html).toContain(`Up to ${facts.limits.qlooCalls} Qloo requests per brief`);
+    expect(html).toContain(`Up to ${facts.limits.qlooCalls} Qloo requests per answer`);
     for (const job of Job.options) expect(html).toContain(`data-job="${job}"`);
     expect(html).toContain("Substitution map · Audience DNA · Travel taste");
     for (const turn of ["Turn 1", "Turn 2", "Turn 3", "Guards"]) expect(html).toContain(turn);
     expect(html).toContain(`${facts.limits.followupCalls} requests`);
   });
 
-  it("lists the checker rules V1–V10 and the conviction penalties with their labels", () => {
+  it("lists the checker rules V1–V10 and the confidence penalties with their labels", () => {
     const html = view();
     const checker = decode(section(html, "checker"));
     const rules = checkerRules(methodFacts());
@@ -136,6 +150,10 @@ describe("the /method page", () => {
     // V3 rejects any bare number once and warns on the repair, as V10 does.
     expect(rules.V3.action).toBe("Rejects; warns on the repair");
     expect(checker).toContain(rules.V3.action);
+    // V10 covers competitor claims by geo_lift's supply-label rule, read from the code.
+    expect(rules.V10.text).toContain(`at least ${MIN_SUPPLY_VENUES} similar venues across the compared areas, and ${MIN_BUSY_AREA_VENUES} in an area`);
+    expect(rules.V10.text).toContain(`An area with none in a capped sample is not "few"`);
+    expect(rules.V10.text).toContain(THIN_SUPPLY_LABEL);
     const conviction = decode(section(html, "conviction"));
     for (const rule of ConfidenceRule.options) {
       expect(conviction).toContain(`data-penalty="${rule}"`);
@@ -145,6 +163,7 @@ describe("the /method page", () => {
     expect(conviction).toMatch(/High<\/span> <span[^>]*>75–100/);
     expect(conviction).toMatch(/Medium<\/span> <span[^>]*>50–74/);
     expect(conviction).toMatch(/Low<\/span> <span[^>]*>0–49/);
+    expect(conviction).toContain("Confidence");
   });
 });
 
@@ -209,13 +228,5 @@ describe("the evaluation section", () => {
     expect(formatEvalValue(3.5, "number")).toBe("3.5");
     expect(formatEvalValue(0.18, "usd")).toBe("$0.18");
     expect(formatEvalValue(null, "rate")).toBe("–");
-  });
-});
-
-describe("Method in the top bar", () => {
-  it("is enabled, and Following stays disabled", () => {
-    expect(ROUTE_LIVE.method).toBe(true);
-    expect(ROUTE_LIVE.following).toBe(false);
-    expect(NAV_ENABLED).toEqual({ briefs: true, following: false, method: true });
   });
 });

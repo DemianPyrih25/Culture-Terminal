@@ -10,13 +10,13 @@ describe("the figure method link", () => {
     expect(ROUTE_LIVE.method).toBe(true);
     const html = render(
       <FigureFrame
-        meta={{ number: 1, title: "A finding", caption: "A caption.", source: FIXTURE_SOURCES.insights, formulaId: "share.pct" }}
+        meta={{ title: "A finding", caption: "A caption.", source: FIXTURE_SOURCES.insights, formulaId: "share.pct" }}
         plot={<svg role="img" aria-label="A finding" />}
         table={<table />}
       />,
     );
     expect(methodHref("share.pct")).toBe("/method#share.pct");
     expect(html).toContain('href="/method#share.pct"');
-    expect(html).toContain(">FIGURE 1<");
+    expect(html).toContain("How it&#x27;s calculated");
   });
 });

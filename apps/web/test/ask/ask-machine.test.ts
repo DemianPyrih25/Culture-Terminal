@@ -1,31 +1,36 @@
-// The Ask page as a state machine: preview answers (success, refusal, 429, 503, errors), the run body
-// with the preview's token, and what the panel prints. Invented entities only.
+// The question box as a state machine: preview answers (success, refusal, 429, 503, errors), what
+// follows a preview with no confirm step (open, run, show), the run body with the preview's token, and
+// the inline state's words. Invented entities only.
 import { compileMnemonic, JOB_PILLAR, METRO_LABEL, type Intent } from "@ct/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
-  ageText,
+  askNotice,
   askReducer,
-  cacheLine,
+  askStatusText,
   canRun,
-  compiledMnemonic,
-  estimateLine,
   INITIAL_ASK_STATE,
-  matchProblems,
-  messageParts,
-  quotaText,
+  isBusy,
+  nextStep,
+  pausedText,
   readingGap,
   readPreviewResponse,
+  refusalText,
+  reopenTime,
   runRequestBody,
-  subjectsText,
+  STILL_OPEN,
   waitText,
   type AskState,
   type PreviewOutcome,
   type PreviewResponse,
 } from "../../components/ask/ask-machine";
+import { followsUp, type AskParent } from "../../components/ask/ask-parent";
 import {
   FIXTURE_AT,
   FIXTURE_HAVE,
+  FIXTURE_PAUSE,
+  FIXTURE_PAUSED_MESSAGE,
   FIXTURE_PREVIEW,
+  FIXTURE_PREVIEW_HAVE,
   FIXTURE_PREVIEW_NO_CITY,
   FIXTURE_PREVIEW_ONE_NAME,
   FIXTURE_PREVIEW_PICK,
@@ -34,11 +39,14 @@ import {
   FIXTURE_REFUSAL,
 } from "../../components/ask/fixtures";
 import { JOB_LABEL } from "../../lib/brief/format";
+import { startRun } from "../../lib/start-run";
+
+/** The 13 map cities a place question can name, A to Z (D28). */
+const CITIES = "Atlanta, Austin, Boston, Chicago, Dallas, Denver, Houston, Los Angeles, Miami, Nashville, New York City, San Francisco or Seattle";
+const CITIES_TEXT = `Add the city: ${CITIES}.`;
 
 type Understood = NonNullable<PreviewResponse["understood"]>;
 type Mention = Intent["mentions"][number];
-import { followsUp, type AskParent } from "../../components/ask/ask-panel";
-import { startRun } from "../../lib/start-run";
 
 const Q = FIXTURE_QUESTION;
 
@@ -74,9 +82,9 @@ describe("readPreviewResponse", () => {
     const paused = { error: "Live analysis is paused. Recorded runs are still available.", retry: false, alreadyHave: FIXTURE_HAVE };
     expect(readPreviewResponse(503, paused)).toEqual({ kind: "paused", message: paused.error, alreadyHave: FIXTURE_HAVE });
     expect(readPreviewResponse(503, { error: "x", retry: false, alreadyHave: { runId: 4 } })).toMatchObject({ alreadyHave: null });
-    expect(readPreviewResponse(503, { error: "The database is unavailable. Try again shortly.", retry: true })).toEqual({
+    expect(readPreviewResponse(503, { error: "We can't take new questions right now. Please try again in a moment.", retry: true })).toEqual({
       kind: "error",
-      message: "The database is unavailable. Try again shortly.",
+      message: "We can't take new questions right now. Please try again in a moment.",
       retry: true,
     });
   });
@@ -208,39 +216,121 @@ describe("the run request", () => {
   });
 });
 
-describe("what the panel prints", () => {
-  it("prints the estimate, the cache share and the quota", () => {
-    expect(estimateLine(FIXTURE_PREVIEW.estimate)).toBe("≈19 data requests · ~45 s");
-    expect(estimateLine({ networkCalls: 1, cachedCalls: 0, seconds: 30, quotaShare: 0 })).toBe("≈1 data request · ~30 s");
-    expect(estimateLine({ networkCalls: 0, cachedCalls: 0, seconds: 0, quotaShare: 0 })).toBe("No data requests");
-    expect(cacheLine(FIXTURE_PREVIEW.estimate)).toBe("≈7 served from cache · priors written before any data");
-    expect(quotaText(0)).toBe("None of today's quota");
-    expect(quotaText(0.0063)).toBe("<1% of today's quota");
-    expect(quotaText(0.0104)).toBe("≈1% of today's quota");
-    expect(quotaText(0.021)).toBe("≈2% of today's quota");
+describe("what follows a preview", () => {
+  it("runs a complete reading at once, with no confirm step", () => {
+    expect(nextStep(previewed({ kind: "ok", preview: FIXTURE_PREVIEW }))).toEqual({ kind: "run" });
+    // A subject with more than one match is picked once the run starts: it still runs.
+    expect(nextStep(previewed({ kind: "ok", preview: FIXTURE_PREVIEW_PICK }))).toEqual({ kind: "run" });
+    // Capped previews still run, without a token.
+    expect(nextStep(previewed({ kind: "limited", message: "Capped.", retryAfterS: 60, alreadyHave: null }))).toEqual({ kind: "run" });
   });
 
-  it("prints a brief's age against when the preview arrived", () => {
-    expect(ageText(FIXTURE_HAVE.createdAt, FIXTURE_AT)).toBe("2h ago");
-    expect(ageText("2026-07-06T11:59:40.000Z", FIXTURE_AT)).toBe("just now");
-    expect(ageText("2026-07-06T11:48:00.000Z", FIXTURE_AT)).toBe("12 min ago");
-    expect(ageText("2026-07-02T12:00:00.000Z", FIXTURE_AT)).toBe("4 days ago");
-    expect(ageText("not a date", FIXTURE_AT)).toBe("");
+  it("opens the answer the visitor already has instead of asking again, even while paused", () => {
+    expect(nextStep(previewed({ kind: "ok", preview: FIXTURE_PREVIEW_HAVE }))).toEqual({ kind: "open", runId: FIXTURE_HAVE.runId });
+    expect(nextStep(previewed({ kind: "paused", message: FIXTURE_PAUSED_MESSAGE, alreadyHave: FIXTURE_HAVE }))).toEqual({
+      kind: "open",
+      runId: FIXTURE_HAVE.runId,
+    });
+    // Never past a refusal.
+    expect(nextStep(previewed({ kind: "ok", preview: { ...FIXTURE_REFUSAL, alreadyHave: FIXTURE_HAVE } }))).toEqual({ kind: "show" });
   });
 
-  it("splits a server message into a heading and its detail, so nothing is said twice", () => {
-    expect(messageParts("Today's budget for live analysis is used up. Live runs resume at 00:00 UTC.")).toEqual({
-      head: "Today's budget for live analysis is used up",
-      rest: "Live runs resume at 00:00 UTC.",
+  it("stays and shows the state for a refusal, a missing part, a pause and an error", () => {
+    for (const outcome of [
+      { kind: "ok", preview: FIXTURE_REFUSAL },
+      { kind: "ok", preview: FIXTURE_PREVIEW_ONE_NAME },
+      { kind: "ok", preview: { ...FIXTURE_PREVIEW, understood: null, token: null } },
+      { kind: "paused", message: FIXTURE_PAUSED_MESSAGE, alreadyHave: null },
+      { kind: "error", message: "No connection.", retry: true },
+    ] as PreviewOutcome[]) {
+      expect(nextStep(previewed(outcome)), outcome.kind).toEqual({ kind: "show" });
+    }
+  });
+
+  it("is busy while the question is read and while the run starts", () => {
+    expect(isBusy(INITIAL_ASK_STATE)).toBe(false);
+    expect(isBusy(askReducer(INITIAL_ASK_STATE, { type: "preview", question: Q }))).toBe(true);
+    const ready = previewed({ kind: "ok", preview: FIXTURE_PREVIEW });
+    expect(isBusy(ready)).toBe(false);
+    expect(isBusy(askReducer(ready, { type: "run" }))).toBe(true);
+  });
+});
+
+describe("the inline state under the box", () => {
+  it("says nothing while idle, while reading and while a complete reading starts its run", () => {
+    expect(askNotice(INITIAL_ASK_STATE)).toBeNull();
+    expect(askNotice(askReducer(INITIAL_ASK_STATE, { type: "preview", question: Q }))).toBeNull();
+    const ready = previewed({ kind: "ok", preview: FIXTURE_PREVIEW });
+    expect(askNotice(ready)).toBeNull();
+    expect(askNotice(askReducer(ready, { type: "run" }))).toBeNull();
+  });
+
+  it("refuses in one sentence, with the reframe to ask instead", () => {
+    expect(askNotice(previewed({ kind: "ok", preview: FIXTURE_REFUSAL }))).toEqual({
+      kind: "refused",
+      text: "We don't answer political targeting questions. Try this instead:",
+      reframe: FIXTURE_REFUSAL.refusal!.reframe,
     });
-    expect(messageParts("Live analysis is unavailable: this server has no Anthropic API key.")).toEqual({
-      head: "Live analysis is unavailable: this server has no Anthropic API key",
-      rest: null,
+    const bare = { ...FIXTURE_REFUSAL, refusal: { ...FIXTURE_REFUSAL.refusal!, reframe: "  " } };
+    expect(askNotice(previewed({ kind: "ok", preview: bare }))).toEqual({
+      kind: "refused",
+      text: "We don't answer political targeting questions.",
+      reframe: null,
     });
-    expect(messageParts("Something went wrong")).toEqual({ head: "Something went wrong", rest: null });
-    // A decimal is no sentence end; a question mark stays on its heading.
-    expect(messageParts("Overlap was 0.5 today. Try again?")).toEqual({ head: "Overlap was 0.5 today", rest: "Try again?" });
-    expect(messageParts("Why? Because.")).toEqual({ head: "Why?", rest: "Because." });
+    expect(refusalText(null, false)).toBe("We can't answer that question as asked.");
+    expect(refusalText("financial_advice", true)).toBe("We don't give investment advice. Try this instead:");
+  });
+
+  it("asks for what the reading lacks, in one sentence", () => {
+    expect(askNotice(previewed({ kind: "ok", preview: FIXTURE_PREVIEW_ONE_NAME }))).toEqual({
+      kind: "needs_input",
+      text: "Add a second brand to compare with Juniper Cola.",
+    });
+    expect(askNotice(previewed({ kind: "ok", preview: FIXTURE_PREVIEW_UNMATCHED }))).toEqual({
+      kind: "needs_input",
+      text: `We couldn't find "Brand Betta". Check the spelling, or name another brand to compare.`,
+    });
+    expect(askNotice(previewed({ kind: "ok", preview: FIXTURE_PREVIEW_NO_CITY }))?.text).toBe(CITIES_TEXT);
+    expect(askNotice(previewed({ kind: "ok", preview: { ...FIXTURE_PREVIEW, understood: null } }))?.kind).toBe("needs_input");
+  });
+
+  it("pauses with the reopen time in the visitor's zone, before anything is sent", () => {
+    expect(askNotice(INITIAL_ASK_STATE, FIXTURE_PAUSE, "UTC")).toEqual({
+      kind: "paused",
+      text: `New questions reopen at 8:00 pm your time. ${STILL_OPEN}`,
+    });
+    expect(reopenTime("2026-07-06T20:00:00.000Z", "America/Chicago")).toBe("3:00 pm");
+    expect(reopenTime("2026-07-06T09:05:00.000Z", "UTC")).toBe("9:05 am");
+    expect(reopenTime("not a time")).toBeNull();
+    expect(reopenTime(null)).toBeNull();
+  });
+
+  it("falls back on the server's message when it does not say when", () => {
+    const paused = previewed({ kind: "paused", message: FIXTURE_PAUSED_MESSAGE, alreadyHave: null });
+    expect(askNotice(paused)).toEqual({ kind: "paused", text: `${FIXTURE_PAUSED_MESSAGE} ${STILL_OPEN}` });
+    expect(pausedText(null, "Live analysis is paused", "UTC")).toBe(`Live analysis is paused. ${STILL_OPEN}`);
+    expect(pausedText(null, null)).toBe(`New questions are paused for now. ${STILL_OPEN}`);
+  });
+
+  it("offers Try again for an error that may pass, and says why a run did not start", () => {
+    expect(askNotice(previewed({ kind: "error", message: "No connection.", retry: true }))).toEqual({
+      kind: "error",
+      text: "No connection.",
+      retry: true,
+    });
+    const starting = askReducer(previewed({ kind: "ok", preview: FIXTURE_PREVIEW }), { type: "run" });
+    const failed = askReducer(starting, { type: "runFailed", message: "Too many answers this hour." });
+    expect(askNotice(failed)).toEqual({ kind: "run_failed", text: "Too many answers this hour." });
+  });
+
+  it("tells the live region what is happening", () => {
+    const loading = askReducer(INITIAL_ASK_STATE, { type: "preview", question: Q });
+    expect(askStatusText(loading, null)).toBe("Reading your question…");
+    expect(askStatusText(loading, null, true)).toBe("Waiting for the check below the question.");
+    const starting = askReducer(previewed({ kind: "ok", preview: FIXTURE_PREVIEW }), { type: "run" });
+    expect(askStatusText(starting, null)).toBe("Starting your answer…");
+    const notice = askNotice(previewed({ kind: "ok", preview: FIXTURE_PREVIEW_ONE_NAME }));
+    expect(askStatusText(previewed({ kind: "ok", preview: FIXTURE_PREVIEW_ONE_NAME }), notice)).toBe(notice!.text);
   });
 
   it("prints how long until previews resume", () => {
@@ -248,13 +338,6 @@ describe("what the panel prints", () => {
     expect(waitText(900)).toBe("about 15 min");
     expect(waitText(61)).toBe("about 2 min");
     expect(waitText(7200)).toBe("about 2 h");
-  });
-
-  it("names the subjects, and every name that did not match exactly: the subject is picked, any other left out", () => {
-    expect(subjectsText(FIXTURE_PREVIEW.understood!)).toBe("Juniper Cola, Brand Beta");
-    expect(matchProblems(FIXTURE_PREVIEW.understood!)).toEqual([]);
-    expect(matchProblems(FIXTURE_PREVIEW_UNMATCHED.understood!)).toEqual(["Brand Betta (brand): no exact match, left out"]);
-    expect(matchProblems(FIXTURE_PREVIEW_PICK.understood!)).toEqual(["Junipr Cola (brand): more than one match, you will pick one"]);
   });
 });
 
@@ -264,7 +347,7 @@ describe("readingGap", () => {
     pillar: "investment",
     job: "brand_health",
     mentions: [],
-    geo: { metro: null, area: null, unsupported_place: null },
+    geo: { metro: null, area: null, unsupported_place: null, market: null },
     constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
     safety: { allowed: true, category: null, reframe: null },
     assumptions: [],
@@ -290,29 +373,41 @@ describe("readingGap", () => {
       lens: "",
     };
   };
-  const austin = { metro: "austin" as const, area: null, unsupported_place: null };
+  const austin = { metro: "austin" as const, area: null, unsupported_place: null, market: null };
   const concepts = (...c: string[]) => ({ ...blank.constraints, concepts: c });
 
-  it("says what each job lacks, and never compiles a placeholder", () => {
-    const short: Array<[Partial<Intent>, string]> = [
-      [{ job: "head_to_head" }, "Two brands to compare"],
-      [{ job: "head_to_head", mentions: [brand("Juniper Cola", "primary")] }, "A second brand to compare with Juniper Cola"],
-      [{ job: "brand_health" }, "A brand to read"],
-      [{ job: "sponsorship" }, "An artist to find sponsors for"],
-      [{ job: "market_selection" }, "A brand or artist to launch or tour"],
-      [{ job: "audience_discovery" }, "A brand, artist or show whose audience to read"],
-      [{ job: "site_selection" }, "A concept to open and a city, Nashville or Austin"],
-      [{ job: "site_selection", geo: austin }, "A concept to open, such as a listening bar"],
-      [{ job: "site_selection", constraints: concepts("ramen counter") }, "A city, Nashville or Austin"],
-      [{ job: "area_profile" }, "A neighbourhood and its city, Nashville or Austin"],
-      [{ job: "tenant_mix", geo: austin }, "A neighbourhood in Austin"],
-      [{ job: "area_profile", geo: { metro: null, area: "Riverside", unsupported_place: null } }, "The neighbourhood's city, Nashville or Austin"],
+
+  it("says what each job lacks, in one sentence", () => {
+    const short: Array<[Partial<Intent>, string, string]> = [
+      [{ job: "head_to_head" }, "Two brands to compare", "Add the two brands you want to compare."],
+      [
+        { job: "head_to_head", mentions: [brand("Juniper Cola", "primary")] },
+        "A second brand to compare with Juniper Cola",
+        "Add a second brand to compare with Juniper Cola.",
+      ],
+      [{ job: "brand_health" }, "A brand to read", "Add the brand you want to know about."],
+      [{ job: "sponsorship" }, "An artist to find sponsors for", "Add the artist you want to find sponsors for."],
+      [{ job: "market_selection" }, "A brand or artist to launch or tour", "Add the brand or artist you want to launch or tour."],
+      [
+        { job: "audience_discovery" },
+        "A brand, artist or show whose audience to read",
+        "Add the brand, artist or show whose audience you want to know.",
+      ],
+      [{ job: "site_selection" }, "A concept to open and one of the 13 cities we map", `Add what you want to open, and the city: ${CITIES}.`],
+      [{ job: "site_selection", geo: austin }, "A concept to open", "Add what you want to open."],
+      [{ job: "site_selection", constraints: concepts("ramen counter") }, "A city, one of the 13 cities we map", CITIES_TEXT],
+      [{ job: "area_profile" }, "A neighbourhood and its city, one of the 13 cities we map", `Add a neighbourhood and its city: ${CITIES}.`],
+      [{ job: "tenant_mix", geo: austin }, "A neighbourhood in Austin", "Add a neighbourhood in Austin."],
+      [
+        { job: "area_profile", geo: { metro: null, area: "Riverside", unsupported_place: null, market: null } },
+        "The neighbourhood's city, one of the 13 cities we map",
+        `Add the neighbourhood's city: ${CITIES}.`,
+      ],
     ];
-    for (const [over, need] of short) {
+    for (const [over, need, text] of short) {
       const reading = understood(over);
       expect(reading.mnemonic, need).toMatch(/<[A-Z]+>/);
-      expect(readingGap(reading)?.need, reading.mnemonic).toBe(need);
-      expect(compiledMnemonic(reading), reading.mnemonic).toBeNull();
+      expect(readingGap(reading), reading.mnemonic).toEqual({ need, text });
     }
   });
 
@@ -330,7 +425,6 @@ describe("readingGap", () => {
     for (const over of complete) {
       const reading = understood(over);
       expect(readingGap(reading), reading.mnemonic).toBeNull();
-      expect(compiledMnemonic(reading)).toBe(reading.mnemonic);
     }
   });
 
@@ -339,13 +433,9 @@ describe("readingGap", () => {
     expect(unmatched.mnemonic).toBe("JUNIPER COLA VS BRAND BETTA");
     expect(readingGap(unmatched)).toEqual({
       need: "A second brand to compare with Juniper Cola",
-      hint: "Check the spelling of Brand Betta, or name another brand, then press ↵.",
+      text: `We couldn't find "Brand Betta". Check the spelling, or name another brand to compare.`,
     });
-    expect(compiledMnemonic(unmatched)).toBeNull();
     const secondary = understood({ job: "head_to_head", mentions: [brand("Juniper Cola", "primary"), brand("Brand Beta", "secondary")] });
-    expect(readingGap(secondary)?.hint).toBe("Ask it as “Juniper Cola vs Brand Beta” and press ↵.");
-    expect(readingGap(understood({ job: "head_to_head", mentions: [brand("Juniper Cola", "primary")] }))?.hint).toBe(
-      "Name it in the question and press ↵ to read it again.",
-    );
+    expect(readingGap(secondary)?.text).toBe(`Ask it as "Juniper Cola vs Brand Beta" to compare the two.`);
   });
 });

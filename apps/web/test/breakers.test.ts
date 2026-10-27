@@ -55,7 +55,7 @@ describe("decideMode: the LLM spend breaker", () => {
       mode: "economy",
       breaker: "llm_spend",
       reason: "today's live budget is nearly used",
-      message: "Live briefs run on the economy analyst until 00:00 UTC: today's live budget is nearly used.",
+      message: "Live answers run on the economy analyst until 00:00 UTC: today's live budget is nearly used.",
       until: MIDNIGHT,
     });
     expect(decide("public", { todayUsd: 0.79 })).toEqual({
@@ -142,7 +142,7 @@ describe("decideMode: the stored mode and the override", () => {
       message: "Live analysis is paused: the Qloo data connection needs attention.",
       until: null,
     });
-    expect(decide("public", { stored: storedMode("economy") }).message).toBe("Live briefs run on the economy analyst: the operator set it.");
+    expect(decide("public", { stored: storedMode("economy") }).message).toBe("Live answers run on the economy analyst: the operator set it.");
     expect(decide("public", { stored: storedMode("live") }).mode).toBe("live");
   });
 

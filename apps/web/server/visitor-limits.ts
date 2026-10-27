@@ -87,5 +87,5 @@ export function waitWords(retryAfterS: number): string {
 /** What a refused visitor reads: the limit reached and when to try again (the Retry-After, in words). */
 export function visitorWaitMessage(wait: VisitorWait, limits: VisitorLimits = DEFAULT_VISITOR_LIMITS): string {
   const n = wait.window === "hour" ? limits.perHour : limits.perDay;
-  return `You have started ${n} live ${n === 1 ? "brief" : "briefs"} in the last ${wait.window}. Try again in ${waitWords(wait.retryAfterS)}; showcases and replays still work.`;
+  return `You have started ${n} live ${n === 1 ? "question" : "questions"} in the last ${wait.window}. Try again in ${waitWords(wait.retryAfterS)}; answers you already have still open.`;
 }

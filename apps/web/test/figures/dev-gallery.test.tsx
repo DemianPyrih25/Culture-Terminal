@@ -17,7 +17,7 @@ describe("/dev/figures", () => {
     vi.stubEnv("NODE_ENV", "development");
     const html = renderToStaticMarkup(<FiguresGallery />);
     for (let n = 1; n <= 44; n += 1) expect(html, `fig-${n}`).toContain(`id="fig-${n}"`);
-    const toggles = [...html.matchAll(/aria-label="(Table view: [^"]+)"/g)].map((m) => m[1]);
+    const toggles = [...html.matchAll(/role="radiogroup" aria-label="(View: [^"]+)"/g)].map((m) => m[1]);
     expect(toggles.length).toBeGreaterThan(10);
     expect(new Set(toggles).size).toBe(toggles.length);
     expect(html).toContain("no fee, availability or ROI data");
@@ -28,21 +28,16 @@ describe("/dev/figures", () => {
     expect(html).not.toContain("maplibregl");
   });
 
-  it("shows the P1 figures: the constellation, the taste map and the twin cards, wide and compact, and an unmeasured candidate", () => {
+  it("opens with the answer-page plots and both maps, from invented rows", () => {
     vi.stubEnv("NODE_ENV", "development");
     const html = renderToStaticMarkup(<FiguresGallery />);
-    for (let n = 45; n <= 51; n += 1) expect(html, `fig-${n}`).toContain(`id="fig-${n}"`);
-    for (const marker of [
-      'data-constellation="wide"',
-      'data-constellation="compact"',
-      'data-category-map="wide"',
-      'data-category-map="compact"',
-      'data-twin="holly"',
-      'data-twin="east-cesar-chavez"',
-      'data-twin="rosedale"',
-      'data-unmeasured="true"',
-    ]) {
-      expect(html).toContain(marker);
+    expect(html).toContain('data-plots-gallery="true"');
+    for (const plot of ["bars", "diverging", "pair", "winners", "rank-tracks", "mini-bars", "ranked-fit", "slate", "numbered", "neighbours", "columns"]) {
+      expect(html, plot).toContain(`data-plot="${plot}"`);
     }
+    expect(html).toContain('data-map-card="austin"');
+    expect(html).toContain('data-area-map="East Nashville"');
+    expect(html).toContain("bg-hatch");
+    expect(html.toLowerCase()).not.toContain("example");
   });
 });

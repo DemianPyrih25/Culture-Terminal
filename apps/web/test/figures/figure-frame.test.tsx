@@ -1,5 +1,5 @@
-// FigureFrame, FigureTable and Exhibit: the frame every family shares (label, source, ⧉ toggle,
-// ⓘ link, fixed caption), the table view's structure, and the dispatch from a dataset envelope to
+// FigureFrame, FigureTable and Exhibit: the ChartCard frame every family shares (kind, title, Chart | Table,
+// Source, captions, the method link), the table view's structure, and the dispatch from a dataset envelope to
 // its family.
 import { DatasetKind, VIZ_COMPAT, type DatasetEnvelope, type Evidence } from "@ct/contracts";
 import { describe, expect, it, vi } from "vitest";
@@ -30,18 +30,25 @@ vi.mock("@/lib/routes", () => ({ ROUTE_LIVE: { method: true, following: false } 
 describe("FigureFrame", () => {
   const html = render(
     <FigureFrame
-      meta={{ number: 4, title: "A finding", caption: "A caption.", source: FIXTURE_SOURCES.insights, formulaId: "share.pct" }}
+      meta={{ kind: "Closest audiences", title: "A finding", caption: "A caption.", source: FIXTURE_SOURCES.insights, formulaId: "share.pct" }}
       plot={<svg role="img" aria-label="A finding" />}
       table={<table />}
       fixedCaption="Taste fit only."
     />,
   );
 
-  it("prints the figure number, the serif title and the caption", () => {
+  it("draws a ChartCard: the kind line, the title and the caption under the plot", () => {
     expect(html).toContain("<figure");
-    expect(html).toContain(">FIGURE 4<");
-    expect(html).toMatch(/<h3[^>]*>A finding<\/h3>/);
-    expect(html).toContain("A caption.");
+    expect(html).toMatch(/<figure[^>]*class="[^"]*rounded-card/);
+    expect(html).toMatch(/<p class="m-0 type-label text-ink-2">Closest audiences<\/p>/);
+    expect(html).toMatch(/<h3[^>]*type-title[^>]*>A finding<\/h3>/);
+    expect(html.indexOf("A caption.")).toBeGreaterThan(html.indexOf('data-view="plot"'));
+    expect(html).not.toContain("FIGURE");
+  });
+
+  it("drops the card for a figure inside another surface", () => {
+    const plain = render(<FigureFrame meta={{ title: "Plain", chrome: "plain" }} plot={<svg />} table={null} />);
+    expect(plain).not.toContain("rounded-card");
   });
 
   it("prints the source line with a short request id that links to its request", () => {
@@ -50,8 +57,10 @@ describe("FigureFrame", () => {
   });
 
   it("offers the table toggle and the method link, each named after its figure", () => {
-    expect(html).toMatch(/<button type="button" aria-pressed="false" aria-label="Table view: A finding"[^>]*>[\s\S]*Table<\/button>/);
-    expect(html).toContain(`href="${methodHref("share.pct")}" aria-label="Method: A finding"`);
+    expect(html).toContain('role="radiogroup" aria-label="View: A finding"');
+    expect(html).toMatch(/role="radio" aria-checked="true"[^>]*>Chart<\/button>/);
+    expect(html).toMatch(/role="radio" aria-checked="false"[^>]*>Table<\/button>/);
+    expect(html).toContain(`href="${methodHref("share.pct")}" aria-label="How it&#x27;s calculated: A finding"`);
     expect(html).toContain('class="sr-only" data-view="table"');
   });
 
@@ -63,8 +72,8 @@ describe("FigureFrame", () => {
 
   it("drops the method link without a formula and the toggle without a table", () => {
     const bare = render(<FigurePending title="Computing" note="Plot · computing in QUANT" formulaId={null} />);
-    expect(bare).not.toContain("Method");
-    expect(bare).not.toContain("aria-pressed");
+    expect(bare).not.toContain("calculated");
+    expect(bare).not.toContain("radiogroup");
     expect(bare).toContain("Plot · computing in QUANT");
   });
 });
@@ -95,12 +104,12 @@ describe("FigureTable", () => {
 
 describe("Exhibit", () => {
   it("picks the family from the dataset kind and the formula from the dataset", () => {
-    const matrix = render(<Exhibit dataset={similarityMap} number={2} />);
+    const matrix = render(<Exhibit dataset={similarityMap} />);
     expect(matrix).toContain('data-cell="self"');
     expect(matrix).toContain(">Substitution Map<");
     expect(matrix).toContain('href="/method#subs.similarity"');
     const slate = render(<Exhibit dataset={sponsorSlate} title="Sponsors" display={{ Slate: { tick: 0.7 } }} />);
-    expect(text(plotView(slate))).toContain("UNDER THE RADAR");
+    expect(text(plotView(slate))).toContain("Under the radar");
     expect(text(plotView(slate))).toContain("Best fit");
   });
 
@@ -114,8 +123,8 @@ describe("Exhibit", () => {
     ["Matrix", shareGrid, 'data-target="column"'],
     ["Ranked", nearestAudiences, 'data-tone="highlight"'],
     ["Ranked lists", domainLists, "TV · series"],
-    ["Bars", blockDna, "Δ VS CITY"],
-    ["Bars, two series", agePeers, "JUNIPER COLA"],
+    ["Bars", blockDna, "Δ vs city"],
+    ["Bars, two series", agePeers, "Juniper Cola"],
     ["Quadrant", sponsorQuadrant, 'data-quadrant="HIDDEN_POCKET"'],
     ["Scorecard", priorsScorecard, 'data-state="REFUTED"'],
     ["Slope", tenantSlope, 'data-tone="highlight"'],
@@ -124,7 +133,7 @@ describe("Exhibit", () => {
     ["Momentum", momentumStrip, 'data-badge="STALE"'],
     ["Position", tastePosition, 'data-axis="next_gen_tilt"'],
   ] as const)("renders a %s envelope with its family", (_, dataset, marker) => {
-    const html = render(<Exhibit dataset={dataset} number={1} display={{ Ranked: { variant: dataset === domainLists ? "lists" : "lollipop" } }} />);
+    const html = render(<Exhibit dataset={dataset} display={{ Ranked: { variant: dataset === domainLists ? "lists" : "lollipop" } }} />);
     expect(html).toContain(marker);
     expect(html).toContain(`>${dataset.title}<`);
     if (dataset.formulaIds[0]) expect(html).toContain(`href="${methodHref(dataset.formulaIds[0])}"`);
@@ -147,7 +156,7 @@ describe("Exhibit", () => {
       payload: { window: { start: "2026-03-01", end: "2026-08-31" }, badgeText: "HISTORICAL", badge: "STALE", series: [] },
     };
     const html = text(render(<Exhibit dataset={momentum} />));
-    expect(html).toContain("No signal after Aug 2026");
+    expect(html).toContain("No data after Aug 2026");
     expect(html).not.toContain("not built yet");
   });
 

@@ -81,6 +81,27 @@ async function allowlistCases(): Promise<Case[]> {
     insights("urn:entity:person", { "signal.location": austin, take: 10 }),
     insights("urn:entity:person", { "signal.location": nashville, "filter.results.entities": ["ent-person-01", "ent-person-02", "ent-person-03"] }),
     insights("urn:entity:person", { "signal.demographics.age": ["24_and_younger"], "filter.results.entities": ["ent-person-01", "ent-person-02", "ent-person-03"] }),
+    // Coverage probe C3 to C5: media named lists and contexts, gender, audiences beyond brands.
+    insights("urn:entity:brand", { "signal.demographics.gender": "female", "filter.results.entities": [brand, brandB] }),
+    insights("urn:entity:artist", { "signal.interests.entities": [brand], "signal.demographics.gender": "male", take: 10 }),
+    insights("urn:entity:person", {
+      "signal.demographics.gender": "male",
+      "filter.results.entities": ["ent-person-01", "ent-person-02", "ent-person-03"],
+    }),
+    insights("urn:entity:person", {
+      "signal.demographics.audiences": ["urn:audience:leisure:mock_trail_runners"],
+      "filter.results.entities": ["ent-person-01", "ent-person-02", "ent-person-03"],
+    }),
+    insights("urn:entity:podcast", { "signal.interests.entities": [artist], "filter.results.entities": ["ent-podcast-01", "ent-podcast-02"] }),
+    insights("urn:entity:podcast", { "signal.demographics.age": ["24_and_younger"], "filter.results.entities": ["ent-podcast-01", "ent-podcast-02"] }),
+    insights("urn:entity:tv_show", { "signal.interests.entities": [artist], "filter.results.entities": ["ent-show-01", "ent-show-02"] }),
+    insights("urn:entity:tv_show", {
+      "signal.demographics.age": ["24_and_younger"],
+      "signal.demographics.audiences": ["urn:audience:leisure:mock_trail_runners"],
+      "filter.results.entities": ["ent-show-01", "ent-show-02"],
+    }),
+    insights("urn:entity:movie", { "signal.interests.entities": [artist], "filter.results.entities": ["ent-movie-01", "ent-movie-02"] }),
+    insights("urn:entity:movie", { "signal.demographics.age": ["24_and_younger"], "filter.results.entities": ["ent-movie-01", "ent-movie-02"] }),
     insights("urn:entity:destination", { "signal.interests.entities": [artist], "filter.geocode.country_code": "US", take: 50, page: 2 }),
     insights("urn:entity:destination", { "signal.interests.entities": [artist], "filter.results.entities": ["ent-dest-01", "ent-dest-02"] }),
     insights("urn:entity:place", { "filter.location": austin, "filter.tags": ["urn:tag:category:place:cafe"], take: 50, page: 1 }),

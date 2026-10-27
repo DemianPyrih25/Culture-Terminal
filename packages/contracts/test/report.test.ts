@@ -7,10 +7,12 @@ import {
   GhostAnswer,
   Intent,
   normalizeIntent,
+  placeSearchMarket,
   Report,
   ReportDraft,
   ReportDraftShape,
   RunEvent,
+  StoredIntent,
   strictSchemaViolations,
   structuredOutputSchema,
   SubmitPlanInput,
@@ -243,6 +245,26 @@ describe("Intent (CLERK structured output)", () => {
     expect(JSON.stringify(schema)).toContain('"type":"null"');
   });
 
+  it("reads a stored intent from before Intent.geo carried a market as market null, and requires it from CLERK", () => {
+    const legacyGeo = { metro: intent.geo.metro, area: intent.geo.area, unsupported_place: intent.geo.unsupported_place };
+    const legacy = { ...intent, geo: legacyGeo };
+    expect(Intent.safeParse(legacy).success).toBe(false);
+    expect(StoredIntent.parse(legacy)).toEqual({ ...intent, geo: { ...legacyGeo, market: null } });
+    const event = { seq: 2, ts: ts(1), runId: RUN_ID, type: "clerk", intent: legacy, ms: 900 };
+    expect(RunEvent.parse(event)).toMatchObject({ type: "clerk", intent: { geo: { market: null } } });
+  });
+
+  it("searches a place in the market CLERK named for it, else in the question's map city (D44)", () => {
+    const geo = { metro: null, area: null, unsupported_place: null, market: null };
+    // A venue in another city than the metro is searched in its own city.
+    expect(placeSearchMarket({ ...geo, metro: "chicago", market: "portland" })).toBe("portland");
+    expect(placeSearchMarket({ ...geo, metro: "chicago" })).toBe("chicago");
+    expect(placeSearchMarket({ ...geo, market: "st_louis" })).toBe("st_louis");
+    expect(placeSearchMarket({ ...geo, metro: "chicago", market: "Not A Market" })).toBe("chicago");
+    expect(placeSearchMarket({ ...geo, market: "Not A Market" })).toBeNull();
+    expect(placeSearchMarket(geo)).toBeNull();
+  });
+
   it("parses a fixture and normalises pillar and mnemonic in code", () => {
     expect(Intent.parse(intent)).toEqual(intent);
     const wrongPillar = normalizeIntent({ ...intent, pillar: "location", mnemonic: "whatever" });
@@ -252,7 +274,7 @@ describe("Intent (CLERK structured output)", () => {
 
   it("compiles the mnemonic for every job shape", () => {
     expect(compileMnemonic({ ...intent, job: "head_to_head" })).toBe("JUNIPER COLA VS AURORA FOOTWEAR");
-    const geo = { metro: "nashville" as const, area: "Marlowe Ridge", unsupported_place: null };
+    const geo = { metro: "nashville" as const, area: "Marlowe Ridge", unsupported_place: null, market: null };
     expect(compileMnemonic({ ...intent, job: "tenant_mix", geo })).toBe("MARLOWE RIDGE, NASHVILLE TEN");
     const site = { ...intent, job: "site_selection" as const, geo, constraints: { ...intent.constraints, concepts: ["listening bar"] } };
     expect(compileMnemonic(site)).toBe("LISTENING BAR SITE NASHVILLE");

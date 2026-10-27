@@ -85,8 +85,8 @@ export function Exhibit({ dataset, display = {}, ...rest }: ExhibitProps) {
 /** A framed figure whose plot is not drawable yet: a dataset still computing or still loading. */
 export function FigurePending({ note, ...meta }: FigureMeta & { note: string }) {
   const box = (
-    <div className="flex h-[120px] items-center justify-center bg-canvas" role="status">
-      <span className="type-trace text-dim">{note}</span>
+    <div className="flex h-[120px] items-center justify-center bg-sunken" role="status">
+      <span className="type-caption text-ink-2">{note}</span>
     </div>
   );
   return <FigureFrame meta={meta} plot={box} table={null} />;

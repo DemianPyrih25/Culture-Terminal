@@ -519,6 +519,8 @@ export interface Interpretation {
   subjects: string[];
   /** "Brand Alpha metro · Riverside", ages and domains; null when the question names none. */
   scope: string | null;
+  /** The neighbourhood the question names (CLERK's geo.area), as asked; null or absent when it names none. */
+  area?: string | null;
   /** "Investment lens · 2 of 3 names matched exactly". */
   detail: string;
   assumptions: string[];

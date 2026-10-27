@@ -6,12 +6,17 @@ import {
   cellLift,
   heatCells,
   liftGrid,
+  MIN_BUSY_AREA_VENUES,
   MIN_RANKED_AREAS,
+  MIN_SUPPLY_VENUES,
   precisionFactor,
   rekey,
+  rankableVenues,
   rollUp,
   sharedPrecision,
+  supplyLabelHolds,
   supplyPercentiles,
+  THIN_SUPPLY_LABEL,
   whiteSpace,
   whiteSpaceQuadrant,
   type AreaLift,
@@ -19,7 +24,8 @@ import {
   type HeatCell,
   type LiftGrid,
 } from "../../src/skills/geoLift/lift";
-import { addLatentDemand, addLiftMetrics, TOP_DETAIL_METRICS, type LiftRun } from "../../src/skills/geoLift/outputs";
+import { addLatentDemand, addLiftMetrics, liftDigestRows, TOP_DETAIL_METRICS, type LiftRun } from "../../src/skills/geoLift/outputs";
+import { FORMULAS } from "../../src/formulas";
 import { createRng } from "../../src/stats";
 import { fakeQloo, fakeRun } from "./support/fakes";
 
@@ -217,11 +223,11 @@ describe("geo_lift: supply and white space", () => {
     expect(ws.get("d")).toMatchObject({ quadrant: "SATURATED", whiteSpace: 0 });
     expect(ws.get("d")?.supplyPct).toBeCloseTo(2 / 3, 12);
     // An area without a lift keeps its count but gets no percentile, white space or quadrant.
-    expect(ws.get("e")).toEqual({ count: 40, supplyPct: null, whiteSpace: null, quadrant: null });
+    expect(ws.get("e")).toEqual({ count: 40, supplyPct: null, whiteSpace: null, quadrant: null, thin: false });
   });
 
   it("uses density, not raw counts", () => {
-    const ws = whiteSpace([lifted("big", 1, 10), lifted("mid", 0.5, 2), lifted("small", 0, 1)], new Map([["big", 5], ["mid", 2], ["small", 2]]));
+    const ws = whiteSpace([lifted("big", 1, 10), lifted("mid", 0.5, 2), lifted("small", 0, 1)], new Map([["big", 10], ["mid", 4], ["small", 4]]));
     expect(ws.get("big")?.supplyPct).toBe(0);
     expect(ws.get("mid")?.supplyPct).toBe(0.5);
     expect(ws.get("small")?.supplyPct).toBe(1);
@@ -230,13 +236,13 @@ describe("geo_lift: supply and white space", () => {
   it("measures nothing without a sample, or with no venue in any area with a lift", () => {
     expect([...whiteSpace(areas, null).values()].every((s) => s.count === null && s.supplyPct === null)).toBe(true);
     const none = whiteSpace(areas, new Map([["e", 3]]));
-    expect(none.get("a")).toEqual({ count: 0, supplyPct: null, whiteSpace: null, quadrant: null });
+    expect(none.get("a")).toEqual({ count: 0, supplyPct: null, whiteSpace: null, quadrant: null, thin: true });
     expect(none.get("e")?.count).toBe(3);
   });
 
   it("ranks no supply among fewer than three areas with a demand percentile, and keeps the counts", () => {
     const one = whiteSpace([lifted("a", 1), lifted("e", null)], new Map([["a", 3], ["e", 1]]));
-    expect(one.get("a")).toEqual({ count: 3, supplyPct: null, whiteSpace: null, quadrant: null });
+    expect(one.get("a")).toEqual({ count: 3, supplyPct: null, whiteSpace: null, quadrant: null, thin: true });
     const two = whiteSpace([lifted("a", 1), lifted("b", 0)], new Map([["a", 3], ["b", 1]]));
     expect([...two.values()].every((s) => s.supplyPct === null && s.whiteSpace === null && s.quadrant === null)).toBe(true);
   });
@@ -262,13 +268,13 @@ describe("geo_lift: supply and white space", () => {
   });
 
   it("reads high-demand areas with no sampled venue as latent and open when most areas have none", () => {
-    // Seven areas, five with no venue in a capped sample. Average ranks would put that tie at 1/3, above the
+    // Seven areas, five with no venue in an uncapped sample. Average ranks would put that tie at 1/3, above the
     // 0.3 band and on the median, so the two top-demand areas would read as proven and crowded.
     const seven = [lifted("a", 1), lifted("b", 5 / 6), lifted("c", 4 / 6), lifted("d", 3 / 6), lifted("e", 2 / 6), lifted("f", 1 / 6), lifted("g", 0)];
-    const ws = whiteSpace(seven, new Map([["c", 4], ["g", 1]]));
+    const ws = whiteSpace(seven, new Map([["c", 8], ["g", 3]]));
     expect(ws.get("a")).toMatchObject({ count: 0, supplyPct: 0, whiteSpace: 1, quadrant: "LATENT_OPEN" });
     expect(ws.get("b")).toMatchObject({ count: 0, supplyPct: 0, quadrant: "LATENT_OPEN" });
-    expect(ws.get("c")).toMatchObject({ count: 4, supplyPct: 1, quadrant: "PROVEN_CROWDED" });
+    expect(ws.get("c")).toMatchObject({ count: 8, supplyPct: 1, quadrant: "PROVEN_CROWDED" });
     expect(ws.get("e")).toMatchObject({ supplyPct: 0, quadrant: "COLD" });
     expect(ws.get("g")).toMatchObject({ supplyPct: 5 / 6, quadrant: "SATURATED" });
     expect(isLatentDemand(seven[0]!.demandPct, ws.get("a")!.supplyPct)).toBe(true);
@@ -279,6 +285,80 @@ describe("geo_lift: supply and white space", () => {
     });
     expect(finding?.text).toMatch(/^a and b in Austin show high demand/);
     expect(finding?.suggestion).toEqual({ tool: "block_dna", reason: "Profile the Block DNA of a to see what its venue-goers favour." });
+  });
+
+  it("never reads an area with no venue in a capped sample as low supply: it ranks only the areas that hold one", () => {
+    const seven = [lifted("a", 1), lifted("b", 5 / 6), lifted("c", 4 / 6), lifted("d", 3 / 6), lifted("e", 2 / 6), lifted("f", 1 / 6), lifted("g", 0)];
+    const counts = new Map([["b", 1], ["c", 4], ["e", 2], ["g", 6]]);
+    const ws = whiteSpace(seven, counts, true);
+    // The cap may have cut a's venues: its 0 in the sample stays, with no percentile, white space or quadrant.
+    expect(ws.get("a")).toEqual({ count: 0, supplyPct: null, whiteSpace: null, quadrant: null, thin: true });
+    expect(ws.get("d")).toEqual({ count: 0, supplyPct: null, whiteSpace: null, quadrant: null, thin: true });
+    expect(ws.get("b")).toMatchObject({ count: 1, supplyPct: 0, quadrant: "LATENT_OPEN" });
+    expect(ws.get("g")).toMatchObject({ count: 6, supplyPct: 1 });
+    // Fewer than three areas holding a sampled venue: nothing is ranked.
+    const thin = whiteSpace(seven, new Map([["c", 4], ["g", 1]]), true);
+    expect([...thin.values()].every((s) => s.supplyPct === null && s.quadrant === null)).toBe(true);
+    expect(thin.get("c")?.count).toBe(4);
+  });
+
+  describe("the supply-label rule", () => {
+    const six = [lifted("a", 1), lifted("b", 0.8), lifted("c", 0.6), lifted("d", 0.4), lifted("e", 0.2), lifted("f", 0)];
+
+    it("withholds a crowded or saturated reading from fewer than three venues: the area reads Not enough venue data", () => {
+      // b is a tiny area: its one sampled venue is the densest of a capped sample, which used to read Proven & crowded.
+      const areas6 = six.map((a) => (a.id === "b" ? { ...a, areaKm2: 0.05 } : a));
+      const ws = whiteSpace(areas6, new Map([["a", 2], ["b", 1], ["c", 4], ["d", 6], ["e", 2], ["f", 5]]), true);
+      expect(ws.get("b")).toEqual({ count: 1, supplyPct: null, whiteSpace: null, quadrant: null, thin: true });
+      // The others keep their labels, the busy ones with at least three venues.
+      expect(ws.get("d")).toMatchObject({ count: 6, quadrant: "SATURATED", thin: false });
+      expect(ws.get("f")).toMatchObject({ count: 5, quadrant: "SATURATED", thin: false });
+      expect(ws.get("a")).toMatchObject({ count: 2, quadrant: "LATENT_OPEN", thin: false });
+      for (const s of ws.values()) if (s.quadrant === "PROVEN_CROWDED" || s.quadrant === "SATURATED") expect(s.count).toBeGreaterThanOrEqual(MIN_BUSY_AREA_VENUES);
+    });
+
+    it("labels nothing when the compared areas hold fewer than ten venues, capped or not", () => {
+      const counts = new Map([["a", 1], ["b", 2], ["c", 1], ["d", 3], ["e", 1], ["f", 1]]);
+      for (const capped of [false, true]) {
+        const ws = whiteSpace(six, counts, capped);
+        expect([...ws.values()].every((s) => s.quadrant === null && s.supplyPct === null && s.thin)).toBe(true);
+        expect(ws.get("d")?.count).toBe(3);
+      }
+    });
+
+    it("never reads a capped zero as open, and an uncapped zero still can be", () => {
+      const counts = new Map([["b", 3], ["c", 4], ["d", 2], ["e", 3], ["f", 1]]);
+      expect(whiteSpace(six, counts, true).get("a")).toMatchObject({ count: 0, quadrant: null, thin: true });
+      expect(whiteSpace(six, counts, false).get("a")).toMatchObject({ count: 0, quadrant: "LATENT_OPEN", thin: false });
+    });
+
+    it("states each label's floor in one predicate", () => {
+      expect(supplyLabelHolds(0, true, "LATENT_OPEN")).toBe(false);
+      expect(supplyLabelHolds(0, false, "LATENT_OPEN")).toBe(true);
+      expect(supplyLabelHolds(0, false, "COLD")).toBe(true);
+      expect(supplyLabelHolds(2, false, "PROVEN_CROWDED")).toBe(false);
+      expect(supplyLabelHolds(2, true, "SATURATED")).toBe(false);
+      expect(supplyLabelHolds(3, true, "PROVEN_CROWDED")).toBe(true);
+      expect(supplyLabelHolds(null, false, "COLD")).toBe(false);
+    });
+
+    it("writes the thin label into the digest and the method caveat quotes the floors", () => {
+      const areas6 = six.map((a) => (a.id === "b" ? { ...a, areaKm2: 0.05 } : a));
+      const ws = whiteSpace(areas6, new Map([["a", 2], ["b", 1], ["c", 4], ["d", 6], ["e", 2], ["f", 5]]), true);
+      const empty = { precision: null, areas: new Map(), confidence: new Map(), whiteSpace: new Map(), rank: new Map(), supply: new Map() };
+      const rows = liftDigestRows(areas6, ws, empty);
+      expect(rows.find((r) => r.name === "b")?.values.quadrant).toBe(THIN_SUPPLY_LABEL);
+      expect(rows.find((r) => r.name === "d")?.values.quadrant).toBe("Saturated");
+      const caveat = FORMULAS["lift.white_space"].caveats.join(" ");
+      expect(caveat).toContain(`at least ${MIN_SUPPLY_VENUES} counted`);
+      expect(caveat).toContain(`at least ${MIN_BUSY_AREA_VENUES} in the area`);
+      expect(caveat).toContain(THIN_SUPPLY_LABEL);
+    });
+  });
+
+  it("counts only the sampled venues in areas white space can rank", () => {
+    const areas3 = [lifted("a", 1), lifted("b", 0.5), lifted("e", null)];
+    expect(rankableVenues(areas3, new Map([["a", 2], ["b", 3], ["e", 40]]))).toBe(5);
   });
 });
 
@@ -300,7 +380,7 @@ describe("geo_lift: white-space metrics and LATENT_DEMAND", () => {
   const supply = new Map<string, AreaSupply>(
     areas.map((a, i) => {
       const supplyPct = SUPPLY_PCT[i] ?? 0.5 + 0.02 * i;
-      return [a.id, { count: 1, supplyPct, whiteSpace: (a.demandPct ?? 0) * (1 - supplyPct), quadrant: "PROVEN_CROWDED" }];
+      return [a.id, { count: 1, supplyPct, whiteSpace: (a.demandPct ?? 0) * (1 - supplyPct), quadrant: "PROVEN_CROWDED", thin: false }];
     }),
   );
 

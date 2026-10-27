@@ -1,5 +1,5 @@
 // What the eval publishes (SPEC §6.7, D29): apps/web/content/eval-summary.json in the EvalSummary schema,
-// which /method#eval and the launchpad read, and eval/SUMMARY.md with the metric definitions, the
+// which /method#eval reads, and eval/SUMMARY.md with the metric definitions, the
 // adversarial handling, the Reality Check table, n and the caveats. Aggregates and derived ranks only:
 // no affinity or popularity value of an entity, no entity id, no request id, and no name (questions and
 // cases go by their registered ids). Every number keeps at most two decimals (pnpm guard's decimal rule
@@ -8,7 +8,7 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { GHOST_HONESTY_LINE } from "@ct/contracts";
-import { ordinal } from "../../apps/web/components/launchpad/eval-summary";
+import { ordinal } from "../../apps/web/components/method/eval-ids";
 import { formatEvalValue, parseEvalSummary, type EvalMetric, type EvalSummary } from "../../apps/web/components/method/eval-summary";
 import { METRIC_DEFINITIONS, type EvalMetrics, type Measure, type MetricResult } from "./metrics";
 import { REPO_ROOT, type EvalRecordSet, type Manifest } from "./records";
