@@ -2,6 +2,7 @@ import { MetroId, type Comparator, type Job, type Metric } from "@ct/contracts";
 import { capitalize, COMPARATOR_TEXT, metricShortLabel } from "./format";
 import { slotFor } from "./kpi-slots";
 import { metricView, type Ledger } from "./ledger";
+import { plainPiece } from "./plain";
 
 /**
  * A/Key figure text per metric key (Concept A, D36): the number, a short label and the line under it,
@@ -143,10 +144,8 @@ export const KEY_FIGURE_SPECS: Readonly<Record<string, KeySpec>> = {
   },
   "block.new_tag": {
     value: (c) => c.head.replace(/ in the area .*$/, ""),
-    detail: (c) => {
-      const top = /\b(area (?:music )?top \d+)/.exec(c.head)?.[1];
-      return top ? [top] : [];
-    },
+    // "6 of 20" under "New music tags · vs Nashville": "in the area top 20" misreads for a whole city (Q1).
+    detail: () => [],
     label: (c) => {
       const family = FAMILY_WORD[fromLabel(c.metric, /^NEW (WHO|VIBE|WHAT|SOUND)\b/) ?? ""];
       return family ? `New ${family} tags` : (c.slot ?? "New tags");
@@ -247,7 +246,7 @@ export function keyFigureText(ledger: Ledger, job: Job | null | undefined, metri
         ]
           .filter((p): p is string => p !== null)
           .join(" · ") || null;
-  const detail = view.unavailable ? [] : (spec?.detail?.(context) ?? rest).map(rankWords);
+  const detail = view.unavailable ? [] : (spec?.detail?.(context) ?? rest).map(plainPiece).map(rankWords);
   const parts = [...detail, versus, view.window ? `${view.window} only` : null].filter((p): p is string => p !== null && p !== "");
   return {
     value: view.unavailable ? view.text : (spec?.value?.(context) ?? head) || view.text,

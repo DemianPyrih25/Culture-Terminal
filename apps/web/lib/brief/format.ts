@@ -185,7 +185,7 @@ export const JOB_LABEL: Readonly<Record<Job, string>> = {
   audience_discovery: "Who they are",
   taste_twins: "Find an area's twin",
   brand_collab: "Brand collaborations",
-  creator_fit: "Creators who fit",
+  creator_fit: "Artists & podcasts who fit",
   launch_test: "Test a new product",
   city_compare: "Compare cities",
 };
@@ -236,6 +236,8 @@ export function convictionRuleLabel(rule: ConfidenceRule, count: number, window:
       return "Signal is insufficient evidence";
     case "read_as_nearest_job":
       return "Answered as the closest question we cover";
+    case "concept_partly_tagged":
+      return "Part of the concept was not tested";
   }
 }
 
@@ -288,6 +290,7 @@ export const NO_VALUE_LABEL: Readonly<Record<NoValueReason, string>> = {
   not_listed: "not a listed company: no public filings to read",
   not_reported: "not in the company's filings",
   suppressed: "withheld by the Census for privacy or a small sample",
+  not_configured: "the public source is not configured on this server",
 };
 
 export const CACHE_LABEL: Readonly<Record<CacheStatus, string>> = {
@@ -377,6 +380,28 @@ export function filterLabel(filterType: string | null): string | null {
 /** What a {{M#}} token prints. UNAVAILABLE prints "not measured", never the number 0. */
 export const NOT_MEASURED = "not measured";
 
+/**
+ * Absences that are a known fact about a public (SEC or Census) value, not a gap in measuring: the company
+ * is not listed, its filings do not report the line, the Census withheld the cell, or the source is not
+ * configured on this server. The value shows its own reason in their place, never "not measured" (Q8).
+ */
+const KNOWN_ABSENCE: Readonly<Partial<Record<NoValueReason, string>>> = {
+  not_listed: "not a listed company",
+  not_reported: "not reported in filings",
+  suppressed: "withheld by the Census",
+  not_configured: "not configured on this server",
+};
+
+/** Whether an absent value's reason is a known fact (a public value's), shown in place of "not measured". */
+export function isKnownAbsence(reason: NoValueReason | null): boolean {
+  return reason !== null && KNOWN_ABSENCE[reason] !== undefined;
+}
+
+/** What an absent value prints: its known reason ("not reported in filings"), else "not measured". */
+export function absentText(reason: NoValueReason | null): string {
+  return (reason !== null ? KNOWN_ABSENCE[reason] : undefined) ?? NOT_MEASURED;
+}
+
 /** Over or under: only for signed units, where the sign is the reading. */
 export function metricDirection(metric: Pick<Metric, "value" | "unit">): "over" | "under" | null {
   if (metric.value === null) return null;
@@ -422,6 +447,9 @@ export const METRIC_SHORT_LABEL: Readonly<Record<string, string>> = {
   "block.rank_delta": "Over-represented",
   "block.new_tag": "New tags",
   "block.panel_rank": "City panel rank",
+  "block.concept_rank": "Concept tag rank",
+  "block.panel_size": "Cities compared",
+  "xdom.partners_one_category": "Partners in one category",
   "tenant.rank_shift": "Rank shift",
   "tenant.fit": "Tenant fit",
   "rank.shift": "Rank shift",
@@ -469,6 +497,7 @@ export function metricShortLabel(metric: Pick<Metric, "key" | "formulaId" | "lab
 /** "+0.21 vs peers": a metric's display text with its comparator, or "not measured (no usable trend in the window)". */
 export function metricWithComparator(metric: Metric): string {
   if (metric.badge === "UNAVAILABLE" || metric.value === null) {
+    if (isKnownAbsence(metric.reason)) return absentText(metric.reason);
     return metric.reason ? `${NOT_MEASURED} (${NO_VALUE_LABEL[metric.reason]})` : NOT_MEASURED;
   }
   return metric.comparator ? `${metric.display} ${COMPARATOR_TEXT[metric.comparator]}` : metric.display;

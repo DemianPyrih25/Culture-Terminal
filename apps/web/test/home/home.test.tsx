@@ -24,7 +24,7 @@ describe("Home", () => {
   it("renders the hero, the question box and the how band in the home shell", () => {
     const out = html(<Home />);
     expect(out).toMatch(/<h1[^>]*>Ask what any audience<br\/>really loves\.<\/h1>/);
-    expect(out).toContain("Get a one-page answer from Qloo taste data in about a minute.");
+    expect(out).toContain("Get a one-page answer in about a minute, from Qloo taste data plus SEC filings and US Census figures where a question needs them.");
     // The box is #ask, so "New question" from any page lands in it.
     const field = out.match(/<textarea[^>]*id="ask"[^>]*>/)?.[0] ?? "";
     expect(field).toContain('aria-autocomplete="list"');

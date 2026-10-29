@@ -179,16 +179,17 @@ export function addLiftMetrics(
 
   if (grid !== null) {
     const prec = precisionFactor(grid.precision);
-    const coarse = grid.precision <= NO_CLAIM_PRECISION ? " · coarse, no neighbourhood claims" : "";
+    const coarse = grid.precision <= NO_CLAIM_PRECISION ? " · too coarse for neighbourhood claims" : "";
     out.precision = push(
       run,
       addSkillMetric(ledger, {
         key: "lift.precision",
-        label: `map precision factor in ${metro} (geohash length after normalisation; 1 = full confidence)`,
+        label: `map grid precision in ${metro} (the finest grid gives full weight)`,
         subjectRefs: [run.metro],
         value: prec,
         reason: "not_measured",
-        display: `gh${grid.precision} · ${fixed2(prec)}${coarse}`,
+        // The brief reads "<grid> · <factor>[ · note]" (apps/web key figures): the grid in words first.
+        display: `${gridWords(grid.precision)} · ${fixed2(prec)}${coarse}`,
         unit: "ratio",
         badge: "DERIVED",
         formulaId: "lift.confidence",
@@ -395,14 +396,29 @@ function focusSupplyMetric(run: LiftRun, a: AreaLift, s: AreaSupply & { count: n
   });
 }
 
+/** A lift's weight in words: the band a reader can act on. */
+function weightWords(conf: number): string {
+  if (conf >= 0.75) return "solid";
+  if (conf >= 0.5) return "moderate";
+  return "weak";
+}
+
+/** The map grid in words, finest first (geohash length 7 = finest). */
+function gridWords(precision: number): string {
+  if (precision >= 7) return "fine";
+  if (precision === 6) return "medium";
+  if (precision === 5) return "coarse";
+  return "very coarse";
+}
+
 function confidenceMetric(run: LiftRun, a: AreaLift, evidence: LiftEvidence): Metric {
   return addSkillMetric(run.ctx.ledger, {
     key: "lift.confidence",
-    label: `confidence of the ${safeName(a.name)} lift (${a.n} gated ${a.n === 1 ? "cell" : "cells"} × map precision)`,
+    label: `confidence of the ${safeName(a.name)} lift (map cells, grid)`,
     subjectRefs: [a.id],
     value: a.conf,
     reason: a.reason ?? "insufficient_n",
-    display: a.conf === null ? "" : fixed2(a.conf),
+    display: a.conf === null ? "" : `${fixed2(a.conf)} · ${weightWords(a.conf)}`,
     unit: "ratio",
     badge: "DERIVED",
     formulaId: "lift.confidence",

@@ -1,4 +1,5 @@
-import { FIXED_DISCLAIMERS, isVerdictTag, VIZ_COMPAT, type Metric, type Report, type RunState } from "@ct/contracts";
+import { FIXED_DISCLAIMERS, isVerdictTag, VIZ_COMPAT, type Metric, type Report, type RunState, type SkillId } from "@ct/contracts";
+import { withoutNoiseTags } from "../tag-noise";
 import { figureLegend, figureSource, methodHrefFor } from "./figures";
 import { FootnoteRegistry, inlineText } from "./footnotes";
 import {
@@ -101,6 +102,11 @@ type LiveKeyFigure = { metric: Metric } | { metric: null; label: string; pending
 /** What a pending key figure says once the run has stopped: it will not arrive, and it is not 0. */
 const STOPPED_FIGURE_NOTE = "not measured · run stopped";
 
+/** Whether the run plans a tool: a call to it has started, or a plan step names it. */
+function planned(state: RunState, tool: SkillId): boolean {
+  return state.toolCalls.some((t) => t.tool === tool) || (state.plan?.plan.steps.some((s) => s.tool === tool) ?? false);
+}
+
 /** The job's key-figure slots filled with the metrics that have arrived, the rest pending. */
 function liveKeyFigures(ledger: Ledger): LiveKeyFigure[] {
   const { state } = ledger;
@@ -125,6 +131,8 @@ function liveKeyFigures(ledger: Ledger): LiveKeyFigure[] {
     }
     if (slot.top) hits = [...hits].sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
     const take = hits.slice(0, slot.count);
+    // A slot tied to one tool (the SEC revenue figure) shows only once that tool is planned (D8).
+    if (slot.onlyWith && take.length === 0 && !planned(state, slot.onlyWith)) continue;
     for (const m of take) {
       picked.add(m.id);
       out.push({ metric: m });
@@ -295,7 +303,8 @@ function figureFor(
 ): BriefFigure | null {
   const { state } = ledger;
   const ds = state.datasets[input.datasetId] ?? null;
-  const dataset = ds?.data ?? null;
+  // Tag lists go through the shared noise filter at display time, stored runs included (ANSWER_QUALITY §10).
+  const dataset = withoutNoiseTags(ds?.data ?? null);
   const kind = dataset?.kind ?? ds?.kind ?? state.report?.exhibits.find((e) => e.datasetId === input.datasetId)?.kind ?? null;
   if (kind === null) return null;
   const evidenceIds = input.evidenceIds.length > 0 ? input.evidenceIds : (dataset?.evidenceIds ?? []);

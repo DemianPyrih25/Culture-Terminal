@@ -192,7 +192,7 @@ describe("run-skill location skills over pinned localities and the gazetteer", (
     expect(section(text, "EVIDENCE").some((l) => l.includes("City tag fingerprint of Nashville (Qloo locality)"))).toBe(true);
     const datasets = section(text, "DATASETS");
     expect(datasets.some((l) => /D1\s+Bars\s+Block DNA · .+ vs Nashville/.test(l))).toBe(true);
-    expect(datasets.some((l) => /D2\s+Ranked\s+Local brands · .+ vs Nashville/.test(l))).toBe(true);
+    expect(datasets.some((l) => /D2\s+Ranked\s+Brands favoured in .+ · vs Nas/.test(l))).toBe(true);
   });
 
   it("lists every ref the skill registered after the digest, which may list fewer", async () => {

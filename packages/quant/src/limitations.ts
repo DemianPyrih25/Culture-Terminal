@@ -1,5 +1,6 @@
 import {
   Flag,
+  PUBLIC_NOT_CONFIGURED_REASON,
   SEVERITY_RANK,
   type Limitation,
   type Pillar,
@@ -31,8 +32,10 @@ const EXPLAINABILITY = "Explainability shows attribution inside Qloo's model, no
 const TRAVEL_TASTE =
   "Travel taste shows places this audience's taste points to, not residence, trips taken or ticket demand.";
 const COMPANY_LEVEL =
-  "Company-level reported figures from SEC filings; one brand may be a small part of a company, and none of this is advice.";
-const RESIDENTS_ONLY = "Survey estimates for residents; not customers, foot traffic or spending.";
+  "Company-level reported figures from SEC filings; one brand may be a small part of a company, a change in revenue can come from acquisitions or other brands, and none of this is advice.";
+// The CENSUS_RESIDENTS_ONLY flag sentence: area_economics always raises the flag, so its bullet is the same sentence, shown once.
+const RESIDENTS_ONLY =
+  "Area figures are US Census survey estimates about the people who live there, not visitors, customers, foot traffic or spending.";
 
 /** One honest sentence per data-quality flag. TRENDING_HISTORICAL_WINDOW gains its window through flagText. */
 export const FLAG_TEXT: Readonly<Record<Flag, string>> = {
@@ -45,7 +48,7 @@ export const FLAG_TEXT: Readonly<Record<Flag, string>> = {
   COARSE_GEOHASH:
     "Part of the heatmap came back on a coarse grid, so neighbourhood lift there is low-confidence or not claimed.",
   LOCATION_FALLBACK:
-    "A neighbourhood boundary could not be used, so the area was read from its centre point or a place-name search (a CODE FALLBACK).",
+    "A neighbourhood boundary could not be used, so the area was read from its centre point or a place-name search, a less precise reading.",
   DEMOGRAPHICS_ARE_INDICES: DEMOGRAPHIC_INDICES,
   SUPPLY_SAMPLE_ONLY: "Supply counts a capped sample of venues Qloo indexes, not every business in the area.",
   SUPPLY_UNAVAILABLE:
@@ -70,8 +73,11 @@ export const FLAG_TEXT: Readonly<Record<Flag, string>> = {
     "The question was read as the closest kind of question Culture Terminal answers, so the parts it does not cover (such as sales, prices, rents or foot traffic) are not answered here.",
   NOT_A_LISTED_COMPANY:
     "The brand is not mapped to a US-listed company (it may be private or not in our list), so no financial figures are shown and none are guessed.",
-  CENSUS_RESIDENTS_ONLY:
-    "Area figures are US Census survey estimates about the people who live there, not visitors, customers, foot traffic or spending.",
+  CENSUS_RESIDENTS_ONLY: RESIDENTS_ONLY,
+  SEC_NOT_CONFIGURED: `${PUBLIC_NOT_CONFIGURED_REASON.sec}, so no reported financials are shown.`,
+  CENSUS_NOT_CONFIGURED: `${PUBLIC_NOT_CONFIGURED_REASON.census}, so no Census area figures are shown.`,
+  CONCEPT_NOT_IN_DATA:
+    "The exact product or concept asked about is not in the data, so it was tested at category level or not at all.",
 };
 
 /**
@@ -99,6 +105,9 @@ export const FLAG_SEVERITY: Readonly<Record<Flag, Severity>> = {
   READ_AS_NEAREST_JOB: "high",
   NOT_A_LISTED_COMPANY: "medium",
   CENSUS_RESIDENTS_ONLY: "low",
+  SEC_NOT_CONFIGURED: "medium",
+  CENSUS_NOT_CONFIGURED: "medium",
+  CONCEPT_NOT_IN_DATA: "high",
 };
 
 /**
@@ -151,6 +160,7 @@ export const SKILL_LIMITATIONS: Readonly<Record<SkillId, readonly string[]>> = {
     "Affinities are compressed, so only rank differences against the city are shown.",
     VENUE_GOERS,
     TENANT_FIT,
+    "Brands favoured in an area rank higher among its venue-goers than city-wide; that does not mean they are based or sold there. Universities and colleges that Qloo lists as brands are left out.",
   ],
   cross_domain: [
     EXPLAINABILITY,

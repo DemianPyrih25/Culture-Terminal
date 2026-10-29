@@ -13,6 +13,7 @@ const ONE: Readonly<Record<ConfidenceRule, ConfidenceInput>> = {
   checker_warning: { checkerWarnings: 1 },
   insufficient_evidence: { insufficientEvidence: true },
   read_as_nearest_job: { readAsNearestJob: true },
+  concept_partly_tagged: { conceptPartlyTagged: true },
 };
 
 describe("computeConfidence", () => {
@@ -44,6 +45,14 @@ describe("computeConfidence", () => {
 
   it("puts a note with fewer than three ok bundles (V7) in the LOW band on its own", () => {
     expect(computeConfidence({ insufficientEvidence: true })).toMatchObject({ score: 40, band: "LOW" });
+  });
+
+  it("caps a partly tested concept at MED on its own and counts it once (D2)", () => {
+    const c = computeConfidence({ conceptPartlyTagged: true });
+    expect(c).toMatchObject({ score: 70, band: "MED" });
+    expect(c.breakdown).toEqual([
+      { rule: "concept_partly_tagged", label: CONFIDENCE_RULE_LABEL.concept_partly_tagged, count: 1, points: -30 },
+    ]);
   });
 
   it("counts coarse geohash and stale momentum once", () => {
@@ -88,6 +97,10 @@ describe("computeConfidence", () => {
 describe("CONFIDENCE_RULE_LABEL", () => {
   it("labels every rule", () => {
     expect(Object.keys(CONFIDENCE_RULE_LABEL).sort()).toEqual([...ConfidenceRule.options].sort());
-    for (const label of Object.values(CONFIDENCE_RULE_LABEL)) expect(label.length).toBeGreaterThan(0);
+    for (const label of Object.values(CONFIDENCE_RULE_LABEL)) {
+      expect(label.length).toBeGreaterThan(0);
+      // Plain business English (Q1): no internal codes such as V7, D41, CODE FALLBACK or EMPTY_RESULT.
+      expect(label).not.toMatch(/\b[A-Z]{2,}_[A-Z_]+\b|\b[VD]\d+\b|CODE FALLBACK|CHECKER/);
+    }
   });
 });

@@ -1,5 +1,4 @@
-import type { NoValueReason, QlooEntity, QuadrantName, SponsorCategory } from "@ct/contracts";
-import { UNDER_THE_RADAR_MAX_POPULARITY } from "../../findings";
+import { UNDER_THE_RADAR_MAX_POPULARITY, type NoValueReason, type QlooEntity, type QuadrantName, type SponsorCategory } from "@ct/contracts";
 import { median, withinCallPercentiles } from "../../stats";
 import type { EntityDraft } from "../common";
 import { displayRanks } from "../format";

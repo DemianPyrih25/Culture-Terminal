@@ -176,7 +176,40 @@ describe("block_dna whole-city fingerprint over the mock transport", () => {
     expect(result.status).toBe("ok");
     // The panel is all 13 map cities, every list cached by the first run (Austin's own included).
     expect(second.runQloo.networkUsed()).toBe(2);
-    expect(result.forModel.notices.join(" ")).toContain("the other 13 map cities");
+    // The panel's size is a metric the model cites, never a number in a label or notice (Q6).
+    const panel = second.ledger.metrics.find((m) => m.key === "block.panel_size");
+    expect(panel).toMatchObject({ value: 13, display: "13 map cities", comparator: "BASELINE" });
+    expect(result.forModel.notices.join(" ")).toContain(`the other map cities (how many: ${panel?.id})`);
+    expect(result.forModel.metrics.filter((m) => m.id !== panel?.id).some((m) => /\b1[23]\b/.test(m.label))).toBe(false);
+  });
+
+  it("gives each concept tag the city's place among the map cities, or the reason, at no extra call (CR 5)", async () => {
+    const run = runOn(mockClient());
+    const absent = run.registry.registerTag({ tagId: "urn:tag:genre:place:invented_nowhere_hall", name: "nowhere hall", type: "urn:tag:genre:place", signalCapable: true });
+    const outside = run.registry.registerTag({ tagId: "urn:tag:keyword:qloo:invented_loud", name: "loud", type: "urn:tag:keyword:qloo", signalCapable: true });
+    const base = input("austin");
+    const result = await blockDnaSkill.run({ ...base, concept_tags: [absent.ref, outside.ref] }, run.ctx);
+    expect(run.runQloo.networkUsed()).toBe(26);
+    const concept = run.ledger.metrics.filter((m) => m.key === "block.concept_rank");
+    expect(concept.map((m) => [m.subjectRefs[0], m.value, m.reason, m.comparator, m.unit])).toEqual([
+      [absent.ref, null, "not_measured", "BASELINE", "rank"],
+      [outside.ref, null, "unavailable", "BASELINE", "rank"],
+    ]);
+    checkLedger(run);
+    checkDigest(result.forModel, "block_dna", "S2", run);
+
+    // A tag Austin's own list ranks: a place among the 13 cities, from the cached lists.
+    const bars = run.ledger.datasets.find((d) => d.kind === "Bars");
+    if (bars?.kind !== "Bars") throw new Error("expected Bars");
+    const held = bars.payload.groups.flatMap((grp) => grp.bars).find((b) => (b.ranks?.subject ?? null) !== null && b.key.startsWith("urn:tag:"));
+    if (held === undefined) throw new Error("expected a ranked Austin tag");
+    const again = runOn(mockClient());
+    const ref = again.registry.registerTag({ tagId: held.key, name: held.label, type: held.key.slice(0, held.key.lastIndexOf(":")), signalCapable: true }).ref;
+    await blockDnaSkill.run({ ...base, concept_tags: [ref] }, again.ctx);
+    const placed = again.ledger.metrics.find((m) => m.key === "block.concept_rank");
+    expect(placed?.value).toBeGreaterThanOrEqual(1);
+    expect(placed?.value).toBeLessThanOrEqual(13);
+    expect(placed?.display).toMatch(/^(tied )?\d+ of 13 cities$/);
   });
 
   it("adds brands pooled the same way when asked", async () => {

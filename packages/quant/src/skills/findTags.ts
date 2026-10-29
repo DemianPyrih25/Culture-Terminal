@@ -131,6 +131,8 @@ interface Search {
   attempt: Attempt<QlooResult<QlooTagsResponse>> | null;
   picked: QlooTagSearchItem[];
   evidenceId: EvidenceId | null;
+  /** The closest category names when the search kept no usable tag (nearestCategories), else empty. */
+  nearest: string[];
 }
 
 type Outcome = "found" | "none" | "budget_truncated" | "error";
@@ -191,7 +193,46 @@ function recordSearch(run: Run, search: Search): void {
     metricIds: [],
   });
   run.findings.push(finding);
+  const nearest = nearestCategories(returned, search.picked, search.query);
+  search.nearest = nearest;
+  if (nearest.length > 0) {
+    run.notices.push(
+      `The tag search for '${query}' kept no usable tag: no returned category name shares all its words. The closest ${search.scope} categories ` +
+        `Qloo returned are ${nearest.map((n) => `'${n}'`).join(", ")}; to test the concept on one, search that name as written ` +
+        "(the concept part it leaves out stays untested). Never repeat the same phrase.",
+    );
+  }
 }
+
+/** Categories named in the no-match notice: enough to choose a broader search, few enough to read. */
+export const NEAREST_CATEGORIES = 5;
+
+/**
+ * The taxonomy tags a semantic search returned but the name filter dropped, distinct by name: a broad
+ * taxonomy (brand genres are product categories such as a drinks or dairy group) seldom shares a whole
+ * word with a product phrase, so the model is told which categories exist instead of re-searching
+ * blind, and an opening scan retries its concept test on the first (the concept then reads as tested at
+ * category level). Those sharing a word with the query (`query`, e.g. a category named after one of the
+ * product's words) come first, then Qloo's (semantic) order. Nothing is registered: a category becomes
+ * a tag only when a later search names it and passes the filter.
+ */
+export function nearestCategories(returned: readonly QlooTagSearchItem[], picked: readonly QlooTagSearchItem[], query = ""): string[] {
+  const kept = new Set(picked.map((t) => t.id));
+  const names = new Map<string, string>();
+  for (const t of returned) {
+    if (kept.has(t.id) || !isTaxonomyTag(t.id)) continue;
+    const name = safeName(t.name);
+    const key = normaliseConcept(name);
+    if (key !== "" && !names.has(key)) names.set(key, name);
+  }
+  const wanted = conceptWords(query);
+  const shares = (name: string) => [...conceptWords(name)].some((w) => wanted.has(w));
+  const all = [...names.values()];
+  return [...all.filter(shares), ...all.filter((n) => !shares(n))].slice(0, NEAREST_CATEGORIES);
+}
+
+/** How a no-match row lists the nearest categories (DigestRow values hold scalars): "a | b | c". */
+export const NEAREST_SEPARATOR = " | ";
 
 function curatedTags(run: Run, curated: CuratedConcept): FoundTag[] {
   return curated.served.slice(0, TAGS_PER_CONCEPT).map((t) => ({
@@ -218,13 +259,19 @@ function outcomeOf(search: Search | null, tags: readonly FoundTag[]): Outcome {
   return "none";
 }
 
-function rowsFor(concept: Concept, tags: readonly FoundTag[], outcome: Outcome): DigestRow[] {
+/**
+ * The digest rows of one concept. A concept whose search answered and kept no usable tag (outcome
+ * none) carries the nearest category names (`nearest`, NEAREST_SEPARATOR between them) on its rows, so
+ * the opening scan can retry its concept test on the first.
+ */
+function rowsFor(concept: Concept, tags: readonly FoundTag[], outcome: Outcome, nearest: readonly string[] = []): DigestRow[] {
   const text = safeText(concept.text, 60);
-  if (tags.length === 0) return [{ ref: null, name: text, values: { concept: text, scope: concept.scope, match: outcome } }];
+  const near: Record<string, string> = outcome === "none" && nearest.length > 0 ? { nearest: nearest.join(NEAREST_SEPARATOR) } : {};
+  if (tags.length === 0) return [{ ref: null, name: text, values: { concept: text, scope: concept.scope, match: outcome, ...near } }];
   return tags.map((t) => ({
     ref: t.tag.ref,
     name: safeName(t.tag.name),
-    values: { concept: text, scope: concept.scope, use: t.use, source: t.source, status: t.status },
+    values: { concept: text, scope: concept.scope, use: t.use, source: t.source, status: t.status, ...near },
   }));
 }
 
@@ -303,6 +350,7 @@ async function runFindTags(input: FindInput, ctx: SkillCtx): Promise<SkillResult
       attempt: null,
       picked: [],
       evidenceId: null,
+      nearest: [],
     };
     for (const id of plan.curated?.candidates ?? []) search.candidates.add(id);
     searches.set(key, search);
@@ -346,7 +394,7 @@ async function runFindTags(input: FindInput, ctx: SkillCtx): Promise<SkillResult
             : searchedTags(run, search);
     const outcome = outcomeOf(search, tags);
     outcomes.push(outcome);
-    rows.push(...rowsFor(plan.concept, tags, outcome));
+    rows.push(...rowsFor(plan.concept, tags, outcome, search?.nearest ?? []));
     run.notices.push(...placeNotices(plan.concept, tags, fallback !== null));
     if (plan.query === null && plan.curated === null) {
       run.notices.push(`'${safeText(plan.concept.text, 60)}' has no words to search for; not looked up.`);

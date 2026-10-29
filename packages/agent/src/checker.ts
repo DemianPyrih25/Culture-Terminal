@@ -166,6 +166,7 @@ export function checkReport<D extends ReportDraftShape>(input: CheckReportInput<
     ...referenceIssues(draft, plan, lookup, blocking),
     ...fields.flatMap((f) => tokenIssues(f, lookup, blocking)),
     ...fields.flatMap((f) => seamIssues(f, lookup, blocking)),
+    ...fields.flatMap((f) => repeatedDisplayIssues(f, lookup, blocking)),
     ...fields.flatMap((f) => subjectIssues(f, lookup, entities, blocking)),
     ...numeralIssues(numerals, lookup, bareCount > V3_REJECT_ABOVE ? blocking : "warn"),
     ...phrases.flatMap(({ path, hits }) => phraseIssues(path, hits, blocking)),
@@ -181,6 +182,7 @@ export function checkReport<D extends ReportDraftShape>(input: CheckReportInput<
   issues.push(...injectWindows(claimUnits(patched, draftProse(patched)), ledger));
   issues.push(...strayPeriods(draftProse(patched), lookup));
   issues.push(...injectPeriods(claimUnits(patched, draftProse(patched)), lookup));
+  collapseSamePeriods(draftProse(patched), lookup);
   issues.sort((a, b) => a.rule.localeCompare(b.rule, "en", { numeric: true }));
 
   return {
@@ -345,9 +347,68 @@ function seamOverlap(before: readonly string[], after: readonly string[]): strin
 }
 
 /**
+ * The longest run (up to 4 words, at least 3 letters besides digits) that `words` and a display's
+ * words both end with (atEnd) or both start with, short of the whole display; [] when none. It
+ * catches a label repeated across the display's number: "solid {{M9}}" when M9 prints "1.00 · solid".
+ */
+function sharedEdge(words: readonly string[], shown: readonly string[], atEnd: boolean): string[] {
+  for (let k = Math.min(4, words.length, shown.length - 1); k >= 1; k--) {
+    const a = atEnd ? words.slice(words.length - k) : words.slice(0, k);
+    const b = atEnd ? shown.slice(shown.length - k) : shown.slice(0, k);
+    if (a.every((w, i) => w === b[i]) && a.join("").replace(/\p{N}/gu, "").length >= 3) return a;
+  }
+  return [];
+}
+
+/** Text between two tokens that names nothing: commas, brackets, slashes and at most one "and" or "or". */
+const BARE_JOIN = /^[\s,;/()&]*(?:\b(?:and|or)\b)?[\s,;/()&]*$/iu;
+
+/**
+ * Tokens side by side that print the same display ("({{M51}}, {{M71}}, {{M91}})" reading "not measured,
+ * not measured, not measured"): the reader sees one figure repeated and cannot tell what each covers
+ * (§1 repeated metric displays). One issue per run of such tokens.
+ */
+function repeatedDisplayIssues(field: ProseField, ledger: LedgerLookup, blocking: Blocking): ValidationIssue[] {
+  if (field.role === "followup") return [];
+  const segments = tokenizeProse(field.text);
+  const out: ValidationIssue[] = [];
+  let run: string[] = [];
+  let display = "";
+  const flush = () => {
+    if (run.length > 1) {
+      const listed = run.map((id) => `{{${id}}}`);
+      const message =
+        `${field.path}: ${wordList(listed)} print the same "${display}" side by side, so the reader sees one figure repeated; ` +
+        "name what each measures beside it (the city, area or brand), or say it once in words.";
+      out.push(issue("V2", blocking, message, field.path, [...run]));
+    }
+    run = [];
+    display = "";
+  };
+  segments.forEach((segment) => {
+    if (segment.kind === "text") {
+      if (!BARE_JOIN.test(segment.text)) flush();
+      return;
+    }
+    if (segment.kind !== "metric") return flush();
+    const shown = ledger.metric(segment.id)?.display ?? "";
+    // A run survives only bare joins (any other text or token flushed it), so the token sits beside it.
+    if (run.length > 0 && shown === display && shown !== "") run.push(segment.id);
+    else {
+      flush();
+      run = [segment.id];
+      display = shown;
+    }
+  });
+  flush();
+  return out;
+}
+
+/**
  * A token whose display repeats the words around it (§11 display bugs): "ranks last in {{M34}}" when
  * {{M34}} prints "last in 0 of 5 rows" reads "ranks last in last in 0 of 5 rows". The words beside the
- * token are judged against the start and the end of what it prints.
+ * token are judged against the start and the end of what it prints, and against the label on the
+ * far side of its number ("solid {{M9}}" when M9 prints "1.00 · solid").
  */
 function seamIssues(field: ProseField, ledger: LedgerLookup, blocking: Blocking): ValidationIssue[] {
   if (field.role === "followup") return [];
@@ -361,8 +422,11 @@ function seamIssues(field: ProseField, ledger: LedgerLookup, blocking: Blocking)
     const prev = segments[i - 1];
     const next = segments[i + 1];
     // Only the words in the token's own clause count: "{{M14}}. New tags…" starts another sentence.
-    const before = prev?.kind === "text" ? seamOverlap(seamWords(prev.text.split(CLAUSE_BREAK).at(-1) ?? ""), shown) : [];
-    const after = next?.kind === "text" ? seamOverlap(shown, seamWords(next.text.split(CLAUSE_BREAK)[0] ?? "")) : [];
+    const beforeWords = prev?.kind === "text" ? seamWords(prev.text.split(CLAUSE_BREAK).at(-1) ?? "") : [];
+    const afterWords = next?.kind === "text" ? seamWords(next.text.split(CLAUSE_BREAK)[0] ?? "") : [];
+    const pick = (a: string[], b: string[]) => (a.length >= b.length ? a : b);
+    const before = pick(seamOverlap(beforeWords, shown), sharedEdge(beforeWords, shown, true));
+    const after = pick(seamOverlap(shown, afterWords), sharedEdge(afterWords, shown, false));
     const repeated = [before, after].filter((w) => w.length > 0).map((w) => `"${w.join(" ")}"`);
     if (repeated.length === 0) return;
     const message =
@@ -684,7 +748,9 @@ function injectPeriods(units: readonly ClaimUnit[], ledger: LedgerLookup): Valid
       return m !== undefined && m.value !== null && typeof m.period === "string" && metricPublicSource(m, ledger) !== null;
     });
     const shown = new Set(unit.fields.flatMap((f) => extractPeriodMetricIds(f.text)));
-    const missing = ids.filter((id) => !shown.has(id));
+    // A shown period prints the same text for every figure of that filing or ACS release: it covers them.
+    const shownText = new Set([...shown].map((id) => ledger.metric(id)?.period).filter((p): p is string => typeof p === "string"));
+    const missing = ids.filter((id) => !shown.has(id) && !shownText.has(ledger.metric(id)?.period as string));
     if (missing.length === 0) continue;
     // A field may take several periods: each insertion reads the text the last one wrote.
     const now = new Map<ProseField, string>();
@@ -703,6 +769,31 @@ function injectPeriods(units: readonly ClaimUnit[], ledger: LedgerLookup): Valid
     out.push(issue("V11", "injected", `${unit.path}: added the reporting period beside SEC or Census ${listed}.`, unit.path, missing));
   }
   return out;
+}
+
+/** "({{PERIOD:M1}}, {{PERIOD:M2}})": a parenthesis that lists only period tokens. */
+const PERIOD_GROUP_RE = /\(\{\{PERIOD:M[1-9]\d*\}\}(?:\s*(?:,|;|and)\s*\{\{PERIOD:M[1-9]\d*\}\})+\)/g;
+
+/**
+ * A parenthesis listing period tokens that render the same text ("ACS 2020-2024 5-year, ACS 2020-2024
+ * 5-year") prints it twice: code keeps the first of each text. Display only, so no issue is raised.
+ */
+function collapseSamePeriods(fields: readonly ProseField[], ledger: LedgerLookup): void {
+  for (const field of fields) {
+    const next = field.text.replace(PERIOD_GROUP_RE, (group) => {
+      const ids = extractPeriodMetricIds(group);
+      const seen = new Set<string>();
+      const kept = ids.filter((id) => {
+        const period = ledger.metric(id)?.period;
+        const key = typeof period === "string" ? period : id;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      return kept.length === ids.length ? group : `(${kept.map(periodToken).join(", ")})`;
+    });
+    if (next !== field.text) field.set(next);
+  }
 }
 
 /**

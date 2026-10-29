@@ -151,7 +151,9 @@ describe("director.md (ANALYST)", () => {
   it("names every scan skill the build runs in its job's Scan part, and never asks wave 1 to repeat it", () => {
     for (const [job, entries] of Object.entries(SCAN_TABLE)) {
       const line = jobLine(Job.parse(job));
-      const [scan = "", wave1 = ""] = line.split("Wave 1:");
+      const [scan = "", rest = ""] = line.split("Wave 1:");
+      // Wave 1 ends where Turn 2 begins: a turn-2 pivot may call a scan tool again, on what the scan found.
+      const wave1 = rest.split("Turn 2:")[0] ?? "";
       for (const entry of entries.filter((e) => (e.build ?? e.chain) !== undefined && isSkillAvailable(e.tool))) {
         expect(scan, `${job} scan`).toContain(entry.tool);
         expect(wave1, `${job} wave 1`).not.toContain(entry.tool);

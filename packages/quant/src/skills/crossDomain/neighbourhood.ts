@@ -1,5 +1,4 @@
-import type { Domain, NoValueReason, QlooEntity } from "@ct/contracts";
-import { UNDER_THE_RADAR_MAX_POPULARITY } from "../../findings";
+import { UNDER_THE_RADAR_MAX_POPULARITY, type Domain, type NoValueReason, type QlooEntity } from "@ct/contracts";
 import { detectFloor, median, qualityGate, withinCallPercentiles } from "../../stats";
 import { insightTags, type EntityTagRef } from "../common";
 import { displayRanks } from "../format";

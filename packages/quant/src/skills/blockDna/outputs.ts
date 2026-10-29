@@ -19,6 +19,7 @@ import {
   type QlooEntity,
   type RankedRow,
   type RegisteredEntity,
+  type RegisteredTag,
   type SkillCtx,
   type TagRef,
   type ValueCell,
@@ -32,11 +33,11 @@ import {
   type BlockNewTagsFamily,
   type FindingDraft,
 } from "../../findings";
-import { addSkillMetric, registerEntity } from "../common";
+import { addSkillMetric, registerEntity, type MetricSpec } from "../common";
 import { skillResult, type DigestTarget } from "../digest";
 import { safeFullName, safeName } from "../format";
 import { draftFromInsight } from "../peerSelection";
-import { BRAND_POPULARITY_MAX, BRAND_TAKE, byGain, familyBars, NEW_AREA_TOP, newTagCount, TAG_TAKE, type Compared } from "./fingerprint";
+import { BRAND_POPULARITY_MAX, BRAND_TAKE, byGain, familyBars, familyOf, NEW_AREA_TOP, newTagCount, TAG_TAKE, type Compared, type CrossCityRank } from "./fingerprint";
 import type { BlockArea } from "./location";
 
 /**
@@ -96,8 +97,14 @@ export interface BlockSubject {
  * caption and comparator that names the comparison comes from here.
  */
 export interface BlockBase {
-  /** "Nashville", or "the other 12 map cities". */
+  /** "Nashville", or "the other 12 map cities": reader-facing titles, column heads and captions. */
   label: string;
+  /**
+   * The same comparison without a count ("Nashville", "the other map cities"), for metric labels,
+   * finding texts and notices the model reads: a panel size typed from a label is a number outside
+   * the {{M#}} tokens (Q6 of the Part 9 close-out), so the count lives in its own metric.
+   */
+  short: string;
   comparator: "CITY" | "BASELINE";
   /** Subject refs every metric carries after the subject's own: the area's metro, or none for a city. */
   refs: readonly string[];
@@ -118,6 +125,7 @@ export function cityBase(metro: MetroId): BlockBase {
   const city = METRO_LABEL[metro];
   return {
     label: city,
+    short: city,
     comparator: "CITY",
     refs: [metro],
     rankLabel: `${city} rank`,
@@ -125,7 +133,7 @@ export function cityBase(metro: MetroId): BlockBase {
     absentFrom: (list) => `absent from the ${city} ${list}top ${TAG_TAKE}`,
     barsCaption:
       `Rank gain is the ${city} rank minus the area rank in Qloo's top-${TAG_TAKE} tag lists; a tag missing from a list counts as ${TAG_TAKE + 1}. ` +
-      "NEW: absent city-wide, in the area's top 20. Venue-goer taste signals, not residents or census.",
+      "New: absent city-wide, in the area's top 20. Venue-goer taste signals, not residents or census.",
     brandsCaption:
       `Brands with popularity up to ${BRAND_POPULARITY_MAX}, top ${BRAND_TAKE} for the area and for ${city}; a brand missing from a list counts as ${BRAND_TAKE + 1}. ` +
       "Venue-goer taste signals, not sales or residents.",
@@ -140,15 +148,16 @@ export function panelBase(cityName: string, cities: number): BlockBase {
   const panel = `the other ${cities} map cities`;
   return {
     label: panel,
+    short: "the other map cities",
     comparator: "BASELINE",
     refs: [],
     rankLabel: "Rank across the other map cities",
     here: `in ${cityName}`,
-    absentFrom: (list) => `absent from every ${list}top-${TAG_TAKE} list of ${panel}`,
+    absentFrom: (list) => `absent from every ${list}top-${TAG_TAKE} list of the other map cities`,
     barsCaption:
       `Rank gain is the panel rank minus the ${cityName} rank. The panel ranks each tag by its average rank in the top-${TAG_TAKE} lists of ${panel} ` +
       `(a tag missing from a city's list counts as ${TAG_TAKE + 1}), and only its top ${TAG_TAKE} get a rank. ` +
-      `NEW: in the ${cityName} top 20 and in none of the other cities' lists. Venue-goer taste signals, not residents or census.`,
+      `New: in the ${cityName} top 20 and in none of the other cities' lists. Venue-goer taste signals, not residents or census.`,
     brandsCaption:
       `Brands with popularity up to ${BRAND_POPULARITY_MAX}: the ${cityName} top ${BRAND_TAKE} against ${panel} pooled the same way; ` +
       `a brand missing from a list counts as ${BRAND_TAKE + 1}. Venue-goer taste signals, not sales or residents.`,
@@ -171,14 +180,24 @@ export const DIGEST_BRANDS = 4;
 /** Local brands in the Ranked dataset. */
 export const DATASET_BRANDS = 10;
 
+/** Group heads in plain words (Q1 of the Part 9 close-out); the family codes stay in `family` for the figure. */
 export const FAMILY_GROUP_LABEL: Readonly<Record<BlockFamily, string>> = {
-  WHO: "WHO · venue-goer taste tags",
-  VIBE: "VIBE · ambience",
-  WHAT: "WHAT · venues and dishes",
-  SOUND: "SOUND · music",
+  WHO: "Who the venue-goers are",
+  VIBE: "Ambience",
+  WHAT: "Venues and dishes",
+  SOUND: "Music",
 };
 
-const TAG_NOUN: Readonly<Record<BlockFamily, string>> = {
+/** One tag of a family, in words, for metric labels and finding texts. */
+export const TAG_NOUN: Readonly<Record<BlockFamily, string>> = {
+  WHO: "venue-goer taste tag",
+  VIBE: "ambience tag",
+  WHAT: "venue or dish tag",
+  SOUND: "music tag",
+};
+
+/** The NEW-count label's family words, in the form the brief rewords (see addFamilyMetrics). */
+const NEW_COUNT_NOUN: Readonly<Record<BlockFamily, string>> = {
   WHO: "WHO venue-goer taste tag",
   VIBE: "VIBE tag",
   WHAT: "WHAT tag",
@@ -200,7 +219,8 @@ export function addFindingDraft(run: BlockRun, draft: FindingDraft, metricIds: r
   return finding;
 }
 
-const cityOf = (frame: BlockFrame): string => frame.base.label;
+/** The comparison as the model reads it, with no count (BlockBase.short). */
+const cityOf = (frame: BlockFrame): string => frame.base.short;
 const areaName = (frame: BlockFrame): string => safeName(frame.area.name);
 
 // Location ladder ----------------------------------------------------------------------------------------
@@ -279,7 +299,14 @@ function addTagMetric(run: BlockRun, frame: BlockFrame, fam: FamilyResult, c: Co
     subjectRefs: [ref, frame.area.subject, ...frame.base.refs],
     value: delta,
     reason: "not_scored",
-    display: gain ? (c.isNew ? `${plus(delta)} · NEW` : plus(delta)) : c.areaRank === null ? `${minus(delta)} · not ranked here` : minus(delta),
+    // " · " pieces, as the brief splits a display (apps/web key figures).
+    display: gain
+      ? c.isNew
+        ? `${plus(delta)} · new ${frame.base.here}`
+        : plus(delta)
+      : c.areaRank === null
+        ? `${minus(delta)} · outside the top ${TAG_TAKE} ${frame.base.here}`
+        : minus(delta),
     unit: "delta",
     badge: "DERIVED",
     formulaId: "block.rank_delta",
@@ -312,7 +339,9 @@ export function addFamilyMetrics(run: BlockRun, frame: BlockFrame, fam: FamilyRe
   out.newTags = compared ? fam.items.filter((c) => c.isNew).sort(byGain) : [];
   out.newCount = addSkillMetric(run.ctx.ledger, {
     key: "block.new_tag",
-    label: `NEW ${TAG_NOUN[fam.family]}s in ${area} (${area} ${listOf(fam.family)}top ${NEW_AREA_TOP}, ${frame.base.absentFrom(listOf(fam.family))})`,
+    // Kept in the form the brief parses and words for the reader at display time (apps/web plain.ts and
+    // key figures read "NEW <family> … tags" and "<n> of <m> in the area top 20"), so stored and new runs read alike.
+    label: `NEW ${NEW_COUNT_NOUN[fam.family]}s in ${area} (${area} ${listOf(fam.family)}top ${NEW_AREA_TOP}, ${frame.base.absentFrom(listOf(fam.family))})`,
     subjectRefs: [frame.area.subject, ...frame.base.refs],
     value: compared ? count : null,
     reason: fam.gap ?? "not_measured",
@@ -326,6 +355,173 @@ export function addFamilyMetrics(run: BlockRun, frame: BlockFrame, fam: FamilyRe
   });
   run.metrics.push(out.newCount);
   return out;
+}
+
+// Concept tags (CR 5 of Part 9) ----------------------------------------------------------------------------
+
+/** A concept tag the caller passed, as the registry holds it, with the family whose list can rank it. */
+export interface ConceptTag {
+  ref: TagRef;
+  tag: RegisteredTag;
+  /** Null for a tag type outside the four families block_dna reads: no list here can rank it. */
+  family: BlockFamily | null;
+}
+
+/** The registered concept tags; a ref the registry does not hold gets a notice instead of a metric. */
+export function conceptTagsOf(run: BlockRun, refs: readonly TagRef[] | undefined): ConceptTag[] {
+  return [...new Set(refs ?? [])].flatMap((ref) => {
+    const tag = run.ctx.registry.tag(ref);
+    if (tag === null) {
+      run.notices.push(`Concept tag ${ref} is not in this run's registry, so it has no rank here.`);
+      return [];
+    }
+    return [{ ref, tag, family: familyOf({ tag_id: tag.tagId, subtype: tag.type }) }];
+  });
+}
+
+const rankWords = (rank: number | null): string => (rank === null ? `outside the top ${TAG_TAKE}` : `rank ${rank}`);
+
+/** The families block_dna reads, in words, for a concept tag none of them holds. */
+const READ_FAMILIES = "venue-goer, ambience, venue-and-dish and music tags";
+
+type ConceptSpec = Pick<MetricSpec, "label" | "value" | "reason" | "display" | "unit" | "n" | "comparator" | "evidenceIds">;
+
+function addConceptMetric(run: BlockRun, frame: BlockFrame, c: ConceptTag, spec: ConceptSpec): Metric {
+  const metric = addSkillMetric(run.ctx.ledger, {
+    key: "block.concept_rank",
+    subjectRefs: [c.ref, frame.area.subject, ...frame.base.refs],
+    badge: "DERIVED",
+    formulaId: "block.concept_rank",
+    ...spec,
+  });
+  run.metrics.push(metric);
+  return metric;
+}
+
+/**
+ * A neighbourhood's or point's concept tags: each tag's rank gain against the city (FORMULAS
+ * block.concept_rank), its area rank alone when the city side is missing, or an UNAVAILABLE metric
+ * that says why (a tag type no list here reads, or a tag in neither top-50 list). No extra call.
+ */
+export function addAreaConceptMetrics(run: BlockRun, frame: BlockFrame, concepts: readonly ConceptTag[], families: readonly FamilyResult[]): Metric[] {
+  const area = areaName(frame);
+  const city = cityOf(frame);
+  const allEvidence = [...new Set(families.flatMap((f) => f.evidenceIds))];
+  return concepts.map((c) => {
+    const name = safeName(c.tag.name);
+    const fam = c.family === null ? undefined : families.find((f) => f.family === c.family);
+    if (fam === undefined) {
+      return addConceptMetric(run, frame, c, {
+        label: `concept tag ${name} in ${area}: no rank (block_dna reads only ${READ_FAMILIES})`,
+        value: null,
+        reason: "unavailable",
+        display: "",
+        unit: "delta",
+        n: null,
+        comparator: frame.base.comparator,
+        evidenceIds: allEvidence,
+      });
+    }
+    const list = listOf(fam.family);
+    const item = fam.items.find((i) => i.item.id === c.tag.tagId);
+    if (fam.gap !== null) {
+      const rank = item?.areaRank ?? null;
+      return addConceptMetric(run, frame, c, {
+        label: `rank of concept tag ${name} among the ${area} ${list}tags (${city} side not measured)`,
+        value: rank,
+        reason: rank === null ? fam.gap : "not_measured",
+        display: rank === null ? "" : `rank ${rank} of ${fam.areaSize} here`,
+        unit: "rank",
+        n: fam.areaSize,
+        comparator: null,
+        evidenceIds: fam.evidenceIds,
+      });
+    }
+    if (item === undefined || item.delta === null || (item.areaRank === null && item.cityRank === null)) {
+      return addConceptMetric(run, frame, c, {
+        label: `concept tag ${name}: rank gain vs ${city} in ${area} (not among the top-${TAG_TAKE} ${list}tags of either)`,
+        value: null,
+        reason: "not_measured",
+        display: "",
+        unit: "delta",
+        n: fam.areaSize,
+        comparator: frame.base.comparator,
+        evidenceIds: fam.evidenceIds,
+      });
+    }
+    const delta = item.delta;
+    return addConceptMetric(run, frame, c, {
+      label: `concept tag ${name}: rank gain vs ${city} in ${area}`,
+      value: delta,
+      reason: "not_scored",
+      display: `${delta > 0 ? plus(delta) : delta < 0 ? minus(delta) : "0"} (${rankWords(item.areaRank)} here, ${rankWords(item.cityRank)} in ${city})`,
+      unit: "delta",
+      n: fam.areaSize,
+      comparator: frame.base.comparator,
+      evidenceIds: fam.evidenceIds,
+    });
+  });
+}
+
+/** One concept tag's reading for a whole city: its place among the cities, or why it has none. */
+export type CityConceptReading = { kind: "ranked"; rank: CrossCityRank } | { kind: "absent" } | { kind: "gap"; reason: NoValueReason };
+
+/**
+ * A whole city's concept tags: the city's place among itself and the panel cities by each city's own
+ * rank of the tag (FORMULAS block.concept_rank, comparator BASELINE), or an UNAVAILABLE metric with
+ * the reason. `read` gives the reading for a tag of a family the city lists hold.
+ */
+export function addCityConceptMetrics(
+  run: BlockRun,
+  frame: BlockFrame,
+  concepts: readonly ConceptTag[],
+  read: (family: BlockFamily, tagId: string) => CityConceptReading,
+  evidenceIds: readonly EvidenceId[],
+): Metric[] {
+  const city = areaName(frame);
+  return concepts.map((c) => {
+    const name = safeName(c.tag.name);
+    if (c.family === null) {
+      return addConceptMetric(run, frame, c, {
+        label: `${city}'s place among the map cities for concept tag ${name}: none (block_dna reads only ${READ_FAMILIES})`,
+        value: null,
+        reason: "unavailable",
+        display: "",
+        unit: "rank",
+        n: null,
+        comparator: frame.base.comparator,
+        evidenceIds,
+      });
+    }
+    const list = listOf(c.family);
+    const reading = read(c.family, c.tag.tagId);
+    if (reading.kind !== "ranked") {
+      return addConceptMetric(run, frame, c, {
+        label:
+          reading.kind === "absent"
+            ? `${city}'s place among the map cities for concept tag ${name} (in no city's top-${TAG_TAKE} ${list}tags)`
+            : `${city}'s place among the map cities for concept tag ${name}`,
+        value: null,
+        reason: reading.kind === "absent" ? "not_measured" : reading.reason,
+        display: "",
+        unit: "rank",
+        n: null,
+        comparator: frame.base.comparator,
+        evidenceIds,
+      });
+    }
+    const { position, cities, ownRank, tied } = reading.rank;
+    return addConceptMetric(run, frame, c, {
+      label: `${city}'s place among ${cities} cities for concept tag ${name} (by its rank in each city's top-${TAG_TAKE} ${list}tags)`,
+      value: position,
+      reason: "not_measured",
+      display: `${tied ? "tied " : ""}${position} of ${cities} cities${ownRank === null ? ` (not in the ${city} top ${TAG_TAKE})` : ""}`,
+      unit: "rank",
+      n: cities,
+      comparator: frame.base.comparator,
+      evidenceIds,
+    });
+  });
 }
 
 /** A local brand with its ref and the metric that holds its gain. */
@@ -352,7 +548,7 @@ export function addBrandMetrics(run: BlockRun, frame: BlockFrame, brands: BrandR
     run.metrics.push(
       addSkillMetric(ledger, {
         key: "block.rank_delta",
-        label: `local brands of ${area} (rank gain vs ${city})`,
+        label: `brands favoured in ${area} (rank gain vs ${city})`,
         subjectRefs: [frame.area.subject, ...frame.base.refs],
         value: null,
         reason: brands.gap ?? "not_measured",
@@ -377,7 +573,7 @@ export function addBrandMetrics(run: BlockRun, frame: BlockFrame, brands: BrandR
       const delta = c.delta as number;
       const metric = addSkillMetric(ledger, {
         key: "block.rank_delta",
-        label: `rank gain vs ${city}: ${safeName(c.item.name)} (local brand, ${area})`,
+        label: `rank gain vs ${city}: ${safeName(c.item.name)} (brand favoured in ${area})`,
         subjectRefs: [reg.entity.ref, frame.area.subject, ...frame.base.refs],
         value: delta,
         reason: "not_scored",
@@ -454,7 +650,7 @@ export function addEmptyBrandsFinding(run: BlockRun, frame: BlockFrame): void {
   addFindingDraft(
     run,
     emptyResultFinding({
-      what: `local brand discovery for ${areaName(frame)}`,
+      what: `the search for brands favoured in ${areaName(frame)}`,
       suggestion: { tool: "rank_candidates", reason: "Name tenant brands yourself and rank them with the site and city contexts." },
     }),
     [],
@@ -499,7 +695,8 @@ export function addBlockDnaBars(
     return bars.length === 0 ? [] : [{ key: family, label: FAMILY_GROUP_LABEL[family], family, bars }];
   });
   if (groups.length === 0) return;
-  const city = cityOf(frame);
+  // Reader-facing: the title and value label keep the panel's size.
+  const city = frame.base.label;
   const dataset = run.ctx.ledger.addDataset({
     kind: "Bars",
     title: `Block DNA · ${safeFullName(frame.area.name)} vs ${city}`,
@@ -529,7 +726,7 @@ export function addLocalBrandsTable(run: BlockRun, frame: BlockFrame, brands: Br
   const local = localBrands(brands).slice(0, DATASET_BRANDS);
   if (local.length === 0) return;
   const refs = new Map(named.map((b) => [b.compared.item.id, b.entity.ref] as const));
-  const city = cityOf(frame);
+  const city = frame.base.label;
   const rows: RankedRow[] = local.map((c, i) => ({
     key: `local-${i + 1}`,
     rank: i + 1,
@@ -549,7 +746,7 @@ export function addLocalBrandsTable(run: BlockRun, frame: BlockFrame, brands: Br
   }));
   const dataset = run.ctx.ledger.addDataset({
     kind: "Ranked",
-    title: `Local brands · ${safeFullName(frame.area.name)} vs ${city}`,
+    title: `Brands favoured in ${safeFullName(frame.area.name)} · vs ${city}`,
     evidenceIds: [...brands.evidenceIds],
     formulaIds: frame.base.comparator === "BASELINE" ? ["block.rank_delta", "block.panel_rank", "popularity"] : ["block.rank_delta", "popularity"],
     payload: {
@@ -616,5 +813,5 @@ export function blockDigestRows(metrics: readonly FamilyMetrics[], brands: reado
 /** The tenant-fit hand-off (S8): local brand refs as rank_candidates candidates with [site, city]. */
 export function tenantNotice(brands: readonly BrandMetric[]): string | null {
   if (brands.length === 0) return null;
-  return `Tenant fit: rank_candidates on this area, contexts [site, city], local brands ${brands.map((b) => b.entity.ref).join(", ")}.`;
+  return `Tenant fit: rank_candidates on this area, contexts [site, city], brands favoured here ${brands.map((b) => b.entity.ref).join(", ")} (they rank higher here, not necessarily based here).`;
 }

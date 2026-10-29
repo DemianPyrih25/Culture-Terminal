@@ -164,14 +164,15 @@ export function periodText(metric: Metric | null): string {
  * token becomes the window, period tokens their metric's period, evidence tokens stay as `[E#]`
  * citations. An unknown metric renders as "n/a" so no unbound number can appear.
  */
-export function renderProse(text: string, ledger: LedgerLookup, window: TrendWindow | null): string {
+export function renderProse(text: string, ledger: LedgerLookup, window: TrendWindow | null, opts: { badges?: boolean } = {}): string {
+  const badges = opts.badges ?? true;
   return resolveProse(text, ledger)
     .map((s) => {
       switch (s.kind) {
         case "text":
           return s.text;
         case "metric":
-          return s.metric ? metricText(s.metric) : "n/a";
+          return s.metric ? (badges ? metricText(s.metric) : s.metric.display) : "n/a";
         case "evidence":
           return `[${s.id}]`;
         case "window":
@@ -187,8 +188,10 @@ const EVIDENCE_TOKENS = /\s?\[E[1-9]\d*\]/g;
 
 /**
  * Prose as text that carries no tokens at all, for text that leaves this run (a case summary, a
- * next-move question): rendered like renderProse, with evidence citations dropped.
+ * next-move question): rendered like renderProse, with evidence citations and badge codes dropped, so
+ * a reader sees "0.62", never "0.62 (MEASURED)" (Q1). The case summary, which only the next run's
+ * ANALYST reads, keeps the badges (`badges: true`).
  */
-export function plainProse(text: string, ledger: LedgerLookup, window: TrendWindow | null): string {
-  return renderProse(text, ledger, window).replace(EVIDENCE_TOKENS, "").replace(/\s+/g, " ").trim();
+export function plainProse(text: string, ledger: LedgerLookup, window: TrendWindow | null, opts: { badges?: boolean } = {}): string {
+  return renderProse(text, ledger, window, { badges: opts.badges ?? false }).replace(EVIDENCE_TOKENS, "").replace(/\s+/g, " ").trim();
 }

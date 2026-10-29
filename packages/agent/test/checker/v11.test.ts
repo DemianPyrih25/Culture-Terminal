@@ -63,6 +63,38 @@ describe("V11: SEC and Census figures carry their period", () => {
   });
 });
 
+describe("V11: one period per release", () => {
+  // M6: a second Census figure of the same ACS release as M5.
+  const fixture = publicLedger();
+  const m5 = fixture.ledger.metric("M5");
+  if (m5 === undefined) throw new Error("expected M5 in the public fixture");
+  const m5Input = Object.fromEntries(Object.entries(m5).filter(([k]) => k !== "id")) as Omit<typeof m5, "id">;
+  fixture.ledger.addMetric({ ...m5Input, key: "econ.population", label: "Residents, Riverbend", value: 9_000, display: "9,000 residents", formulaId: "econ.count" });
+  const twoCensus = fixture.snapshot();
+  const REVENUE = "The parent company reported revenue of {{M4}} ({{PERIOD:M4}}) [E4].";
+  const withCensus = (qlooFact: string): ReportDraft =>
+    edit((d) => {
+      const a = d.arguments[2]!;
+      a.qloo_fact = qlooFact;
+      a.metric_ids = ["M4", "M5", "M6"];
+      a.evidence_ids = ["E4", "E5"];
+    });
+  const checkTwo = (draft: ReportDraft) => checkReport({ draft, plan: plan(), ledger: twoCensus, qlooEnabled: true, registry: brandHealthRegistry(), attempt: 1 });
+
+  it("lets one shown period cover another figure of the same release", () => {
+    const text = `${REVENUE} Riverbend has {{M6}} and median income {{M5}} ({{PERIOD:M5}}) [E5].`;
+    const result = checkTwo(withCensus(text));
+    expect(of(result.issues, "V11")).toEqual([]);
+    expect(result.patchedDraft.arguments[2]?.qloo_fact).toBe(text);
+  });
+
+  it("prints a period that two tokens would render twice only once", () => {
+    const result = checkTwo(withCensus(`${REVENUE} Riverbend has {{M6}} and median income {{M5}} ({{PERIOD:M6}}, {{PERIOD:M5}}) [E5].`));
+    expect(result.patchedDraft.arguments[2]?.qloo_fact).toBe(`${REVENUE} Riverbend has {{M6}} and median income {{M5}} ({{PERIOD:M6}}) [E5].`);
+    expect(result.issues).toEqual([]);
+  });
+});
+
 describe("V11: no causal link between public figures and taste signals", () => {
   it("rejects a claim that explains a financial figure by a taste signal, and warns on the last attempt", () => {
     const draft = edit((d) => (d.arguments[2]!.our_read = "Revenue grew because fans love the brand {{M2}}."));

@@ -105,8 +105,8 @@ function NameList({ names, icon, heading }: { names: AnswerGhost["ai"]; icon: Ic
         {names.map((n, i) => (
           <li key={`${n.name}-${i}`} className="flex min-w-0 items-center gap-2.5 max-md:gap-2">
             <Monogram name={n.name} size={24} />
-            {/* Phones: two columns are narrow, so a name wraps to a second line at 13 px rather than cut off. */}
-            <span className="min-w-0 truncate type-body text-ink max-md:line-clamp-2 max-md:text-[13px] max-md:leading-[18px] max-md:whitespace-normal max-md:[overflow-wrap:anywhere]">
+            {/* Long names wrap; a card never cuts a name with an ellipsis (ANSWER_QUALITY §11). Phones use 13 px. */}
+            <span className="min-w-0 type-body text-ink [overflow-wrap:anywhere] max-md:text-[13px] max-md:leading-[18px]">
               {n.name}
             </span>
             {n.both ? (
@@ -251,6 +251,27 @@ export function GroupLabel({ icon, children }: { icon: IconName; children: React
       <Icon name={icon} size={16} />
       {children}
     </h2>
+  );
+}
+
+/**
+ * The concept note (the owner's o03 decision): the product or concept asked about is not in the data, so
+ * the answer says first, before the verdict, which category was tested instead, or that it could not be
+ * tested. A note strip like the nearest-job one: one chip and the agent's plain sentence.
+ */
+export function ConceptNote({ text, className }: { text: string; className?: string }) {
+  return (
+    <section
+      aria-label="What was tested"
+      data-concept-note="true"
+      className={cx("flex flex-wrap items-center gap-x-3 gap-y-2 rounded-card bg-caution-soft px-4 py-3", className)}
+    >
+      <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-chip bg-surface px-2.5 text-[13px] leading-[18px] font-semibold text-ink">
+        <Icon name="corner-down-right" size={14} className="text-ink-2" />
+        Not in the data
+      </span>
+      <p className="min-w-0 flex-1 type-body text-caution-ink [overflow-wrap:anywhere]">{text}</p>
+    </section>
   );
 }
 

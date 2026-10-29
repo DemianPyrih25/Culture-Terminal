@@ -185,7 +185,9 @@ function addTenantMetrics(run: RankRun, grid: ScoreGrid, layout: TenantLayout, e
   const [city, site] = layout.rows;
   const lines = tenantLines(layout);
   const k = layout.common.members.length;
-  const where = (l: TenantLine) => `site ${rankText(l.site.rank ?? 0, k)} · city ${rankText(l.city.rank ?? 0, k)}, among the ${k} ranked at both`;
+  // Both orders are named (D10 of the Part 9 close-out): tenant fit weighs the rise over the city too,
+  // so it can order two candidates the other way round from their site rank.
+  const where = (l: TenantLine) => `site rank ${rankText(l.site.rank ?? 0, k)} · city rank ${rankText(l.city.rank ?? 0, k)}`;
   const subjects = [site.spec.subject, city.spec.subject].filter((s): s is string => s !== null);
   for (const j of topBy(lines.map((l) => l.shift), SLOPE_METRIC_ROWS)) {
     const c = grid.candidates[j]!;
@@ -215,7 +217,7 @@ function addTenantMetrics(run: RankRun, grid: ScoreGrid, layout: TenantLayout, e
       run,
       addSkillMetric(run.ctx.ledger, {
         key: "tenant.fit",
-        label: `tenant fit of ${safeName(c.name)} at ${site.spec.label}`,
+        label: `tenant fit of ${safeName(c.name)} at ${site.spec.label} (weighs the site rank and the rise over the city, so its order can differ from the site rank)`,
         subjectRefs: [c.ref, ...subjects],
         value: line.fit,
         reason: "not_scored",
@@ -360,7 +362,7 @@ export function slopePayload(grid: ScoreGrid, layout: Exclude<RankLayout, { kind
       scale: "pct",
       comparator: "CITY",
       valueLabel: `FIT among the ${count(k, type)} ranked at both the site and the city`,
-      scoreLabel: "Tenant fit (0–100)",
+      scoreLabel: "Tenant fit (0–100): weighs the site rank and the rise over the city, so its order can differ from the site rank",
       lines: grid.candidates.map((c, j) => ({
         key: c.ref,
         label: safeFullName(c.name),

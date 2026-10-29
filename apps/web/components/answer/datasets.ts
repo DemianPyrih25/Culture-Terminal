@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { DatasetEnvelope } from "@ct/contracts";
 import type { AnswerDatasets } from "../../lib/answer";
 import type { BriefFigure } from "../../lib/brief";
+import { withoutNoiseTags } from "../../lib/tag-noise";
 
 /**
  * Datasets too large to stream inline (a big lift map or matrix) are fetched from
@@ -20,7 +21,7 @@ export function loadDataset(url: string, doFetch: typeof fetch = fetch): Promise
     .then((res) => (res.ok ? res.json() : null))
     .then((json: unknown) => {
       const parsed = DatasetEnvelope.safeParse(json);
-      return parsed.success ? parsed.data : null;
+      return parsed.success ? withoutNoiseTags(parsed.data) : null;
     })
     .catch(() => null)
     .then((data) => {

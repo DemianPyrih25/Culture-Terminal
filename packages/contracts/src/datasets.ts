@@ -403,6 +403,15 @@ export type RankedPayload = z.infer<typeof RankedPayload>;
 
 // Slate: S10 sponsor slate (RankedTable) -------------------------------------------------------------------
 
+/**
+ * The absolute popularity ceiling of every "under the radar" or "hidden pocket" label (D3 of the Part 9
+ * close-out): at or above it a name is mass-market and never flagged, however low the set's median
+ * popularity falls. It applies to the UNDER-THE-RADAR flag and pick (S9 cross_domain, S10 sponsor_slate,
+ * creator_fit) and to the HIDDEN_POCKET finding (S3 destination_affinity). The quadrant geometry itself
+ * stays split at the within-set medians (D17).
+ */
+export const UNDER_THE_RADAR_MAX_POPULARITY = 0.85;
+
 export const SlateEntry = z.object({
   ref: EntityRefSchema,
   label: z.string(),

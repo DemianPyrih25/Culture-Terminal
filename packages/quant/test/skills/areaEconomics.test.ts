@@ -167,15 +167,17 @@ describe("area_economics", () => {
       ["zcta_00002", 80000, "ESTIMATED", "$80,000 (approx.)"],
       // The clipped ZIP's own median is withheld: not measured, never 0.
       ["zcta_00003", null, "UNAVAILABLE", "not measured"],
-      ["nashville", 80000, "ESTIMATED", "$80,000 (approx.)"],
+      // The city's units include the clipped ZIP, so the city row is its whole ZIPs and says so.
+      ["nashville", 80000, "ESTIMATED", "$80,000 (approx., whole ZIPs)"],
     ]);
     const pop = run.ledger.metrics.filter((m) => m.key === "econ.population");
     expect(pop.map((m) => [m.value, m.badge, m.comparator])).toEqual([
       [4000, "DERIVED", "CITY"],
       [2000, "ESTIMATED", "CITY"],
-      [6000, "DERIVED", null],
+      [6000, "ESTIMATED", null],
     ]);
-    expect(pop[0]?.display).toBe("4,000 residents");
+    expect(pop.map((m) => m.display)).toEqual(["4,000 residents", "2,000 residents (whole ZIP)", "6,000 residents (whole ZIPs)"]);
+    expect(pop[2]?.label).toContain("ZIP areas (whole ZIPs)");
 
     const table = run.ledger.datasets[0];
     if (table?.kind !== "Ranked") throw new Error("expected the economics table");

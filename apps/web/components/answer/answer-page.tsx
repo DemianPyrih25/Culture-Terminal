@@ -12,7 +12,7 @@ import { LiftMapCard } from "../figures/lift-map-card";
 import { Button, ChartCard, ChartTable, cx, Icon, IconButton, KeyNumber, Popover, Tag } from "../ui";
 import { GUESS_CAPTION, GuessesCard, StateCard } from "../working";
 import { AskNextCard } from "./ask-next";
-import { AIAloneCard, ChangeCard, NextStepsCard, ReadAsNote, VerdictCard, WhyRow } from "./cards";
+import { AIAloneCard, ChangeCard, ConceptNote, NextStepsCard, ReadAsNote, VerdictCard, WhyRow } from "./cards";
 import { ChartBodyView } from "./chart-bodies";
 import { useFetchedDatasets } from "./datasets";
 import { ChartSheet, MoreCharts } from "./more-charts";
@@ -286,6 +286,7 @@ export function AnswerPage({ model, state, runId = model.runId, links, fallbackQ
           className="pb-0.5"
         />
 
+        {answer.concept ? <ConceptNote text={answer.concept} /> : null}
         {answer.readAs ? <ReadAsNote readAs={answer.readAs} /> : null}
 
         <div className={ROW}>

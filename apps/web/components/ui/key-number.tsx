@@ -100,7 +100,7 @@ export function KeyNumber(props: KeyNumberProps) {
     value = (
       <span className="flex min-w-0 items-center gap-3">
         <Monogram name={props.value} size={32} palette={props.palette} />
-        <span className="truncate type-name-value text-ink max-md:type-name-value-sm">{props.value}</span>
+        <span className="min-w-0 type-name-value text-ink [overflow-wrap:anywhere] max-md:type-name-value-sm">{props.value}</span>
       </span>
     );
   } else if (variant === "word") {

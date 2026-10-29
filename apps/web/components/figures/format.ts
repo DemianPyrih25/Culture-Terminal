@@ -107,6 +107,7 @@ export const REASON_LABEL: Readonly<Record<NoValueReason, string>> = {
   not_listed: "not a listed company",
   not_reported: "not reported in filings",
   suppressed: "withheld by the Census",
+  not_configured: "not configured on this server",
 };
 
 /** The reason text for a missing value; a missing reason still reads as "not measured". */
@@ -196,6 +197,18 @@ function codeCandidates(label: string): string[] {
  * then the first letter is raised ("UNDER-THE-RADAR FIT · no pricing data" reads "Under-the-radar fit ·
  * no pricing data"). Mixed-case parts keep their capitals, so names stay as written.
  */
+/**
+ * A Slope score label split into its column name and the note after a colon (D10): QUANT's tenant
+ * label reads "Tenant fit (0–100): weighs the site rank and the rise over the city, so its order can
+ * differ from the site rank". `head` drops the trailing scale ("Tenant fit") for a narrow column.
+ */
+export function scoreLabelParts(label: string): { name: string; head: string; note: string | null } {
+  const at = label.indexOf(": ");
+  const name = (at < 0 ? label : label.slice(0, at)).trim();
+  const note = at < 0 ? null : label.slice(at + 2).trim() || null;
+  return { name, head: name.replace(/\s*\([^)]*\)\s*$/, ""), note };
+}
+
 export function sentenceCase(label: string): string {
   const parts = label.split(" · ").map((part) => (/[a-z]/.test(part) || !/[A-Z]{2}/.test(part) ? part : part.toLowerCase()));
   const out = parts.join(" · ");

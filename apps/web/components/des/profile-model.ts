@@ -1,5 +1,6 @@
 import type { DatasetEnvelope, RankedRow } from "@ct/contracts";
 import { formatUtcDate, formatUtcShortDateTime } from "../../lib/brief/format";
+import { withoutNoiseTags } from "../../lib/tag-noise";
 import type { IconName } from "../ui/icons";
 import { DES_TYPE_LABEL, desHref, isDesType, type DesType } from "./des-href";
 import type { DesFigure, DesReceipt, DesSection, Tearsheet } from "./model";
@@ -255,7 +256,9 @@ export interface ProfileModel {
 const EMPTY_TITLE = "No data for this audience.";
 
 function figureOf<K extends DatasetEnvelope["kind"]>(section: DesSection, kind: K, display?: DesFigure["display"]) {
-  return section.figures.find((f) => f.dataset.kind === kind && (display === undefined || f.display === display)) as
+  const figure = section.figures.find((f) => f.dataset.kind === kind && (display === undefined || f.display === display));
+  // Tag lists go through the shared noise filter at display time, stored lookups included (ANSWER_QUALITY §10).
+  return (figure ? { ...figure, dataset: withoutNoiseTags(figure.dataset) } : undefined) as
     | (DesFigure & { dataset: Extract<DatasetEnvelope, { kind: K }> })
     | undefined;
 }

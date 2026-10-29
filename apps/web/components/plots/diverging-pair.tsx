@@ -91,12 +91,12 @@ export function DivergingPair({ groups, keyLabels = PAIR_KEY, baseline = 1, labe
         ) : null}
         <ul className="flex flex-col">
           {groups.map((g, i) => (
-            <li key={g.key ?? g.label} data-row={g.key ?? g.label} className="grid h-10 grid-cols-[112px_1fr_1fr] items-center">
+            <li key={g.key ?? g.label} data-row={g.key ?? g.label} className="grid min-h-10 grid-cols-[112px_1fr_1fr] items-center py-1">
               <span className="text-[13px] leading-[18px] font-semibold text-ink-2">{g.label}</span>
               <span className="flex min-w-0 items-center justify-end gap-2">
                 {g.less ? (
                   <>
-                    <span className="truncate type-body text-ink">{g.less.label}</span>
+                    <span className="min-w-0 text-right type-body text-ink [overflow-wrap:anywhere]">{g.less.label}</span>
                     {g.less.value === null ? (
                       <NoDataMark />
                     ) : (
@@ -119,7 +119,7 @@ export function DivergingPair({ groups, keyLabels = PAIR_KEY, baseline = 1, labe
                         <span className="type-label text-ink-2 tabular-nums">{pairDisplay(g.more)}</span>
                       </>
                     )}
-                    <span className="truncate type-body text-ink">{g.more.label}</span>
+                    <span className="min-w-0 type-body text-ink [overflow-wrap:anywhere]">{g.more.label}</span>
                   </>
                 ) : null}
               </span>
@@ -144,7 +144,7 @@ export function DivergingPair({ groups, keyLabels = PAIR_KEY, baseline = 1, labe
               return (
                 <div key={side} className="flex flex-col gap-1">
                   <span className="flex items-baseline gap-1.5">
-                    <span className="type-body text-ink">{s.label}</span>
+                    <span className="min-w-0 type-body text-ink [overflow-wrap:anywhere]">{s.label}</span>
                     <span className="type-label text-ink-2 tabular-nums">{pairDisplay(s)}</span>
                   </span>
                   <span className="relative h-2 w-full overflow-hidden rounded-xs bg-sunken">

@@ -81,7 +81,7 @@ describe("token helpers", () => {
 
   it("renders prose with no tokens at all for text that leaves the run", () => {
     expect(plainProse("Similarity {{M1}} [E1] over {{WINDOW}} [E3].", lookup, WINDOW)).toBe(
-      "Similarity 0.62 (MEASURED) over 2025-04-01..2025-09-30.",
+      "Similarity 0.62 over 2025-04-01..2025-09-30.",
     );
   });
 });

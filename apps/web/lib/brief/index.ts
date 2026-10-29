@@ -2,6 +2,7 @@
 // everything the brief page renders. Safe on the server and in the browser.
 export * from "./types";
 export * from "./format";
+export { plainDisplay, plainPiece, plainWords } from "./plain";
 export { buildBriefModel, briefIdOf, findingOf } from "./model";
 export { FootnoteRegistry, createFootnoteRegistry, fallbackTrace, figureNoteText, inlineText, SHORT_NOTE_MAX } from "./footnotes";
 export { buildLedger, metricView, cacheLabel, shortRequestTrace, SHORT_TRACE_MAX, type Ledger } from "./ledger";

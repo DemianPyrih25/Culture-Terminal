@@ -1,4 +1,4 @@
-import { Flag, Limitation, Pillar, SEVERITY_RANK, SkillId } from "@ct/contracts";
+import { Flag, Limitation, Pillar, PUBLIC_NOT_CONFIGURED_REASON, SEVERITY_RANK, SkillId } from "@ct/contracts";
 import { describe, expect, it } from "vitest";
 import {
   DESK_LIMITATIONS,
@@ -136,8 +136,8 @@ describe("buildLimitations", () => {
     expect(texts.filter((t) => t === FLAG_TEXT.DEMOGRAPHICS_ARE_INDICES)).toHaveLength(1);
     expect(out.filter((l) => l.source === "flag")).toHaveLength(1);
     expect(out.filter((l) => l.source === "open_question").map((l) => l.text)).toEqual(["Which tenants fit best?"]);
-    // block_dna repeats two location desk bullets; only its compressed-affinity sentence is new.
-    expect(out.filter((l) => l.source === "desk")).toHaveLength(DESK_LIMITATIONS.location.length + 2);
+    // block_dna repeats two location desk bullets; its compressed-affinity and brands-favoured sentences are new.
+    expect(out.filter((l) => l.source === "desk")).toHaveLength(DESK_LIMITATIONS.location.length + 3);
   });
 
   it("drops a skill bullet that only restates a fixed sentence already shown", () => {
@@ -210,5 +210,13 @@ describe("buildLimitations", () => {
   it("gives only desk bullets when there is nothing else", () => {
     const out = buildLimitations({ flags: [], pillar: "audience", openQuestions: [] });
     expect(out).toEqual(DESK_LIMITATIONS.audience.map((text) => ({ source: "desk", flag: null, text })));
+  });
+});
+
+describe("public sources not configured (D7)", () => {
+  it("states the contract reason verbatim, with no paraphrase", () => {
+    expect(FLAG_TEXT.SEC_NOT_CONFIGURED.startsWith(PUBLIC_NOT_CONFIGURED_REASON.sec)).toBe(true);
+    expect(FLAG_TEXT.CENSUS_NOT_CONFIGURED.startsWith(PUBLIC_NOT_CONFIGURED_REASON.census)).toBe(true);
+    expect(FLAG_SEVERITY.SEC_NOT_CONFIGURED).toBe("medium");
   });
 });

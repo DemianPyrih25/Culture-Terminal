@@ -111,6 +111,12 @@ export const COMPARATOR_LABEL: Readonly<Record<Comparator, string>> = {
  *   (private or not mapped), so no financial figures are shown and none are guessed.
  * - CENSUS_RESIDENTS_ONLY: Census figures describe residents of the area, not its visitors or customers,
  *   and are kept apart from taste signals.
+ * - SEC_NOT_CONFIGURED / CENSUS_NOT_CONFIGURED: the source is not configured on this server, so its tool
+ *   was not planned or run (D7 of the Part 9 close-out). The limitation states PUBLIC_NOT_CONFIGURED_REASON
+ *   verbatim; no figure from that source is shown or guessed.
+ * - CONCEPT_NOT_IN_DATA: a product or concept the question names has no tag in the data, so it was tested
+ *   at category level (the nearest category its tag search returned) or not at all. Code writes the
+ *   limitation with the names (conceptDisclosure in the agent), puts it first and opens the thesis with it.
  */
 export const Flag = z.enum([
   "TRENDING_HISTORICAL_WINDOW",
@@ -133,10 +139,18 @@ export const Flag = z.enum([
   "READ_AS_NEAREST_JOB",
   "NOT_A_LISTED_COMPANY",
   "CENSUS_RESIDENTS_ONLY",
+  "SEC_NOT_CONFIGURED",
+  "CENSUS_NOT_CONFIGURED",
+  "CONCEPT_NOT_IN_DATA",
 ]);
 export type Flag = z.infer<typeof Flag>;
 
-/** Code detectors that drive ANALYST turn 2 (PLAN §4.4). */
+/**
+ * Code detectors that drive ANALYST turn 2 (PLAN §4.4).
+ * - PARTNERS_ONE_CATEGORY (brand_collab): most of the discovered partners share one top-level category
+ *   after the subject's own category is left out; suggests sponsor_slate seeded by the subject over the
+ *   sponsor categories the discovered partners do not cover, so the pivot is structural.
+ */
 export const FindingKind = z.enum([
   "TASTE_ISLAND",
   "NEAR_SUBSTITUTES",
@@ -155,6 +169,7 @@ export const FindingKind = z.enum([
   "TWIN_FOUND",
   "ANALOG_VETOED",
   "TASTE_FINANCIALS_SPLIT",
+  "PARTNERS_ONE_CATEGORY",
 ]);
 export type FindingKind = z.infer<typeof FindingKind>;
 
@@ -435,6 +450,7 @@ export type PositionAxis = z.infer<typeof PositionAxis>;
  * - not_listed: the brand maps to no SEC-listed company; not_reported: the filings carry no value for
  *   the concept and period; suppressed: Census withheld or could not compute the estimate (ACS null or
  *   a negative sentinel such as -666666666)
+ * - not_configured: the public source (SEC EDGAR or US Census) is not configured on this server
  */
 export const NoValueReason = z.enum([
   "not_scored",
@@ -451,6 +467,7 @@ export const NoValueReason = z.enum([
   "not_listed",
   "not_reported",
   "suppressed",
+  "not_configured",
 ]);
 export type NoValueReason = z.infer<typeof NoValueReason>;
 

@@ -265,7 +265,7 @@ export const GhostAnswer = z.strictObject({
     neighbourhoods: z.array(z.string()),
     tenants: z.array(z.string()),
     partners: z.array(z.string()),
-    /** Creators GHOST would pick (creator_fit). */
+    /** Creators GHOST would pick (creator_fit: artists and podcasts only, D1 of the Part 9 close-out). */
     creators: z.array(z.string()),
   }),
   numeric_claims: z.array(z.string()).describe("Every number GHOST states, verbatim."),
@@ -346,12 +346,19 @@ export const ConfidenceRule = z.enum([
   "checker_warning",
   "insufficient_evidence",
   "read_as_nearest_job",
+  "concept_partly_tagged",
 ]);
 export type ConfidenceRule = z.infer<typeof ConfidenceRule>;
 
 /**
- * Points subtracted from 100 per occurrence (coarse_geohash, stale_momentum, insufficient_evidence and
- * read_as_nearest_job count once). insufficient_evidence alone puts a note in the LOW band: V7 left no reading to trust.
+ * Points subtracted from 100 per occurrence (coarse_geohash, stale_momentum, insufficient_evidence,
+ * read_as_nearest_job and concept_partly_tagged count once). insufficient_evidence alone puts a note in the
+ * LOW band: V7 left no reading to trust.
+ *
+ * concept_partly_tagged (D2 of the Part 9 close-out): part of the question's concept was never tested,
+ * because a find_tags search for it came back EMPTY_RESULT or a concept part got no tag and no analog that
+ * any call used. It alone caps the note at MED (70): an answer that tested only part of the concept is
+ * never HIGH.
  */
 export const CONFIDENCE_PENALTY: Readonly<Record<ConfidenceRule, number>> = {
   dropped_entity: 15,
@@ -363,6 +370,7 @@ export const CONFIDENCE_PENALTY: Readonly<Record<ConfidenceRule, number>> = {
   checker_warning: 5,
   insufficient_evidence: 60,
   read_as_nearest_job: 5,
+  concept_partly_tagged: 30,
 };
 
 export function confidenceBand(score: number): ConfidenceBand {

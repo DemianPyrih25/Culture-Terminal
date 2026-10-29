@@ -6,6 +6,8 @@ import {
   FOLLOWUP_NUDGE_COMPANION,
   NOTICE_FOLLOWUP_OPEN,
   NOTICE_TRUNCATED,
+  NOTICE_LOOKUP_OPEN,
+  NOTICE_LOOKUP_PENDING,
   NOTICE_TURN2_OPEN,
   NUDGE_PLAN,
   NUDGE_REPORT,
@@ -717,6 +719,70 @@ describe("turn 2: calls all refused for their input", () => {
       expect(textsOf(lastMessage(h.fake.streamRequests[2]))).toEqual([TURN3_NOTICE]);
       expect(h.outcome).toMatchObject({ status: "completed", responses: 3, repairs: { input: false } });
     }
+  });
+});
+
+describe("turn 2: lookups only", () => {
+  const tagLookup = (id = "toolu_tags") =>
+    toolUse(id, "find_tags", { concepts: [{ text: "hot drinks", scope: "brand" }], trigger_finding_id: "F1", step_id: null });
+
+  it("keeps turn 2 open once so the call that uses the looked-up refs can run", async () => {
+    const h = await runScripted([respond([planCall(), peerCall()]), respond([tagLookup()]), respond([followUp()]), respond([reportCall()])]);
+    expect(textsOf(lastMessage(h.fake.streamRequests[2]))).toEqual([NOTICE_LOOKUP_OPEN]);
+    expect(textsOf(lastMessage(h.fake.streamRequests[3]))).toEqual([TURN3_NOTICE]);
+    expect(h.executed.map((e) => [e.turn, e.calls.map((c) => c.id)])).toEqual([
+      [1, ["toolu_peer"]],
+      [2, ["toolu_tags"]],
+      [2, ["toolu_dna"]],
+    ]);
+    expect(h.outcome).toMatchObject({ status: "completed", responses: 4, repairs: { lookup: true } });
+  });
+
+  it("keeps it open only once, and not when another call ran beside the lookup or too few responses are left", async () => {
+    const twice = await runScripted([respond([planCall(), peerCall()]), respond([tagLookup()]), respond([tagLookup("toolu_tags_again")]), respond([reportCall()])]);
+    expect(textsOf(lastMessage(twice.fake.streamRequests[3]))).toEqual([TURN3_NOTICE]);
+    const mixed = await runScripted([respond([planCall(), peerCall()]), respond([tagLookup(), followUp()]), respond([reportCall()])]);
+    const short = await runScripted([respond([planCall(), peerCall()]), respond([tagLookup()]), respond([reportCall()])], { limits: { modelResponses: 4 } });
+    for (const h of [mixed, short]) {
+      expect(textsOf(lastMessage(h.fake.streamRequests[2]))).toEqual([TURN3_NOTICE]);
+      expect(h.outcome).toMatchObject({ status: "completed", responses: 3, repairs: { lookup: false } });
+    }
+  });
+});
+
+describe("turn 2: a lookup sent with other calls (the owner's o03 decision, option c)", () => {
+  const tagLookup = (id = "toolu_tags") =>
+    toolUse(id, "find_tags", { concepts: [{ text: "hot drinks", scope: "brand" }], trigger_finding_id: "F1", step_id: null });
+
+  it("keeps turn 2 open once while the lookup found a ref no call used, so the concept test can still run", async () => {
+    const asked: string[][] = [];
+    const h = await runScripted(
+      [respond([planCall(), peerCall()]), respond([tagLookup(), followUp()]), respond([followUp("toolu_dna_2")]), respond([reportCall()])],
+      { lookupsPending: (lookups) => (asked.push(lookups.map((c) => c.id)), true) },
+    );
+    expect(asked).toEqual([["toolu_tags"]]);
+    expect(textsOf(lastMessage(h.fake.streamRequests[2]))).toEqual([NOTICE_LOOKUP_PENDING]);
+    expect(textsOf(lastMessage(h.fake.streamRequests[3]))).toEqual([TURN3_NOTICE]);
+    expect(h.executed.map((e) => [e.turn, e.calls.map((c) => c.id)])).toEqual([
+      [1, ["toolu_peer"]],
+      [2, ["toolu_tags", "toolu_dna"]],
+      [2, ["toolu_dna_2"]],
+    ]);
+    expect(h.outcome).toMatchObject({ status: "completed", responses: 4, repairs: { lookup: true } });
+  });
+
+  it("closes turn 2 when the lookup's refs are used or spent, and keeps it open only once in a run", async () => {
+    const used = await runScripted([respond([planCall(), peerCall()]), respond([tagLookup(), followUp()]), respond([reportCall()])], {
+      lookupsPending: () => false,
+    });
+    expect(textsOf(lastMessage(used.fake.streamRequests[2]))).toEqual([TURN3_NOTICE]);
+    expect(used.outcome).toMatchObject({ status: "completed", responses: 3, repairs: { lookup: false } });
+    const twice = await runScripted(
+      [respond([planCall(), peerCall()]), respond([tagLookup()]), respond([tagLookup("toolu_tags_again"), followUp()]), respond([reportCall()])],
+      { lookupsPending: () => true },
+    );
+    expect(textsOf(lastMessage(twice.fake.streamRequests[2]))).toEqual([NOTICE_LOOKUP_OPEN]);
+    expect(textsOf(lastMessage(twice.fake.streamRequests[3]))).toEqual([TURN3_NOTICE]);
   });
 });
 

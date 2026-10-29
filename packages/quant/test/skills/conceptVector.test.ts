@@ -116,7 +116,7 @@ describe("concept_vector with a planted veto", () => {
     expect(verdicts.map((m) => m.badge)).toEqual(["DERIVED", "DERIVED", "UNAVAILABLE", "UNAVAILABLE"]);
     const precision = run.ledger.metrics.find((m) => m.key === "cnpt.precision") as Metric;
     expect(precision.value).toBe(0.5);
-    expect(precision.display).toBe("1 of 2 kept (50%)");
+    expect(precision.display).toBe("1 of 2 brand analogs kept (50%)");
 
     const finding = run.ledger.findings.find((f) => f.kind === "ANALOG_VETOED");
     expect(finding?.text).toContain("Brand Vetoed");

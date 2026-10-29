@@ -2,6 +2,7 @@
 // neighbourhood, so a test reads like the cultural map it sets up. Invented entities only (D29).
 import {
   DATASET_PAYLOADS,
+  UNDER_THE_RADAR_MAX_POPULARITY,
   digestFits,
   ModelDigest,
   type DatasetOf,
@@ -15,7 +16,6 @@ import {
   type QlooResult,
 } from "@ct/contracts";
 import { describe, expect, it, vi } from "vitest";
-import { UNDER_THE_RADAR_MAX_POPULARITY } from "../../src/findings";
 import { isFormulaId } from "../../src/formulas";
 import { SKILL_LIMITATIONS } from "../../src/limitations";
 import { crossDomainSkill, estimateCrossDomainCalls } from "../../src/skills/crossDomain";
@@ -720,6 +720,43 @@ describe("cross_domain: unscored and dropped values stay explicit", () => {
 });
 
 // Empty, partial and truncated -----------------------------------------------------------------------------
+
+describe("cross_domain: partners in one category (brand_collab, CR 3)", () => {
+  const dining = (leaf: string) => ({ id: `urn:tag:genre:brand:dining:${slug(leaf)}`, name: leaf });
+  const ONE_CATEGORY: Spec[] = [
+    { name: "Grill House", popularity: 0.6, affinity: 0.8, genre: dining("Burgers") },
+    { name: "Taco Stand", popularity: 0.5, affinity: 0.75, genre: dining("Tacos") },
+    { name: "Noodle Bar", popularity: 0.4, affinity: 0.7, genre: dining("Noodles") },
+    { name: "Pizza Corner", popularity: 0.55, affinity: 0.65, genre: dining("Pizza") },
+    { name: "Fernleaf Apothecary", popularity: 0.3, affinity: 0.6, genre: brandGenre("Beauty") },
+  ];
+
+  it("fires when most partners share one category, and suggests sponsor_slate over the uncovered ones seeded by the subject", async () => {
+    const run = setup({ brand: ONE_CATEGORY });
+    const result = await crossDomainSkill.run(input({ seeds: ["R2"], seed_tags: [], domains: ["brand"] }), run.ctx);
+    const f = run.ledger.findings.find((x) => x.kind === "PARTNERS_ONE_CATEGORY");
+    expect(f?.text).toBe(
+      "Most partner brands this audience also favours sit in one category (dining, 4 of 5), with Brand Alpha's own category already left out: the list shows one category, not a range of partners.",
+    );
+    // Quick-service restaurants are covered by the dining partners, outdoor retail has no verified tag, and the seed's own branch is out.
+    expect(f?.suggestion).toEqual({
+      tool: "sponsor_slate",
+      reason:
+        "Find the best-fitting partner in other categories: sponsor_slate with seed R2 (Brand Alpha) over beer, spirits, rtd_seltzer, apparel_footwear, energy_drinks, auto, sponsor categories none of the discovered partners sits in.",
+    });
+    expect(f?.metricIds.length).toBeGreaterThan(0);
+    expect(result.forModel.findings.map((x) => x.kind)).toContain("PARTNERS_ONE_CATEGORY");
+  });
+
+  it("does not fire for a spread list or without a brand seed", async () => {
+    const spread = setup();
+    await crossDomainSkill.run(input({ seeds: ["R2"], seed_tags: [], domains: ["brand"] }), spread.ctx);
+    expect(spread.ledger.findings.some((x) => x.kind === "PARTNERS_ONE_CATEGORY")).toBe(false);
+    const artist = setup({ brand: ONE_CATEGORY });
+    await crossDomainSkill.run(input({ seeds: ["R1"], seed_tags: [], domains: ["brand"] }), artist.ctx);
+    expect(artist.ledger.findings.some((x) => x.kind === "PARTNERS_ONE_CATEGORY")).toBe(false);
+  });
+});
 
 describe("cross_domain: empty, partial and budget-truncated results", () => {
   it("reports an empty domain with EMPTY_RESULT, THIN_RESULT and an explained row, the rest still ok", async () => {

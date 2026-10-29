@@ -46,12 +46,14 @@ export const FORMULA_IDS = [
   "block.rank_delta",
   "block.new_tag",
   "block.panel_rank",
+  "block.concept_rank",
   "tenant.rank_shift",
   "tenant.fit",
   "rank.shift",
   // S9 Cultural neighbourhood and S10 Sponsor Slate
   "xdom.under_the_radar",
   "xdom.edge",
+  "xdom.partners_one_category",
   "slate.best_fit",
   "slate.under_the_radar",
   "slate.market_alignment",
@@ -323,7 +325,7 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
     name: "Travel taste quadrant",
     formula_tex: String.raw`A_d = \mathrm{pct}(\mathrm{affinity}_d), \quad \text{HEARTLAND: } A_d \ge \tilde{A},\ p_d \ge \tilde{p}; \ \text{HIDDEN POCKET: } A_d \ge \tilde{A},\ p_d < \tilde{p}; \ \text{MASS: } A_d < \tilde{A},\ p_d \ge \tilde{p}; \ \text{COLD otherwise}`,
     plain_english:
-      "Each destination is placed by how strongly this audience's taste points to it (its percentile in the call) and by its popularity, split at the medians of the result set: HEARTLAND (high fit, high popularity), HIDDEN POCKET (high fit, low popularity), MASS (low fit, high popularity) and COLD.",
+      "Each destination is placed by how strongly this audience's taste points to it (its percentile in the call) and by its popularity, split at the medians of the result set: HEARTLAND (high fit, high popularity), HIDDEN POCKET (high fit, low popularity), MASS (low fit, high popularity) and COLD. A destination with popularity 0.85 or more is never a hidden pocket, however the set's median falls: with high fit it is HEARTLAND.",
     caveats: [
       "Places this audience's taste points to (travel and leisure), not residence, sales or ticket demand.",
       "Among Qloo's top 50 US destinations for this audience only.",
@@ -334,7 +336,7 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
     name: "Hidden-pocket score",
     formula_tex: String.raw`H_d = \Phi^{-1}(3/4) \cdot \frac{e_d - \operatorname{median}(e)}{\mathrm{MAD}(e)}, \quad e_d = A_d - (\alpha + \beta\, p_d), \quad (\alpha, \beta) = \text{Theil–Sen fit of } A \text{ on } p`,
     plain_english:
-      "How much more this audience's taste points to a destination than its popularity predicts: the robust z-score of its residual from a Theil–Sen line of fit on popularity. Above zero means more taste than popularity explains.",
+      "How much more this audience's taste points to a destination than its popularity predicts: the robust z-score of its residual from a Theil–Sen line of fit on popularity. Above zero means more taste than popularity explains. A destination is called a hidden pocket when this score is 2 or more and its popularity is below both the set's median and 0.85.",
     caveats: [
       "Relative within this result set.",
       "Travel and leisure taste, not residence or ticket demand.",
@@ -375,12 +377,12 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
     name: "White space",
     formula_tex: String.raw`\mathrm{WS}_N = \mathrm{Demand\_pct}_N \cdot \big(1 - \mathrm{Supply\_pct}_N\big)`,
     plain_english:
-      "High where the concept's taste lift is strong and the density of indexed venues is low. Demand_pct is the neighbourhood's lift percentile and Supply_pct its percentile of venues per square kilometre, both among the neighbourhoods with a lift and only when there are at least three of them. Neighbourhoods tied on density share the lowest percentile of the tie, so one with no sampled venue has Supply_pct 0 and never counts as high supply. Median splits give four groups: Latent & open, Proven & crowded, Saturated and Cold.",
+      "High where the concept's taste lift is strong and the density of indexed venues is low. Demand_pct is the neighbourhood's lift percentile and Supply_pct its percentile of venues per square kilometre, both among the neighbourhoods with a lift and only when there are at least three of them. Neighbourhoods tied on density share the lowest percentile of the tie, so one with no sampled venue has Supply_pct 0 and never counts as high supply. Median splits give four groups: high demand with few rivals, high demand with many rivals, low demand with many rivals, and low demand with few rivals.",
     caveats: [
       "Supply is a capped sample of venues Qloo indexes, not a full count of businesses.",
       "Relative within the metro; not rent, footfall or sales.",
       "Without a supply sample (none asked for, no category tag, or a first page that did not come back) white space is not measured, never 0.",
-      "A quadrant needs enough venues: at least 10 counted in at least three compared areas, never an area with none in a capped sample, and at least 3 in the area for Proven & crowded or Saturated. Otherwise the area reads Not enough venue data.",
+      "A quadrant needs enough venues: at least 10 counted in at least three compared areas, never an area with none in a capped sample, and at least 3 in the area for either group with many rivals. Otherwise the area reads Not enough venue data.",
     ],
   },
   "block.rank_delta": {
@@ -412,6 +414,17 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
       "Read ranks, not raw scores: affinities are compressed.",
     ],
   },
+  "block.concept_rank": {
+    name: "Concept tag rank (Block DNA)",
+    formula_tex: String.raw`\text{area: } \Delta_t = \mathrm{rank}_{\text{city}}(t) - \mathrm{rank}_{\text{area}}(t); \quad \text{city: } \mathrm{place}_c(t) = 1 + \big|\{c' \in P : \mathrm{rank}_{c'}(t) < \mathrm{rank}_c(t)\}\big|, \quad \text{a missing rank counts as } 51`,
+    plain_english:
+      "How the question's concept tags stand in a Block DNA read, at no extra call. For a neighbourhood or point: how many places higher each concept tag ranks in the area's top-50 tag list than in the city's, as the rank gain does. For a whole city: its place among itself and the other map cities when each city is ordered by the tag's rank in its own top-50 list (1 = the city where the tag ranks highest; a city whose list misses the tag counts it as 51, and cities on the same rank share a place). A tag outside the tag families Block DNA reads, or in none of the lists, gets no value and says why.",
+    caveats: [
+      "The panel is the map cities Culture Terminal covers, not every US city.",
+      VENUE_GOERS,
+      "A place among cities orders ranks; it does not say by how much one city leads another.",
+    ],
+  },
   "tenant.rank_shift": {
     name: "Rank shift (site vs city)",
     formula_tex: String.raw`\Delta_j = \mathrm{pct}_{\text{site}, j} - \mathrm{pct}_{\text{city}, j}, \quad \text{both among the candidates both calls ranked}`,
@@ -427,6 +440,7 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
     caveats: [
       "Taste fit for a commercial concept; not credit, rent capacity, sales, or any decision about a business owner or resident.",
       "The weights are not fitted to outcomes.",
+      "Because it also weighs the rise over the city, tenant fit can order two candidates the other way round from their site rank; tables state which order they are sorted by.",
       WITHIN_CALL,
     ],
   },
@@ -462,6 +476,17 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
     caveats: [
       "Explainability is attribution inside Qloo's model, not causation.",
       "Most results split almost evenly across seeds and get no edge.",
+    ],
+  },
+  "xdom.partners_one_category": {
+    name: "Partners in one category (brand collaboration)",
+    formula_tex: String.raw`\text{fires} \iff N \ge 5 \ \wedge\ \max_c N_c / N \ge 0.6, \quad N = \text{scored partners},\ N_c = \text{partners in top-level brand category } c`,
+    plain_english:
+      "When at least 60% of at least five scored partner brands sit in one top-level brand category (after the subject's own category is left out), discovery has clustered. The suggested next step is a sponsor slate seeded by the subject over up to six sponsor categories the partners do not cover, so the note can name a best fit in each other category.",
+    caveats: [
+      "A rule: it decides the next step and produces no number of its own.",
+      "Categories are Qloo's genre:brand branches; a partner without one is counted but sits in no category.",
+      "A sponsor category without a verified tag is never suggested.",
     ],
   },
   "slate.best_fit": {
@@ -572,9 +597,9 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
   },
   "confidence.run": {
     name: "Run confidence",
-    formula_tex: String.raw`C = \max\!\big(0,\ 100 - 15\,n_{\text{dropped}} - 10\,n_{\text{fallback}} - 10\,[\text{coarse}] - 20\,[\text{stale momentum cited}] - 10\,n_{\text{thin}} - 5\,n_{\text{gate}} - 5\,n_{\text{warn}} - 5\,[\text{read as nearest job}]\big)`,
+    formula_tex: String.raw`C = \max\!\big(0,\ 100 - 15\,n_{\text{dropped}} - 10\,n_{\text{fallback}} - 10\,[\text{coarse}] - 20\,[\text{stale momentum cited}] - 10\,n_{\text{thin}} - 5\,n_{\text{gate}} - 5\,n_{\text{warn}} - 5\,[\text{read as nearest job}] - 30\,[\text{concept partly tested}]\big)`,
     plain_english:
-      "Starts at 100 and loses points for each weakness: 15 per dropped or unresolved secondary entity, 10 per code fallback, 10 for a coarse map, 20 when stale-only momentum is cited, 10 per thin result (fewer than 5 rows), 5 per quality-gate drop, 5 per CHECKER warning, and 5 when the question was read as the closest kind of question Culture Terminal answers. HIGH is 75 or more, MED 50 to 74, LOW below 50. The breakdown shows on hover.",
+      "Starts at 100 and loses points for each weakness: 15 per dropped or unresolved secondary entity, 10 per code fallback, 10 for a coarse map, 20 when stale-only momentum is cited, 10 per thin result (fewer than 5 rows), 5 per quality-gate drop, 5 per CHECKER warning, 5 when the question was read as the closest kind of question Culture Terminal answers, and 30 once when part of the concept was not tested (a tag search for it came back empty, or no call used its tags), so a partly tested concept is never HIGH. HIGH is 75 or more, MED 50 to 74, LOW below 50. The breakdown shows on hover.",
     caveats: [
       "Measures the completeness and quality of this run's evidence, not the probability that the conclusion is right.",
       "Computed by code from the run's flags; the model cannot change it.",
@@ -584,7 +609,7 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
     name: "Metric confidence",
     formula_tex: String.raw`\mathrm{conf} = m_{\text{badge}} \cdot \big(1 - 1/\sqrt{n}\big), \quad \text{clamped to } [0, 1]`,
     plain_english:
-      "The evidence strength behind one number: a weight for its badge (measured data counts most) times a factor that grows with the number of observations n behind it. It drives the STRONG, MODERATE and THIN pills.",
+      "The evidence strength behind one number: a weight for its badge (measured data counts most) times a factor that grows with the number of observations n behind it. It drives the STRONG, MODERATE and THIN pills. A reported SEC or Census figure has no sample size, so its pill comes from its source and badge instead: a reported or exactly derived figure is STRONG, an approximate one (an area apportioned from tracts or ZIP areas) MODERATE.",
     caveats: [
       "An UNAVAILABLE metric has no confidence, and a single observation gives zero.",
       "Strength of evidence, not the size or direction of the effect.",

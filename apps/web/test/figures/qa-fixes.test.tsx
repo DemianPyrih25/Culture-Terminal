@@ -69,10 +69,11 @@ describe("table views", () => {
 });
 
 describe("plots at 390", () => {
-  it("RankedFitList gives the name its own line (two lines at most) below md", () => {
+  it("RankedFitList gives the name its own line below md and wraps it, never cut with an ellipsis", () => {
     const html = render(<RankedFitList rows={tenantFit} label="Best fit for this corner" />);
-    expect(html).toContain("col-span-3 line-clamp-2");
-    expect(html).toContain("md:truncate");
+    expect(html).toContain("col-span-3 min-w-0");
+    expect(html).toContain("[overflow-wrap:anywhere]");
+    expect(html).not.toMatch(/truncate|line-clamp/);
     expect(html).toContain("relative col-start-2 h-3");
   });
 

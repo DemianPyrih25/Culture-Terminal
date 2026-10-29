@@ -28,6 +28,8 @@ import {
   nearSubstitutesFinding,
   noTrendSignalFinding,
   outsideCategoryNeighbourFinding,
+  isPartnersOneCategory,
+  partnersOneCategoryFinding,
   popularityDominanceFinding,
   suggestedPopularityCap,
   tasteIslandFinding,
@@ -137,6 +139,16 @@ function oneOfEach(): FindingDraft[] {
         revenuePeriod: "the fiscal year ended 2025-06-30",
       }),
     ),
+    fired(
+      partnersOneCategoryFinding({
+        subjectName: ALPHA,
+        subjectRef: "R1",
+        categoryLabel: "Food and beverage",
+        inCategory: 9,
+        scored: 12,
+        otherCategories: ["telecom", "travel"],
+      }),
+    ),
   ];
 }
 
@@ -165,6 +177,7 @@ describe("policy tables", () => {
       TWIN_FOUND: "block_dna",
       ANALOG_VETOED: "rank_candidates",
       TASTE_FINANCIALS_SPLIT: null,
+      PARTNERS_ONE_CATEGORY: "sponsor_slate",
     });
   });
 });
@@ -381,6 +394,12 @@ describe("HIDDEN_POCKET", () => {
     expect(isHiddenPocket({ name: "A", residualZ: null, popularity: 0.1 }, 0.5)).toBe(false);
   });
 
+  it("never calls a destination at or above popularity 0.85 hidden, however high the median (D3)", () => {
+    expect(isHiddenPocket({ name: "A", residualZ: 3, popularity: 0.84 }, 0.95)).toBe(true);
+    expect(isHiddenPocket({ name: "A", residualZ: 3, popularity: 0.85 }, 0.95)).toBe(false);
+    expect(isHiddenPocket({ name: "A", residualZ: 3, popularity: 0.9 }, 0.95)).toBe(false);
+  });
+
   it("names the strongest pockets first, with agreement for one or many", () => {
     const destinations = [
       { name: "Lake Town", residualZ: 2.1, popularity: 0.2 },
@@ -449,7 +468,7 @@ describe("BLOCK_NEW_TAGS", () => {
     ];
     const d = fired(what(["Natural Wine", "Omakase", "Vinyl Bar", "Tapas"], signal, 20));
     expect(d.text).toBe(
-      "Among its top tags, Riverside has WHAT tags that are not among the city's top tags, led by Natural Wine, Omakase, Vinyl Bar and 1 more.",
+      "Among its top tags, Riverside has venue and dish tags that are not among the city's top tags, led by Natural Wine, Omakase, Vinyl Bar and 1 more.",
     );
     // Up to the three signal tags rank_candidates takes, so the follow-up can pick the ones that fit a tenant.
     expect(d.suggestion).toEqual({
@@ -468,7 +487,7 @@ describe("BLOCK_NEW_TAGS", () => {
       blockNewTagsFinding({ areaName: "Riverton", family: "SOUND", newTags: songs(6), familyTags: 20, signalTags: refs(songs(2)), panel: "the other 12 map cities" }),
     );
     expect(d.text).toBe(
-      "Among its top music tags, Riverton has SOUND tags that are not among the top music tags of the other 12 map cities, led by Genre 1, Genre 2, Genre 3 and 3 more.",
+      "Among its top music tags, Riverton has music tags that are not among the top music tags of the other 12 map cities, led by Genre 1, Genre 2, Genre 3 and 3 more.",
     );
     expect(d.suggestion).toEqual({
       tool: "concept_vector",
@@ -479,7 +498,7 @@ describe("BLOCK_NEW_TAGS", () => {
   it("fires on SOUND at three new tags that are at least a quarter of its area top 20", () => {
     const d = fired(sound(songs(5), 20));
     expect(d.text).toBe(
-      "Among its top music tags, Riverside has SOUND tags that are not among the city's top music tags, led by Genre 1, Genre 2, Genre 3 and 2 more.",
+      "Among its top music tags, Riverside has music tags that are not among the city's top music tags, led by Genre 1, Genre 2, Genre 3 and 2 more.",
     );
     expect(d.suggestion?.reason).toBe("Rank tenant brands with Genre 1 (T1), Genre 2 (T2) or Genre 3 (T3) as the taste signal at this site against the city.");
     expect(sound(songs(4), 20)).toBeNull();
@@ -647,7 +666,7 @@ describe("LOCATION_FALLBACK", () => {
     expect(locationFallbackFinding({ areaName: "Riverside", from: "POLYGON", to: "POINT" })).toEqual({
       kind: "LOCATION_FALLBACK",
       severity: "low",
-      text: "Location for Riverside fell back from the neighbourhood boundary to its centre point (a CODE FALLBACK).",
+      text: "Location for Riverside fell back from the neighbourhood boundary to its centre point, a less precise reading of the area.",
       suggestion: null,
     });
     expect(locationFallbackFinding({ areaName: "Riverside", from: "POINT", to: "QUERY" }).text).toContain(
@@ -712,5 +731,35 @@ describe("Part 9 finding rules", () => {
     });
     expect(d?.text).toContain("neither explains the other");
     expect(d?.text).not.toMatch(/\b(because|due to|drives|causes)\b/);
+  });
+});
+
+describe("PARTNERS_ONE_CATEGORY", () => {
+  const draftOf = (inCategory: number, scored: number, otherCategories: Parameters<typeof partnersOneCategoryFinding>[0]["otherCategories"] = ["telecom"]) =>
+    partnersOneCategoryFinding({ subjectName: ALPHA, subjectRef: "R1", categoryLabel: "Food and beverage", inCategory, scored, otherCategories });
+
+  it("fires when at least 60% of at least five scored partners share one category", () => {
+    expect(isPartnersOneCategory(3, 5)).toBe(true);
+    expect(isPartnersOneCategory(6, 10)).toBe(true);
+    expect(isPartnersOneCategory(5, 10)).toBe(false);
+    expect(isPartnersOneCategory(4, 4)).toBe(false);
+    expect(isPartnersOneCategory(6, 5)).toBe(false);
+  });
+
+  it("suggests sponsor_slate seeded by the subject over the categories the partners do not cover, at most six", () => {
+    const d = fired(draftOf(9, 12, ["beer", "spirits", "auto", "telecom", "fintech", "beauty", "gaming", "travel"]));
+    expect(d.text).toBe(
+      "Most partner brands this audience also favours sit in one category (Food and beverage, 9 of 12), with Brand Alpha's own category already left out: the list shows one category, not a range of partners.",
+    );
+    expect(d.suggestion).toEqual({
+      tool: "sponsor_slate",
+      reason:
+        "Find the best-fitting partner in other categories: sponsor_slate with seed R1 (Brand Alpha) over beer, spirits, auto, telecom, fintech, beauty, sponsor categories none of the discovered partners sits in.",
+    });
+  });
+
+  it("keeps the finding but suggests nothing when every sponsor category is covered", () => {
+    expect(fired(draftOf(4, 5, [])).suggestion).toBeNull();
+    expect(draftOf(2, 5)).toBeNull();
   });
 });

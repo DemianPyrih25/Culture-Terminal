@@ -298,7 +298,8 @@ describe("every job runs end to end with a pivot and no CHECKER issue", () => {
     const scan = ofType(events, "tool.start").filter((e) => e.phase === "scan");
     expect(scan.map((e) => [e.toolCallId, e.tool])).toEqual([
       ["scan-1", "find_tags"],
-      ["scan-2", "geo_lift"],
+      // scan-2 is the category retry, which does not run when the concept's own search kept a tag.
+      ["scan-3", "geo_lift"],
     ]);
     expect(report.kpis.some((k) => report.exhibits.length > 0 && k.label.startsWith("lift of"))).toBe(true);
   });

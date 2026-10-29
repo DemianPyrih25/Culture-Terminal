@@ -18,7 +18,7 @@ export const ANSWER_JOB_LABEL: Readonly<Record<Job, string>> = {
   area_profile: "What an area is like",
   taste_twins: "Find an area's twin",
   brand_collab: "Brand collaborations",
-  creator_fit: "Creators who fit",
+  creator_fit: "Artists & podcasts who fit",
   launch_test: "Test a new product",
   city_compare: "Compare cities",
 };
@@ -96,7 +96,7 @@ export const GHOST_NOUN: Readonly<Record<GhostPickCategory, string>> = {
   neighbourhoods: "areas",
   tenants: "tenants",
   partners: "brands",
-  creators: "creators",
+  creators: "artists and podcasts",
 };
 
 /** The title when the AI's picks are clearly better known than the data's (10 points or more). */
@@ -106,7 +106,7 @@ export const GHOST_OBVIOUS_TITLE: Readonly<Record<GhostPickCategory, string>> = 
   neighbourhoods: "AI alone picked busier areas",
   tenants: "AI alone suggested the obvious tenants",
   partners: "AI alone named the biggest brands",
-  creators: "AI alone named the most famous creators",
+  creators: "AI alone named the most famous artists and podcasts",
 };
 
 /** How many points of mean popularity make the AI's picks "obvious". */
@@ -153,12 +153,12 @@ export const CHART_COPY = {
   },
   partners: { kind: "Best-fit partners", caption: "Scored on one scale in one request: 100 = the best fit among the names checked. Taste fit, not sales or deal terms." },
   creators: {
-    kind: "Creators who fit",
-    caption: "Ranked within each kind of creator; scores compare only within a kind. Public figures only. Taste fit, not reach or fees.",
+    kind: "Artists & podcasts who fit",
+    caption: "Artists and podcasts only (no influencers or other public figures). Ranked within each kind; scores compare only within a kind. Taste fit, not reach or fees.",
   },
   creatorsScored: {
     kind: "Scored on one scale",
-    caption: "Creators of one kind scored in one request: 100 = the best fit among the names checked. Taste fit, not reach or fees.",
+    caption: "Artists or podcasts of one kind scored in one request: 100 = the best fit among the names checked. Taste fit, not reach or fees.",
   },
   fingerprints: { kind: "What sets each city apart", caption: "Tastes each city ranks higher than the other cities we map do, on average. Shared taste, not sales or foot traffic." },
   financials: {

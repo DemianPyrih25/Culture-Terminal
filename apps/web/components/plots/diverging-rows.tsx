@@ -71,7 +71,7 @@ export function DivergingRows({
                 key={row.key ?? row.label}
                 data-row={row.key ?? row.label}
                 data-side={v === null ? "none" : less ? "less" : "more"}
-                className="grid h-9 grid-cols-2 items-center"
+                className="grid min-h-9 grid-cols-2 items-center py-1"
               >
                 <span className="flex min-w-0 items-center justify-end gap-2">
                   {less ? (
@@ -82,7 +82,7 @@ export function DivergingRows({
                   ) : v === null ? (
                     <NoDataMark className="mr-3" />
                   ) : (
-                    <span className="truncate pr-3 type-body text-ink">{row.label}</span>
+                    <span className="min-w-0 pr-3 text-right type-body text-ink [overflow-wrap:anywhere]">{row.label}</span>
                   )}
                 </span>
                 <span className="flex min-w-0 items-center gap-2">
@@ -92,7 +92,7 @@ export function DivergingRows({
                       <span className="type-label text-ink-2 tabular-nums">{text}</span>
                     </>
                   ) : (
-                    <span className="truncate pl-3 type-body text-ink">{row.label}</span>
+                    <span className="min-w-0 pl-3 type-body text-ink [overflow-wrap:anywhere]">{row.label}</span>
                   )}
                 </span>
               </li>

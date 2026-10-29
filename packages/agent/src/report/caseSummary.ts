@@ -29,7 +29,7 @@ const oneLine = (text: string) => text.replace(/[\s\p{Cc}]+/gu, " ").trim();
 
 export function buildCaseSummary(report: Report, context: CaseSummaryContext = {}): string {
   const lookup = indexSnapshot(context.ledger ?? { evidence: [], metrics: [], datasets: [], findings: [] });
-  const render = (text: string) => oneLine(plainProse(text, lookup, report.dataFreshness.trendWindow));
+  const render = (text: string) => oneLine(plainProse(text, lookup, report.dataFreshness.trendWindow, { badges: true }));
   const { verdict } = report;
   const prior = context.priorRunIds ?? [];
   const openQuestions = report.limitations.filter((l) => l.source === "open_question");

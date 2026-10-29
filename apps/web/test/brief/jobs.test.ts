@@ -55,7 +55,7 @@ describe("key figures for every job", () => {
       ["1.36×", "Holly", "vs restaurant baseline"],
       ["1.29×", "Central East Austin", "vs restaurant baseline"],
       ["0.80", "Map precision", "geohash 6 grid"],
-      ["0.62", "White space · Holly", "Latent & open"],
+      ["0.62", "White space · Holly", "strong interest, few rivals"],
     ]);
   });
 
@@ -63,10 +63,10 @@ describe("key figures for every job", () => {
     expect(strip("tenant_mix")).toEqual([
       ["88 of 100", "Tenant fit · Lantern Hi-Fi Bar", "site 1 of 5 · city 4 of 5"],
       ["+0.75", "Top climber · Lantern Hi-Fi Bar", "site 1 of 5 · city 4 of 5"],
-      ["2 of 20", "New place tags", "area top 20 · vs Nashville"],
-      ["+38", "Listening room", "NEW · rank vs Nashville"],
+      ["2 of 20", "New place tags", "vs Nashville"],
+      ["+38", "Listening room", "new here · rank vs Nashville"],
     ]);
-    expect(strip("area_profile")[0]).toEqual(["2 of 20", "New place tags", "area top 20 · vs Austin"]);
+    expect(strip("area_profile")[0]).toEqual(["2 of 20", "New place tags", "vs Austin"]);
   });
 
   it("names the category and the brand of each best fit, and the market of the strongest alignment", () => {

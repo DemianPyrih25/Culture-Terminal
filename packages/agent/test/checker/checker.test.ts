@@ -179,6 +179,30 @@ describe("V2: tokens resolve", () => {
     }
   });
 
+  it("rejects a label typed before a token whose display ends with it, across the number", () => {
+    // M13 prints "12 of 20 in the area top 20": "in the area top 20 {{M13}}" reads the label twice.
+    const ledger = extendedLedger();
+    const twice = check(edit((d) => (d.arguments[0]!.our_read = "Elm Park's new music sits in the area top 20 {{M13}} [E5].")), { ledger });
+    expect(of(twice.issues, "V2")).toEqual([expect.objectContaining({ action: "reject", subjects: ["M13"] })]);
+    expect(of(twice.issues, "V2")[0]?.message).toContain('the words "the area top 20" beside it print twice');
+    const once = check(edit((d) => (d.arguments[0]!.our_read = "Elm Park's new music tags: {{M13}} [E5].")), { ledger });
+    expect(of(once.issues, "V2")).toEqual([]);
+  });
+
+  it("rejects tokens side by side that print the same display, and lets them stand once each names its subject", () => {
+    const fx = brandHealthLedger();
+    // A second age index that came back not measured, like M6.
+    fx.ledger.addMetric({ ...fx.ledger.metric("M6")!, key: "dna.age_index_copy" });
+    const ledger = fx.ledger.snapshot();
+    const id = ledger.metrics.at(-1)!.id;
+    const side = check(edit((d) => (d.arguments[0]!.qloo_fact = `The age indices read ({{M6}}, {{${id}}}) [E4].`)), { ledger });
+    const v2 = of(side.issues, "V2");
+    expect(v2).toEqual([expect.objectContaining({ action: "reject", path: "arguments[0].qloo_fact", subjects: ["M6", id] })]);
+    expect(v2[0]?.message).toContain('print the same "not measured" side by side');
+    const named = check(edit((d) => (d.arguments[0]!.qloo_fact = `The age index reads {{M6}} at 35–44 and {{${id}}} at 45–54 [E4].`)), { ledger });
+    expect(of(named.issues, "V2").filter((i) => i.message.includes("side by side"))).toEqual([]);
+  });
+
   it("rejects a metric token set beside another entity's name", () => {
     // M2 is Brand Alpha's distinctiveness rank; "Beta" alone names Brand Beta.
     const draft = edit((d) => (d.arguments[0]!.qloo_fact = "Similarity with Brand Beta is {{M1}} [E1]. In the matrix Beta sits at {{M2}} [E1]."));

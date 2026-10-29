@@ -25,6 +25,7 @@ import {
   type Pillar,
   type ReportDraftShape,
   type ReportExhibit,
+  type SkillId,
   type Strength,
   type SubmitPlanInputShape,
   type TrendWindow,
@@ -34,17 +35,19 @@ import {
   argumentStrength,
   buildLimitations,
   computeConfidence,
+  DESK_LIMITATIONS,
   distinctBadges,
   freshness,
   metricConfidence,
   SKILL_LIMITATIONS,
 } from "@ct/quant";
 import { MIN_OK_EVIDENCE, type CheckResult } from "./checker";
-import { indexSnapshot, type LedgerSnapshot } from "./ledger";
+import { indexSnapshot, type LedgerLookup, type LedgerSnapshot } from "./ledger";
 import { formatUtcDate, timeRange } from "./report/format";
 import { pickKpis } from "./report/kpis";
 import { POSITION_JOBS } from "./report/position";
-import { isQlooEvidence, publicDisclaimers, readAsLimitation } from "./report/publicData";
+import { conceptLimitation, withConceptDisclosure, type ConceptSubstitute } from "./report/concept";
+import { isQlooEvidence, metricPublicSource, publicDisclaimers, readAsLimitation } from "./report/publicData";
 import { buildReceipt, type ReceiptPublicCall, type ReceiptQlooCall, type ReceiptUsage } from "./report/receipt";
 import { exhibitSourceLine } from "./report/sourceLine";
 import { buildScorecard } from "./scorecard";
@@ -106,7 +109,25 @@ export interface ReportContext {
    * cover, for the READ_AS_NEAREST_JOB limitation and its −5 confidence. Null or absent when the job fits.
    */
   readAs?: { notCovered: readonly string[] } | null;
+  /**
+   * Run-level limitation flags raised outside any skill: SEC_NOT_CONFIGURED / CENSUS_NOT_CONFIGURED when
+   * the run needed a public source this server cannot read (D7). Absent: none.
+   */
+  runFlags?: readonly Flag[];
+  /**
+   * Part of the question's concept was never tested (D2, conceptPartlyTagged): −30 confidence, once, so
+   * the note is never HIGH. Absent: false.
+   */
+  conceptPartlyTagged?: boolean;
+  /**
+   * The question's concepts that are not in the data, with the categories tested instead (or none:
+   * not tested at all). Code opens the thesis with the disclosure and puts its CONCEPT_NOT_IN_DATA
+   * limitation first. Absent: none.
+   */
+  conceptSubstitutes?: readonly ConceptSubstitute[];
 }
+
+export type { ConceptSubstitute } from "./report/concept";
 
 export interface AssembleInput extends ReportContext {
   /**
@@ -122,7 +143,8 @@ export interface IncompleteInput extends ReportContext {
 }
 
 export const INCOMPLETE_HEADLINE = "Evidence digest: the analysis did not finish";
-export const SCORECARD_CAPTION = "Priors the ANALYST wrote before any data, each judged against cited metrics.";
+export const SCORECARD_CAPTION =
+  "What the AI expected before it saw any data, each expectation checked against the figures cited for it.";
 export const POSITION_CAPTION =
   "Where the subject stands against its peers on five axes, each with its peer rank and exhibit; no total is given.";
 
@@ -152,6 +174,8 @@ interface ConfidenceCounts {
   insufficientEvidence: boolean;
   /** The question was read as its nearest job (D41): −5, once. */
   readAsNearestJob: boolean;
+  /** Part of the question's concept was never tested (D2): −30, once. */
+  conceptPartlyTagged: boolean;
 }
 
 const scoreConfidence = (c: ConfidenceCounts): Confidence =>
@@ -165,6 +189,7 @@ const scoreConfidence = (c: ConfidenceCounts): Confidence =>
     checkerWarnings: c.checkerWarnings,
     insufficientEvidence: c.insufficientEvidence,
     readAsNearestJob: c.readAsNearestJob,
+    conceptPartlyTagged: c.conceptPartlyTagged,
   });
 
 const limitationsFor = (args: {
@@ -174,17 +199,66 @@ const limitationsFor = (args: {
   skillLimitations: readonly string[];
   window: TrendWindow | null;
   asOf: string;
-}): Limitation[] => buildLimitations(args);
+  /** Skills that put evidence in the ledger: a desk bullet about one method shows only when it ran (Q4). */
+  ran: ReadonlySet<SkillId>;
+}): Limitation[] => {
+  const built = buildLimitations(args);
+  const owners = deskBulletOwners(args.pillar);
+  return built.filter((l) => {
+    const skills = l.source === "desk" ? owners.get(l.text) : undefined;
+    return skills === undefined || skills.some((s) => args.ran.has(s));
+  });
+};
+
+/** Desk bullets on under-the-radar picks: cross_domain and sponsor_slate are the skills that make them. */
+const UNDER_THE_RADAR_SKILLS: readonly SkillId[] = ["cross_domain", "sponsor_slate"];
+
+/**
+ * Q4: the desk bullets of the marketing and audience desks each explain one method (a sponsor slate, a
+ * metro share read, travel taste, model explainability, under-the-radar picks), so each shows only when
+ * a skill using that method put evidence in the note. A bullet's skills are those whose fixed list
+ * (SKILL_LIMITATIONS) holds the same sentence; the under-the-radar bullet, which no skill list repeats,
+ * belongs to the skills that pick under-the-radar results. A bullet with no skill (the audience desk's
+ * "cultural neighbours" line) always shows. The investment and location desks' bullets describe every
+ * read of their desk (taste is not sales; venue-goers are not residents; taste fit is never a decision
+ * about a person), so they always show.
+ */
+function deskBulletOwners(pillar: Pillar): Map<string, readonly SkillId[]> {
+  const owners = new Map<string, readonly SkillId[]>();
+  if (pillar !== "marketing" && pillar !== "audience") return owners;
+  for (const text of DESK_LIMITATIONS[pillar]) {
+    const skills = (Object.keys(SKILL_LIMITATIONS) as SkillId[]).filter((id) => SKILL_LIMITATIONS[id].includes(text));
+    const all = /\bunder-the-radar\b/i.test(text) ? [...new Set([...skills, ...UNDER_THE_RADAR_SKILLS])] : skills;
+    if (all.length > 0) owners.set(text, all);
+  }
+  return owners;
+}
+
+/**
+ * A reported SEC or Census figure's weight in an argument pill (Q8): keyed on its badge, since a
+ * filing or an ACS table has no Qloo sample size. A reported or exactly derived figure is STRONG; an
+ * approximate one (an area apportioned from tracts) is MODERATE; an absent one carries no weight.
+ */
+const PUBLIC_BADGE_CONF: Readonly<Record<Badge, number | null>> = {
+  MEASURED: 1,
+  DERIVED: 1,
+  ESTIMATED: 0.5,
+  STALE: 0.5,
+  UNAVAILABLE: null,
+};
 
 /**
  * A metric without a stored conf gets one here. A STALE metric's weight is the freshness of its
  * window at report time, so a recent window is not marked down to the default F of an unknown age.
+ * A public-data metric is weighed by its source and badge, never by a Qloo sample size it lacks.
  */
-const strengthOf = (metrics: readonly Metric[], asOf: string): Strength =>
+const strengthOf = (metrics: readonly Metric[], asOf: string, lookup: Pick<LedgerLookup, "evidence">): Strength =>
   argumentStrength(
-    metrics.map(
-      (m) => m.conf ?? metricConfidence(m.badge, m.n, m.badge === "STALE" && m.window ? freshness(m.window, asOf) : null),
-    ),
+    metrics.map((m) => {
+      if (m.conf !== null) return m.conf;
+      if (metricPublicSource(m, lookup) !== null) return PUBLIC_BADGE_CONF[m.badge];
+      return metricConfidence(m.badge, m.n, m.badge === "STALE" && m.window ? freshness(m.window, asOf) : null);
+    }),
   );
 
 /**
@@ -229,7 +303,7 @@ export function assembleReport(input: AssembleInput): Report {
       ourRead: a.our_read,
       metricIds,
       evidenceIds: knownEvidence(a.evidence_ids, [a.qloo_fact, a.our_read]),
-      strength: strengthOf(metricsOf(metricIds), input.createdAt),
+      strength: strengthOf(metricsOf(metricIds), input.createdAt, lookup),
     };
   });
 
@@ -259,12 +333,12 @@ export function assembleReport(input: AssembleInput): Report {
       headline: draft.headline,
       signal: draft.signal,
       tag: reportTag(draft.verdict_tag),
-      thesis: draft.thesis,
+      thesis: withConceptDisclosure(draft.thesis, input.conceptSubstitutes ?? []),
       confidence,
       coverage: run.coverage,
     },
     scorecard: buildScorecard(input.plan, draft, ledger).rows,
-    kpis: pickKpis(input.job, ledger.metrics, cited, { subject: input.subject ?? null, peers: input.peers ?? [] }),
+    kpis: pickKpis(input.job, ledger.metrics, cited, { subject: input.subject ?? null, peers: input.peers ?? [], ran: run.ran }),
     exhibits: run.exhibits(draftExhibits),
     arguments: reportArguments,
     bearCase: draft.bear_case.map((b) => ({ text: b.text, metricIds: knownMetrics(b.metric_ids, [b.text]) })),
@@ -295,9 +369,11 @@ export function buildIncompleteReport(input: IncompleteInput): Report {
   const run = runFacts(input);
   // A digest's signal is always insufficient_evidence, however many bundles came back ok.
   const confidence = scoreConfidence({ ...run.counts, staleMomentumCited: false, checkerWarnings: 0, insufficientEvidence: true });
-  const thesis =
-    `The run stopped before the ANALYST submitted its note${input.reason ? ` (${input.reason})` : ""}. ` +
-    "The exhibits show every dataset QUANT computed; no interpretation is offered.";
+  const thesis = withConceptDisclosure(
+    `The run stopped before the AI finished writing its answer${input.reason ? ` (${input.reason})` : ""}. ` +
+      "The exhibits show every result our code computed; no interpretation is offered.",
+    input.conceptSubstitutes ?? [],
+  );
 
   return Report.parse({
     ...run.header,
@@ -312,7 +388,7 @@ export function buildIncompleteReport(input: IncompleteInput): Report {
       coverage: run.coverage,
     },
     scorecard: buildScorecard(input.plan, null, ledger).rows,
-    kpis: pickKpis(input.job, ledger.metrics, [], { subject: input.subject ?? null, peers: input.peers ?? [] }),
+    kpis: pickKpis(input.job, ledger.metrics, [], { subject: input.subject ?? null, peers: input.peers ?? [], ran: run.ran }),
     exhibits: run.exhibits(
       ledger.datasets
         .filter((d) => !isLeadKind(d.kind))
@@ -367,6 +443,7 @@ function runFacts(ctx: ReportContext) {
   // The Qloo data line dates Qloo bundles only; SEC and Census figures carry their own period lines.
   const qlooFetched = timeRange(ledger.evidence.filter(isQlooEvidence).map((e) => e.fetchedAt));
   const readAs = ctx.readAs ?? null;
+  const ran = new Set(ledger.evidence.map((e) => e.skill));
   const skillLimitations =
     ctx.skillLimitations ?? [...new Set(ledger.evidence.map((e) => e.skill))].flatMap((s) => SKILL_LIMITATIONS[s]);
   const dataLine = qlooFetched
@@ -389,6 +466,7 @@ function runFacts(ctx: ReportContext) {
   return {
     lookup,
     window,
+    ran,
     header: {
       runId: ctx.runId,
       question: ctx.question,
@@ -412,19 +490,25 @@ function runFacts(ctx: ReportContext) {
       // V7 counts Qloo bundles only: SEC and Census figures sit beside the taste read, never in its place.
       insufficientEvidence: ledger.evidence.filter((e) => e.status === "ok" && isQlooEvidence(e)).length < MIN_OK_EVIDENCE,
       readAsNearestJob: readAs !== null,
+      conceptPartlyTagged: ctx.conceptPartlyTagged === true,
     },
     disclaimers: [...FIXED_DISCLAIMERS, dataLine, ...publicDisclaimers(ledger.metrics, lookup)],
-    /** The flag limitations, the nearest-job one first among them (D41), then the desk, skill and open-question lines. */
+    /**
+     * The flag limitations: a concept not in the data first (the owner's o03 decision), then the
+     * nearest-job one (D41), then the other flags, the desk, skill and open-question lines.
+     */
     limitations: (extraFlags: readonly Flag[], openQuestions: readonly string[]) => {
       const built = limitationsFor({
-        flags: [...flags, ...extraFlags].filter((f) => f !== "READ_AS_NEAREST_JOB"),
+        flags: [...flags, ...(ctx.runFlags ?? []), ...extraFlags].filter((f) => f !== "READ_AS_NEAREST_JOB" && f !== "CONCEPT_NOT_IN_DATA"),
         pillar,
         openQuestions,
         skillLimitations,
         window,
         asOf: ctx.createdAt,
+        ran,
       });
-      return readAs === null ? built : [readAsLimitation(ctx.job, readAs.notCovered), ...built];
+      const concept = conceptLimitation(ctx.conceptSubstitutes ?? []);
+      return [...(concept === null ? [] : [concept]), ...(readAs === null ? [] : [readAsLimitation(ctx.job, readAs.notCovered)]), ...built];
     },
     /**
      * The Scorecard dataset first (absent only without hypotheses), then the Taste Position card on the

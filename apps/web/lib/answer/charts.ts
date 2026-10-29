@@ -11,6 +11,7 @@ import {
   type SlopePayload,
 } from "@ct/contracts";
 import { DEFAULT_DES_TYPE, desHref, isDesType } from "../../components/des/des-href";
+import { scoreLabelParts } from "../../components/figures/format";
 import { fewRivals, supplyUnknown } from "../../components/figures/lift-scale";
 import { formatTrendWindow, type BriefFigure } from "../brief";
 import { formatDollars, formatPeople } from "../brief/format";
@@ -37,6 +38,7 @@ import {
 } from "./job-shapes";
 import { marketState } from "./markets";
 import type { AnswerChart, AnswerDatasets, BarRowData, ChartBody, ChartTableData, MoreChart, PairRowData, WinnerRowData } from "./types";
+import { withoutNoiseTags } from "../tag-noise";
 
 /**
  * The answer's charts (§2.6–2.10): which figure of the report each job leads with, and each one shaped into
@@ -66,7 +68,8 @@ const NO_DATA = "No data";
 
 /** A figure's dataset: streamed inline, or fetched after the first paint. */
 export function datasetOf(figure: BriefFigure, fetched: AnswerDatasets = {}): DatasetEnvelope | null {
-  return figure.dataset ?? fetched[figure.datasetId] ?? null;
+  // The shared tag-noise filter, also for datasets fetched after the first paint (ANSWER_QUALITY §10).
+  return withoutNoiseTags(figure.dataset ?? fetched[figure.datasetId] ?? null);
 }
 
 const isBars = (d: DatasetEnvelope | null): d is Extract<DatasetEnvelope, { kind: "Bars" }> => d?.kind === "Bars";
@@ -365,8 +368,20 @@ function lessMorePairs(data: BarsPayload): { body: ChartBody; table: ChartTableD
   };
 }
 
-/** Tenant fit (tenant_mix) or who climbs (area_profile): ranked fit rows. */
-function fitRows(data: SlopePayload): { body: ChartBody; table: ChartTableData } {
+/**
+ * Whether two orders of the same lines disagree: some line ranks above another by score and below it by
+ * its rank at the site (tenant fit 53 at site rank 3, fit 47 at site rank 2).
+ */
+function ordersDisagree(lines: SlopePayload["lines"], last: number): boolean {
+  const known = lines.filter((l) => l.score !== null && l.points[last]?.rank != null);
+  return known.some((a) => known.some((b) => (a.score ?? 0) > (b.score ?? 0) && (a.points[last]?.rank ?? 0) > (b.points[last]?.rank ?? 0)));
+}
+
+/**
+ * Tenant fit (tenant_mix) or who climbs (area_profile): ranked fit rows. When the fit order and the site's
+ * rank order disagree, `sortNote` says what each order is sorted by (D10).
+ */
+function fitRows(data: SlopePayload): { body: ChartBody; table: ChartTableData; sortNote: string | null } {
   const climbLabel = data.scoreLabel !== null ? "fits better here than citywide" : "climbs here vs citywide";
   const last = data.axes.length - 1;
   const scored = data.scoreLabel !== null;
@@ -386,10 +401,21 @@ function fitRows(data: SlopePayload): { body: ChartBody; table: ChartTableData }
   });
   const cityAxis = data.axes[0]?.label ?? "City";
   const hereAxis = data.axes[last]?.label ?? "Here";
+  const sortNote =
+    scored && ordersDisagree(data.lines, last)
+      ? `Sorted by tenant fit, best first. Fit weighs a tenant's rank at the site (60%) and how much higher it ranks there than citywide (40%), so the fit order and the site rank order can differ.`
+      : null;
   return {
+    sortNote,
     body: { type: "fit", rows, climbLabel },
     table: {
-      columns: [{ label: "Tenant" }, ...(scored ? [{ label: data.scoreLabel ?? "Fit", numeric: true }] : []), { label: hereAxis, numeric: true }, { label: cityAxis, numeric: true }],
+      // Tenant fit: the rows are in fit order, and the rank columns say which ranking each one is (D10).
+      columns: [
+        { label: "Tenant" },
+        ...(scored ? [{ label: `${scoreLabelParts(data.scoreLabel ?? "Fit").name}, sorted best first`, numeric: true }] : []),
+        { label: scored ? `Rank at the site (${hereAxis})` : hereAxis, numeric: true },
+        { label: scored ? `Rank citywide (${cityAxis})` : cityAxis, numeric: true },
+      ],
       rows: lines.map((l) => [
         l.label,
         ...(scored ? [l.score === null ? NO_DATA : `${Math.round(l.score)}/100`] : []),
@@ -636,13 +662,13 @@ export function shapeChart(
       return { ...base, kind: CHART_COPY.map.kind, title: CHART_COPY.map.title, caption: null, legend: [], table, body };
     }
     case "Slope": {
-      const { body, table } = fitRows(dataset.payload);
+      const { body, table, sortNote } = fitRows(dataset.payload);
       const scored = dataset.payload.scoreLabel !== null;
       const copy = scored ? CHART_COPY.fit : CHART_COPY.climbers;
       return {
         ...base,
         kind: copy.kind,
-        caption: copy.caption,
+        caption: sortNote ? `${copy.caption} ${sortNote}` : copy.caption,
         // The fit list draws its own key (an arrow, not a dot) when a row climbs.
         legend: [],
         stacked: true,

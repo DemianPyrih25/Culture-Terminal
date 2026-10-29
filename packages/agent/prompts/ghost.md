@@ -28,7 +28,7 @@ Code writes the first lines of the message; the question follows them.
 | sponsorship (SPON) | The best-fit sponsor or partner brands for an artist or public figure, by category; which fits are under the radar; which markets align. |
 | market_selection (MKTS) | Which cities suit a tour, a launch or a set of dates. |
 | brand_collab (COLLAB) | The other brands that would make a credible collaboration partner for a named brand, the best fit first, and what their audiences share. |
-| creator_fit (CRTR) | The creators (musicians, podcasts and public figures) that fit a named brand's audience, the best fit first. |
+| creator_fit (CRTR) | The musicians and podcasts that fit a named brand's audience, the best fit first. |
 | audience_discovery (AUD) | Who an audience is and what else it loves in music, podcasts, TV, film and brands. |
 
 ## Pick lists
@@ -39,7 +39,7 @@ Each list holds at most five names, best first: the order is your ranking. Write
 - **neighbourhoods**: neighbourhoods of the city the question names (for a twin, the city the twin is looked for in), written without the city: chosen from AREAS when the message lists them, else as locals write them. The best fit first.
 - **tenants**: named businesses or brands that could take the space or that fit the area, not generic categories, the best fit first.
 - **partners**: brands, the best fit first. When the question names sponsor categories, put the best brand for each named category first. For a new product concept, the existing brands whose audience it would share.
-- **creators**: musicians, podcasts and public figures, the best fit first; never a private person.
+- **creators**: musicians and podcasts, the best fit first; never a private person.
 
 ## Writing the answer
 

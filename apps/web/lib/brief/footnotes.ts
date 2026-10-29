@@ -1,7 +1,8 @@
 import { CONFIDENCE_PENALTY, tokenizeProse, type DatasetId, type EvidenceId, type MetricId, type ProseSegment } from "@ct/contracts";
-import { capitalize, formatTrendWindow, plural, TOOL_LABEL } from "./format";
+import { capitalize, formatTrendWindow, isKnownAbsence, plural, TOOL_LABEL } from "./format";
 import { buildLedger, metricView, requestHead, requestsForEvidence, requestTrace, shortRequestTrace, sourceName, type Ledger } from "./ledger";
 import { areaReads } from "./location";
+import { plainBeforeMetric, plainWords } from "./plain";
 import type { CiteSection, Footnote, FigureLegend, Inline, MetricView, RequestRef } from "./types";
 
 /**
@@ -106,7 +107,8 @@ export class FootnoteRegistry {
       const segment = segments[i] as ProseSegment;
       switch (segment.kind) {
         case "text":
-          out.push({ kind: "text", text: segment.text });
+          // Analyst shorthand ("(DERIVED)", "EMPTY_RESULT", "SOUND") in plain words, stored runs too (Q1).
+          out.push({ kind: "text", text: plainWords(segment.text) });
           break;
         case "window":
           out.push({ kind: "window", text: this.ledger.window ? formatTrendWindow(this.ledger.window) : "the trending window" });
@@ -133,6 +135,9 @@ export class FootnoteRegistry {
             out.push({ kind: "missing", id: segment.id, text: "not available" });
             break;
           }
+          // "τ {{M4}}" reads "trend strength +0.87", "p {{M5}}" reads "p-value <0.001" (Q1).
+          const before = out.at(-1);
+          if (before?.kind === "text") before.text = plainBeforeMetric(before.text, metric);
           out.push({ kind: "metric", metric: metricView(metric, this.ledger.window), footnote: this.metric(segment.id, section) });
           // "{{M5}} [E5]": the citation is the metric's own evidence, so it folds into the metric's note.
           const gap = segments[i + 1];
@@ -167,12 +172,14 @@ export class FootnoteRegistry {
         const what = `${view.label}${periodSuffix(view)}${view.comparatorLabel ? `, ${view.comparatorLabel}` : ""}${view.window ? `, ${view.window} only` : ""}`;
         const brief = shortWhat(view);
         if (view.unavailable) {
-          const text = [`${view.label}: not measured, ${view.reasonLabel}.`, head ? `${head}.` : null].filter(Boolean).join(" ");
+          // A known absence (a public value not reported, withheld or not configured) states its reason alone (Q8).
+          const absent = isKnownAbsence(view.reason) ? `${view.reasonLabel}` : `not measured, ${view.reasonLabel}`;
+          const text = [`${view.label}: ${absent}.`, head ? `${head}.` : null].filter(Boolean).join(" ");
           return {
             ...base,
             text,
             trace: requestTrace(requests),
-            short: { text: firstThatFits(`${view.shortLabel}: not measured, ${view.reasonLabel}.`, `${view.shortLabel}: not measured.`), trace: shortRequestTrace(requests) },
+            short: { text: firstThatFits(`${view.shortLabel}: ${absent}.`, `${view.shortLabel}: ${view.text}.`), trace: shortRequestTrace(requests) },
             metric: view,
             evidenceIds: metric.evidenceIds,
             requests,

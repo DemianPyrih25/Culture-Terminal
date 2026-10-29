@@ -285,7 +285,7 @@ const NAME_NEED: Readonly<Record<NamedJob, ReadingGap>> = {
     text: "Add the brand, artist or show whose audience you want to know.",
   },
   brand_collab: { need: "A brand to find collaboration partners for", text: "Add the brand you want to find collaboration partners for." },
-  creator_fit: { need: "A brand whose audience the creators should fit", text: "Add the brand whose audience the creators should fit." },
+  creator_fit: { need: "A brand whose audience the artists or podcasts should fit", text: "Add the brand whose audience the artists or podcasts should fit." },
 };
 
 /** "Atlanta, Austin, … or Seattle": the 13 map cities a place question can name. */

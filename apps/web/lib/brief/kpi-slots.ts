@@ -36,6 +36,12 @@ export interface KpiSlot {
   top?: boolean;
   /** A/Key figure label: "Nearest audience". */
   label: string;
+  /**
+   * The slot shows only when this tool was planned: a call to it is in the run, a plan step names it, or a
+   * metric for the slot has arrived (D8). The agent plans company_financials only for a listed company, so
+   * an unlisted brand's strip has no revenue slot left pending. The agent's report applies the same rule.
+   */
+  onlyWith?: SkillId;
 }
 
 const one = (key: string, extra: Omit<KpiPick, "key"> = {}): KpiPick => ({ key, ...extra });
@@ -64,7 +70,7 @@ export const KPI_SLOTS: Readonly<Record<Job, readonly KpiSlot[]>> = {
     { picks: [one("subs.distinctiveness")], count: 1, label: "Distinctiveness" },
     { picks: NEXT_GEN, count: 1, label: "Youth tilt" },
     { picks: [one("share.metros_won"), one("mom.label", { label: "Momentum" })], count: 1, label: "Metros won" },
-    { picks: FINANCIALS, count: 1, label: "Reported revenue" },
+    { picks: FINANCIALS, count: 1, label: "Reported revenue", onlyWith: "company_financials" },
   ],
   head_to_head: [
     { picks: [one("subs.similarity", { pair: true }), one("rank.fit", { label: "Fit" })], count: 1, label: "Audience overlap" },
@@ -114,13 +120,13 @@ export const KPI_SLOTS: Readonly<Record<Job, readonly KpiSlot[]>> = {
     { picks: [one("xdom.under_the_radar")], count: 1, label: "Under the radar" },
   ],
   creator_fit: [
-    { picks: [one("rank.fit"), one("xdom.fit")], count: 3, top: true, label: "Creator fit" },
+    { picks: [one("rank.fit"), one("xdom.fit")], count: 3, top: true, label: "Artist & podcast fit" },
     { picks: [one("xdom.under_the_radar")], count: 2, label: "Under the radar" },
   ],
   launch_test: [
     { picks: [one("cnpt.precision")], count: 1, label: "AI guesses kept" },
     { picks: [one("cnpt.verdict")], count: 2, label: "Kept or dropped" },
-    { picks: FINANCIALS, count: 1, label: "Reported revenue" },
+    { picks: FINANCIALS, count: 1, label: "Reported revenue", onlyWith: "company_financials" },
   ],
   city_compare: [
     { picks: [one("share.pct", { where: inMarket })], count: 4, top: true, label: "City fit" },

@@ -105,6 +105,17 @@ function buildHead(model: BriefModel, fallbackQuestion: string | null, subjects:
 }
 
 const NEAREST_FLAG = "READ_AS_NEAREST_JOB";
+const CONCEPT_FLAG = "CONCEPT_NOT_IN_DATA";
+
+/**
+ * The concept note (the owner's o03 decision): the CONCEPT_NOT_IN_DATA limitation's sentence, which the
+ * agent writes with the names ("The exact product, "X", is not in the data, so the category "Y" was
+ * tested instead."); null when the report has none.
+ */
+export function buildConceptNote(model: BriefModel): string | null {
+  const text = model.risks.limitations.find((l) => l.flag === CONCEPT_FLAG)?.text.replace(/\s+/g, " ").trim() ?? "";
+  return text === "" ? null : text;
+}
 
 const NEAREST_FALLBACK = "This answers the closest question we cover, not every part of what you asked.";
 
@@ -227,7 +238,7 @@ export function buildGhost(job: Job | null, run: AnswerRun): AnswerGhost | null 
   return { category: cat.category, title, subline, ai, data };
 }
 
-export function buildChanges(model: BriefModel, readAsShown = false): string[] {
+export function buildChanges(model: BriefModel, readAsShown = false, conceptShown = false): string[] {
   const out: string[] = [];
   for (const c of model.risks.changes) {
     const text = inlineText(c.condition).replace(/\s+/g, " ").trim();
@@ -238,6 +249,8 @@ export function buildChanges(model: BriefModel, readAsShown = false): string[] {
     if (/^Boundaries\s*©/i.test(l.text)) continue;
     // What the question asked beyond its job already leads the page (the Read as chip).
     if (readAsShown && l.flag === NEAREST_FLAG) continue;
+    // So does a concept the data does not hold (the concept note).
+    if (conceptShown && l.flag === CONCEPT_FLAG) continue;
     out.push(l.text.trim());
   }
   return out.slice(0, CHANGES_MAX);
@@ -379,10 +392,12 @@ export function buildAnswerModel(model: BriefModel, run: AnswerRun, options: Bui
   const ghost = model.terminal?.kind === "refused" || model.terminal?.kind === "needs_input" ? null : buildGhost(job, run);
   const intent = run.intent ?? null;
   const readAs = buildReadAs(model, intent);
+  const concept = buildConceptNote(model);
   return {
     runId: model.runId,
     job,
     head: buildHead(model, options.fallbackQuestion ?? null, subjects, intent),
+    concept,
     readAs,
     verdict: buildVerdict(model, run),
     steps: buildSteps(model),
@@ -405,7 +420,7 @@ export function buildAnswerModel(model: BriefModel, run: AnswerRun, options: Bui
     ),
     ghost,
     ghostSpan: job && GHOST_WIDE.has(job) ? 3 : 4,
-    changes: buildChanges(model, readAs !== null),
+    changes: buildChanges(model, readAs !== null, concept !== null),
     why: { count: model.evidence.arguments.length, thesis: model.answer.thesis, arguments: model.evidence.arguments },
     more: moreCharts(figures, used, fetched),
     ask: { moves: model.nextMoves, placeholder: placeholderOf(model, subjects, intent) },

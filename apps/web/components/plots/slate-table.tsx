@@ -53,7 +53,7 @@ export function categoryIcon(category: string): IconName {
 
 function BestFit({ row }: { row: SlateRow }) {
   if (row.name === null) return <span className="type-body text-ink-2">{NO_DATA}</span>;
-  const name = <span className="truncate text-[15px] leading-6 font-semibold text-ink">{row.name}</span>;
+  const name = <span className="min-w-0 text-[15px] leading-6 font-semibold text-ink [overflow-wrap:anywhere]">{row.name}</span>;
   return (
     <span className="flex min-w-0 items-center gap-2.5">
       <Monogram name={row.name} size={24} />

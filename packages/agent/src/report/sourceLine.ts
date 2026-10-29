@@ -12,7 +12,7 @@ import { evidenceSource } from "./publicData";
 
 const ANALYSIS = "Culture Terminal analysis";
 export const SCORECARD_SOURCE =
-  `Source: ANALYST priors recorded before any data, judged against cited Qloo metrics · ${ANALYSIS}`;
+  `Source: the AI's expectations, recorded before any data, checked against the cited Qloo figures · ${ANALYSIS}`;
 
 export function exhibitSourceLine(dataset: DatasetEnvelope, evidence: readonly Evidence[], now: number): string {
   if (dataset.kind === "Scorecard") return SCORECARD_SOURCE;

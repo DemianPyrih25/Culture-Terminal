@@ -22,14 +22,15 @@ import {
 import { ensureMetrosIn } from "@ct/geo";
 import type { RunPublic } from "@ct/publicdata";
 import { qlooErrorCode, type RunQloo } from "@ct/qloo";
-import { normaliseName, SKILLS, skillErrorResult } from "@ct/quant";
+import { normaliseName, SKILL_LIMITATIONS, SKILLS, skillErrorResult } from "@ct/quant";
 import type { RunLedger } from "../ledger";
-import { errorText } from "../llm/notices";
+import { errorText, type AnalystToolErrorCode } from "../llm/notices";
 import type { RunRegistry } from "../registry";
 import { unlistedAudiences } from "./audiences";
 import { escapeAngles } from "./context";
 import type { FollowupDeadline } from "./followup";
 import type { RunEvents } from "./meter";
+import { NOT_CONFIGURED_FLAG, notConfiguredRefusal, unconfiguredSource, type PublicConfigured } from "./publicConfig";
 
 /**
  * One skill call end to end, for opening-scan steps and ANALYST tool calls alike: tool.start, the
@@ -71,6 +72,14 @@ export interface SkillRunnerDeps {
    * has no public-data client, and those skills then answer UNAVAILABLE with a plain reason. Absent: null.
    */
   publicdata?: RunPublic | null;
+  /**
+   * Which public sources the client can read (PublicDataClient.configured). A call to a public-data tool
+   * whose source is not configured is refused before it runs, with PUBLIC_NOT_CONFIGURED_REASON verbatim,
+   * and raises the source's not-configured flag through onFlag (D7). Absent or null: no check.
+   */
+  publicConfigured?: PublicConfigured | null;
+  /** A run-level limitation flag raised outside any skill (D7's not-configured flags). */
+  onFlag?: (flag: Flag) => void;
   ledger: RunLedger;
   registry: RunRegistry;
   geo: GeoApi;
@@ -95,8 +104,8 @@ export interface SkillRunnerDeps {
   now: () => number;
   /** The error code for a call stopped by its signal: "cancelled" on a cancel, "timeout" at the hard stop. */
   abortCode: () => ErrorCode;
-  /** Every completed skill run, e.g. to collect its limitations. */
-  onResult?: (tool: SkillId, result: SkillResult) => void;
+  /** Every completed skill run with the input it ran on, e.g. to collect its limitations. */
+  onResult?: (tool: SkillId, result: SkillResult, input: unknown) => void;
   /**
    * The gazetteer areas the question names in its map city (scan namedAreaIds). A geo_lift call in that
    * city that names none gets them (withQuestionFocus), so every lift map ranks the reader's own area.
@@ -117,27 +126,65 @@ export function withQuestionFocus(deps: Pick<SkillRunnerDeps, "questionAreas">, 
   return { ...call, input: { ...input, focus_areas: [...areas.ids] } };
 }
 
+/** rank_candidates contexts that read a location signal: the skill's "site or city context" bullet is about these. */
+const LOCATION_CONTEXT_KINDS: ReadonlySet<string> = new Set(["site", "city", "metro"]);
+
+/** rank_candidates' fixed bullet on site and city contexts: true only when a call ranked under one (Q4). */
+const isLocationContextBullet = (text: string): boolean => /\bsite or city context\b/i.test(text);
+
+/** share_of_taste's fixed bullet on metro contexts: true only when a call read a metro context (Q4). */
+const isMetroContextBullet = (text: string): boolean => /\bmetro context\b/i.test(text);
+
+/** True when a share_of_taste input reads at least one metro context. */
+function sharesInMetros(input: unknown): boolean {
+  const metros = (input as Partial<ToolInput<"share_of_taste">> | null)?.metros;
+  return Array.isArray(metros) && metros.length > 0;
+}
+
+/** True when a rank_candidates input ranks under a site, city or metro context. */
+function ranksInPlace(input: unknown): boolean {
+  const contexts = (input as Partial<ToolInput<"rank_candidates">> | null)?.contexts;
+  return Array.isArray(contexts) && contexts.some((c) => LOCATION_CONTEXT_KINDS.has(c.kind));
+}
+
 /**
- * The skills that put evidence in the ledger and the flags they raised: the report's skill
- * limitations are Skill.limitations(flags) of these, in contracts order so the report is stable.
+ * The skills that put evidence in the ledger, the flags they raised and the inputs they ran on: the
+ * report's skill limitations are Skill.limitations(flags) of these, in contracts order so the report is
+ * stable. A fixed bullet about an input the run never sent is left out (Q4): rank_candidates' "site or
+ * city context" line shows only when a call ranked under a site, city or metro context, and
+ * share_of_taste's "metro context" line only when a call read a metro.
  */
 export class SkillsRan {
   readonly #flags = new Map<SkillId, Set<Flag>>();
+  #rankedInPlace = false;
+  #sharedInMetros = false;
 
-  add(tool: SkillId, flags: readonly Flag[]): void {
+  add(tool: SkillId, flags: readonly Flag[], input?: unknown): void {
     const seen = this.#flags.get(tool) ?? new Set<Flag>();
     for (const f of flags) seen.add(f);
     this.#flags.set(tool, seen);
+    if (tool === "rank_candidates" && ranksInPlace(input)) this.#rankedInPlace = true;
+    if (tool === "share_of_taste" && sharesInMetros(input)) this.#sharedInMetros = true;
   }
 
   limitations(): string[] {
     const lines = SkillId.options.flatMap((id) => {
       const flags = this.#flags.get(id);
-      return flags === undefined ? [] : skillOf(id).limitations([...flags]);
+      if (flags === undefined) return [];
+      const own = skillOf(id).limitations([...flags]);
+      if (id === "rank_candidates" && !this.#rankedInPlace) return own.filter((t) => !isLocationContextBullet(t));
+      if (id === "share_of_taste" && !this.#sharedInMetros) return own.filter((t) => !isMetroContextBullet(t));
+      return own;
     });
     return [...new Set(lines)];
   }
 }
+
+/** The share_of_taste bullet SkillsRan leaves out without a metro context; exported for its test. */
+export const SHARE_METRO_BULLET: string | undefined = SKILL_LIMITATIONS.share_of_taste.find(isMetroContextBullet);
+
+/** The rank_candidates bullet SkillsRan leaves out without a location context; exported for its test. */
+export const RANK_LOCATION_BULLET: string | undefined = SKILL_LIMITATIONS.rank_candidates.find(isLocationContextBullet);
 
 /** Parsed tool input is plain JSON (zod output of the tool's JSON schema). */
 type ToolArgs = EventInputOf<"tool.start">["args"];
@@ -213,8 +260,25 @@ function refuseUnlistedAudiences(deps: SkillRunnerDeps, call: SkillCall): SkillC
   return refuseCall(deps, call, `${listed} ${unlisted.length === 1 ? "is" : "are"} not in the AUDIENCES list, so no Qloo call ran; ${fix}.`);
 }
 
-/** A call refused before it ran: tool.start and tool.end as invalid input, and the message for the model. */
-function refuseCall(deps: SkillRunnerDeps, call: SkillCall, message: string): SkillCallOutcome {
+/**
+ * D7: a public-data tool whose source is not configured on this server is never run. The call is
+ * refused before it runs with PUBLIC_NOT_CONFIGURED_REASON verbatim, and the source's flag joins the
+ * report's limitations, so the reason is never paraphrased.
+ */
+function refuseNotConfigured(deps: SkillRunnerDeps, call: SkillCall): SkillCallOutcome | null {
+  const source = unconfiguredSource(call.tool, deps.publicConfigured);
+  if (source === null) return null;
+  deps.onFlag?.(NOT_CONFIGURED_FLAG[source]);
+  return refuseCall(deps, call, notConfiguredRefusal(call.tool, source), { code: "SOURCE_NOT_CONFIGURED", trace: "public_unavailable" });
+}
+
+/** A call refused before it ran: tool.start and tool.end (invalid input unless `as` says otherwise), and the message for the model. */
+function refuseCall(
+  deps: SkillRunnerDeps,
+  call: SkillCall,
+  message: string,
+  as: { code: AnalystToolErrorCode; trace: ErrorCode } = { code: "INVALID_INPUT", trace: "invalid_tool_input" },
+): SkillCallOutcome {
   const { events } = deps;
   const base = { toolCallId: call.toolCallId, tool: call.tool };
   events.emit({
@@ -237,14 +301,14 @@ function refuseCall(deps: SkillRunnerDeps, call: SkillCall, message: string): Sk
     datasetIds: [],
     findingIds: [],
     flags: [],
-    error: { code: "invalid_tool_input", message },
+    error: { code: as.trace, message },
   });
-  return { content: errorText("INVALID_INPUT", message), isError: true, result: null };
+  return { content: errorText(as.code, message), isError: true, result: null };
 }
 
 export async function runSkillCall(deps: SkillRunnerDeps, asked: SkillCall, signal: AbortSignal): Promise<SkillCallOutcome> {
   const call = withQuestionFocus(deps, asked);
-  const refusal = refusePrivatePersons(deps, call) ?? refuseUnlistedAudiences(deps, call);
+  const refusal = refuseNotConfigured(deps, call) ?? refusePrivatePersons(deps, call) ?? refuseUnlistedAudiences(deps, call);
   if (refusal !== null) return refusal;
   const { events } = deps;
   const { toolCallId } = call;
@@ -312,7 +376,7 @@ export async function runSkillCall(deps: SkillRunnerDeps, asked: SkillCall, sign
     return { content: `TOOL_FAILED: ${call.tool} failed (${code}): ${escapeAngles(message)}`, isError: true, result: null };
   }
 
-  deps.onResult?.(call.tool, result);
+  deps.onResult?.(call.tool, result, call.input);
   events.emit({
     type: "tool.end",
     toolCallId,

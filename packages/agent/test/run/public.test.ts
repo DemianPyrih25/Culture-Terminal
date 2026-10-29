@@ -1,7 +1,7 @@
 // runAgent with public data (PLAN §5.2, D40) and the nearest-job rule (D41): the scripted fake ANALYST,
 // the mock Qloo client and a scripted public-data client. Invented entities and figures only (D29); the
 // listed brand's name is read from config/listed_companies.json, never written here.
-import { Report, type EventInput, type EventInputOf } from "@ct/contracts";
+import { PUBLIC_NOT_CONFIGURED_REASON, Report, type EventInput, type EventInputOf } from "@ct/contracts";
 import { describe, expect, it } from "vitest";
 import listedConfig from "../../../../config/listed_companies.json";
 import { OUT_OF_SCOPE_CARD } from "../../src/run/agentRun";
@@ -86,6 +86,51 @@ describe("runAgent: public data", () => {
     expect(answer).not.toContain(QLOO_DISABLED_NOTICE);
     expect(ofType(events, "tool.start").find((e) => e.toolCallId === "toolu_fin")).toMatchObject({ estimatedCalls: 0 });
     parseAll(events);
+  });
+});
+
+describe("runAgent: a public source that is not configured (D7)", () => {
+  it("leaves the step out of the scan, refuses an ANALYST call with the exact reason and states it in the limitations", async () => {
+    const publicdata = fakePublicData({ configured: { sec: false } });
+    const intent = intentFor({ mentions: [{ text: LISTED_NAME, entity_type: "brand", role: "primary", public_figure: false }] });
+    const { result, events, fake } = await run({
+      intent,
+      publicdata,
+      stream: [
+        respond([planCall(), toolUse("toolu_fin", "company_financials", { brand: "R1", trigger_finding_id: null, step_id: null })]),
+        ...reportWithoutFollowup(),
+      ],
+    });
+    expect(result.status).toBe("completed");
+    expect(ofType(events, "public")).toEqual([]);
+    expect(ofType(events, "tool.start").filter((e) => e.tool === "company_financials").map((e) => e.toolCallId)).toEqual(["toolu_fin"]);
+    const context = String(fake.streamRequests[0]?.messages[0]?.content);
+    expect(context).toContain(`company_financials (FIN): skipped, ${PUBLIC_NOT_CONFIGURED_REASON.sec}.`);
+    expect(context).toMatch(/UNAVAILABLE TOOLS: .*company_financials/);
+    const answer = userTexts(fake.streamRequests[1]!).join("\n");
+    expect(answer).toContain(`SOURCE_NOT_CONFIGURED: ${PUBLIC_NOT_CONFIGURED_REASON.sec}`);
+    const end = ofType(events, "tool.end").find((e) => e.toolCallId === "toolu_fin");
+    expect(end).toMatchObject({ ok: false, error: { code: "public_unavailable" } });
+    const report = Report.parse(result.report);
+    const flagged = report.limitations.filter((l) => l.flag === "SEC_NOT_CONFIGURED");
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0]?.text).toContain(PUBLIC_NOT_CONFIGURED_REASON.sec);
+    parseAll(events);
+  });
+});
+
+describe("runAgent: a trade question (D9)", () => {
+  it("is never read as the nearest job: no coverage limitation and no 5 points off", async () => {
+    const intent = intentFor({
+      read_as: { nearest: true, not_covered: ["stock price"] },
+      safety: { allowed: true, category: "financial_advice", reframe: "Reads taste-signal health only; not investment advice." },
+    });
+    const { result, events } = await run({ intent, stream: [respond([planCall()]), ...reportWithoutFollowup()] });
+    expect(result.status).toBe("completed");
+    expect(ofType(events, "clerk")[0]?.intent.read_as).toEqual({ nearest: false, not_covered: [] });
+    const report = Report.parse(result.report);
+    expect(report.limitations.some((l) => l.flag === "READ_AS_NEAREST_JOB")).toBe(false);
+    expect(report.verdict.confidence.breakdown.some((l) => l.rule === "read_as_nearest_job")).toBe(false);
   });
 });
 

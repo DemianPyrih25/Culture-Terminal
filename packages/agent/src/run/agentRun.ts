@@ -9,6 +9,7 @@ import {
   StepIdSchema,
   type ErrorCode,
   type EventInputOf,
+  type Flag,
   type Intent,
   type Phase,
   type RegisteredEntity,
@@ -36,12 +37,14 @@ import { areaMentionsToGeo } from "./areaMentions";
 import { runAreaMetros } from "./areas";
 import { loadRunAudiences, NO_RUN_AUDIENCES } from "./audiences";
 import { ALL_SKILLS, toolLabel, UNAVAILABLE_SKILLS } from "./catalogue";
+import { conceptPartlyTagged, conceptSubstitutes, questionConcepts, unusedRefs } from "./conceptCoverage";
 import { buildRunContext, evidenceStatus, findingLeads, type RanCall } from "./context";
 import { createFollowupDeadline, type FollowupDeadline } from "./followup";
 import { gazetteer } from "./gazetteer";
 import { gateEvidence, privatePersonNames, privatePersonRefusal, runResolutionGate, type GateResolved } from "./gate";
 import { RunEvents, RunMeter } from "./meter";
 import { runMarkets, unknownMarketIssues } from "./markets";
+import { unconfiguredTools } from "./publicConfig";
 import { chainFeed, emptyScan, namedAreaIds, planScan, type ScanPlan } from "./scan";
 import { estimateSkillCalls, runSkillCall, shortError, SkillsRan, type SkillCallOutcome, type SkillRunnerDeps } from "./tools";
 
@@ -254,6 +257,11 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         },
         signal: runAbort.signal,
       }) ?? null;
+    // D7: a source the client cannot read (no SEC_USER_AGENT, no CENSUS_API_KEY) is never planned or run.
+    const publicConfigured = runPublic === null ? null : (options.publicdata?.configured ?? null);
+    const unconfigured = unconfiguredTools(publicConfigured);
+    /** Run-level limitation flags raised outside any skill: the not-configured sources the run needed. */
+    const runFlags = new Set<Flag>();
     const registry = createEntityRegistry();
     const runLedger = createRunLedger({
       emit: events.emit,
@@ -300,6 +308,8 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       events,
       qloo: runQloo,
       publicdata: runPublic,
+      publicConfigured,
+      onFlag: (flag) => runFlags.add(flag),
       ledger: runLedger,
       registry,
       geo,
@@ -319,15 +329,24 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       now,
       abortCode,
       // Only a skill that put evidence in the note adds its limitations to the report.
-      onResult: (tool, result) => {
-        if (result.evidenceIds.length > 0) skillsRan.add(tool, result.flags);
+      onResult: (tool, result, input) => {
+        if (result.evidenceIds.length > 0) skillsRan.add(tool, result.flags, input);
       },
       questionAreas: read.geo.metro === null ? null : { metro: read.geo.metro, ids: namedAreaIds(read, geo) },
     };
     const markets = await runMarkets(deps.localities, geo);
     const scan: ScanPlan = qlooEnabled
-      ? planScan(job, { intent: read, primary: gate.primary, peers: gate.peers, geo, markets, publicData: runPublic !== null })
+      ? planScan(job, {
+          intent: read,
+          primary: gate.primary,
+          peers: gate.peers,
+          geo,
+          markets,
+          publicData: runPublic !== null,
+          publicConfigured: publicConfigured ?? undefined,
+        })
       : emptyScan();
+    for (const flag of scan.flags) runFlags.add(flag);
     // Estimated before the scan starts: once its requests are in flight the probe counts them as cached.
     const scanEstimates = new Map(
       await Promise.all(scan.steps.map(async (s) => [s.toolCallId, await estimateSkillCalls(deps, s.tool, s.input)] as const)),
@@ -351,7 +370,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         { toolCallId, tool, input, phase: "scan", stepId: null, triggerFindingId: null, estimatedCalls },
         runAbort.signal,
       );
-      ranCalls.push({ tool, input, findingIds: outcome.result?.findingIds ?? [] });
+      ranCalls.push({ tool, input, findingIds: outcome.result?.findingIds ?? [], rows: outcome.result?.forModel.top_rows ?? null });
       scanTools.push(tool);
       return outcome;
     };
@@ -401,15 +420,39 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
             ran.flatMap((r) => (r.tool === tool && r.outcome.result !== null ? [r.outcome.result.forModel] : [])),
             { registry, ledger: runLedger, geo, metros: areaMetros },
           );
+        // Consecutive chained steps that follow the same step, and not one another, run in parallel
+        // (city_compare's per-city fingerprints and lift maps after find_tags); digests keep table order.
+        const groups: (typeof scan.chained)[] = [];
         for (const step of scan.chained) {
-          const input = step.input(feedFrom(step.after));
-          if (input === null) {
-            digests.push(`SCAN NOTE: ${toolLabel(step.tool)} did not run: ${toolLabel(step.after)} returned nothing it can use.`);
-            continue;
+          const last = groups.at(-1);
+          const joins = last !== undefined && last[0]!.after === step.after && !last.some((s) => s.tool === step.after);
+          if (joins) last.push(step);
+          else groups.push([step]);
+        }
+        for (const group of groups) {
+          const feed = feedFrom(group[0]!.after);
+          // Inputs and estimates first, then every call starts in table order.
+          const planned = await Promise.all(
+            group.map(async (step) => {
+              const input = step.input(feed);
+              return { step, input, estimate: input === null ? null : await estimateSkillCalls(deps, step.tool, input) };
+            }),
+          );
+          const results = await Promise.all(
+            planned.map(async ({ step, input, estimate }) => {
+              if (input === null) {
+                // A quiet step (the category retry) not running is the usual case, not news.
+                if (step.quiet === true) return { step, outcome: null, content: null };
+                return { step, outcome: null, content: `SCAN NOTE: ${toolLabel(step.tool)} did not run: ${toolLabel(step.after)} returned nothing it can use.` };
+              }
+              const outcome = await scanCall(step.toolCallId, step.tool, input, estimate);
+              return { step, outcome, content: outcome.content };
+            }),
+          );
+          for (const r of results) {
+            if (r.outcome !== null) ran.push({ tool: r.step.tool, outcome: r.outcome });
+            if (r.content !== null) digests.push(r.content);
           }
-          const outcome = await scanCall(step.toolCallId, step.tool, input, await estimateSkillCalls(deps, step.tool, input));
-          ran.push({ tool: step.tool, outcome });
-          digests.push(outcome.content);
         }
         return digests;
       })(),
@@ -426,8 +469,14 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       scan: { plan: scan, estimates: scanEstimates },
       markets,
       audiences: audiences.segments,
-      // With Qloo off, only the public-data tools can still answer, and only with a public-data client.
-      unavailable: qlooEnabled ? UNAVAILABLE_SKILLS : ALL_SKILLS.filter((s) => runPublic === null || !isPublicDataTool(s)),
+      // With Qloo off, only the public-data tools can still answer, and only with a public-data client;
+      // a public-data tool whose source is not configured never answers (D7).
+      unavailable: [
+        ...new Set([
+          ...(qlooEnabled ? UNAVAILABLE_SKILLS : ALL_SKILLS.filter((s) => runPublic === null || !isPublicDataTool(s))),
+          ...unconfigured,
+        ]),
+      ],
       qlooEnabled,
       publicData: runPublic !== null,
       caseSummary: options.parent?.caseSummary ?? null,
@@ -472,7 +521,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
               calls.map(async (call) => {
                 const meta = { ...callMeta(call.input), estimatedCalls: estimates.get(call.id) ?? null, deadline };
                 const o = await runSkillCall(deps, { toolCallId: call.id, tool: call.name, input: call.input, phase, ...meta }, signal);
-                ranCalls.push({ tool: call.name, input: call.input, findingIds: o.result?.findingIds ?? [] });
+                ranCalls.push({ id: call.id, tool: call.name, input: call.input, findingIds: o.result?.findingIds ?? [], rows: o.result?.forModel.top_rows ?? null });
                 if (turn === 1 && call.name === "resolve_entities") notePeers(o);
                 return { tool_use_id: call.id, content: o.content, ...(o.isError ? { is_error: true } : {}) };
               }),
@@ -502,6 +551,16 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         if (followupCallsLeft() <= 0 || followup?.signal.aborted === true) return [];
         const { findings, metrics } = runLedger.snapshot();
         return findingLeads({ findings, metrics, qlooEnabled, primary: gate.primary?.ref ?? null, ran: ranCalls });
+      },
+      // (c) of the owner's o03 decision: a lookup sent with other calls keeps turn 2 open once while it found
+      // a ref no call used yet, so a concept test on a tag just found is not starved by the turn closing.
+      lookupsPending: (lookups) => {
+        if (followupCallsLeft() <= 0 || followup?.signal.aborted === true) return false;
+        const ids = new Set(lookups.map((c) => c.id));
+        const found = ranCalls
+          .filter((c) => c.id !== undefined && ids.has(c.id))
+          .flatMap((c) => (c.rows ?? []).flatMap((row) => (row.ref !== null && row.values.use !== "label_only" ? [row.ref] : [])));
+        return unusedRefs(found, ranCalls).length > 0;
       },
       reviewReport: (draft, context) => {
         const check = checkReport({
@@ -575,6 +634,9 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         cardLimitations.push(`${POSITION_FAILED}: ${shortError(err)}`);
       }
       const snapshot = runLedger.snapshot();
+      // The owner's o03 decision: a concept with no tag of its own is tested on its nearest category (or
+      // not at all), and the note says so at the top; either way it counts as partly tested (D2).
+      const substitutes = conceptSubstitutes({ concepts: questionConcepts(read), calls: ranCalls });
       const context: ReportContext = {
         runId: options.runId,
         question,
@@ -593,7 +655,18 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         subject: gate.primary?.ref ?? null,
         peers: gate.peers.map((p) => p.ref),
         // D41: a question read as its nearest job says what the data does not cover, and costs 5 points.
+        // normalizeIntent keeps a financial_advice question off this path (D9): its reframe already says so.
         readAs: read.read_as.nearest ? { notCovered: read.read_as.not_covered } : null,
+        runFlags: [...runFlags],
+        // D2: part of the question's concept never tested by a tag some call used.
+        conceptPartlyTagged:
+          substitutes.length > 0 ||
+          conceptPartlyTagged({
+            concepts: questionConcepts(read),
+            calls: ranCalls,
+            findings: snapshot.findings,
+          }),
+        conceptSubstitutes: substitutes,
       };
       report = check !== null ? assembleReport({ ...context, check }) : buildIncompleteReport({ ...context, reason });
     } catch (err) {

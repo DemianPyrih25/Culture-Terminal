@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import {
+  CONFIDENCE_PENALTY,
   compileMnemonic,
   confidenceBand,
   isVerdictTag,
@@ -287,6 +288,17 @@ describe("Intent (CLERK structured output)", () => {
     expect(wrongPillar.mnemonic).toBe("JUNIPER COLA <BRAND> HLTH");
   });
 
+  it("never reads a financial_advice question as the nearest job (D9)", () => {
+    const readAs = { nearest: true, not_covered: ["stock price"] };
+    const trade = normalizeIntent({
+      ...intent,
+      read_as: readAs,
+      safety: { allowed: true, category: "financial_advice", reframe: "Juniper Cola taste-signal health" },
+    });
+    expect(trade.read_as).toEqual({ nearest: false, not_covered: [] });
+    expect(normalizeIntent({ ...intent, read_as: readAs }).read_as).toEqual(readAs);
+  });
+
   it("compiles the mnemonic for every job shape", () => {
     expect(compileMnemonic({ ...intent, job: "head_to_head" })).toBe("JUNIPER COLA VS AURORA FOOTWEAR");
     const geo = { ...intent.geo, metro: "nashville" as const, area: "Marlowe Ridge" };
@@ -349,5 +361,9 @@ describe("Report", () => {
 
   it("bands confidence at 75 and 50", () => {
     expect([100, 75, 74, 50, 49, 0].map(confidenceBand)).toEqual(["HIGH", "HIGH", "MED", "MED", "LOW", "LOW"]);
+  });
+
+  it("keeps a partly tested concept out of the HIGH band on its own (D2)", () => {
+    expect(confidenceBand(100 - CONFIDENCE_PENALTY.concept_partly_tagged)).toBe("MED");
   });
 });

@@ -531,7 +531,7 @@ function brandCollab(input: Input): Number_[] {
   return out;
 }
 
-/** The top creator of each kind: ranks compare only within a kind. */
+/** The top artist or podcast of each kind: ranks compare only within a kind. */
 function creatorFit(input: Input): Number_[] {
   const out: Number_[] = [];
   const hood = findWhere(input, isNeighbourhood);
@@ -554,7 +554,7 @@ function creatorFit(input: Input): Number_[] {
   const scored = findWhere(input, isScored);
   const rows = scored ? scored.data.payload.groups.flatMap((g) => g.rows).filter((r) => r.rank !== null) : [];
   const top = rows[0];
-  if (scored && top) out.push(one(`creator:${scored.figure.datasetId}`, top.label, "Best-fit creator", `#1 of the ${rows.length} scored on one scale`, scored.figure.footnote, { variant: "name" }));
+  if (scored && top) out.push(one(`creator:${scored.figure.datasetId}`, top.label, "Best fit", `#1 of the ${rows.length} scored on one scale`, scored.figure.footnote, { variant: "name" }));
   return out;
 }
 

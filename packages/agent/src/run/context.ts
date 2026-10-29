@@ -1,6 +1,8 @@
 import {
   AgeBucket,
   JOB_MNEMONIC,
+  PUBLIC_DATA_TOOLS,
+  type DigestRow,
   type Evidence,
   type Finding,
   type FindingKind,
@@ -121,10 +123,12 @@ const SUBJECT_ID = /^[\w:.,-]{1,48}$/;
 const SUBJECTS_MAX = 3;
 
 /**
- * Tools whose result is only refs for a later call. Turn 2 is one response and turn 3 allows only
- * submit_report, so nothing could use those refs before the report: such a lead cannot change it.
+ * Tools whose result is only refs for a later call, so a lead to them alone cannot change the report.
+ * find_tags is not one of them: a turn-2 tag search whose tag no call used yet keeps turn 2 open once
+ * (the owner's o03 decision, option c), so an empty tag search's lead (search a broader category) can
+ * still reach the concept test.
  */
-const REF_ONLY_TOOLS: ReadonlySet<SkillId> = new Set(["resolve_entities", "find_tags"]);
+const REF_ONLY_TOOLS: ReadonlySet<SkillId> = new Set(["resolve_entities"]);
 
 /**
  * Tools a follow-up can run again on subjects an earlier call already read, by changing the input
@@ -158,9 +162,13 @@ const isEntityOrTag = (id: string): boolean => isId("R", id) || isId("T", id);
 
 /** A skill call that already ran (opening scan, wave 1), with the findings it issued. */
 export interface RanCall {
+  /** The tool call id, for an ANALYST call (lookupsPending reads its own lookups back); absent for scan calls. */
+  id?: string;
   tool: SkillId;
   input: unknown;
   findingIds: readonly string[];
+  /** The digest rows it returned; null when it failed or was refused (conceptPartlyTagged reads find_tags rows). */
+  rows?: readonly DigestRow[] | null;
 }
 
 export interface FindingLeadsInput {
@@ -181,6 +189,12 @@ function stringsIn(value: unknown, out = new Set<string>()): Set<string> {
   else if (typeof value === "object" && value !== null) for (const v of Object.values(value)) stringsIn(v, out);
   return out;
 }
+
+/** The finding a call cites as its trigger, or null. */
+const triggerOfCall = (input: unknown): string | null =>
+  typeof input === "object" && input !== null && typeof (input as { trigger_finding_id?: unknown }).trigger_finding_id === "string"
+    ? (input as { trigger_finding_id: string }).trigger_finding_id
+    : null;
 
 /** 1 for EMPTY_RESULT, ranked after every other kind. */
 const emptyRank = (finding: Pick<Finding, "kind">): number => (finding.kind === "EMPTY_RESULT" ? 1 : 0);
@@ -225,7 +239,12 @@ export function findingLeads(input: FindingLeadsInput): FollowupLead[] {
       continue;
     }
     const refs = [...new Set(finding.metricIds.flatMap((id) => metrics.get(id)?.subjectRefs ?? []))].filter((r) => SUBJECT_ID.test(r));
-    const covered = ran.some((c) => c.tool === tool && !c.findingIds.includes(finding.id) && refs.every((r) => c.named.has(r)));
+    // An empty tag search's lead is covered only by a tag search citing it: another one, such as the scan's
+    // category retry, searched other words, so the part the finding says is missing may still be found.
+    const covered =
+      refs.length === 0 && tool === "find_tags"
+        ? ran.some((c) => c.tool === tool && triggerOfCall(c.input) === finding.id)
+        : ran.some((c) => c.tool === tool && !c.findingIds.includes(finding.id) && refs.every((r) => c.named.has(r)));
     const vary = covered && refs.length > 0 ? CONTEXT_FIELDS[tool] : undefined;
     if (covered && vary === undefined) continue;
     const named = refs.filter((r) => (CONTEXT_FIELDS[tool] === undefined ? !AGE_BUCKETS.has(r) : isEntityOrTag(r)));
@@ -244,7 +263,13 @@ function budgetBlock(input: RunContextInput): string {
   const { limits } = input;
   const s = (ms: number) => `${Math.round(ms / 1000)} s`;
   if (!input.qlooEnabled) {
-    const publicTools = input.publicData === true ? " Only company_financials and area_economics still read SEC and Census data." : "";
+    // A public-data tool whose source is not configured is on the UNAVAILABLE list (D7), so it is not named here.
+    const live = PUBLIC_DATA_TOOLS.filter((t) => !input.unavailable.includes(t));
+    const sources = live.map((t) => (t === "company_financials" ? "SEC" : "Census")).join(" and ");
+    const publicTools =
+      input.publicData === true && live.length > 0
+        ? ` Only ${live.join(" and ")} still ${live.length === 1 ? "reads" : "read"} ${sources} data.`
+        : "";
     return [
       "BUDGET:",
       `- Qloo: disabled for this run. Every Qloo tool answers with no data, so the note can only be insufficient_evidence.${publicTools}`,

@@ -1,7 +1,7 @@
 import type { SlopeLine, SlopePayload, SlopePoint } from "@ct/contracts";
 import { FigureFrame, figureLabel, type FigureMeta } from "./figure-frame";
 import { FigureTable, type TableCell, type TableColumn, type TableRow } from "./figure-table";
-import { formatNumber, reasonLabel, sentenceCase, type NumberStyle } from "./format";
+import { formatNumber, reasonLabel, scoreLabelParts, sentenceCase, type NumberStyle } from "./format";
 import { clamp, fitText, linear, niceDomain, px, textWidth } from "./scale";
 
 /**
@@ -107,7 +107,7 @@ export function shiftHead(data: SlopePayload): string {
 }
 
 function scoreHead(data: SlopePayload): string | null {
-  return data.scoreLabel ? data.scoreLabel.replace(/\s*\([^)]*\)\s*$/, "") : null;
+  return data.scoreLabel ? scoreLabelParts(data.scoreLabel).head : null;
 }
 
 /**
@@ -410,7 +410,7 @@ function describe(data: SlopePayload, highlight: ReadonlySet<string>): string {
 function lineTitle(line: SlopeLine, data: SlopePayload, style: NumberStyle): string {
   const points = line.points.map((p, i) => `${data.axes[i]?.label ?? ""} ${slopeValueText(p, data.scale, style)}`).join(", ");
   const shift = shiftText(line, data.scale, style);
-  const score = line.score !== null && data.scoreLabel ? `; ${data.scoreLabel} ${formatNumber(line.score, "score", { digits: 0 })}` : "";
+  const score = line.score !== null && data.scoreLabel ? `; ${scoreLabelParts(data.scoreLabel).name} ${formatNumber(line.score, "score", { digits: 0 })}` : "";
   return `${line.label}: ${points}${shift ? `; ${shift.replace("▲", "up").replace("▼", "down")}` : ""}${score}`;
 }
 
@@ -420,11 +420,16 @@ function lineTitle(line: SlopeLine, data: SlopePayload, style: NumberStyle): str
  */
 export function slopeTableSpec(data: SlopePayload, caption: string, style: NumberStyle, highlight = slopeHighlight(data)) {
   const withScore = data.scoreLabel !== null && data.lines.some((l) => l.score !== null);
+  // D10: the rows keep the payload's order (by score, best first); the score's note says how that order
+  // can differ from the last axis's rank order, so the table states what each order is sorted by.
+  const parts = data.scoreLabel === null ? null : scoreLabelParts(data.scoreLabel);
+  const note = parts === null || parts.note === null ? "" : ` ${parts.head} ${parts.note.replace(/\.$/, "")}.`;
+  const sorted = withScore && parts !== null ? ` Rows are sorted by ${parts.head.toLowerCase()}, best first.${note}` : "";
   const columns: TableColumn[] = [
     { label: "Name" },
     ...data.axes.map((a) => ({ label: data.scale === "rank" ? `${a.label} (rank)` : a.label, numeric: true })),
     { label: `Shift vs ${data.axes[0]?.label ?? "start"}`, numeric: true },
-    ...(withScore ? [{ label: data.scoreLabel!, numeric: true }] : []),
+    ...(withScore ? [{ label: parts!.name, numeric: true }] : []),
     { label: "Climber" },
   ];
   const rows: TableRow[] = data.lines.map((line) => {
@@ -457,5 +462,5 @@ export function slopeTableSpec(data: SlopePayload, caption: string, style: Numbe
     ];
     return { key: line.key, cells };
   });
-  return { caption, columns, rows };
+  return { caption: `${caption}${sorted}`, columns, rows };
 }

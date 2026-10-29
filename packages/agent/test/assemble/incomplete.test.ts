@@ -60,7 +60,7 @@ describe("buildIncompleteReport", () => {
     recordScorecard(fx.ledger, plan(), null);
     const report = buildIncompleteReport({ ...context(fx.ledger.snapshot()), reason: null });
     expect(report.verdict.thesis).toBe(
-      "The run stopped before the ANALYST submitted its note. The exhibits show every dataset QUANT computed; no interpretation is offered.",
+      "The run stopped before the AI finished writing its answer. The exhibits show every result our code computed; no interpretation is offered.",
     );
   });
 

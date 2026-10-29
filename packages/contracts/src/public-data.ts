@@ -28,6 +28,17 @@ export const PUBLIC_SOURCE_LABEL: Readonly<Record<PublicSource, string>> = {
   census: "US Census Bureau",
 };
 
+/**
+ * The exact reason a public source cannot be read on this server (D7 of the Part 9 close-out). When a
+ * source is not configured, code does not plan or run its tool in the opening scan, adds the
+ * SEC_NOT_CONFIGURED / CENSUS_NOT_CONFIGURED limitation with this text, and refuses an ANALYST call to
+ * the tool with this text. Nothing paraphrases it.
+ */
+export const PUBLIC_NOT_CONFIGURED_REASON: Readonly<Record<PublicSource, string>> = {
+  sec: "SEC EDGAR is not configured on this server",
+  census: "Census ACS is not configured on this server",
+};
+
 // Call metadata ---------------------------------------------------------------------------------------------
 
 /**
@@ -64,7 +75,7 @@ export interface PublicResult<T> {
  * Why a public-data call failed. The client throws an error whose `name` is "PublicDataError" and whose
  * `code` is one of these, so skills can map it to UNAVAILABLE with a plain reason without importing the
  * client (see publicDataErrorCode).
- * - not_configured: live SEC needs SEC_USER_AGENT and it is not set
+ * - not_configured: live SEC needs SEC_USER_AGENT, live Census needs CENSUS_API_KEY, and it is not set
  * - not_found: unknown ticker or CIK, or no Census row for the geography
  * - rate_limited: 429 after retries; unavailable: network, 5xx or a 403 block after retries
  * - bad_request: other 4xx (e.g. an unknown Census variable); invalid_response: the body failed to parse

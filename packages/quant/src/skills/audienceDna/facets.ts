@@ -1,4 +1,5 @@
 import type { RegisteredEntity } from "@ct/contracts";
+import { isNoiseTag } from "../../tagNoise";
 
 /**
  * S3 facet tags (SPEC §5.3 S3, probe G13): the entities' /search tag lists (fetched by /entities,
@@ -63,12 +64,17 @@ export function compareFacets(a: string, b: string): number {
   return ra - rb || (a < b ? -1 : a > b ? 1 : 0);
 }
 
-/** An entity's distinct tags as facet tags, in Qloo's order. */
+/**
+ * An entity's distinct tags as facet tags, in Qloo's order. Noise tags (a place name, or a nationality
+ * or generic word among music tags) go through the shared filter (ANSWER_QUALITY §10) and are left out,
+ * so they never take a facet row, a shared/only slot or a distinctive count.
+ */
 export function facetTags(entity: Pick<RegisteredEntity, "tags">): FacetTag[] {
   const seen = new Set<string>();
   const out: FacetTag[] = [];
   for (const t of entity.tags) {
     if (seen.has(t.tagId)) continue;
+    if (isNoiseTag({ name: t.name, tagId: t.tagId, type: t.type })) continue;
     seen.add(t.tagId);
     out.push({ tagId: t.tagId, name: t.name, facet: facetOf(t) });
   }

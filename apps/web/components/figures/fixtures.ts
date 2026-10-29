@@ -898,7 +898,7 @@ export const FIXTURE_SOURCES: Readonly<Record<string, FigureSource>> = {
     requestId: "0002abab0000f002",
     href: null,
   },
-  priors: { text: "Source: ANALYST priors recorded before any data", requestId: null, href: null },
+  priors: { text: "Source: the AI's expectations, recorded before any data", requestId: null, href: null },
 };
 
 /** Every fixture envelope, for schema tests. */

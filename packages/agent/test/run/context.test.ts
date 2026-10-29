@@ -305,13 +305,14 @@ describe("findingLeads", () => {
     expect(found.map((l) => l.findingId)).toEqual(["F3", "F4", "F2"]);
   });
 
-  it("leaves out tools that only return refs, which nothing could use before the report", () => {
+  it("leaves out resolve_entities, whose refs alone cannot change the report, and lists an empty tag search last", () => {
     const found = leads([
       finding("F1", "EMPTY_RESULT", "resolve_entities", [], "high"),
       finding("F2", "EMPTY_RESULT", "find_tags", [], "high"),
       finding("F3", "OUTSIDE_CATEGORY_NEIGHBOUR", "peer_landscape", ["M1"]),
     ]);
-    expect(found.map((l) => l.findingId)).toEqual(["F3"]);
+    // A tag search found in turn 2 keeps the turn open for the call that uses it (the owner's o03 decision, c).
+    expect(found.map((l) => l.findingId)).toEqual(["F3", "F2"]);
   });
 
   it("leaves out a lead an earlier call of its tool already ran on all its ids, unless that call issued it", () => {
@@ -340,6 +341,15 @@ describe("findingLeads", () => {
     const empty = finding("F3", "EMPTY_RESULT", "share_of_taste", [], "high");
     expect(leads([empty], { ran: [share] })).toEqual([]);
     expect(leads([empty])).toHaveLength(1);
+    // An empty tag search stays a lead after another tag search (the scan's category retry), until a search cites it.
+    const tags = finding("F4", "EMPTY_RESULT", "find_tags", [], "high");
+    const retry = (trigger: string | null): RanCall => ({
+      tool: "find_tags",
+      input: { concepts: [{ text: "Sea Snacks", scope: "brand" }], trigger_finding_id: trigger, step_id: null },
+      findingIds: [],
+    });
+    expect(leads([tags], { ran: [retry(null)] }).map((l) => l.findingId)).toEqual(["F4"]);
+    expect(leads([tags], { ran: [retry("F4")] })).toEqual([]);
   });
 
   it("keeps a lead on ids an earlier call read when its tool's contexts can change, saying what to change", () => {

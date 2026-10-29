@@ -460,7 +460,7 @@ function finish(run: SlateRun, target: DigestTarget, status: SkillStatus, rows: 
 async function runSponsorSlate(input: SlateInput, ctx: SkillCtx): Promise<SkillResult> {
   const out: DigestTarget = { tool: "sponsor_slate", step: input.step_id };
   const seed = ctx.registry.entity(input.seed);
-  if (seed === null) return skillErrorResult(out, `${input.seed} is not in the registry; resolve the artist or person first.`);
+  if (seed === null) return skillErrorResult(out, `${input.seed} is not in the registry; resolve the artist, person or brand first.`);
 
   const shortlist = usableShortlist(input, ctx.registry, seed);
   const run: SlateRun = {

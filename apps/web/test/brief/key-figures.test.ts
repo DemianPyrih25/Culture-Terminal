@@ -61,9 +61,9 @@ describe("keyFigureText", () => {
 
   it("names a tag, its city and NEW from a Block DNA label", () => {
     const tag = metric({ key: "block.rank_delta", label: "rank gain vs Nashville: Listening room (WHO venue-goer taste tag, East Nashville)", subjectRefs: ["T9", "east", "nashville"], display: "+42 · NEW", unit: "delta", comparator: "CITY" });
-    expect(keyFigureText(LEDGER, "tenant_mix", tag, null, "CITY")).toEqual({ value: "+42", label: "Listening room", comparator: "NEW · rank vs Nashville" });
+    expect(keyFigureText(LEDGER, "tenant_mix", tag, null, "CITY")).toEqual({ value: "+42", label: "Listening room", comparator: "new here · rank vs Nashville" });
     const fresh = metric({ key: "block.new_tag", label: "NEW SOUND music tags in East Nashville (area music top 20, absent from the Nashville music top 50)", subjectRefs: ["east", "nashville"], display: "6 of 20 in the area music top 20", unit: "count", comparator: "CITY" });
-    expect(keyFigureText(LEDGER, "area_profile", fresh, null, "CITY")).toEqual({ value: "6 of 20", label: "New music tags", comparator: "area music top 20 · vs Nashville" });
+    expect(keyFigureText(LEDGER, "area_profile", fresh, null, "CITY")).toEqual({ value: "6 of 20", label: "New music tags", comparator: "vs Nashville" });
   });
 
   it("names a neighbourhood's lift and its baseline, and keeps the slot for the metro-wide one", () => {

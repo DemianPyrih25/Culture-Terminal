@@ -189,6 +189,12 @@ function layoutNotices(grid: ScoreGrid, layout: RankLayout, specs: readonly Cont
   if (siteAndCity && pair === null) {
     return ["Tenant fit needs exactly a site and the city of the same metro; this call shows a rank slope instead."];
   }
+  if (layout.kind === "tenant") {
+    // D10 of the Part 9 close-out: the two orders can disagree, so the answer says which one it reads.
+    return [
+      "Rows are sorted by tenant fit, which weighs the site rank and the rise over the city; site and city are ranks in each context, so a candidate can sit higher by tenant fit and lower by site rank. Say which order you mean.",
+    ];
+  }
   return [];
 }
 

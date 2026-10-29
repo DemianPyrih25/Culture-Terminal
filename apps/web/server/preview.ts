@@ -269,7 +269,7 @@ const JOB_BASELINE: Readonly<Record<Job, string>> = {
   audience_discovery: "vs US baseline",
   taste_twins: "each area vs its own city",
   brand_collab: "partners scored on one scale",
-  creator_fit: "one scale per kind of creator",
+  creator_fit: "one scale per kind: artists, podcasts",
   launch_test: "vs the concept's 50th result",
   city_compare: "each city vs the other map cities",
 };
@@ -301,7 +301,7 @@ function scopeOf(intent: Intent): string {
     case "brand_collab":
       return "US · partner brands across categories";
     case "creator_fit":
-      return "US · public figures, artists & podcasts";
+      return "US · artists & podcasts only";
     case "launch_test":
       return "US · the concept's audience";
     case "city_compare":

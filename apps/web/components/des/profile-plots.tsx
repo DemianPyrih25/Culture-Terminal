@@ -25,10 +25,10 @@ export function DivergingRows({ rows, label }: { rows: readonly FanRow[]; label:
       <span aria-hidden="true" className="absolute inset-y-0 left-1/2 w-px bg-ink-3" />
       {rows.map((row) => {
         const v = row.value;
-        const name = <span className="truncate type-body text-ink">{row.label}</span>;
+        const name = <span className="min-w-0 type-body text-ink [overflow-wrap:anywhere]">{row.label}</span>;
         const value = v === null ? null : <span className="shrink-0 type-label text-ink-2 tabular-nums">{signed(v)}</span>;
         return (
-          <div key={row.key} className="grid h-9 grid-cols-2 items-center" data-row={row.label} aria-hidden="true">
+          <div key={row.key} className="grid min-h-9 grid-cols-2 items-center py-1" data-row={row.label} aria-hidden="true">
             {v === null ? (
               <>
                 <span className="flex min-w-0 justify-end pr-3">{name}</span>
@@ -104,11 +104,11 @@ export function NeighbourColumns({ columns }: { columns: readonly NeighbourColum
                   <span className="flex min-w-0 flex-col gap-0.5">
                     {row.href ? (
                       <Link href={row.href} prefetch={false} className="group inline-flex min-w-0 items-center gap-1 rounded-sm type-body text-ink hover:text-accent">
-                        <span className="truncate">{row.name}</span>
+                        <span className="min-w-0 [overflow-wrap:anywhere]">{row.name}</span>
                         <Icon name="arrow-up-right" size={12} className="shrink-0 text-ink-3 group-hover:text-accent" />
                       </Link>
                     ) : (
-                      <span className="truncate type-body text-ink">{row.name}</span>
+                      <span className="min-w-0 type-body text-ink [overflow-wrap:anywhere]">{row.name}</span>
                     )}
                     {row.gem ? <Tag preset="hidden-gem" /> : null}
                   </span>
@@ -144,7 +144,7 @@ export function TravelBars({ rows, label }: { rows: readonly TravelRow[]; label:
         {rows.map((row) => (
           <li key={row.label} className="flex min-h-11 items-center gap-4 max-md:gap-3">
             <span className="flex w-[200px] shrink-0 flex-col max-md:w-[148px]">
-              <span className="truncate type-body text-ink">{row.label}</span>
+              <span className="min-w-0 type-body text-ink [overflow-wrap:anywhere]">{row.label}</span>
               {row.gem ? <Tag preset="hidden-gem" className="md:hidden" /> : null}
             </span>
             <span className="relative h-3 min-w-0 flex-1 rounded-xs bg-sunken">

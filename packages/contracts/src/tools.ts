@@ -283,8 +283,8 @@ export const GeoLiftInput = z
   .refine((i) => distinct(i.concept_tags) && distinct(i.concept_entities) && distinct(i.focus_areas ?? []), noDuplicates);
 
 /**
- * A whole city for Block DNA: its fingerprint read against the national set (comparator BASELINE).
- * city_compare uses it for every city, map city or not.
+ * A whole city for Block DNA: its fingerprint read against the other map cities pooled (comparator
+ * BASELINE), never against the nation. city_compare uses it for every city, map city or not.
  */
 export const CityAreaArg = z.strictObject({
   kind: z.literal("city"),
@@ -295,11 +295,20 @@ export type CityAreaArg = z.infer<typeof CityAreaArg>;
 export const BlockArea = z.discriminatedUnion("kind", [...AreaArg.options, CityAreaArg]);
 export type BlockArea = z.infer<typeof BlockArea>;
 
-export const BlockDnaInput = z.strictObject({
-  area: BlockArea,
-  include_brands: z.boolean().describe("Also fetch local brands that over-index in the area (1 extra call)."),
-  ...callMeta,
-});
+export const BlockDnaInput = z
+  .strictObject({
+    area: BlockArea,
+    include_brands: z.boolean().describe("Also fetch local brands that over-index in the area (1 extra call)."),
+    concept_tags: z
+      .array(T)
+      .max(4)
+      .optional()
+      .describe(
+        "Taxonomy tags of the question's concept (no extra call): each gets a citable rank metric in the area's profile, or the reason it has none. For a city area it is the concept's rank against the other map cities.",
+      ),
+    ...callMeta,
+  })
+  .refine((i) => distinct(i.concept_tags ?? []), noDuplicates);
 
 export const CrossDomainInput = z
   .strictObject({
@@ -313,7 +322,7 @@ export const CrossDomainInput = z
 
 export const SponsorSlateInput = z
   .strictObject({
-    seed: R.describe("The artist or person being sponsored."),
+    seed: R.describe("The artist or person being sponsored, or for brand_collab the subject brand whose partners are sought."),
     categories: z.array(SponsorCategory).min(1).max(6),
     shortlist: z.array(R).max(10).describe("Brands to score alongside the discovered ones; may be empty."),
     markets: z.array(MarketId).max(4).describe("Tour or launch markets to check alignment in; may be empty."),
@@ -567,8 +576,10 @@ export const ANALYST_TOOLS = {
       "profiled). Returns rank-delta bars by family (WHO venue-goer taste tags, VIBE, WHAT, SOUND), NEW tags " +
       "absent city-wide, and local brand refs to feed rank_candidates. If the area polygon fails, code falls back to " +
       "a point, then a text query (a CODE FALLBACK that lowers confidence). An area of kind city (a market id) " +
-      "gives the city's fingerprint against the national set instead, same call count, pinned for map cities. " +
-      "These are venue-goer taste signals, not residents or census data.",
+      "gives the city's fingerprint against the other map cities pooled instead (never the nation), same call " +
+      "count, pinned for map cities. concept_tags cost no extra call: each gets a rank metric in this area's " +
+      "profile (for a city, its rank against the other map cities), or the reason it has none when the tag is " +
+      "not among the tags read. These are venue-goer taste signals, not residents or census data.",
   }),
 
   cross_domain: defineTool({
@@ -581,7 +592,9 @@ export const ANALYST_TOOLS = {
       "Cultural neighbourhood: what else this audience loves in each domain (artist means music; podcast, tv_show, " +
       "brand, movie). Costs 1 Qloo call per domain, with explainability and a popularity cap. Returns a ranked list " +
       "per domain with FIT, popularity, UNDER-THE-RADAR (fit minus popularity) and explainability edges. " +
-      "Explainability is attribution inside Qloo's model, not causation. seed_tags must be taxonomy tags.",
+      "Explainability is attribution inside Qloo's model, not causation. seed_tags must be taxonomy tags. The " +
+      "brand domain leaves out the brand seeds' own category (the top-level branch of their genre:brand tag), " +
+      "so rivals are not offered as partners.",
   }),
 
   sponsor_slate: defineTool({
@@ -591,7 +604,7 @@ export const ANALYST_TOOLS = {
     endpoints: ["/v2/insights", "/v2/tags"],
     input: SponsorSlateInput,
     description:
-      "Sponsor Slate for an artist or person: the best-fitting brand in each sponsor category. Costs 1 Qloo call per " +
+      "Sponsor Slate for an artist, person or brand: the best-fitting brand in each sponsor category. Costs 1 Qloo call per " +
       "category (+1 cached tag lookup per category without a pinned tag), 1 one-scale scoring call (the top two per " +
       "category plus your shortlist) and 1 per market. Returns a " +
       "Slate (best fit and runner-up per category, FIT, popularity, UNDER-THE-RADAR flag, top markets), a Quadrant " +

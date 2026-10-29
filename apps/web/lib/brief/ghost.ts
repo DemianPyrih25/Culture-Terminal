@@ -31,7 +31,7 @@ const GHOST_CATEGORY_LABEL: Readonly<Record<GhostPickCategory, string>> = {
   neighbourhoods: "Neighbourhoods",
   tenants: "Tenants",
   partners: "Partners",
-  creators: "Creators",
+  creators: "Artists & podcasts",
 };
 
 /** One name in a column. */

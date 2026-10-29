@@ -34,7 +34,7 @@ import { SKILL_LIMITATIONS } from "../limitations";
 import { addSkillEvidence, attemptAllKeepingFailures, countUncached, type Attempt } from "./common";
 import { skillErrorResult, skillResult, type DigestTarget } from "./digest";
 import { displayRanks, fixed2, rankText, safeFullName, safeName } from "./format";
-import { analyseSeries, TRENDING_WINDOW, type NoSignalCause, type SeriesAnalysis } from "./momentum/series";
+import { analyseSeries, LABEL_MAX_P, TRENDING_WINDOW, type NoSignalCause, type SeriesAnalysis } from "./momentum/series";
 
 /**
  * S4 momentum (SPEC §5.3 S4, probe G11): one /v2/trending call per brand or TV show over the frozen
@@ -178,6 +178,21 @@ function pText(p: number): string {
   return p < 0.001 ? "<0.001" : p.toFixed(3);
 }
 
+/** Mann–Kendall τ in words (Q1 of the Part 9 close-out): how steady the direction is, not how large the change. */
+export function tauWords(tau: number): string {
+  const size = Math.abs(tau);
+  if (size >= 0.6) return tau > 0 ? "a steady rise" : "a steady fall";
+  if (size >= 0.3) return tau > 0 ? "a mostly steady rise" : "a mostly steady fall";
+  return "no steady direction";
+}
+
+/** The Mann–Kendall p-value in words; the label rule reads below 0.1 as a consistent direction. */
+export function pWords(p: number): string {
+  if (p < 0.01) return "very unlikely to be chance";
+  if (p < LABEL_MAX_P) return "unlikely to be chance";
+  return "could be chance";
+}
+
 function recordEvidence(run: MomentumRun, outcome: Extract<Outcome, { kind: "series" }>): EvidenceId | null {
   const { entity, analysis, meta } = outcome;
   const flags: Flag[] = ["TRENDING_HISTORICAL_WINDOW"];
@@ -260,11 +275,11 @@ function addEntityMetrics(
   });
   const tau = addStaleMetric(run, {
     key: "mom.mann_kendall_tau",
-    label: `Mann–Kendall τ of ${name}'s weekly series`,
+    label: `trend strength of ${name}'s weekly series (how steadily it rose or fell)`,
     subjectRefs,
     value: trend.tau,
     reason: "no_signal",
-    display: signed(trend.tau, 2),
+    display: `${signed(trend.tau, 2)} (${tauWords(trend.tau)})`,
     unit: "stat",
     formulaId: "mom.mann_kendall",
     evidenceIds,
@@ -273,11 +288,11 @@ function addEntityMetrics(
   });
   const p = addStaleMetric(run, {
     key: "mom.mann_kendall_p",
-    label: `Mann–Kendall p of ${name}'s weekly series`,
+    label: `trend p-value of ${name}'s weekly series (how likely the direction is chance)`,
     subjectRefs,
     value: trend.p,
     reason: "no_signal",
-    display: pText(trend.p),
+    display: `${pText(trend.p)} (${pWords(trend.p)})`,
     unit: "stat",
     formulaId: "mom.mann_kendall",
     evidenceIds,
@@ -487,7 +502,7 @@ async function runMomentum(input: MomentumInput, ctx: SkillCtx): Promise<SkillRe
     });
     datasetIds.push(dataset.id);
     // First, so it is the last notice a tight digest drops.
-    notices.unshift(`Trending window ${windowText()} is historical: every momentum metric is STALE; cite it with {{WINDOW}}.`);
+    notices.unshift(`Trending window ${windowText()} is historical: every momentum figure describes that past window, not today; name the window with {{WINDOW}} and do not write the badge word.`);
   }
 
   return skillResult(

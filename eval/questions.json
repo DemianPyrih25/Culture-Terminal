@@ -288,22 +288,22 @@
     {
       "id": "o02",
       "set": "offlist",
-      "desk": "audience",
-      "job": "audience_discovery",
+      "desk": "investment",
+      "job": "brand_health",
       "question": "How many Stanley tumblers were sold last holiday season, and who is buying them?",
       "expected": {
         "handling": "nearest",
         "not_covered": [
           "unit sales"
         ],
-        "note": "Unit sales are not in the data. Read as the Stanley audience's cultural neighbourhood, saying plainly that sales are not covered."
+        "note": "Unit sales are not in the data. Read as a brand-health read of Stanley (its audience, rivals and taste momentum), saying plainly that sales are not covered."
       }
     },
     {
       "id": "o03",
       "set": "offlist",
-      "desk": "marketing",
-      "job": "market_selection",
+      "desk": "investment",
+      "job": "launch_test",
       "question": "What price should we set for our new oat-milk latte line, and which US cities will buy the most of it?",
       "expected": {
         "handling": "nearest",
@@ -311,7 +311,7 @@
           "pricing",
           "sales volume"
         ],
-        "note": "Prices and sales volumes are not in the data. Read as which markets' taste fits the concept, saying plainly that pricing and sales are not covered."
+        "note": "Prices and sales volumes are not in the data. Read as a launch test of the concept (its taste, analogs and the markets that fit it), saying plainly that pricing and sales are not covered."
       }
     }
   ]

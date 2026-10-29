@@ -229,6 +229,17 @@ describe("audience_dna: profiles and facets", () => {
     expect(profile.groups.map((g) => g.label)).toEqual(["Aesthetic", "Emotional tone", "Lifestyle", "Genre", "Core value"]);
   });
 
+  it("leaves noise tags (a place name, a generic music word) out of the facet tags through the shared filter", () => {
+    const tags = facetTags({
+      tags: [
+        { tagId: tag("lifestyle", "slow_living"), name: "slow living", type: "urn:tag:lifestyle" },
+        { tagId: tag("genre", "usa"), name: "Usa", type: "urn:tag:genre" },
+        { tagId: "urn:tag:genre:music:seen_live", name: "seen live", type: "urn:tag:genre:music" },
+      ],
+    });
+    expect(tags.map((t) => t.name)).toEqual(["slow living"]);
+  });
+
   it("calls a tag in the SPEC facets distinctive when fewer than half of the peers with known tags carry it", () => {
     const target = tagsOf(ALPHA);
     const sets = [BETA, GAMMA, DELTA].map((s) => new Set(s.tags));

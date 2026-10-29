@@ -1,4 +1,4 @@
-import { AgeBucket, type EntityRef, type Job, type Metric, type MetricId, type Report } from "@ct/contracts";
+import { AgeBucket, type EntityRef, type Job, type Metric, type MetricId, type Report, type SkillId } from "@ct/contracts";
 
 /**
  * The KPI strip per job (SPEC §7.2): each job's key figures, picked by metric key (Metric.key), so
@@ -27,6 +27,8 @@ interface KpiPick {
 export interface KpiFocus {
   subject?: EntityRef | null;
   peers?: readonly EntityRef[];
+  /** Skills that put evidence in the note: a slot with `requires` is in the strip only when its skill is among them. */
+  ran?: ReadonlySet<SkillId>;
 }
 
 interface KpiSlot {
@@ -35,6 +37,12 @@ interface KpiSlot {
   count: number;
   /** Rank by value, highest first, rather than by citation and subject. */
   top?: boolean;
+  /**
+   * The slot belongs in the strip only when the run planned and ran this skill (D8 of the Part 9
+   * close-out): the reported-revenue slot exists for a listed company, whose company_financials step
+   * the scan plans; an unlisted brand's strip has no such slot, so nothing waits on it or reads "not measured".
+   */
+  requires?: SkillId;
 }
 
 const one = (key: string, extra: Omit<KpiPick, "key"> = {}): KpiPick => ({ key, ...extra });
@@ -60,7 +68,7 @@ export const KPI_SLOTS: Readonly<Record<Job, readonly KpiSlot[]>> = {
     { picks: [one("subs.distinctiveness")], count: 1 },
     { picks: NEXT_GEN, count: 1 },
     { picks: [one("share.metros_won"), one("mom.label")], count: 1 },
-    { picks: FINANCIALS, count: 1 },
+    { picks: FINANCIALS, count: 1, requires: "company_financials" },
   ],
   // The pair's similarity (else its fit), metros won A/B, youth tilt A/B.
   head_to_head: [
@@ -127,7 +135,7 @@ export const KPI_SLOTS: Readonly<Record<Job, readonly KpiSlot[]>> = {
   launch_test: [
     { picks: [one("cnpt.precision")], count: 1 },
     { picks: [one("cnpt.verdict")], count: 2 },
-    { picks: FINANCIALS, count: 1 },
+    { picks: FINANCIALS, count: 1, requires: "company_financials" },
   ],
   // Each city's share percentile (the named entity's), the cities won, the biggest fingerprint gap.
   city_compare: [
@@ -162,6 +170,7 @@ export function pickKpis(job: Job, metrics: readonly Metric[], cited: readonly M
 
   const picked: Metric[] = [];
   for (const slot of KPI_SLOTS[job]) {
+    if (slot.requires !== undefined && focus.ran !== undefined && !focus.ran.has(slot.requires)) continue;
     for (const pick of slot.picks) {
       const hits = valued.filter((m) => matches(m, pick, focus) && !picked.includes(m));
       if (hits.length === 0) continue;

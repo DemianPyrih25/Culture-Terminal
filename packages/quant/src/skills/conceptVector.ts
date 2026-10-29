@@ -257,7 +257,7 @@ async function runConceptVector(input: ConceptInput, ctx: SkillCtx): Promise<Ski
           subjectRefs: tags.map((t) => t.ref),
           value: precision,
           reason: truncated ? "budget_truncated" : "not_scored",
-          display: precision === null ? "" : `${keep} of ${keep + veto} kept (${Math.round(precision * 100)}%)`,
+          display: precision === null ? "" : `${keep} of ${keep + veto} ${noun} analogs kept (${Math.round(precision * 100)}%)`,
           unit: "pct",
           badge: "DERIVED",
           formulaId: "cnpt.precision",

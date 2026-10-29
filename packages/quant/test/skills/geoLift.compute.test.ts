@@ -348,7 +348,7 @@ describe("geo_lift: supply and white space", () => {
       const empty = { precision: null, areas: new Map(), confidence: new Map(), whiteSpace: new Map(), rank: new Map(), supply: new Map() };
       const rows = liftDigestRows(areas6, ws, empty);
       expect(rows.find((r) => r.name === "b")?.values.quadrant).toBe(THIN_SUPPLY_LABEL);
-      expect(rows.find((r) => r.name === "d")?.values.quadrant).toBe("Saturated");
+      expect(rows.find((r) => r.name === "d")?.values.quadrant).toBe("low demand, many rivals");
       const caveat = FORMULAS["lift.white_space"].caveats.join(" ");
       expect(caveat).toContain(`at least ${MIN_SUPPLY_VENUES} counted`);
       expect(caveat).toContain(`at least ${MIN_BUSY_AREA_VENUES} in the area`);

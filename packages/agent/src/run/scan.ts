@@ -2,9 +2,12 @@ import {
   ANALYST_TOOLS,
   Domain,
   isId,
+  PUBLIC_NOT_CONFIGURED_REASON,
   SponsorCategory,
   type AgeBucket,
+  type DigestRow,
   type EntityRegistry,
+  type Flag,
   type GeoApi,
   type Intent,
   type Job,
@@ -18,10 +21,11 @@ import {
   type SkillId,
   type ToolInput,
 } from "@ct/contracts";
-import { listedCompanyOf } from "@ct/quant";
+import { listedCompanyOf, NEAREST_SEPARATOR } from "@ct/quant";
 import { AREA_ALSO_NAMED } from "./areaMentions";
 import { isSkillAvailable, toolLabel } from "./catalogue";
 import { gazetteer } from "./gazetteer";
+import { NOT_CONFIGURED_FLAG, unconfiguredSource, type PublicConfigured } from "./publicConfig";
 import { askedTier, compareCities, isGazetteerMetro, MARKET_CATALOGUE, marketTier, namedMarkets, type RunMarket } from "./markets";
 
 /**
@@ -46,6 +50,12 @@ export interface ScanContext {
    * area_economics join the scan only then. Defaults to false.
    */
   publicData?: boolean;
+  /**
+   * Which public sources the client can read (PublicDataClient.configured). A public-data step whose
+   * source is not configured is never planned (D7): it is skipped with PUBLIC_NOT_CONFIGURED_REASON, and
+   * when it would have run, the plan carries the source's not-configured flag. Absent: every source.
+   */
+  publicConfigured?: PublicConfigured;
 }
 
 /** What a builder reads: the scan context with its gazetteer and markets settled. */
@@ -59,12 +69,14 @@ export interface ScanArea {
 
 /**
  * What a chained step reads from the step it follows: the tags (T#) and entities (R#) its rows and
- * registrations name, and the gazetteer areas its rows name, each in row order.
+ * registrations name, and the gazetteer areas its rows name, each in row order; and its digest rows
+ * themselves (`rows`), which the category retry reads for concepts that kept no tag.
  */
 export interface ChainFeed {
   tags: readonly RegisteredTag[];
   entities: readonly RegisteredEntity[];
   areas: readonly ScanArea[];
+  rows?: readonly DigestRow[];
 }
 
 /** What chainFeed needs to read a step's digests back into registry records and gazetteer areas. */
@@ -86,10 +98,12 @@ export function chainFeed(digests: readonly ModelDigest[], sources: ChainFeedSou
   const tags: RegisteredTag[] = [];
   const entities: RegisteredEntity[] = [];
   const areas: ScanArea[] = [];
+  const rows: DigestRow[] = [];
   const addArea = (area: ScanArea | null) => {
     if (area !== null && !areas.some((a) => a.metro === area.metro && a.id === area.id)) areas.push(area);
   };
   for (const digest of digests) {
+    rows.push(...digest.top_rows);
     for (const row of digest.top_rows) {
       const tag = row.ref !== null && isId("T", row.ref) ? sources.registry.tag(row.ref) : null;
       if (tag !== null && !tags.includes(tag)) tags.push(tag);
@@ -100,7 +114,7 @@ export function chainFeed(digests: readonly ModelDigest[], sources: ChainFeedSou
       if (entity !== null && !entities.includes(entity)) entities.push(entity);
     }
   }
-  return { tags, entities, areas };
+  return { tags, entities, areas, rows };
 }
 
 /** The gazetteer area a digest row names: by its name, else by an area id among its metrics' subjects. */
@@ -128,6 +142,8 @@ interface ChainBuild<Id extends SkillId> {
   /** How the run context describes it, after the tool label. */
   describe: string;
   input: (feed: ChainFeed) => ToolInput<Id> | null;
+  /** True when not running is the usual case (the category retry): no SCAN NOTE then. */
+  quiet?: boolean;
 }
 
 /** A deferred step's input from the peers wave 1 resolved, or null when none fits. */
@@ -158,6 +174,8 @@ type ScanEntry = {
     chain?: (ctx: ScanInputs) => ChainBuild<Id> | null;
     defer?: (ctx: ScanInputs) => DeferBuild<Id> | null;
     why?: string;
+    /** True when this entry is a per-item slot the question does not use (a fourth city of three): no skip line. */
+    unused?: (ctx: ScanInputs) => boolean;
   };
 }[SkillId];
 
@@ -594,6 +612,52 @@ function productTags({ intent }: ScanInputs): ToolInput<"find_tags"> | null {
   return concepts.length === 0 ? null : { concepts: concepts.map((text) => ({ text, scope: "brand" as const })), ...NO_STEP };
 }
 
+/** The key two concept names are compared by: case, punctuation and spacing do not count. */
+const nameKey = (text: string): string => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+
+/**
+ * The category retry (the owner's o03 decision): chained after a scan's find_tags, it searches, for
+ * each concept whose own search answered and kept no usable tag, the first nearest category that search
+ * returned (find_tags' `nearest`, those sharing a word with the concept first), so the chained concept
+ * test (concept_vector, block_dna, geo_lift, taste_twins) runs on the category instead of not at all.
+ * The concept then reads as tested at category level: code opens the thesis with that, lists it first
+ * among the limitations and applies the partly-tested confidence penalty (D2). A concept with a tag of
+ * its own, a failed search or no nearest category is not retried; with none to retry the step does not
+ * run, quietly. One search per retried concept, so it costs one call each unless cached.
+ */
+function categoryRetry(base: (ctx: ScanInputs) => ToolInput<"find_tags"> | null): (ctx: ScanInputs) => ChainBuild<"find_tags"> | null {
+  return (ctx) => {
+    const first = base(ctx);
+    if (first === null) return null;
+    return {
+      after: "find_tags",
+      estimate: 0,
+      quiet: true,
+      describe: "on the nearest category, only for a concept whose own tag search keeps no tag (the concept is then tested at category level)",
+      input: ({ rows = [] }) => {
+        const concepts: ToolInput<"find_tags">["concepts"] = [];
+        const searched = new Set(first.concepts.map((c) => nameKey(c.text)));
+        for (const concept of first.concepts) {
+          const own = rows.filter((r) => typeof r.values.concept === "string" && nameKey(r.values.concept) === nameKey(concept.text));
+          const kept = own.some((r) => r.ref !== null && isId("T", r.ref) && r.values.use !== "label_only");
+          const empty = own.some((r) => r.values.match === "none" || r.values.use === "label_only");
+          if (kept || !empty) continue;
+          const nearest = own.flatMap((r) => (typeof r.values.nearest === "string" ? r.values.nearest.split(NEAREST_SEPARATOR) : []));
+          const pick = nearest.map((n) => n.trim().slice(0, 60).trim()).find((n) => n !== "" && !searched.has(nameKey(n)));
+          if (pick === undefined) continue;
+          searched.add(nameKey(pick));
+          concepts.push({ text: pick, scope: concept.scope });
+        }
+        return concepts.length === 0 ? null : { concepts, ...NO_STEP };
+      },
+    };
+  };
+}
+
+const CATEGORY_RETRY_WHY = "runs only when a concept's own tag search keeps no tag";
+/** The retry never earns a skip line: it is a fallback inside the concept test, not a reading of its own. */
+const retryUnused = (): boolean => true;
+
 /** concept_vector analogs (the tool's maximum). */
 const CNPT_ANALOGS_MAX = 8;
 
@@ -625,11 +689,63 @@ export function scanCities({ intent, markets }: Pick<ScanInputs, "intent" | "mar
   return compareCities(intent).filter((id) => usable.has(id)).slice(0, CITIES_MAX);
 }
 
-/** block_dna's city fingerprint (against the other map cities pooled) for each city compared, when two or more can be read. */
-function cityFingerprints(ctx: ScanInputs): ToolInput<"block_dna">[] {
-  const cities = scanCities(ctx);
-  if (cities.length < 2) return [];
-  return cities.map((market) => ({ area: { kind: "city" as const, market }, include_brands: false, ...NO_STEP }));
+/** block_dna concept tags (the tool's maximum). */
+const BLOCK_CONCEPT_TAGS_MAX = 4;
+/** Tag types the four Block DNA families read (quant blockDna/fingerprint.ts): a concept tag of another type has no rank there. */
+const BLOCK_FAMILY_PREFIXES = [
+  "urn:tag:customer_identity:",
+  "urn:tag:ambience:",
+  GENRE_PLACE,
+  CATEGORY_PLACE,
+  "urn:tag:specialty_dish:",
+  "urn:tag:genre:music:",
+] as const;
+/** A city fingerprint's typical cold cost: the city's tag list and its music list (pinned and warm for map cities). */
+const SCAN_FINGERPRINT_ESTIMATE = 2;
+
+/** The concept's find_tags refs that a Block DNA family reads, at most four (CR 5). */
+function blockConceptRefs(tags: readonly RegisteredTag[]): RegisteredTag["ref"][] {
+  const read = tags.filter((t) => BLOCK_FAMILY_PREFIXES.some((p) => t.tagId.startsWith(p)));
+  return [...new Set(read.map((t) => t.ref))].slice(0, BLOCK_CONCEPT_TAGS_MAX);
+}
+
+/**
+ * block_dna's city fingerprint (against the other map cities pooled) for the `index`-th compared
+ * city, when two or more can be read. Without a concept it runs in parallel (`build`).
+ */
+function fingerprintOfCity(index: number): (ctx: ScanInputs) => ToolInput<"block_dna"> | null {
+  return (ctx) => {
+    const cities = scanCities(ctx);
+    const market = cities[index];
+    if (cities.length < 2 || market === undefined) return null;
+    return { area: { kind: "city", market }, include_brands: false, ...NO_STEP };
+  };
+}
+
+/**
+ * With a concept, the same fingerprint chained after find_tags, carrying the concept's tags (CR 5),
+ * so each city's rank for the concept against the other map cities is a citable metric. The tags cost
+ * no extra call. When find_tags finds no tag a family reads, the fingerprint still runs, without them.
+ */
+function fingerprintInCity(index: number): (ctx: ScanInputs) => ChainBuild<"block_dna"> | null {
+  return (ctx) => {
+    const plain = fingerprintOfCity(index)(ctx);
+    if (plain === null || plain.area.kind !== "city" || conceptTags(ctx) === null) return null;
+    return {
+      after: "find_tags",
+      estimate: SCAN_FINGERPRINT_ESTIMATE,
+      describe: `city fingerprint of ${plain.area.market} against the other map cities, with the concept's taxonomy tags find_tags returns (no extra call)`,
+      input: ({ tags }) => ({ ...plain, concept_tags: blockConceptRefs(tags) }),
+    };
+  };
+}
+
+/** A fingerprint slot past the cities the question compares is no gap, so it is not listed as skipped. */
+function citySlotUnused(index: number): (ctx: ScanInputs) => boolean {
+  return (ctx) => {
+    const cities = scanCities(ctx);
+    return cities.length >= 2 && index >= cities.length;
+  };
 }
 
 /** share_of_taste of the named entity and its same-type peers across the compared cities. */
@@ -705,9 +821,10 @@ const LIFT_WHY = "needs a concept and a gazetteer metro (one of the 13 map citie
  * neighbourhood with cross_domain (chains after a chain);
  * creator_fit discovers artists and podcasts and scores each kind on its own scale (a person is no
  * cross_domain domain); launch_test reads the concept's open call, keeping or vetoing the analogs the
- * question names; city_compare reads each city's fingerprint (`each`) and the named entity's share
- * across them, and with a concept chains geo_lift (with supply) in each compared map city after
- * find_tags, as site_selection does, so a LATENT_DEMAND pocket can be profiled in turn 2. company_financials (brand_health, head_to_head, launch_test) and area_economics (the
+ * question names; city_compare reads each city's fingerprint (one entry per city) and the named
+ * entity's share across them, and with a concept chains each fingerprint after find_tags with the
+ * concept's tags (CR 5: the concept's rank per city is a citable metric) and geo_lift (with supply) in
+ * each compared map city, as site_selection does, so a LATENT_DEMAND pocket can be profiled in turn 2. company_financials (brand_health, head_to_head, launch_test) and area_economics (the
  * location jobs with an area set) cost 0 Qloo calls and join only with a public-data client, for a
  * listed brand or a known area, so no step runs that could only answer UNAVAILABLE.
  */
@@ -727,6 +844,7 @@ export const SCAN_TABLE: Readonly<Record<Job, readonly ScanEntry[]>> = {
   ],
   site_selection: [
     { tool: "find_tags", build: conceptTags, why: "needs a concept in the question" },
+    { tool: "find_tags", chain: categoryRetry(conceptTags), why: CATEGORY_RETRY_WHY, unused: retryUnused },
     { tool: "geo_lift", chain: liftFromTags, why: LIFT_WHY },
     { tool: "area_economics", chain: econLift, why: ECON_WHY },
   ],
@@ -753,6 +871,7 @@ export const SCAN_TABLE: Readonly<Record<Job, readonly ScanEntry[]>> = {
   ],
   taste_twins: [
     { tool: "find_tags", build: conceptTags, why: "runs only when the question names a concept" },
+    { tool: "find_tags", chain: categoryRetry(conceptTags), why: CATEGORY_RETRY_WHY, unused: retryUnused },
     { tool: "taste_twins", build: twinsByArea, chain: twinsFromTags, why: TWINS_WHY },
     { tool: "area_economics", build: econNamed, why: ECON_WHY },
     { tool: "area_economics", chain: econTwins, why: "needs twins from taste_twins, and public data on this server" },
@@ -770,12 +889,18 @@ export const SCAN_TABLE: Readonly<Record<Job, readonly ScanEntry[]>> = {
   ],
   launch_test: [
     { tool: "find_tags", build: productTags, why: "needs a concept or concept description in the question" },
+    { tool: "find_tags", chain: categoryRetry(productTags), why: CATEGORY_RETRY_WHY, unused: retryUnused },
     { tool: "concept_vector", chain: conceptVector, why: "needs taxonomy tags from find_tags" },
     { tool: "company_financials", build: financials, why: FIN_WHY },
   ],
   city_compare: [
-    { tool: "block_dna", each: cityFingerprints, why: CITIES_WHY },
+    // find_tags first, so each city's fingerprint can chain after it and carry the concept's tags (CR 5).
     { tool: "find_tags", build: conceptTags, why: "runs only when the question names a concept" },
+    { tool: "find_tags", chain: categoryRetry(conceptTags), why: CATEGORY_RETRY_WHY, unused: retryUnused },
+    ...Array.from(
+      { length: CITIES_MAX },
+      (_, i): ScanEntry => ({ tool: "block_dna", chain: fingerprintInCity(i), build: fingerprintOfCity(i), unused: citySlotUnused(i), why: CITIES_WHY }),
+    ),
     ...Array.from({ length: CITIES_MAX }, (_, i): ScanEntry => ({ tool: "geo_lift", chain: liftInCity(i), why: CITY_LIFT_WHY })),
     { tool: "share_of_taste", build: shareAcrossCities, defer: shareCitiesAfterWave1, why: "needs a brand or person primary and two cities from MARKETS" },
   ],
@@ -803,6 +928,8 @@ export interface ChainedScanStep {
   describe: string;
   /** The input parsed by the tool's own schema, or null when what the step returned cannot feed it. */
   input: (feed: ChainFeed) => unknown;
+  /** True when not running is the usual case (the category retry): no SCAN NOTE then. */
+  quiet?: boolean;
 }
 
 /**
@@ -831,10 +958,34 @@ export interface ScanPlan {
   unavailable: SkillId[];
   /** Scan skills that could run but not for this question, with the reason. */
   skipped: { tool: SkillId; reason: string }[];
+  /**
+   * Run-level limitation flags the plan raises: SEC_NOT_CONFIGURED / CENSUS_NOT_CONFIGURED when a
+   * public-data step would have run for this question but its source is not configured (D7).
+   */
+  flags: Flag[];
 }
 
 /** The plan of a run that scans nothing (Qloo disabled). */
-export const emptyScan = (): ScanPlan => ({ steps: [], chained: [], deferred: [], unavailable: [], skipped: [] });
+export const emptyScan = (): ScanPlan => ({ steps: [], chained: [], deferred: [], unavailable: [], skipped: [], flags: [] });
+
+/**
+ * True when a scan entry would make a step for this question: its build parses, its chain follows a
+ * step already planned, or `each` returns an input. Used for a public-data entry whose source is not
+ * configured, so its limitation shows only on a question that would have read it.
+ */
+function wouldPlan(entry: ScanEntry, inputs: ScanInputs, planned: readonly SkillId[]): boolean {
+  const schema = ANALYST_TOOLS[entry.tool].input;
+  if (entry.chain !== undefined) {
+    const chain = (entry.chain as (c: ScanInputs) => ChainBuild<SkillId> | null)(inputs);
+    if (chain !== null && planned.includes(chain.after)) return true;
+  }
+  if (entry.build !== undefined) {
+    const raw = (entry.build as (c: ScanInputs) => unknown)(inputs);
+    if (raw !== null && schema.safeParse(raw).success) return true;
+  }
+  if (entry.each !== undefined) return (entry.each as (c: ScanInputs) => unknown[])(inputs).some((raw) => schema.safeParse(raw).success);
+  return false;
+}
 
 export function planScan(job: Job, ctx: ScanContext): ScanPlan {
   const plan = emptyScan();
@@ -843,10 +994,25 @@ export function planScan(job: Job, ctx: ScanContext): ScanPlan {
   const markets = ctx.markets ?? MARKET_CATALOGUE.filter((m) => metros.includes(m.id));
   const inputs: ScanInputs = { ...ctx, geo, markets };
   const why = (entry: ScanEntry) => entry.why ?? "its default arguments do not fit this question";
+  // One line per tool and reason: per-item slots (a fingerprint or lift map per city) share theirs.
+  const skip = (entry: ScanEntry, reason = why(entry)) => {
+    if (entry.unused?.(inputs) === true) return;
+    if (!plan.skipped.some((s) => s.tool === entry.tool && s.reason === reason)) plan.skipped.push({ tool: entry.tool, reason });
+  };
   const nextId = () => `scan-${plan.steps.length + plan.chained.length + plan.deferred.length + 1}`;
   for (const entry of SCAN_TABLE[job]) {
     if (!isSkillAvailable(entry.tool) || (entry.build === undefined && entry.chain === undefined && entry.each === undefined)) {
       plan.unavailable.push(entry.tool);
+      continue;
+    }
+    const unconfigured = ctx.publicData === true ? unconfiguredSource(entry.tool, ctx.publicConfigured) : null;
+    if (unconfigured !== null) {
+      // D7: never planned. The limitation is the source's own, shown only when the question would have read it.
+      const planned = [...plan.steps, ...plan.chained].map((s) => s.tool);
+      const wanted = wouldPlan(entry, inputs, planned);
+      skip(entry, wanted ? PUBLIC_NOT_CONFIGURED_REASON[unconfigured] : why(entry));
+      const flag = NOT_CONFIGURED_FLAG[unconfigured];
+      if (wanted && !plan.flags.includes(flag)) plan.flags.push(flag);
       continue;
     }
     const schema = ANALYST_TOOLS[entry.tool].input;
@@ -861,6 +1027,7 @@ export function planScan(job: Job, ctx: ScanContext): ScanPlan {
           after: chain.after,
           estimate: chain.estimate,
           describe: chain.describe,
+          ...(chain.quiet === true ? { quiet: true } : {}),
           input: (feed) => {
             const raw = chain.input(feed);
             const parsed = raw === null ? null : schema.safeParse(raw);
@@ -870,7 +1037,7 @@ export function planScan(job: Job, ctx: ScanContext): ScanPlan {
         continue;
       }
       if (entry.build === undefined) {
-        plan.skipped.push({ tool: entry.tool, reason: why(entry) });
+        skip(entry);
         continue;
       }
     }
@@ -879,7 +1046,7 @@ export function planScan(job: Job, ctx: ScanContext): ScanPlan {
         const parsed = schema.safeParse(raw);
         return parsed.success ? [parsed.data] : [];
       });
-      if (built.length === 0) plan.skipped.push({ tool: entry.tool, reason: why(entry) });
+      if (built.length === 0) skip(entry);
       for (const input of built) plan.steps.push({ toolCallId: nextId(), tool: entry.tool, input });
       continue;
     }
@@ -891,7 +1058,7 @@ export function planScan(job: Job, ctx: ScanContext): ScanPlan {
     }
     const defer = entry.defer === undefined ? null : (entry.defer as (c: ScanInputs) => DeferBuild<SkillId> | null)(inputs);
     if (defer === null) {
-      plan.skipped.push({ tool: entry.tool, reason: why(entry) });
+      skip(entry);
       continue;
     }
     plan.deferred.push({
@@ -906,8 +1073,25 @@ export function planScan(job: Job, ctx: ScanContext): ScanPlan {
       },
     });
   }
-  return plan;
+  return dropIdleRetries(plan);
 }
+
+/**
+ * A quiet chained step (the category retry) feeds the steps chained after it on the same step; with
+ * none planned for this question (a site_selection concept but no map city), it would test nothing,
+ * so it is dropped and the code-made ids are numbered again in the order they were given.
+ */
+function dropIdleRetries(plan: ScanPlan): ScanPlan {
+  const idle = plan.chained.filter((c, i) => c.quiet === true && !plan.chained.slice(i + 1).some((n) => n.after === c.after && n.quiet !== true));
+  if (idle.length === 0) return plan;
+  const chained = plan.chained.filter((c) => !idle.includes(c));
+  const all = [...plan.steps, ...chained, ...plan.deferred].sort((a, b) => idNumber(a.toolCallId) - idNumber(b.toolCallId));
+  const ids = new Map(all.map((s, i) => [s.toolCallId, `scan-${i + 1}`]));
+  const renumber = <T extends { toolCallId: string }>(s: T): T => ({ ...s, toolCallId: ids.get(s.toolCallId) ?? s.toolCallId });
+  return { ...plan, steps: plan.steps.map(renumber), chained: chained.map(renumber), deferred: plan.deferred.map(renumber) };
+}
+
+const idNumber = (id: string): number => Number(id.slice("scan-".length));
 
 /** How the run context describes a chained step, e.g. "geo_lift (LIFT) in nashville on the place tags …". */
 export function describeChainedStep(step: ChainedScanStep): string {

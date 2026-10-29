@@ -13,6 +13,7 @@ import type {
   TrendWindow,
 } from "@ct/contracts";
 import {
+  absentText,
   COMPARATOR_TEXT,
   filterLabel,
   formatCacheAge,
@@ -21,10 +22,10 @@ import {
   metricDirection,
   metricShortLabel,
   NO_VALUE_LABEL,
-  NOT_MEASURED,
   plural,
   shortRequestId,
 } from "./format";
+import { plainDisplay, plainWords } from "./plain";
 import type { MetricView, RequestRef, SourceEndpoint } from "./types";
 
 /**
@@ -287,9 +288,11 @@ export function metricView(metric: Metric, window: TrendWindow | null): MetricVi
   const w = metric.window ?? (stale ? window : null);
   return {
     id: metric.id,
-    label: metric.label,
+    // QUANT's shorthand in plain words ("SOUND music tag" -> "music tag", "+42 · NEW" -> "+42 · new here"), stored runs too (Q1).
+    label: plainWords(metric.label),
     shortLabel: metricShortLabel(metric),
-    text: unavailable ? NOT_MEASURED : metric.display,
+    // A public value's known absence ("not reported in filings") prints its reason, not "not measured" (Q8).
+    text: unavailable ? absentText(metric.reason) : plainDisplay(metric),
     badge: metric.badge,
     unavailable,
     reason: metric.reason,

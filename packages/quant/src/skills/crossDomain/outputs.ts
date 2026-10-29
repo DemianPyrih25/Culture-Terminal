@@ -1,5 +1,6 @@
 import {
   MODEL_DIGEST_MAX_ROWS,
+  SponsorCategory,
   type DatasetId,
   type DigestRow,
   type Domain,
@@ -16,12 +17,13 @@ import {
   type SkillCtx,
   type ValueCell,
 } from "@ct/contracts";
-import { emptyResultFinding, popularityDominanceFinding, type FindingDraft } from "../../findings";
+import { emptyResultFinding, partnersOneCategoryFinding, popularityDominanceFinding, type FindingDraft } from "../../findings";
 import type { FormulaId } from "../../formulas";
 import { addSkillEvidence, addSkillMetric, insightTags, registerEntity } from "../common";
 import { fixed2, safeFullName, safeName, safeText } from "../format";
 import type { DomainNeighbourhood, Edge, NeighbourRow } from "./neighbourhood";
-import { DOMAIN_ITEM, DOMAIN_LABEL, DOMAIN_NOUN, type CrossDomainPlan } from "./requests";
+import { SPONSOR_CATEGORIES, tagsOverlap } from "../sponsorSlate/categories";
+import { categoryBranchOf, DOMAIN_ITEM, DOMAIN_LABEL, DOMAIN_NOUN, type CrossDomainPlan } from "./requests";
 
 /**
  * What one cross_domain run writes: an evidence bundle per domain call, a bounded metric set (per
@@ -368,6 +370,58 @@ export function addPopularityFindings(
     const ids = group.flatMap((h) => [metrics.get(h.domain)?.fit?.id, metrics.get(h.domain)?.utr?.id]);
     addFindingDraft(run, draft, ids.filter((id): id is MetricId => id !== undefined));
   }
+}
+
+/** "urn:tag:genre:brand:food_and_beverage" → "food and beverage", for a branch no row names. */
+function branchWords(branchId: string): string {
+  return branchId.slice(branchId.lastIndexOf(":") + 1).replace(/_/g, " ");
+}
+
+/** A row tag sits in a sponsor category when it is the category's tag or a leaf under it. */
+const inCategoryTag = (rowTag: string, categoryTag: string): boolean => rowTag === categoryTag || rowTag.startsWith(`${categoryTag}:`);
+
+/**
+ * PARTNERS_ONE_CATEGORY for the brand domain when a seed is a brand (brand_collab, CR 3): the scored
+ * brand rows outside the seeds' own categories, grouped by their top-level genre:brand branch. The
+ * suggestion's categories are the sponsor categories with a verified tag that no scored partner sits
+ * in and that are not the seeds' own; a category whose tag is found only at run time is left out,
+ * since the partners' coverage of it cannot be told.
+ */
+export function addPartnersCategoryFinding(run: XdomRun, hoods: readonly DomainNeighbourhood[], metrics: ReadonlyMap<Domain, DomainMetrics>): void {
+  const subject = run.plan.seeds.find((s) => s.type === "brand");
+  const hood = hoods.find((h) => h.domain === "brand");
+  if (subject === undefined || hood === undefined || hood.scored === 0) return;
+  const own = run.plan.excludeTags.map((t) => t.tagId);
+  const isOwn = (tagId: string): boolean => own.some((o) => tagsOverlap(tagId, o));
+  const partners = hood.rows.filter((r) => r.fit !== null).filter((r) => {
+    const branch = categoryBranchOf(r)?.tagId ?? null;
+    return branch === null || !isOwn(branch);
+  });
+  const counts = new Map<string, number>();
+  for (const r of partners) {
+    const branch = categoryBranchOf(r)?.tagId ?? null;
+    if (branch !== null) counts.set(branch, (counts.get(branch) ?? 0) + 1);
+  }
+  const [top] = [...counts.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
+  if (top === undefined) return;
+  const [branchId, inCategory] = top;
+  const named = partners.flatMap((r) => r.tags).find((t) => t.tagId === branchId);
+  const rowTags = partners.flatMap((r) => r.tags.map((t) => t.tagId));
+  const otherCategories = SponsorCategory.options.filter((c) => {
+    const tag = SPONSOR_CATEGORIES[c].tag;
+    return tag !== null && !isOwn(tag) && !rowTags.some((t) => inCategoryTag(t, tag));
+  });
+  const draft = partnersOneCategoryFinding({
+    subjectName: safeName(subject.name),
+    subjectRef: subject.ref,
+    categoryLabel: named === undefined ? branchWords(branchId) : safeName(named.name),
+    inCategory,
+    scored: partners.length,
+    otherCategories,
+  });
+  if (draft === null) return;
+  const m = metrics.get("brand");
+  addFindingDraft(run, draft, [m?.fit?.id, m?.utr?.id].filter((id): id is MetricId => id !== undefined));
 }
 
 // Dataset -----------------------------------------------------------------------------------------------

@@ -121,7 +121,7 @@ export type IntentSafety = z.infer<typeof IntentSafety>;
 export const IntentReadAs = z.strictObject({
   nearest: z
     .boolean()
-    .describe("True when the question asks for more than the job covers and is read as the nearest job; false when the job fits."),
+    .describe("True when the question asks for more than the job covers and is read as the nearest job; false when the job fits. Always false for financial_advice: the not-advice reframe already says what is not covered."),
   not_covered: z
     .array(z.string())
     .describe("What the question asks that the data does not cover, a few words each, e.g. 'sales', 'rents', 'foot traffic'. Empty when nearest is false."),
@@ -198,7 +198,13 @@ export function compileMnemonic(intent: Pick<Intent, "job" | "mentions" | "geo" 
   }
 }
 
-/** Code-side normalisation after CLERK: the pillar follows the job and the mnemonic is recompiled. */
+/**
+ * Code-side normalisation after CLERK: the pillar follows the job and the mnemonic is recompiled. A
+ * financial_advice question (buy or sell a stock) is never read as the nearest job (D9 of the Part 9
+ * close-out): its fixed not-advice reframe already states what is not covered, so read_as is cleared and
+ * no read_as_nearest_job penalty applies.
+ */
 export function normalizeIntent(intent: Intent): Intent {
-  return { ...intent, pillar: JOB_PILLAR[intent.job], mnemonic: compileMnemonic(intent) };
+  const readAs = intent.safety.category === "financial_advice" ? { nearest: false, not_covered: [] } : intent.read_as;
+  return { ...intent, pillar: JOB_PILLAR[intent.job], read_as: readAs, mnemonic: compileMnemonic(intent) };
 }

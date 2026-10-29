@@ -405,7 +405,7 @@ describe("readingGap", () => {
         `Add the neighbourhood's city: ${CITIES}.`,
       ],
       [{ job: "brand_collab" }, "A brand to find collaboration partners for", "Add the brand you want to find collaboration partners for."],
-      [{ job: "creator_fit" }, "A brand whose audience the creators should fit", "Add the brand whose audience the creators should fit."],
+      [{ job: "creator_fit" }, "A brand whose audience the artists or podcasts should fit", "Add the brand whose audience the artists or podcasts should fit."],
       [{ job: "launch_test" }, "The product or concept to test", "Add the product or concept you want to test, in a few words."],
       [{ job: "city_compare", geo: { ...blank.geo, cities: ["austin"] } }, "Two to four US cities to compare", "Add the two to four US cities you want to compare."],
       [

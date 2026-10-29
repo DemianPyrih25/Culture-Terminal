@@ -42,6 +42,7 @@ import { estimateCityCalls, runCityFingerprint } from "./blockDna/city";
 import { BRAND_POPULARITY_MAX, BRAND_TAKE, compareLists, NEW_AREA_TOP, rankBrandRows, rankTagRows, TAG_TAKE } from "./blockDna/fingerprint";
 import { cityLocation, distanceKm, MAX_POINT_KM, parsePoint, pointAreaLocation, resolveArea, type BlockArea } from "./blockDna/location";
 import {
+  addAreaConceptMetrics,
   addBlockDnaBars,
   addBrandMetrics,
   addEmptyAreaFinding,
@@ -51,6 +52,7 @@ import {
   addNewTagsFinding,
   blockDigestRows,
   cityBase,
+  conceptTagsOf,
   finishBlockRun,
   localBrands,
   methodNotice,
@@ -276,6 +278,7 @@ async function runAreaFingerprint(input: BlockInput & { area: NbhdOrPoint }, ctx
   // Brands.
   let brands: BrandResult | null = null;
   let noLocalBrands = false;
+  let brandInstitutions = 0;
   if (input.include_brands && noCity !== null) {
     brands = { items: null, gap: noCity, raw: new Map(), areaSize: 0, evidenceIds: [] };
   } else if (input.include_brands) {
@@ -285,6 +288,7 @@ async function runAreaFingerprint(input: BlockInput & { area: NbhdOrPoint }, ctx
     const cityList = cityData === null ? null : rankBrandRows(cityData.data.results.entities);
     const brandCalls = metasOf([areaBrandsA, cityBrandsA]);
     const gateDropped = (areaList?.gateDropped ?? 0) + (cityList?.gateDropped ?? 0);
+    brandInstitutions = areaList?.institutions ?? 0;
     const areaGap = gapOf(areaBrandsA, areaList);
     const cityBrandGap = gapOf(cityBrandsA, cityList);
     const flags = callFlags(
@@ -317,6 +321,7 @@ async function runAreaFingerprint(input: BlockInput & { area: NbhdOrPoint }, ctx
 
   // Ledger output.
   const familyMetrics = families.map((fam) => addFamilyMetrics(run, frame, fam));
+  addAreaConceptMetrics(run, frame, conceptTagsOf(run, input.concept_tags), families);
   const brandMetrics = brands === null ? [] : addBrandMetrics(run, frame, brands);
   addNewTagsFinding(run, frame, families, familyMetrics);
   if (noLocalBrands) addEmptyBrandsFinding(run, frame);
@@ -326,12 +331,18 @@ async function runAreaFingerprint(input: BlockInput & { area: NbhdOrPoint }, ctx
   // Notices.
   run.notices.push(methodNotice(area, rung.method, city !== null));
   if (city === null) run.notices.push(`No Qloo locality is pinned for ${cityName} yet; the city side is not measured.`);
-  else if (cityGap !== null) run.notices.push(`WHO, VIBE and WHAT are not compared: the ${cityName} tag list is missing (${cityGap}).`);
-  if (areaMusicA?.kind === "ok" && areaMusicGap !== null) run.notices.push("No music tags came back for this area, so SOUND is not measured.");
-  else if (areaMusicGap !== null) run.notices.push(`SOUND is not measured: the area's music list is missing (${areaMusicGap}).`);
-  else if (city !== null && cityMusicGap !== null) run.notices.push(`SOUND is not measured at city scale (${cityMusicGap}).`);
+  else if (cityGap !== null) run.notices.push(`Venue-goer, ambience and venue tags are not compared: the ${cityName} tag list is missing (${cityGap}).`);
+  if (areaMusicA?.kind === "ok" && areaMusicGap !== null) run.notices.push("No music tags came back for this area, so music is not measured.");
+  else if (areaMusicGap !== null) run.notices.push(`Music is not measured: the area's music list is missing (${areaMusicGap}).`);
+  else if (city !== null && cityMusicGap !== null) run.notices.push(`Music is not measured at city scale (${cityMusicGap}).`);
   if (brands !== null && brands.items !== null && localBrands(brands).length === 0) {
     run.notices.push(`No brand ranks higher here than across ${cityName}.`);
+  }
+  const institutions = brandInstitutions;
+  if (institutions > 0) {
+    run.notices.push(
+      `${institutions === 1 ? "1 university or college" : `${institutions} universities or colleges`} that Qloo lists as brands ${institutions === 1 ? "was" : "were"} left out: an institution is not a tenant brand.`,
+    );
   }
   const failed = [...tagAttempts, ...brandAttempts].filter((a) => a?.kind === "failed");
   if (failed.length > 0) {

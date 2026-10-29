@@ -69,6 +69,8 @@ export interface RankedList {
   gateDropped: number;
   /** Rows the call answered, before the gate. */
   rows: number;
+  /** Brand rows left out as educational institutions (isInstitution); absent for tag lists. */
+  institutions?: number;
 }
 
 interface RawRow {
@@ -131,14 +133,29 @@ export function rankTagRows(rows: readonly QlooTagInsightRow[], families: readon
   return rankRaw(raw, rows.length, 0);
 }
 
-/** A brand list after the §5.2 quality gate. */
+/**
+ * Educational institutions Qloo types as brands (Q5 of the Part 9 close-out): a university ranks high
+ * where its campus is, but it is no tenant or partner brand. Read by name (the words "university" or
+ * "college") or by a genre:brand tag whose path names education. A brand whose own name carries one of
+ * those words is left out too; the limitation says so.
+ */
+const INSTITUTION_NAME = /\b(?:university|universities|college|colleges)\b/i;
+const INSTITUTION_TAG = /^urn:tag:genre:brand(?::[a-z0-9_]+)*:(?:education|educational_institution|university|college|school)s?(?::|$)/;
+
+export function isInstitution(entity: Pick<QlooEntity, "name" | "tags">): boolean {
+  if (INSTITUTION_NAME.test(entity.name)) return true;
+  return (entity.tags ?? []).some((t) => typeof t.id === "string" && INSTITUTION_TAG.test(t.id));
+}
+
+/** A brand list after the §5.2 quality gate, with educational institutions left out (isInstitution). */
 export function rankBrandRows(rows: readonly QlooEntity[]): RankedList {
-  const kept = rows.filter(passesQualityGate);
+  const kept = rows.filter((r) => passesQualityGate(r) && !isInstitution(r));
   const raw: RawRow[] = kept.map((r) => ({
     item: { id: r.entity_id, name: r.name, type: "urn:entity:brand", popularity: r.popularity ?? null, family: null },
     affinity: r.query?.affinity ?? null,
   }));
-  return rankRaw(raw, rows.length, rows.length - kept.length);
+  const gated = rows.filter((r) => !passesQualityGate(r)).length;
+  return { ...rankRaw(raw, rows.length, gated), institutions: rows.length - kept.length - gated };
 }
 
 /** One tag or brand compared between the area and the city. */
@@ -242,5 +259,38 @@ export function panelList(lists: readonly RankedList[], take: number): RankedLis
     unscored,
     gateDropped: lists.reduce((s, l) => s + l.gateDropped, 0),
     rows: items.size,
+  };
+}
+
+/** A concept tag's place among cities by its rank in each city's own list (FORMULAS block.concept_rank). */
+export interface CrossCityRank {
+  /** 1 + the cities whose list ranks the tag strictly higher; ties share the place. */
+  position: number;
+  /** The subject city and every panel city with a usable list. */
+  cities: number;
+  /** The subject city's own rank of the tag, null when its list does not rank it. */
+  ownRank: number | null;
+  /** Whether another city holds the same place. */
+  tied: boolean;
+}
+
+/**
+ * Where the subject city stands among the map cities on one tag: each city's rank of the tag in its
+ * own top-`take` list, a list that misses it or holds it at its floor counting `take + 1` (as the
+ * panel does). Panel lists with nothing ranked are left out. Null when no list ranks the tag, since a
+ * place among cities that all miss it says nothing.
+ */
+export function crossCityRank(tagId: string, own: RankedList, panel: readonly RankedList[], take: number): CrossCityRank | null {
+  const missing = take + 1;
+  const usable = panel.filter((l) => l.ranks.size > 0);
+  const ownRank = own.ranks.get(tagId) ?? null;
+  const others = usable.map((l) => l.ranks.get(tagId) ?? missing);
+  if (ownRank === null && others.every((r) => r === missing)) return null;
+  const mine = ownRank ?? missing;
+  return {
+    position: 1 + others.filter((r) => r < mine).length,
+    cities: 1 + usable.length,
+    ownRank,
+    tied: others.some((r) => r === mine),
   };
 }

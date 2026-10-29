@@ -1,4 +1,4 @@
-import { LocationMethod, type AgeBucket, type FindingKind, type FindingSuggestion, type Severity, type SkillId } from "@ct/contracts";
+import { LocationMethod, UNDER_THE_RADAR_MAX_POPULARITY, type AgeBucket, type FindingKind, type FindingSuggestion, type Severity, type SkillId, type SponsorCategory } from "@ct/contracts";
 import { quantile, spearman } from "./stats";
 import { TASTE_ISLAND_LAST_SHARE, TASTE_ISLAND_MIN_ROWS } from "./subs";
 
@@ -48,6 +48,7 @@ export const FINDING_SUGGESTION: Readonly<Record<FindingKind, SkillId | null>> =
   TWIN_FOUND: "block_dna",
   ANALOG_VETOED: "rank_candidates",
   TASTE_FINANCIALS_SPLIT: null,
+  PARTNERS_ONE_CATEGORY: "sponsor_slate",
 };
 
 /**
@@ -73,6 +74,7 @@ export const FINDING_SEVERITY: Readonly<Record<FindingKind, Severity>> = {
   TWIN_FOUND: "medium",
   ANALOG_VETOED: "medium",
   TASTE_FINANCIALS_SPLIT: "medium",
+  PARTNERS_ONE_CATEGORY: "medium",
 };
 
 // Thresholds (SPEC §4.4) --------------------------------------------------------------------------
@@ -112,14 +114,12 @@ export const POPULARITY_DOMINANCE_MIN_RHO = 0.8;
 export const HIGH_POPULARITY = 0.95;
 /** More than this share of results above HIGH_POPULARITY means the list is mostly mainstream names. */
 export const POPULARITY_DOMINANCE_MAX_HIGH_SHARE = 0.7;
-/** The first popularity cap to suggest (PLAN §4.4). */
-export const SUGGESTED_POPULARITY_CAP = 0.85;
 /**
- * UNDER-THE-RADAR never labels a result at or above this popularity, however it sits against its list's
- * median (ANSWER_QUALITY §3: a mass-market name is not "under the radar"). It is the first cap the
- * product suggests for less obvious picks, so the two read the same line.
+ * The first popularity cap to suggest (PLAN §4.4). It equals the contracts UNDER_THE_RADAR_MAX_POPULARITY
+ * (D3 of the Part 9 close-out: no under-the-radar or hidden-pocket label at or above it), so the cap the
+ * product suggests for less obvious picks and the under-the-radar line read the same value.
  */
-export const UNDER_THE_RADAR_MAX_POPULARITY = SUGGESTED_POPULARITY_CAP;
+export const SUGGESTED_POPULARITY_CAP = UNDER_THE_RADAR_MAX_POPULARITY;
 /** Each further re-run lowers the cap by this much. */
 export const POPULARITY_CAP_STEP = 0.1;
 /** The lowest cap cross_domain accepts. */
@@ -304,11 +304,15 @@ export interface HiddenPocketCandidate {
   popularity: number | null;
 }
 
-/** The HIDDEN_POCKET rule: MAD-z residual ≥ 2 and popularity below the within-set median (D17). */
+/**
+ * The HIDDEN_POCKET rule: MAD-z residual ≥ 2 and popularity below min(within-set median, 0.85). The
+ * median split is D17; the absolute ceiling is UNDER_THE_RADAR_MAX_POPULARITY (D3 of the Part 9
+ * close-out), because a mass-market destination is not hidden however popular the rest of the set is.
+ */
 export function isHiddenPocket(candidate: HiddenPocketCandidate, medianPopularity: number): boolean {
   const { residualZ, popularity } = candidate;
   if (!finite(residualZ) || !finite(popularity) || !finite(medianPopularity)) return false;
-  return atLeast(residualZ, HIDDEN_POCKET_MIN_Z) && popularity < medianPopularity;
+  return atLeast(residualZ, HIDDEN_POCKET_MIN_Z) && popularity < Math.min(medianPopularity, UNDER_THE_RADAR_MAX_POPULARITY);
 }
 
 /** HIDDEN_POCKET: destinations that over-index for the audience against their popularity, strongest first. */
@@ -399,7 +403,7 @@ export function blockNewTagsFinding(args: {
   /** The NEW tags that are taxonomy tags, most distinctive first, with their registry refs. */
   signalTags: readonly { name: string; ref: string }[];
   /**
-   * A whole city's fingerprint: the panel its lists are read against ("the other 12 map cities").
+   * A whole city's fingerprint: the panel its lists are read against ("the other map cities", no count).
    * The NEW tags are then the city's own, and the follow-up is concept_vector on them (no candidate refs needed),
    * not tenants at a site. Null or absent for a neighbourhood against its city.
    */
@@ -411,6 +415,7 @@ export function blockNewTagsFinding(args: {
   if (!isBlockNewTags(family, tags.length, args.familyTags)) return null;
   const signal = [...new Map(args.signalTags.map((t) => [t.ref, `${t.name} (${t.ref})`])).values()].slice(0, BLOCK_SIGNAL_TAGS_MAX);
   const list = family === "SOUND" ? "top music tags" : "top tags";
+  const words = family === "SOUND" ? "music" : "venue and dish";
   const either = signal.length < 2 ? signal.join("") : `${signal.slice(0, -1).join(", ")} or ${signal[signal.length - 1]}`;
   if (panel !== null) {
     // A city has no site to rank tenants at, and a concept-only city_compare has no candidate refs to
@@ -418,7 +423,7 @@ export function blockNewTagsFinding(args: {
     // what the city's distinct taste points to (artists for music tags, brands for place tags).
     const { kind, severity, text } = draft(
       "BLOCK_NEW_TAGS",
-      `Among its ${list}, ${areaName} has ${family} tags that are not among the ${list} of ${panel}, led by ${listNames(tags)}.`,
+      `Among its ${list}, ${areaName} has ${words} tags that are not among the ${list} of ${panel}, led by ${listNames(tags)}.`,
       null,
     );
     const type = family === "SOUND" ? "artist" : "brand";
@@ -434,7 +439,7 @@ export function blockNewTagsFinding(args: {
   }
   return draft(
     "BLOCK_NEW_TAGS",
-    `Among its ${list}, ${areaName} has ${family} tags that are not among the city's ${list}, led by ${listNames(tags)}.`,
+    `Among its ${list}, ${areaName} has ${words} tags that are not among the city's ${list}, led by ${listNames(tags)}.`,
     signal.length === 0 ? null : `Rank tenant brands with ${either} as the taste signal at this site against the city.`,
   );
 }
@@ -460,8 +465,56 @@ export function locationFallbackFinding(args: {
   }
   return draft(
     "LOCATION_FALLBACK",
-    `Location for ${areaName} fell back from ${LOCATION_LABEL[from]} to ${LOCATION_LABEL[to]} (a CODE FALLBACK).`,
+    `Location for ${areaName} fell back from ${LOCATION_LABEL[from]} to ${LOCATION_LABEL[to]}, a less precise reading of the area.`,
     null,
+  );
+}
+
+// S9 brand_collab ---------------------------------------------------------------------------------------
+
+/**
+ * PARTNERS_ONE_CATEGORY needs at least this share of the scored partner brands in one top-level
+ * category: "most" means a clear majority, so a list split across two or three branches never fires.
+ */
+export const PARTNERS_ONE_CATEGORY_MIN_SHARE = 0.6;
+/** Below this many scored partner brands a majority is a handful of names, too few to call a pattern. */
+export const PARTNERS_ONE_CATEGORY_MIN_SCORED = 5;
+/** sponsor_slate takes at most six categories. */
+export const PARTNERS_SLATE_MAX_CATEGORIES = 6;
+
+/** Whether `inCategory` of `scored` partner brands make a one-category list. */
+export function isPartnersOneCategory(inCategory: number, scored: number): boolean {
+  if (!Number.isInteger(inCategory) || !Number.isInteger(scored) || inCategory > scored) return false;
+  return scored >= PARTNERS_ONE_CATEGORY_MIN_SCORED && atLeast(inCategory / scored, PARTNERS_ONE_CATEGORY_MIN_SHARE);
+}
+
+/**
+ * PARTNERS_ONE_CATEGORY (CR 3 of Part 9): most of the partner brands the audience also favours share
+ * one top-level genre:brand category once the subject's own category is left out, so the list shows
+ * one category rather than a range of partners. Suggests sponsor_slate seeded by the subject brand over
+ * the sponsor categories none of the discovered partners sits in (and not the subject's own), which
+ * finds the best fit in each: the pivot is structural. No suggestion when no such category is left.
+ */
+export function partnersOneCategoryFinding(args: {
+  subjectName: string;
+  /** The subject brand's registry ref, the seed sponsor_slate takes. */
+  subjectRef: string;
+  /** The shared category in words, e.g. "food and beverage". */
+  categoryLabel: string;
+  inCategory: number;
+  scored: number;
+  /** Sponsor category ids the discovered partners do not cover, in SponsorCategory order. */
+  otherCategories: readonly SponsorCategory[];
+}): FindingDraft | null {
+  const { subjectName, subjectRef, categoryLabel, inCategory, scored } = args;
+  if (!isPartnersOneCategory(inCategory, scored)) return null;
+  const categories = [...new Set(args.otherCategories)].slice(0, PARTNERS_SLATE_MAX_CATEGORIES);
+  return draft(
+    "PARTNERS_ONE_CATEGORY",
+    `Most partner brands this audience also favours sit in one category (${categoryLabel}, ${inCategory} of ${scored}), with ${subjectName}'s own category already left out: the list shows one category, not a range of partners.`,
+    categories.length === 0
+      ? null
+      : `Find the best-fitting partner in other categories: sponsor_slate with seed ${subjectRef} (${subjectName}) over ${categories.join(", ")}, sponsor categories none of the discovered partners sits in.`,
   );
 }
 

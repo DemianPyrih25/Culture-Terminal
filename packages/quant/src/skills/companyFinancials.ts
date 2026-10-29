@@ -1,4 +1,5 @@
 import {
+  PUBLIC_NOT_CONFIGURED_REASON,
   ANALYST_TOOLS,
   makeId,
   publicDataErrorCode,
@@ -73,7 +74,7 @@ export function listedCompanyOf(name: string, listed: ListedCompanies = LISTED_C
 
 /** Why public data failed, in a reader's words. */
 const ERROR_TEXT: Readonly<Record<PublicDataErrorCode, string>> = {
-  not_configured: "SEC access is not configured on this server",
+  not_configured: PUBLIC_NOT_CONFIGURED_REASON.sec,
   not_found: "SEC EDGAR has no record for it",
   rate_limited: "SEC EDGAR asked us to slow down; try again shortly",
   unavailable: "SEC EDGAR could not be reached",
@@ -285,7 +286,7 @@ export function makeCompanyFinancialsSkill(listed: ListedCompanies = LISTED_COMP
       const code = publicDataErrorCode(err);
       if (code === null) throw err;
       const ids = record("error", `${step}: ${ERROR_TEXT[code]}.`);
-      addMissing(fin, entity.ref, `Reported revenue of ${companyName}: ${ERROR_TEXT[code]}`, code === "not_found" ? "not_listed" : "unavailable", ids);
+      addMissing(fin, entity.ref, `Reported revenue of ${companyName}: ${ERROR_TEXT[code]}`, code === "not_found" ? "not_listed" : code === "not_configured" ? "not_configured" : "unavailable", ids);
       fin.notices.push(`No financial figures for ${companyName}: ${ERROR_TEXT[code]} (${step}). None are guessed.`);
       return finish(fin, out, "error", []);
     };

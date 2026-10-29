@@ -106,4 +106,13 @@ describe("pickKpis: the Part 9 jobs and the public-data figures", () => {
     const similarity = metric("subs.similarity", 0.62, ["R1", "R2"]);
     expect(ids(pickKpis("brand_health", [similarity, yoy], []))).toEqual([similarity.id, yoy.id]);
   });
+
+  it("has a reported-revenue slot only when company_financials ran (D8)", () => {
+    const fin = (job: Job) => KPI_SLOTS[job].filter((s) => s.picks.some((p) => p.key === "fin.yoy"));
+    for (const job of ["brand_health", "launch_test"] as const) expect(fin(job).map((s) => s.requires)).toEqual(["company_financials"]);
+    const yoy = metric("fin.yoy", 0.12, ["R1"], { period: "FY2025, 10-K filed 2025-03-20" });
+    const similarity = metric("subs.similarity", 0.62, ["R1", "R2"]);
+    expect(ids(pickKpis("brand_health", [similarity, yoy], [], { ran: new Set(["peer_landscape", "company_financials"]) }))).toEqual([similarity.id, yoy.id]);
+    expect(ids(pickKpis("brand_health", [similarity, yoy], [], { ran: new Set(["peer_landscape"]) }))).toEqual([similarity.id]);
+  });
 });

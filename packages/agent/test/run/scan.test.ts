@@ -1,5 +1,5 @@
 // The opening scan table: which skills each job runs in this build, with what default arguments.
-import { DATA_NOTICE, Job, type EntityRef, type GeoApi, type Intent, type ModelDigest, type RegisteredEntity, type RegisteredTag, type TagRef } from "@ct/contracts";
+import { DATA_NOTICE, Job, PUBLIC_NOT_CONFIGURED_REASON, type DigestRow, type EntityRef, type GeoApi, type Intent, type ModelDigest, type RegisteredEntity, type RegisteredTag, type TagRef } from "@ct/contracts";
 import { createGeo } from "@ct/geo";
 import { describe, expect, it } from "vitest";
 import listedConfig from "../../../../config/listed_companies.json";
@@ -151,8 +151,10 @@ describe("planScan", () => {
     });
     const plan = scanOf("site_selection", { intent });
     expect(plan.steps.map((s) => s.toolCallId)).toEqual(["scan-1"]);
-    const [lift] = plan.chained;
-    expect(lift).toMatchObject({ toolCallId: "scan-2", tool: "geo_lift", after: "find_tags", estimate: SCAN_LIFT_ESTIMATE });
+    // The category retry comes first, quietly (it runs only when the concept's own search keeps no tag).
+    const [retry, lift] = plan.chained;
+    expect(retry).toMatchObject({ toolCallId: "scan-2", tool: "find_tags", after: "find_tags", estimate: 0, quiet: true });
+    expect(lift).toMatchObject({ toolCallId: "scan-3", tool: "geo_lift", after: "find_tags", estimate: SCAN_LIFT_ESTIMATE });
     expect(describeChainedStep(lift!)).toBe("geo_lift (LIFT) in austin on the place tags find_tags returns, with supply");
     const tag = (n: number, tagId: string): RegisteredTag => ({ ref: `T${n}` as TagRef, tagId, name: tagId, type: "taxonomy", signalCapable: true });
     const tags = [
@@ -172,7 +174,7 @@ describe("planScan", () => {
       geo: { metro: "nashville", area: "Riverbend", unsupported_place: null, market: null, target_metro: null, cities: [] },
       constraints: { ...intentFor().constraints, concepts: ["listening bar"], notes: ["area also named: Riverbend", "area also named: Nowhere Flats", "budget is tight"] },
     });
-    const [lift] = scanOf("site_selection", { intent, geo: AREA_GEO }).chained;
+    const [, lift] = scanOf("site_selection", { intent, geo: AREA_GEO }).chained;
     expect(describeChainedStep(lift!)).toBe("geo_lift (LIFT) in nashville on the place tags find_tags returns, with supply, and the question's area riverbend first");
     const genre: RegisteredTag = { ref: "T1" as TagRef, tagId: "urn:tag:genre:place:restaurant:bar", name: "Bar", type: "taxonomy", signalCapable: true };
     // A repeat and a name the gazetteer does not hold are left out.
@@ -180,7 +182,7 @@ describe("planScan", () => {
     expect(namedAreaIds(intent, AREA_GEO)).toEqual(["riverbend"]);
     expect(namedAreaIds({ ...intent, geo: { ...intent.geo, metro: null } }, AREA_GEO)).toEqual([]);
     // Without an area in the gazetteer, no focus_areas at all.
-    expect(scanOf("site_selection", { intent }).chained[0]?.input(feed({ tags: [genre] }))).not.toHaveProperty("focus_areas");
+    expect(scanOf("site_selection", { intent }).chained[1]?.input(feed({ tags: [genre] }))).not.toHaveProperty("focus_areas");
   });
 
   it("area_profile and tenant_mix read the question's neighbourhood with local brands", () => {
@@ -375,7 +377,7 @@ describe("planScan: the Part 9 jobs", () => {
   it("taste_twins with a concept chains the twins after find_tags, the concept's place tags picking the areas", () => {
     const plan = scanOf("taste_twins", { intent: twinIntent(["listening bar"]), geo: AREA_GEO });
     expect(plan.steps.map((s) => s.tool)).toEqual(["find_tags"]);
-    const [twins] = plan.chained;
+    const [, twins] = plan.chained;
     expect(twins).toMatchObject({ tool: "taste_twins", after: "find_tags" });
     const tags = [tagOf(1, "urn:tag:category:place:wine_bar"), tagOf(2, "urn:tag:genre:place:restaurant:bar"), tagOf(3, "urn:tag:genre:brand:soda")];
     expect(twins!.input(feed({ tags }))).toMatchObject({ concept_tags: ["T2", "T1"], target_areas: [] });
@@ -455,12 +457,38 @@ describe("planScan: the Part 9 jobs", () => {
     expect(plan.steps).toEqual([
       { toolCallId: "scan-1", tool: "find_tags", input: { concepts: [{ text: described.constraints.concept_description!.slice(0, 60).trim(), scope: "brand" }], ...NO_STEP } },
     ]);
-    const [vector] = plan.chained;
+    const [retry, vector] = plan.chained;
+    expect(retry).toMatchObject({ tool: "find_tags", after: "find_tags", quiet: true });
     expect(vector).toMatchObject({ tool: "concept_vector", after: "find_tags" });
     const tags = [tagOf(1, "urn:tag:genre:brand:hot_sauce"), tagOf(2, "urn:tag:keyword:qloo:spicy", false)];
     expect(vector!.input(feed({ tags }))).toEqual({ concept_tags: ["T1"], type: "brand", analogs: [], ...NO_STEP });
     expect(vector!.input(feed({ tags: [tags[1]!] }))).toBeNull();
     expect(plan.skipped).toEqual([FIN_SKIP]);
+  });
+
+  it("launch_test retries a concept with no tag of its own on the first nearest category (the owner's o03 decision)", () => {
+    const intent = intentFor({ job: "launch_test", mentions: [], constraints: { ...intentFor().constraints, concepts: ["fizzy kelp tonic", "hot sauce"] } });
+    const [retry, vector] = scanOf("launch_test", { intent, primary: null }).chained;
+    const none = (concept: string, nearest: string | null): DigestRow => ({
+      ref: null,
+      name: concept,
+      values: { concept, scope: "brand", match: "none", ...(nearest === null ? {} : { nearest }) },
+    });
+    const kept: DigestRow = { ref: "T1" as TagRef, name: "Hot Sauce", values: { concept: "hot sauce", scope: "brand", use: "taste_signal", source: "search", status: "live" } };
+    // Only the concept that kept nothing is retried, on the first listed category that is not already searched.
+    expect(retry!.input(feed({ rows: [none("Fizzy kelp tonic", "Hot sauce | Sea Snacks | Soft Drinks"), kept] }))).toEqual({
+      concepts: [{ text: "Sea Snacks", scope: "brand" }],
+      ...NO_STEP,
+    });
+    // Every concept kept a tag, a search failed, or no category was listed: nothing to retry.
+    expect(retry!.input(feed({ rows: [kept] }))).toBeNull();
+    expect(retry!.input(feed({ rows: [{ ...none("fizzy kelp tonic", "Sea Snacks"), values: { concept: "fizzy kelp tonic", match: "error", nearest: "Sea Snacks" } }] }))).toBeNull();
+    expect(retry!.input(feed({ rows: [none("fizzy kelp tonic", null)] }))).toBeNull();
+    // The concept test reads the retry's tags with the first search's: chainFeed merges both.
+    expect(vector).toMatchObject({ tool: "concept_vector", after: "find_tags" });
+    // A site_selection concept with no map city has no concept test to feed, so no retry is planned.
+    const noCity = intentFor({ job: "site_selection", constraints: { ...intentFor().constraints, concepts: ["listening bar"] } });
+    expect(scanOf("site_selection", { intent: noCity }).chained).toEqual([]);
   });
 
   it("launch_test keeps or vetoes the analogs the question names in the scan, the gate's stand-in primary among them", () => {
@@ -473,15 +501,15 @@ describe("planScan: the Part 9 jobs", () => {
     const listed = { ...entity(1), name: LISTED_NAME };
     // No mention is the subject: the gate's first mention is an analog, never the company whose filings are read.
     const plan = scanOf("launch_test", { intent: analogsOnly, primary: listed, peers: [entity(2), entity(3, "artist")], publicData: true });
-    expect(plan.chained[0]?.input(feed({ tags: [tagOf(1, "urn:tag:genre:brand:hot_sauce")] }))).toMatchObject({ analogs: ["R1", "R2"] });
-    expect(describeChainedStep(plan.chained[0]!)).toBe(
+    expect(plan.chained[1]?.input(feed({ tags: [tagOf(1, "urn:tag:genre:brand:hot_sauce")] }))).toMatchObject({ analogs: ["R1", "R2"] });
+    expect(describeChainedStep(plan.chained[1]!)).toBe(
       "concept_vector (CNPT) on the taxonomy tags find_tags returns, type brand, the question's analogs R1, R2 kept or vetoed",
     );
     expect(plan.steps.map((s) => s.tool)).toEqual(["find_tags"]);
     // A marked subject is the company: it is no analog, and its filings join the scan when it is listed.
     const company = intentFor({ job: "launch_test", constraints: { ...intentFor().constraints, concepts: ["hot sauce"] } });
     const own = scanOf("launch_test", { intent: company, primary: listed, peers: [entity(2)], publicData: true });
-    expect(own.chained[0]?.input(feed({ tags: [tagOf(1, "urn:tag:genre:brand:hot_sauce")] }))).toMatchObject({ analogs: ["R2"] });
+    expect(own.chained[1]?.input(feed({ tags: [tagOf(1, "urn:tag:genre:brand:hot_sauce")] }))).toMatchObject({ analogs: ["R2"] });
     expect(own.steps.map((s) => s.tool)).toEqual(["find_tags", "company_financials"]);
   });
 
@@ -520,19 +548,38 @@ describe("planScan: the Part 9 jobs", () => {
       constraints: { ...intentFor().constraints, concepts: ["natural-wine bar"] },
     });
     const plan = scanOf("city_compare", { intent, markets: MARKET_CATALOGUE });
-    expect(plan.steps.map((s) => s.tool)).toEqual(["block_dna", "block_dna", "block_dna", "find_tags"]);
-    // A market without a gazetteer (las_vegas) has no lift map; the map cities each get one.
+    expect(plan.steps.map((s) => s.tool)).toEqual(["find_tags"]);
+    // CR 5: each city's fingerprint chains after find_tags and carries the concept's tags. A market
+    // without a gazetteer (las_vegas) has no lift map; the map cities each get one.
     expect(plan.chained.map((c) => [c.tool, c.after])).toEqual([
+      ["find_tags", "find_tags"],
+      ["block_dna", "find_tags"],
+      ["block_dna", "find_tags"],
+      ["block_dna", "find_tags"],
       ["geo_lift", "find_tags"],
       ["geo_lift", "find_tags"],
     ]);
+    // The unused fourth city slot is no gap: nothing says block_dna was skipped.
+    expect(plan.skipped.filter((s) => s.tool === "block_dna")).toEqual([]);
     const genre = tagOf(1, "urn:tag:genre:place:wine_bar");
-    expect(plan.chained.map((c) => c.input(feed({ tags: [genre] })))).toEqual([
+    const keyword = tagOf(2, "urn:tag:keyword:qloo:natural_wine", false);
+    expect(plan.chained.map((c) => c.input(feed({ tags: [genre, keyword] })))).toEqual([
+      null,
+      { area: { kind: "city", market: "austin" }, include_brands: false, concept_tags: ["T1"], ...NO_STEP },
+      { area: { kind: "city", market: "las_vegas" }, include_brands: false, concept_tags: ["T1"], ...NO_STEP },
+      { area: { kind: "city", market: "denver" }, include_brands: false, concept_tags: ["T1"], ...NO_STEP },
       { metro: "austin", concept_tags: ["T1"], concept_entities: [], supply: true, ...NO_STEP },
       { metro: "denver", concept_tags: ["T1"], concept_entities: [], supply: true, ...NO_STEP },
     ]);
-    // No place tag: nothing to map.
-    expect(plan.chained[0]!.input(feed({ tags: [tagOf(2, "urn:tag:keyword:qloo:natural_wine", false)] }))).toBeNull();
+    expect(describeChainedStep(plan.chained[1]!)).toContain("city fingerprint of austin against the other map cities");
+    // No tag a Block DNA family reads: the fingerprint still runs, without concept tags; no place tag, no lift map.
+    expect(plan.chained[1]!.input(feed({ tags: [keyword] }))).toEqual({
+      area: { kind: "city", market: "austin" },
+      include_brands: false,
+      concept_tags: [],
+      ...NO_STEP,
+    });
+    expect(plan.chained[4]!.input(feed({ tags: [keyword] }))).toBeNull();
   });
 
   it("compareCities keeps the config's market ids, by id or by name, at most four", () => {
@@ -560,10 +607,31 @@ describe("planScan: the Part 9 jobs", () => {
       geo: { ...intentFor().geo, metro: "nashville", area: "Riverbend" },
       constraints: { ...intentFor().constraints, concepts: ["listening bar"] },
     });
-    const [, econ] = scanOf("site_selection", { intent: site, geo: AREA_GEO, publicData: true }).chained;
+    const [, , econ] = scanOf("site_selection", { intent: site, geo: AREA_GEO, publicData: true }).chained;
     expect(econ).toMatchObject({ tool: "area_economics", after: "geo_lift" });
     const lifted = [{ metro: "nashville" as const, id: "a_one" }, { metro: "nashville" as const, id: "riverbend" }, { metro: "austin" as const, id: "elsewhere" }];
     expect(econ!.input(feed({ areas: lifted }))).toEqual({ metro: "nashville", areas: ["riverbend", "a_one"], ...NO_STEP });
+  });
+
+  it("never plans a public-data step whose source is not configured, and flags it only when the question needed it (D7)", () => {
+    const listed = { ...entity(1), name: LISTED_NAME };
+    const noSec = scanOf("brand_health", { intent: intentFor(), primary: listed, publicData: true, publicConfigured: { sec: false, census: true } });
+    expect(noSec.steps.map((s) => s.tool)).not.toContain("company_financials");
+    expect(noSec.skipped).toContainEqual({ tool: "company_financials", reason: PUBLIC_NOT_CONFIGURED_REASON.sec });
+    expect(noSec.flags).toEqual(["SEC_NOT_CONFIGURED"]);
+    // An unlisted brand would not have read filings: the usual reason, and no limitation.
+    const unlisted = scanOf("brand_health", { intent: intentFor(), primary: entity(1), publicData: true, publicConfigured: { sec: false, census: false } });
+    expect(unlisted.skipped).toContainEqual(FIN_SKIP);
+    expect(unlisted.flags).toEqual([]);
+    const area = intentFor({ job: "area_profile", pillar: "location", geo: { ...intentFor().geo, metro: "nashville", area: "Riverbend" } });
+    const noCensus = scanOf("area_profile", { intent: area, geo: AREA_GEO, publicData: true, publicConfigured: { sec: true, census: false } });
+    expect(noCensus.steps.map((s) => s.tool)).toEqual(["block_dna"]);
+    expect(noCensus.skipped).toEqual([{ tool: "area_economics", reason: PUBLIC_NOT_CONFIGURED_REASON.census }]);
+    expect(noCensus.flags).toEqual(["CENSUS_NOT_CONFIGURED"]);
+    // Both configured: planned as before, no flag.
+    const both = scanOf("area_profile", { intent: area, geo: AREA_GEO, publicData: true, publicConfigured: { sec: true, census: true } });
+    expect(both.steps.map((s) => s.tool)).toEqual(["block_dna", "area_economics"]);
+    expect(both.flags).toEqual([]);
   });
 });
 

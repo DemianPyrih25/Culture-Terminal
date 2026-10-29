@@ -172,7 +172,7 @@ describe("company_financials", () => {
     expect(digest._data_notice).toBe(PUBLIC_DATA_NOTICE);
     expect(digestFits(digest, { tool: "company_financials", step: "S5" })).toBe(true);
     expect(skill.limitations([])).toContain(
-      "Company-level reported figures from SEC filings; one brand may be a small part of a company, and none of this is advice.",
+      "Company-level reported figures from SEC filings; one brand may be a small part of a company, a change in revenue can come from acquisitions or other brands, and none of this is advice.",
     );
   });
 
@@ -193,8 +193,8 @@ describe("company_financials", () => {
     const run = setup("Brand Alpha", publicApi({ failFacts: "not_configured" }));
     const result = await skill.run(run.input, run.ctx);
     expect(result.status).toBe("error");
-    expect(run.ledger.metrics.map((m) => [m.badge, m.reason])).toEqual([["UNAVAILABLE", "unavailable"]]);
-    expect(result.forModel.notices[0]).toContain("SEC access is not configured on this server");
+    expect(run.ledger.metrics.map((m) => [m.badge, m.reason])).toEqual([["UNAVAILABLE", "not_configured"]]);
+    expect(result.forModel.notices[0]).toContain("SEC EDGAR is not configured on this server");
     // The ticker lookup that did answer stays as evidence.
     expect(run.ledger.evidences[0]?.requestIds).toEqual(["company_tickers.json"]);
     // Any other error is a bug and propagates.

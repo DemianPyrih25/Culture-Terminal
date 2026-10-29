@@ -57,6 +57,7 @@ export { marketLabel, METRO_CENTRES, PLACE_SEARCH_MIN_RADIUS_MILES, metroCentreL
 export { tagNameFromUrn, tagTypeOf } from "./findTags/tags";
 // The curated place types; CLERK's backstop reads a place mention that names one as the concept, not a venue.
 export { curatedConcept } from "./findTags/curated";
+export { NEAREST_SEPARATOR } from "./findTags";
 export { buildSkillDigest, fitSkillDigest, orderedFlags, skillErrorResult, skillResult } from "./digest";
 export type { DigestParts, DigestTarget } from "./digest";
 export { addSkillEvidence, addSkillMetric, attemptAll, countUncached, isBudgetError, registerEntity } from "./common";

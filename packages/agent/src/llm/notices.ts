@@ -68,6 +68,7 @@ const FINDING_KIND_WORDS: Readonly<Record<FindingKind, string>> = {
   TWIN_FOUND: "taste twin found",
   ANALOG_VETOED: "analog vetoed",
   TASTE_FINANCIALS_SPLIT: "taste and financials split",
+  PARTNERS_ONE_CATEGORY: "partners in one category",
 };
 
 /**
@@ -127,6 +128,20 @@ export const NOTICE_FOLLOWUP_OPEN =
 /** After a turn-2 response whose calls were all refused for their input: turn 2 stays open once. */
 export const NOTICE_TURN2_OPEN = "None of your turn-2 calls ran. Turn 2 stays open for one response: send the calls again corrected, or call submit_report.";
 
+/** After a turn-2 response that ran only lookups (find_tags, resolve_entities): turn 2 stays open once. */
+export const NOTICE_LOOKUP_OPEN =
+  "Your turn-2 calls only looked up refs, which are no evidence by themselves. Turn 2 stays open for one response: run the call that uses what they found " +
+  "(its planned step_id, or the same trigger_finding_id), or call submit_report if they found nothing usable.";
+
+/**
+ * After a turn-2 response that sent lookups (find_tags, resolve_entities) together with other calls,
+ * when a lookup found refs no call has used yet and follow-up calls and time are left: turn 2 stays
+ * open once, so the call that uses them (a concept test on a tag just found) can still run.
+ */
+export const NOTICE_LOOKUP_PENDING =
+  "Your lookups found refs that no call has used yet, and a lookup is no evidence by itself. Turn 2 stays open for one response: run the call that uses what they found " +
+  "(its planned step_id, or the lookup's trigger_finding_id), or call submit_report if they found nothing usable.";
+
 /** At most this many findings are named in an UNTRIGGERED_FOLLOWUP answer. */
 const CITABLE_MAX = 8;
 
@@ -164,6 +179,7 @@ export const ANALYST_TOOL_ERROR_CODES = [
   "TOOL_INPUT_TRUNCATED",
   "INVALID_JSON",
   "TOOL_FAILED",
+  "SOURCE_NOT_CONFIGURED",
 ] as const;
 export type AnalystToolErrorCode = (typeof ANALYST_TOOL_ERROR_CODES)[number];
 

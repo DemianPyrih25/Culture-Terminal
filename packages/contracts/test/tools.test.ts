@@ -275,6 +275,13 @@ describe("parseToolInput", () => {
     expect(parseToolInput("block_dna", { ...city, area: { kind: "city", metro: "nashville" } }).ok).toBe(false);
   });
 
+  it("takes optional concept tags in block_dna, distinct and at most four", () => {
+    const city = { area: { kind: "city", market: "kansas_city" }, include_brands: false, trigger_finding_id: null, step_id: null };
+    expect(parseToolInput("block_dna", { ...city, concept_tags: ["T1", "T2"] }).ok).toBe(true);
+    expect(parseToolInput("block_dna", { ...city, concept_tags: ["T1", "T1"] }).ok).toBe(false);
+    expect(parseToolInput("block_dna", { ...city, concept_tags: ["T1", "T2", "T3", "T4", "T5"] }).ok).toBe(false);
+  });
+
   it("checks the taste_twins source and target cities", () => {
     const twins = {
       source: { kind: "nbhd", ref: "fixture_area", metro: "nashville" },

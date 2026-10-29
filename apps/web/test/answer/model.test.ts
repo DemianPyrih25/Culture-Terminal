@@ -571,4 +571,17 @@ describe("Part 9 jobs", () => {
   it("a question that fit its job has no Read as note", () => {
     for (const job of Job.options.filter((j) => j !== "launch_test")) expect(answer(job).readAs, job).toBeNull();
   });
+
+  it("a product the data does not hold leads the page with the category tested instead, said once (the owner's o03 decision)", () => {
+    const sentence = 'The exact product, "fizzy kelp tonic", is not in the data, so the category "Sea Snacks" was tested instead.';
+    const events = jobRunEvents("launch_test").map((e) =>
+      e.type === "report.final"
+        ? { ...e, report: { ...e.report, limitations: [{ source: "flag" as const, flag: "CONCEPT_NOT_IN_DATA" as const, text: sentence }, ...e.report.limitations] } }
+        : e,
+    );
+    const a = answerOf(events);
+    expect(a.concept).toBe(sentence);
+    expect(a.changes).not.toContain(sentence);
+    for (const job of Job.options) expect(answer(job).concept, job).toBeNull();
+  });
 });

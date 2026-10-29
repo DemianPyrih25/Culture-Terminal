@@ -1,4 +1,4 @@
-import type { NoValueReason, QlooEntity, QuadrantName } from "@ct/contracts";
+import { UNDER_THE_RADAR_MAX_POPULARITY, type NoValueReason, type QlooEntity, type QuadrantName } from "@ct/contracts";
 import { isHiddenPocket } from "../../findings";
 import { detectFloor, madZ, median, theilSen, withinCallPercentiles } from "../../stats";
 import { displayRanks } from "../format";
@@ -51,7 +51,7 @@ export interface TravelQuadrant {
   residual: (number | null)[];
   /** Hidden-pocket score H_d (MAD-z of the residual) by row. */
   score: (number | null)[];
-  /** Rows that pass the HIDDEN_POCKET rule (z ≥ 2, popularity below the median), strongest first. */
+  /** Rows that pass the HIDDEN_POCKET rule (z ≥ 2, popularity below min(median, 0.85)), strongest first. */
   hiddenPockets: number[];
   /** Σ positive residuals per region, largest first; `members` counts the positive residuals. */
   belts: { region: string; value: number; members: number }[];
@@ -78,8 +78,14 @@ function outsideUs(r: QlooEntity): boolean {
   return typeof code === "string" && code.trim() !== "" && code.trim().toUpperCase() !== US_COUNTRY_CODE;
 }
 
+/**
+ * The travel quadrant, split at the within-set medians (D17). A destination at or above
+ * UNDER_THE_RADAR_MAX_POPULARITY is well known whatever the set's median (D3 of the Part 9 close-out):
+ * high fit makes it HEARTLAND, never a hidden pocket, as on the sponsor slate.
+ */
 export function quadrantOf(fit: number, popularity: number, medianFit: number, medianPopularity: number): QuadrantName {
-  if (fit >= medianFit) return popularity >= medianPopularity ? "HEARTLAND" : "HIDDEN_POCKET";
+  const known = popularity >= medianPopularity || popularity >= UNDER_THE_RADAR_MAX_POPULARITY;
+  if (fit >= medianFit) return known ? "HEARTLAND" : "HIDDEN_POCKET";
   return popularity >= medianPopularity ? "MASS" : "COLD";
 }
 

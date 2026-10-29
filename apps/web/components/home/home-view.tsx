@@ -11,7 +11,8 @@ export interface HomeViewProps {
 
 /** The hero line, with the design's forced break. */
 export const HERO_LINES = ["Ask what any audience", "really loves."] as const;
-export const HERO_SUBLINE = "Get a one-page answer from Qloo taste data in about a minute.";
+/** True to the sources: Qloo taste data always; SEC filings and Census figures only when a question needs them. */
+export const HERO_SUBLINE = "Get a one-page answer in about a minute, from Qloo taste data plus SEC filings and US Census figures where a question needs them.";
 
 /**
  * Home (N01 at 1440, N17 at 390): the hero, the question box with its inline states, and the how band.

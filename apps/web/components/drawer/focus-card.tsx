@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import type { Footnote } from "../../lib/brief";
+import { capitalize, isKnownAbsence, type Footnote } from "../../lib/brief";
 import { ButtonLink } from "../ui";
 
 /**
@@ -45,7 +45,7 @@ export function focusView(note: Footnote, copy: NumberCopy | null = null, figure
   const from = andList(sources.map((k) => SOURCE_WORDS[k]));
   rows.push({ key: "Source", value: note.computed || m?.derived ? `Computed from ${from}${sources.length === 1 && sources[0] === "qloo" ? " data" : ""}` : `From ${from}` });
   if (m?.period) rows.push({ key: "Period", value: m.period });
-  const means = copy?.means ?? (m?.unavailable ? `Not measured: ${m.reasonLabel ?? "no value"}` : m?.window ? `From ${m.window} only` : null);
+  const means = copy?.means ?? (m?.unavailable ? (isKnownAbsence(m.reason) ? capitalize(m.reasonLabel ?? m.text) : `Not measured: ${m.reasonLabel ?? "no value"}`) : m?.window ? `From ${m.window} only` : null);
   if (means) rows.push({ key: "Means", value: means });
   const lookupSource = sources.length === 1 ? `${LOOKUP_WORDS[sources[0] ?? "qloo"]} ` : "";
   rows.push({ key: "Built from", value: lookups === 0 ? "Our own code" : `${lookups} ${lookupSource}${lookups === 1 ? "lookup" : "lookups"}` });
@@ -55,7 +55,7 @@ export function focusView(note: Footnote, copy: NumberCopy | null = null, figure
     return { kicker: "This chart", value: null, description: copy?.description ?? figureTitle ?? "A chart in this answer", rows, methodHref };
   }
   if (m) {
-    const value = copy?.value ?? (m.unavailable ? "No data" : m.text);
+    const value = copy?.value ?? (m.unavailable ? (isKnownAbsence(m.reason) ? capitalize(m.text) : "No data") : m.text);
     return { kicker: "This number", value, description: copy?.description ?? sentence(m.label), rows, methodHref };
   }
   return { kicker: "This note", value: null, description: copy?.description ?? sentence(note.text), rows, methodHref };

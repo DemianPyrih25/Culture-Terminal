@@ -43,7 +43,8 @@ export interface FakePublicData extends PublicDataClient {
   readonly records: PublicCallRecord[];
 }
 
-export function fakePublicData(): FakePublicData {
+/** `configured` mirrors PublicDataClient.configured: a source set to false is one the server cannot read (D7). */
+export function fakePublicData(options: { configured?: { sec?: boolean; census?: boolean } } = {}): FakePublicData {
   const records: PublicCallRecord[] = [];
   let next = 0;
   const forScope = (runId: string | null, onCall?: (record: PublicCallRecord) => void): RunPublic => {
@@ -109,7 +110,7 @@ export function fakePublicData(): FakePublicData {
   };
   return {
     env: "mock",
-    configured: { sec: true, census: true },
+    configured: { sec: options.configured?.sec ?? true, census: options.configured?.census ?? true },
     records,
     forRun: (scope) => forScope(scope.runId, scope.onCall),
     standalone: (options) => forScope(null, options?.onCall),

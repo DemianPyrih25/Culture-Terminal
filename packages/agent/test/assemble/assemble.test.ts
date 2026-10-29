@@ -83,7 +83,7 @@ describe("assembleReport", () => {
     );
     expect(matrix?.badges).toEqual(["MEASURED", "DERIVED"]);
     expect(momentum?.badges).toEqual(["STALE"]);
-    expect(report.exhibits[0]?.sourceLine).toMatch(/^Source: ANALYST priors recorded before any data/);
+    expect(report.exhibits[0]?.sourceLine).toMatch(/^Source: the AI's expectations, recorded before any data/);
   });
 
   it("computes confidence from run facts, cited STALE metrics and CHECKER warnings", () => {
@@ -332,7 +332,7 @@ describe("assembleReport", () => {
     const draft = validDraft();
     draft.next_moves[0]!.question = "Does the similarity {{M1}} [E1] hold by metro?";
     const { report } = assemble(draft, { attempt: 2 });
-    expect(report.nextMoves[0]?.question).toBe("Does the similarity 0.62 (MEASURED) hold by metro?");
+    expect(report.nextMoves[0]?.question).toBe("Does the similarity 0.62 hold by metro?");
     expect(report.warnings.map((w) => w.rule)).toEqual(["V2"]);
   });
 

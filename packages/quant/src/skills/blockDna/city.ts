@@ -1,5 +1,6 @@
 import {
   MetroId,
+  type BlockFamily,
   type CacheProbe,
   type CityAreaArg,
   type EvidenceId,
@@ -13,7 +14,7 @@ import {
   type ToolInput,
 } from "@ct/contracts";
 import { emptyResultFinding } from "../../findings";
-import { attemptAllKeepingFailures, countUncached, type Attempt } from "../common";
+import { addSkillMetric, attemptAllKeepingFailures, countUncached, type Attempt } from "../common";
 import { skillErrorResult, type DigestTarget } from "../digest";
 import { marketLabel } from "../metros";
 import {
@@ -38,22 +39,25 @@ import {
   type BrandAttempt,
   type TagAttempt,
 } from "./calls";
-import { BRAND_TAKE, compareLists, NEW_AREA_TOP, panelList, rankBrandRows, rankTagRows, TAG_TAKE, type RankedList } from "./fingerprint";
+import { BRAND_TAKE, compareLists, crossCityRank, NEW_AREA_TOP, panelList, rankBrandRows, rankTagRows, TAG_TAKE, type RankedList } from "./fingerprint";
 import { cityLocation } from "./location";
 import {
   addBlockDnaBars,
   addBrandMetrics,
+  addCityConceptMetrics,
   addFamilyMetrics,
   addFindingDraft,
   addLocalBrandsTable,
   addNewTagsFinding,
   blockDigestRows,
+  conceptTagsOf,
   finishBlockRun,
   localBrands,
   panelBase,
   type BlockFrame,
   type BlockRun,
   type BrandResult,
+  type CityConceptReading,
   type FamilyResult,
 } from "./outputs";
 
@@ -189,6 +193,22 @@ export async function runCityFingerprint(input: CityInput, ctx: SkillCtx): Promi
     flags: callFlags(panelAttempts.map(rowsOf), [...panelTagLists, ...panelMusicLists], panelCalls, panelAttempts.some((a) => a?.kind === "truncated")),
   });
   const tagEvidence = [ownE, panelE].filter((e): e is EvidenceId => e !== null);
+  // The panel's size as a metric (Q6): the model cites it as a token instead of typing the count.
+  const panelSize = addSkillMetric(ctx.ledger, {
+    key: "block.panel_size",
+    label: `other map cities ${name} is compared with (their tag lists answered)`,
+    subjectRefs: [market],
+    value: tagsPanel.size,
+    reason: "not_measured",
+    display: `${tagsPanel.size} map ${tagsPanel.size === 1 ? "city" : "cities"}`,
+    unit: "count",
+    badge: "DERIVED",
+    formulaId: "block.panel_rank",
+    evidenceIds: panelE === null ? [] : [panelE],
+    n: null,
+    comparator: "BASELINE",
+  });
+  run.metrics.push(panelSize);
 
   // No ranked tags for the city itself: nothing to compare.
   if (ownTags === null || ownGap !== null) {
@@ -244,6 +264,12 @@ export async function runCityFingerprint(input: CityInput, ctx: SkillCtx): Promi
       qualityGateDrops: gateDropped,
     });
     const raw = new Map<string, QlooEntity>((okValue(ownBrandsA)?.data.results.entities ?? []).map((e) => [e.entity_id, e]));
+    const institutions = ownList?.institutions ?? 0;
+    if (institutions > 0) {
+      run.notices.push(
+        `${institutions === 1 ? "1 university or college" : `${institutions} universities or colleges`} that Qloo lists as brands ${institutions === 1 ? "was" : "were"} left out: an institution is not a partner or tenant brand.`,
+      );
+    }
     brandResult = {
       items: ownList !== null && ownBrandGap === null && brandPanel.list !== null ? compareLists(ownList, brandPanel.list, BRAND_TAKE + 1, null) : null,
       gap: ownBrandGap ?? brandPanel.gap,
@@ -257,23 +283,33 @@ export async function runCityFingerprint(input: CityInput, ctx: SkillCtx): Promi
   // concept_vector open call on those tags (a city is no site for tenants), so city_compare has a lead
   // to pivot on even when the question names no brand and no lift map counts supply.
   const familyMetrics = families.map((fam) => addFamilyMetrics(run, frame, fam));
-  addNewTagsFinding(run, frame, families, familyMetrics, frame.base.label);
+  addNewTagsFinding(run, frame, families, familyMetrics, frame.base.short);
+  // Concept tags (CR 5): the city's place among the map cities on each, from the lists already read.
+  const conceptReading = (family: BlockFamily, tagId: string): CityConceptReading => {
+    const music = family === "SOUND";
+    const own = music ? ownMusic : ownTags;
+    const gap = music ? (ownMusicGap ?? musicPanel.gap) : tagsPanel.gap;
+    if (own === null || gap !== null) return { kind: "gap", reason: gap ?? "not_measured" };
+    const rank = crossCityRank(tagId, own, (music ? panelMusicLists : panelTagLists).filter((l): l is RankedList => l !== null), TAG_TAKE);
+    return rank === null ? { kind: "absent" } : { kind: "ranked", rank };
+  };
+  addCityConceptMetrics(run, frame, conceptTagsOf(run, input.concept_tags), conceptReading, tagEvidence);
   const brandMetrics = brandResult === null ? [] : addBrandMetrics(run, frame, brandResult);
   addBlockDnaBars(run, frame, families, familyMetrics, tagEvidence);
   if (brandResult !== null) addLocalBrandsTable(run, frame, brandResult, brandMetrics);
 
   // Notices.
   run.notices.push(
-    `${name} read from its pinned Qloo locality and compared with ${frame.base.label}: each tag's panel rank is its average rank across their top-${TAG_TAKE} lists.`,
+    `${name} read from its pinned Qloo locality and compared with ${frame.base.short} (how many: ${panelSize.id}): each tag's panel rank is its average rank across their top-${TAG_TAKE} lists.`,
   );
   if (tagsPanel.gap !== null) {
-    run.notices.push(`WHO, VIBE and WHAT are not compared: only ${tagsPanel.size} of ${pins.length} map-city tag lists came back (${tagsPanel.gap}).`);
+    run.notices.push(`Venue-goer, ambience and venue tags are not compared: too few map-city tag lists came back (${tagsPanel.gap}).`);
   }
-  if (ownMusicGap !== null) run.notices.push(`SOUND is not measured: ${name}'s music list is missing (${ownMusicGap}).`);
-  else if (musicPanel.gap !== null) run.notices.push(`SOUND is not compared: only ${musicPanel.size} of ${pins.length} map-city music lists came back (${musicPanel.gap}).`);
-  else if (musicPanel.size !== tagsPanel.size) run.notices.push(`SOUND compares against ${musicPanel.size} cities' music lists.`);
+  if (ownMusicGap !== null) run.notices.push(`Music is not measured: ${name}'s music list is missing (${ownMusicGap}).`);
+  else if (musicPanel.gap !== null) run.notices.push(`Music is not compared: too few map-city music lists came back (${musicPanel.gap}).`);
+  else if (musicPanel.size !== tagsPanel.size) run.notices.push("Music compares against fewer cities' lists than the other tags, since some music lists did not come back.");
   if (brandResult !== null && brandResult.items !== null && localBrands(brandResult).length === 0) {
-    run.notices.push(`No brand ranks higher in ${name} than across ${frame.base.label}.`);
+    run.notices.push(`No brand ranks higher in ${name} than across ${frame.base.short}.`);
   }
   const all = [...ownAttempts, ...ownBrandAttempts, ...panelTagA, ...panelMusicA, ...panelBrandA];
   const failed = all.filter((a) => a?.kind === "failed");

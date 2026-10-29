@@ -63,8 +63,9 @@ export function RankTrackList({ rows, label, emptyLabel, className }: RankTrackL
             data-row={row.key ?? row.label}
             className="grid min-h-9 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 py-1 md:grid-cols-[minmax(0,192px)_auto_minmax(0,1fr)]"
           >
-            <span className="flex min-w-0 items-baseline gap-2">
-              <span className="truncate text-[15px] leading-6 font-semibold text-ink">{row.label}</span>
+            <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+              {/* Long names wrap; a card never cuts a name with an ellipsis (ANSWER_QUALITY §11). */}
+              <span className="min-w-0 text-[15px] leading-6 font-semibold text-ink [overflow-wrap:anywhere]">{row.label}</span>
               {row.sublabel ? <span className="type-caption text-ink-2">{row.sublabel}</span> : null}
             </span>
             <RankTrack rank={row.rank} of={row.of} />

@@ -434,10 +434,10 @@ describe("block_dna: the happy path", () => {
     expect(d.formulaIds).toEqual(["block.rank_delta", "block.new_tag"]);
     expect(d.payload).toMatchObject({ mode: "diverging", comparator: "CITY", unit: "delta", method: "POLYGON" });
     expect(d.payload.groups.map((g) => g.label)).toEqual([
-      "WHO · venue-goer taste tags",
-      "VIBE · ambience",
-      "WHAT · venues and dishes",
-      "SOUND · music",
+      "Who the venue-goers are",
+      "Ambience",
+      "Venues and dishes",
+      "Music",
     ]);
     // The genre:qloo tag above Night Owls takes no rank, and the stray music tag stays out of WHO/VIBE/WHAT.
     expect(barValues(d, "WHO")).toEqual([
@@ -483,28 +483,28 @@ describe("block_dna: the happy path", () => {
     ]);
     const deltas = byKey("block.rank_delta").map((m) => [m.value, m.display, m.badge, m.unit]);
     expect(deltas).toEqual([
-      [45, "+45 · NEW", "DERIVED", "delta"],
+      [45, "+45 · new here", "DERIVED", "delta"],
       [6, "+6", "DERIVED", "delta"],
-      [-47, "−47 · not ranked here", "DERIVED", "delta"],
+      [-47, "−47 · outside the top 50 here", "DERIVED", "delta"],
       [2, "+2", "DERIVED", "delta"],
-      [-42, "−42 · not ranked here", "DERIVED", "delta"],
-      [49, "+49 · NEW", "DERIVED", "delta"],
-      [48, "+48 · NEW", "DERIVED", "delta"],
-      [-49, "−49 · not ranked here", "DERIVED", "delta"],
-      [50, "+50 · NEW", "DERIVED", "delta"],
-      [48, "+48 · NEW", "DERIVED", "delta"],
-      [-48, "−48 · not ranked here", "DERIVED", "delta"],
+      [-42, "−42 · outside the top 50 here", "DERIVED", "delta"],
+      [49, "+49 · new here", "DERIVED", "delta"],
+      [48, "+48 · new here", "DERIVED", "delta"],
+      [-49, "−49 · outside the top 50 here", "DERIVED", "delta"],
+      [50, "+50 · new here", "DERIVED", "delta"],
+      [48, "+48 · new here", "DERIVED", "delta"],
+      [-48, "−48 · outside the top 50 here", "DERIVED", "delta"],
       [29, "+29 · not in the Austin top 30", "DERIVED", "delta"],
       [3, "+3", "DERIVED", "delta"],
     ]);
-    expect(byKey("block.rank_delta")[0]?.label).toBe("rank gain vs Austin: Vinyl Collectors (WHO venue-goer taste tag, Riverbend)");
+    expect(byKey("block.rank_delta")[0]?.label).toBe("rank gain vs Austin: Vinyl Collectors (venue-goer taste tag, Riverbend)");
     // The largest loss of each family is a metric too, so what falls against the city can be cited.
     const losses = run.ledger.metrics.filter((m) => m.label.startsWith("rank loss"));
     expect(losses.map((m) => m.label)).toEqual([
-      "rank loss vs Austin: Tourists (WHO venue-goer taste tag, Riverbend)",
-      "rank loss vs Austin: Upscale (VIBE tag, Riverbend)",
-      "rank loss vs Austin: Chain Dining (WHAT tag, Riverbend)",
-      "rank loss vs Austin: Blues (SOUND music tag, Riverbend)",
+      "rank loss vs Austin: Tourists (venue-goer taste tag, Riverbend)",
+      "rank loss vs Austin: Upscale (ambience tag, Riverbend)",
+      "rank loss vs Austin: Chain Dining (venue or dish tag, Riverbend)",
+      "rank loss vs Austin: Blues (music tag, Riverbend)",
     ]);
     expect(losses.every((m) => m.subjectRefs[0]?.startsWith("T") && m.evidenceIds.length === 2)).toBe(true);
     expect(group(barsOf(run), "WHO")?.bars.find((b) => b.label === "Tourists")?.tagRef).toBe(losses[0]?.subjectRefs[0]);
@@ -526,7 +526,7 @@ describe("block_dna: the happy path", () => {
       ["Corner Roast", "brand"],
     ]);
     expect(result.forModel.registered.map((e) => e.name)).toEqual(["Corner Books", "Corner Roast"]);
-    expect(result.forModel.notices.at(-1)).toBe("Tenant fit: rank_candidates on this area, contexts [site, city], local brands R1, R2.");
+    expect(result.forModel.notices.at(-1)).toBe("Tenant fit: rank_candidates on this area, contexts [site, city], brands favoured here R1, R2 (they rank higher here, not necessarily based here).");
     const tagsRegistered = run.registry.tags();
     expect(tagsRegistered.map((t) => [t.name, t.signalCapable])).toContainEqual(["Ramen", true]);
     expect(tagsRegistered.map((t) => [t.name, t.signalCapable])).toContainEqual(["Night Owls", false]);
@@ -556,7 +556,7 @@ describe("block_dna: the happy path", () => {
     expect(found).toHaveLength(1);
     const sound = found[0]!;
     expect(sound.text).toBe(
-      "Among its top music tags, Riverbend has SOUND tags that are not among the city's top music tags, led by Jazz, Soul and Bluegrass.",
+      "Among its top music tags, Riverbend has music tags that are not among the city's top music tags, led by Jazz, Soul and Bluegrass.",
     );
     // The NEW count, then the two NEW gains: a lead reads the area, the city and a signal tag.
     const cited = sound.metricIds.map((id) => run.ledger.metric(id)!);
@@ -659,6 +659,36 @@ describe("block_dna: the happy path", () => {
     expect(bare.calls).toHaveLength(2);
   });
 
+  it("gives each concept tag a citable rank against the city, or the reason it has none (CR 5)", async () => {
+    const run = setup();
+    const reg = (type: string, slugName: string, name: string) =>
+      run.registry.registerTag({ tagId: `${type}:test_${slugName}`, name, type, signalCapable: true }).ref;
+    const ramen = reg(WHAT, "ramen", "Ramen");
+    const taqueria = reg(WHAT, "taqueria", "Taqueria");
+    const bakery = reg(WHAT, "bakery", "Bakery");
+    const nowhere = reg(WHAT, "nowhere", "Nowhere Hall");
+    const result = await blockDnaSkill.run({ ...input(), concept_tags: [ramen, taqueria, bakery, nowhere] }, run.ctx);
+    const concept = run.ledger.metrics.filter((m) => m.key === "block.concept_rank");
+    expect(concept.map((m) => [m.subjectRefs[0], m.value, m.display, m.badge, m.reason])).toEqual([
+      [ramen, 49, "+49 (rank 2 here, outside the top 50 in Austin)", "DERIVED", null],
+      [taqueria, -2, "−2 (rank 7 here, rank 5 in Austin)", "DERIVED", null],
+      [bakery, -43, "−43 (outside the top 50 here, rank 8 in Austin)", "DERIVED", null],
+      [nowhere, null, "not measured", "UNAVAILABLE", "not_measured"],
+    ]);
+    expect(concept.every((m) => m.formulaId === "block.concept_rank" && m.comparator === "CITY")).toBe(true);
+    expect(concept[3]?.label).toContain("not among the top-50 tags of either");
+    // No extra call for the concept tags: the six calls of the happy path.
+    expect(run.calls).toHaveLength(6);
+    expect(digestFits(ModelDigest.parse(result.forModel), { tool: "block_dna", step: "S3" })).toBe(true);
+
+    const second = setup();
+    const keyword = second.registry.registerTag({ tagId: "urn:tag:keyword:qloo:test_loud", name: "Loud", type: "urn:tag:keyword:qloo", signalCapable: true }).ref;
+    await blockDnaSkill.run({ ...input(), concept_tags: [keyword] }, second.ctx);
+    const none = second.ledger.metrics.find((m) => m.key === "block.concept_rank");
+    expect(none).toMatchObject({ value: null, reason: "unavailable", badge: "UNAVAILABLE" });
+    expect(none?.label).toContain("block_dna reads only");
+  });
+
   it("returns the fixed method limitations", () => {
     expect(blockDnaSkill.limitations(["LOCATION_FALLBACK"])).toEqual([...SKILL_LIMITATIONS.block_dna]);
     expect(SKILLS.block_dna).toBe(blockDnaSkill);
@@ -674,7 +704,7 @@ describe("block_dna: the location ladder at run time", () => {
     expect(result.status).toBe("ok");
     expect(run.calls.map((c) => c.rung)).toEqual(["POLYGON", "POINT", "POINT", "CITY", "CITY", "POINT", "CITY"]);
     const fallback = run.ledger.findings.find((f) => f.kind === "LOCATION_FALLBACK");
-    expect(fallback?.text).toBe("Location for Riverbend fell back from the neighbourhood boundary to its centre point (a CODE FALLBACK).");
+    expect(fallback?.text).toBe("Location for Riverbend fell back from the neighbourhood boundary to its centre point, a less precise reading of the area.");
     expect(run.events.filter((e) => e.type === "fallback")).toEqual([
       {
         type: "fallback",
@@ -849,14 +879,14 @@ describe("block_dna: partial, truncated and unscored results", () => {
     expect(newCounts).toHaveLength(4);
     expect(newCounts.every((m) => m.value === null && m.reason === "budget_truncated" && m.badge === "UNAVAILABLE")).toBe(true);
     expect(newCounts[0]?.display).toBe("not measured");
-    const brandGap = run.ledger.metrics.find((m) => m.label.startsWith("local brands of"));
+    const brandGap = run.ledger.metrics.find((m) => m.label.startsWith("brands favoured in"));
     expect(brandGap).toMatchObject({ value: null, reason: "budget_truncated", badge: "UNAVAILABLE" });
     const d = barsOf(run);
     BarsPayload.parse(d.payload);
     const values = d.payload.groups.flatMap((g) => g.bars.flatMap((b) => b.values));
     expect(values.every((v) => v.value === null && v.reason === "budget_truncated")).toBe(true);
     expect(group(d, "WHO")?.bars[0]).toMatchObject({ label: "Night Owls", ranks: { subject: 1, comparator: null }, isNew: false });
-    expect(result.forModel.notices).toContain("WHO, VIBE and WHAT are not compared: the Austin tag list is missing (budget_truncated).");
+    expect(result.forModel.notices).toContain("Venue-goer, ambience and venue tags are not compared: the Austin tag list is missing (budget_truncated).");
     expect(digestFits(ModelDigest.parse(result.forModel), { tool: "block_dna", step: "S3" })).toBe(true);
   });
 
@@ -864,7 +894,7 @@ describe("block_dna: partial, truncated and unscored results", () => {
     const run = setup(WORLD, { fail: (c) => c.rung === "CITY" && c.params["filter.tag.types"] !== undefined });
     const result = await blockDnaSkill.run(input(), run.ctx);
     expect(result.status).toBe("partial");
-    expect(result.forModel.notices).toContain("SOUND is not measured at city scale (error).");
+    expect(result.forModel.notices).toContain("Music is not measured at city scale (error).");
     expect(result.forModel.notices.some((n) => n.startsWith("1 of 5 follow-on calls failed (qloo_unavailable)"))).toBe(true);
     const sound = group(barsOf(run), "SOUND");
     expect(sound?.bars.map((b) => [b.label, b.values[0]])).toEqual([
@@ -903,7 +933,7 @@ describe("block_dna: partial, truncated and unscored results", () => {
     const run = setup({ POLYGON: { tags: AREA_TAGS, music: [] }, CITY: WORLD.CITY });
     const result = await blockDnaSkill.run(input({ include_brands: false }), run.ctx);
     expect(result.status).toBe("partial");
-    expect(result.forModel.notices).toContain("No music tags came back for this area, so SOUND is not measured.");
+    expect(result.forModel.notices).toContain("No music tags came back for this area, so music is not measured.");
     expect(group(barsOf(run), "SOUND")).toBeUndefined();
     const sound = run.ledger.metrics.filter((m) => m.label.includes("SOUND"));
     expect(sound.map((m) => [m.key, m.value, m.reason, m.badge])).toEqual([["block.new_tag", null, "not_measured", "UNAVAILABLE"]]);
@@ -917,7 +947,7 @@ describe("block_dna: partial, truncated and unscored results", () => {
     const result = await blockDnaSkill.run(input(), run.ctx);
     expect(result.status).toBe("partial");
     const empty = run.ledger.findings.find((f) => f.kind === "EMPTY_RESULT");
-    expect(empty?.text).toBe("Local brand discovery for Riverbend returned no usable results.");
+    expect(empty?.text).toBe("The search for brands favoured in Riverbend returned no usable results.");
     expect(empty?.suggestion?.tool).toBe("rank_candidates");
     expect(run.ledger.evidences.find((e) => e.purpose.startsWith("Local brands"))?.status).toBe("empty");
     expect(run.ledger.datasets.map((d) => d.kind)).toEqual(["Bars"]);
@@ -1008,12 +1038,27 @@ describe("block_dna: digest budget", () => {
     // Two gains, the largest loss and the NEW count per family, then four local brands.
     expect(run.ledger.metrics).toHaveLength(4 * 4 + 4);
     expect(digest.metrics.filter((m) => m.label.startsWith("rank loss")).map((m) => m.display)).toEqual([
-      "−50 · not ranked here",
-      "−48 · not ranked here",
-      "−49 · not ranked here",
-      "−50 · not ranked here",
+      "−50 · outside the top 50 here",
+      "−48 · outside the top 50 here",
+      "−49 · outside the top 50 here",
+      "−50 · outside the top 50 here",
     ]);
     // Ten gains, and the four city WHO tags the area lacks as losses.
     expect(group(barsOf(run), "WHO")?.bars).toHaveLength(10 + 4);
+
+    // The same worst case with four long concept tags (CR 5): their metrics still fit, never dropped.
+    const withConcepts = setup({
+      POLYGON: { tags: [] },
+      POINT: { tags: [] },
+      QUERY: { tags: areaTags, music: areaMusic, brands: brandsHere },
+      CITY: { tags: CITY_TAGS, music: CITY_MUSIC, brands: CITY_BRANDS },
+    });
+    const conceptRefs = [nth(WHAT, "What", 5), nth(SOUND, "Sound", 2), nth(WHAT, "Absent", 0), nth("urn:tag:keyword:qloo", "Keyword", 0)].map(
+      ([type, name]) => withConcepts.registry.registerTag({ tagId: `${type}:test_${slug(name)}`, name, type, signalCapable: true }).ref,
+    );
+    const conceptResult = await blockDnaSkill.run({ ...input(), concept_tags: conceptRefs }, withConcepts.ctx);
+    const conceptDigest = ModelDigest.parse(conceptResult.forModel);
+    expect(digestFits(conceptDigest, { tool: "block_dna", step: "S3" })).toBe(true);
+    expect(conceptDigest.metrics.filter((m) => withConcepts.ledger.metric(m.id)?.key === "block.concept_rank")).toHaveLength(4);
   });
 });

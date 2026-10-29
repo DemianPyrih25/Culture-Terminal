@@ -1936,7 +1936,7 @@ function creatorFit(): RunEvent[] {
       { label: "Audience", question: "Who is the Wildcomb Honey customer?" },
       { label: "Collaborations", question: "Which brands would make a credible collaboration with Wildcomb Honey?" },
     ],
-    limitations: ["Public figures only; scores compare only within one kind of creator."],
+    limitations: ["Artists and podcasts only; scores compare only within one kind."],
   });
 }
 

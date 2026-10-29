@@ -51,6 +51,8 @@ import {
   NOTICE_COST,
   NOTICE_FOLLOWUP_OPEN,
   NOTICE_INVALID_JSON,
+  NOTICE_LOOKUP_OPEN,
+  NOTICE_LOOKUP_PENDING,
   NOTICE_TIME,
   NOTICE_TRUNCATED,
   NOTICE_TURN2_OPEN,
@@ -85,6 +87,16 @@ export const FOLLOWUP_LEADS_MAX = 3;
  * the report and the CHECKER repair, so a second chance at a pivot never costs the repair.
  */
 export const SECOND_CHANCE_RESPONSES = 3;
+
+/**
+ * Tools that only look refs up (T#, R#) for another call to use: a turn-2 response made only of these
+ * keeps turn 2 open once (NOTICE_LOOKUP_OPEN), so the call they prepare can still run. Without it a
+ * tag re-search after an empty scan search (launch_test's concept, say) could never be used. Sent
+ * together with other calls, they keep it open once too while a lookup found refs no call used yet
+ * (AnalystOptions.lookupsPending, NOTICE_LOOKUP_PENDING), so the other calls never close the turn on
+ * a tag the concept test has not read.
+ */
+const LOOKUP_TOOLS: ReadonlySet<string> = new Set(["find_tags", "resolve_entities"]);
 
 /** A request that ended without its final message: the error, the message streamed until then, how long it ran and what it showed. */
 interface Failed {
@@ -163,7 +175,7 @@ export class AnalystLoop {
   #refusal: LlmRefusal | null = null;
   #error: LlmErrorInfo | null = null;
   readonly #nudges = { plan: false, report: false, time: false, cost: false, followup: false };
-  readonly #repairs = { plan: false, report: false, truncated: false, invalidJson: false, input: false };
+  readonly #repairs = { plan: false, report: false, truncated: false, invalidJson: false, input: false, lookup: false };
   /**
    * The leads FOLLOW-UPS WORTH RUNNING listed when turn 1 closed, none when it did not go out: a turn-2
    * report without a follow-up gets the nudge, unless it already declines them in writing.
@@ -467,7 +479,11 @@ export class AnalystLoop {
    * submit_report is left. A response
    * whose calls were all refused for their input keeps turn 2 open once, with NOTICE_TURN2_OPEN,
    * while no wrap-up notice went out and SECOND_CHANCE_RESPONSES are left. A response that ran
-   * planned steps but no follow-up may keep it open for the follow-up nudge (#nudgeAfterSteps).
+   * planned steps but no follow-up may keep it open for the follow-up nudge (#nudgeAfterSteps). A
+   * response that ran only lookups (LOOKUP_TOOLS) keeps it open once, with NOTICE_LOOKUP_OPEN, under
+   * the same conditions, so the call that uses the refs they found can run; one that ran lookups with
+   * other calls does too, with NOTICE_LOOKUP_PENDING, when the caller says a lookup found refs no call
+   * used yet while follow-up calls and time are left (lookupsPending). The two share one keep-open.
    */
   async #turnTwo(uses: ToolUseBlock[], answers: Answers, unparsed: Unparsed | null): Promise<AnalystOutcome | null> {
     if (uses.length === 0 && unparsed === null) return this.#nudgeReport(answers);
@@ -509,11 +525,17 @@ export class AnalystLoop {
     // UNTRIGGERED_FOLLOWUP); a lone submit_plan is no follow-up to correct.
     const refused = calls.length === 0 && uses.some((u) => u.name !== "submit_plan");
     const reopen = !open && refused && !this.#repairs.input && !this.#wrapUp && left >= SECOND_CHANCE_RESPONSES;
+    const lookupCalls = calls.filter((c) => LOOKUP_TOOLS.has(c.name));
+    const onlyLookups = calls.length > 0 && lookupCalls.length === calls.length;
+    const canKeepOpen = !open && !reopen && unparsed === null && !this.#repairs.lookup && !this.#wrapUp && left >= SECOND_CHANCE_RESPONSES;
+    const lookups = canKeepOpen && (onlyLookups || (lookupCalls.length > 0 && this.#lookupsPending(lookupCalls)));
     if (unparsed && !open) this.#answerUnparsed(answers, unparsed, false);
     const results = this.#finish(answers, 2);
-    if (open || reopen) {
+    if (open || reopen || lookups) {
       if (reopen) this.#repairs.input = true;
-      this.#pushUser(results, [], reopen ? [NOTICE_TURN2_OPEN] : []);
+      if (lookups) this.#repairs.lookup = true;
+      const notice = reopen ? [NOTICE_TURN2_OPEN] : lookups ? [onlyLookups ? NOTICE_LOOKUP_OPEN : NOTICE_LOOKUP_PENDING] : [];
+      this.#pushUser(results, [], notice);
       return null;
     }
     // Calls ran and none was a pivot (#nudgeLeads checks), so they were planned steps.
@@ -787,6 +809,17 @@ export class AnalystLoop {
     const results = await this.#hook("executeTools", () => this.#o.executeTools(calls, turn, this.#control.signal));
     const byId = new Map(results.map((r) => [r.tool_use_id, r]));
     for (const call of calls) answers.executed(call.id, byId.get(call.id));
+  }
+
+  /** Whether lookups sent with other calls found refs no call used yet (AnalystOptions.lookupsPending); false without the hook. */
+  #lookupsPending(lookups: readonly AnalystToolCall[]): boolean {
+    const { lookupsPending } = this.#o;
+    if (!lookupsPending) return false;
+    try {
+      return lookupsPending(lookups);
+    } catch (err) {
+      throw new HookFailed("lookupsPending", err);
+    }
   }
 
   #findingExists(id: FindingId): boolean {

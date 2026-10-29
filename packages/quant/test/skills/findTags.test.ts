@@ -395,7 +395,27 @@ describe("find_tags: live semantic search", () => {
     expect(run.ledger.findings).toHaveLength(1);
     expect(run.ledger.findings[0]).toMatchObject({ kind: "EMPTY_RESULT", suggestion: { tool: "find_tags" } });
     expect(run.ledger.findings[0]?.text).toContain("natural wine bar");
-    expect(result.forModel.top_rows).toEqual([{ ref: null, name: "natural wine bar", values: { concept: "natural wine bar", scope: "place", match: "none" } }]);
+    expect(result.forModel.top_rows).toEqual([{ ref: null, name: "natural wine bar", values: { concept: "natural wine bar", scope: "place", match: "none", nearest: "Lounge" } }]);
+  });
+
+  it("names the closest categories a no-match search returned, so the model can search one by name", async () => {
+    const dairy = { id: "urn:tag:genre:brand:test_dairy_alternatives", name: "Dairy Alternatives", type: "urn:tag:genre:brand" };
+    const drinks = { id: "urn:tag:genre:brand:test_hot_drinks", name: "Hot Drinks", type: "urn:tag:genre:brand" };
+    const twin = { id: "urn:tag:genre:brand:test_hot_drinks_2", name: "Hot drinks", type: "urn:tag:genre:brand" };
+    const qloo = tagsQloo(() => [dairy, CUISINE_WINE, drinks, twin]);
+    const run = fakeRun(qloo.api);
+    const result = await findTagsSkill.run(input([{ text: "oat latte line", scope: "brand" }]), run.ctx);
+    expect(result.status).toBe("empty");
+    expect(run.ledger.findings.map((f) => f.kind)).toEqual(["EMPTY_RESULT"]);
+    expect(run.registry.tags()).toEqual([]);
+    const notice = result.forModel.notices.find((n) => n.includes("closest brand categories"));
+    expect(notice).toContain("'Dairy Alternatives', 'Hot Drinks';");
+    expect(notice).not.toContain("Natural Wine");
+    // The row lists them too, for the scan's category retry (the owner's o03 decision).
+    expect(result.forModel.top_rows[0]?.values).toMatchObject({ match: "none", nearest: "Dairy Alternatives | Hot Drinks" });
+    // A category sharing a word with the product comes first, then Qloo's order.
+    const warm = await findTagsSkill.run(input([{ text: "warm oat drink", scope: "brand" }]), fakeRun(qloo.api).ctx);
+    expect(warm.forModel.top_rows[0]?.values.nearest).toBe("Hot Drinks | Dairy Alternatives");
   });
 
   it("keeps a descriptive-only answer as labels, flags it unusable and finds nothing", async () => {

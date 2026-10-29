@@ -205,6 +205,13 @@ export interface AnalystOptions {
    */
   followupLeads?(): readonly FollowupLead[];
   /**
+   * Asked after a turn-2 response that ran lookups (find_tags, resolve_entities) together with other
+   * calls, with those lookups once they ran: true when one found a ref (a usable tag, a matched
+   * entity) that no call has used yet and follow-up calls and time are left. Turn 2 then stays open
+   * once (NOTICE_LOOKUP_PENDING), so the call that uses the ref can run. Without the hook it closes.
+   */
+  lookupsPending?(lookups: readonly AnalystToolCall[]): boolean;
+  /**
    * The CHECKER (V1–V10) on every structurally valid submit_report, as strict mode guarantees it: id
    * formats (V1) and lengths and counts (V9) are the CHECKER's to judge, so all issues reach the model
    * in one repair message. A rejection that is not `final` sends `feedback` back as an is_error
@@ -298,9 +305,10 @@ export interface AnalystOutcome {
    * again. invalidJson: a tool input the SDK could not parse was answered with INVALID_JSON, or its
    * request re-issued when the response could not be sent back. input: a turn-2 response whose calls
    * were all refused for their input (INVALID_INPUT, UNTRIGGERED_FOLLOWUP, UNKNOWN_TOOL) kept turn 2
-   * open for one more response.
+   * open for one more response. lookup: a turn-2 response of lookups only (find_tags, resolve_entities)
+   * kept turn 2 open for the call that uses what they found.
    */
-  repairs: { plan: boolean; report: boolean; truncated: boolean; invalidJson: boolean; input: boolean };
+  repairs: { plan: boolean; report: boolean; truncated: boolean; invalidJson: boolean; input: boolean; lookup: boolean };
   /** The accepted finding-triggered turn-2 calls (afterNudge: whether the follow-up nudge preceded each); planned steps are not pivots. */
   pivots: AnalystPivot[];
   /** Calls the loop answered with is_error itself, e.g. UNTRIGGERED_FOLLOWUP. */

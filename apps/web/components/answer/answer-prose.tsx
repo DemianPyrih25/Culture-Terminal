@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, type ReactNode } from "react";
-import type { Inline } from "../../lib/brief";
+import { isKnownAbsence, type Inline } from "../../lib/brief";
 import { useHowWeKnow } from "../drawer";
 
 /**
@@ -41,7 +41,8 @@ export function AnswerProse({ inlines }: { inlines: readonly Inline[] | null }) 
         return;
       case "metric": {
         const { metric, footnote } = piece;
-        const text = metric.unavailable ? "No data" : metric.text;
+        // A public value's known absence prints its reason ("not reported in filings"); any other gap reads "No data".
+        const text = metric.unavailable ? (isKnownAbsence(metric.reason) ? metric.text : "No data") : metric.text;
         if (!how.available) {
           out.push(
             <span key={i} data-metric={metric.id} className="tabular-nums">

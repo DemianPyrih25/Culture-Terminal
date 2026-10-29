@@ -170,7 +170,7 @@ describe("rank_candidates: tenant fit (site vs city)", () => {
     expect(DatasetEnvelope.parse(d)).toEqual(d);
     expect(d.title).toBe("Tenant fit · East Side vs Nashville (city)");
     expect(d.formulaIds).toEqual(["pct.within_call", "tenant.rank_shift", "tenant.fit"]);
-    expect(d.payload).toMatchObject({ scale: "pct", comparator: "CITY", scoreLabel: "Tenant fit (0–100)" });
+    expect(d.payload).toMatchObject({ scale: "pct", comparator: "CITY", scoreLabel: "Tenant fit (0–100): weighs the site rank and the rise over the city, so its order can differ from the site rank" });
     expect(d.payload.axes.map((a) => a.label)).toEqual(["Nashville (city)", "East Side"]);
     const line = (ref: string) => d.payload.lines.find((l) => l.key === ref)!;
     expect(line("R4")).toMatchObject({
@@ -197,7 +197,7 @@ describe("rank_candidates: tenant fit (site vs city)", () => {
       label: "rank shift of Brand Delta, East Side vs Nashville (city)",
       subjectRefs: ["R4", "east_side", "nashville"],
       value: 0.75,
-      display: "+0.75 · site 1 of 5 · city 4 of 5, among the 5 ranked at both",
+      display: "+0.75 · site rank 1 of 5 · city rank 4 of 5",
       unit: "delta",
       badge: "DERIVED",
       evidenceIds: ["E1"],
@@ -206,7 +206,9 @@ describe("rank_candidates: tenant fit (site vs city)", () => {
     });
     const fits = byFormula(run, "tenant.fit");
     expect(fits.map((m) => m.subjectRefs[0])).toEqual(["R4", "R2", "R3", "R5", "R1"]);
-    expect(fits[0]).toMatchObject({ value: 100, display: "100 of 100 · site 1 of 5 · city 4 of 5, among the 5 ranked at both", unit: "score", badge: "DERIVED" });
+    expect(fits[0]).toMatchObject({ value: 100, display: "100 of 100 · site rank 1 of 5 · city rank 4 of 5", unit: "score", badge: "DERIVED" });
+    expect(fits[0]?.label).toContain("its order can differ from the site rank");
+    expect(result.forModel.notices.join(" ")).toContain("Rows are sorted by tenant fit");
     expect(run.ledger.metrics.indexOf(shifts[0]!)).toBe(0);
     expect(result.forModel.top_rows[0]).toEqual({
       ref: "R4",
@@ -232,7 +234,7 @@ describe("rank_candidates: tenant fit (site vs city)", () => {
       ["R4", 0],
       ["R5", 0],
     ]);
-    expect(shifts[0]).toMatchObject({ display: "no shift · site 1 of 3 · city 1 of 3, among the 3 ranked at both", n: 3 });
+    expect(shifts[0]).toMatchObject({ display: "no shift · site rank 1 of 3 · city rank 1 of 3", n: 3 });
     expect(byFormula(run, "tenant.fit").map((m) => [m.subjectRefs[0], m.value])).toEqual([
       ["R3", 80],
       ["R4", 50],

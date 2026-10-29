@@ -38,7 +38,7 @@ export const JOB_ACTIVE_PHRASE: Readonly<Record<Job, string>> = {
   audience_discovery: "Profiling the audience",
   taste_twins: "Matching areas across the two cities",
   brand_collab: "Scoring possible partners",
-  creator_fit: "Scoring creators for the audience",
+  creator_fit: "Scoring artists and podcasts for the audience",
   launch_test: "Checking the concept against the data",
   city_compare: "Comparing the cities",
 };

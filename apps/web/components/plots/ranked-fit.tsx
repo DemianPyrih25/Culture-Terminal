@@ -56,10 +56,10 @@ export function RankedFitList({ rows, max = 100, climbLabel = CLIMB_LABEL, label
           <li
             key={row.key ?? row.label}
             data-row={row.key ?? row.label}
-            className="grid grid-cols-[16px_minmax(0,1fr)_48px_14px] items-center gap-x-3 gap-y-1 py-2 md:h-11 md:grid-cols-[16px_minmax(0,1fr)_160px_48px_14px] md:py-0"
+            className="grid grid-cols-[16px_minmax(0,1fr)_48px_14px] items-center gap-x-3 gap-y-1 py-2 md:min-h-11 md:grid-cols-[16px_minmax(0,1fr)_160px_48px_14px] md:py-1"
           >
             <span className="type-label text-ink-2 tabular-nums">{i + 1}</span>
-            <span className="col-span-3 line-clamp-2 text-[15px] leading-6 font-semibold text-ink md:col-span-1 md:line-clamp-none md:truncate">
+            <span className="col-span-3 min-w-0 text-[15px] leading-6 font-semibold text-ink [overflow-wrap:anywhere] md:col-span-1">
               {row.label}
             </span>
             {row.value === null ? (

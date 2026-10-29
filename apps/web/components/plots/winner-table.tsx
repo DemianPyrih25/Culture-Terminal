@@ -31,7 +31,7 @@ export function Scoreboard({ a, b, caption, className }: ScoreboardProps) {
     >
       <span className="flex min-w-0 items-center gap-3">
         <Monogram name={a.name} size={48} palette="subject" className="max-md:size-8 max-md:rounded-sm max-md:text-[13.5px]" />
-        <span className="truncate text-[15px] leading-6 font-semibold text-ink max-md:hidden">{a.name}</span>
+        <span className="min-w-0 text-[15px] leading-6 font-semibold text-ink [overflow-wrap:anywhere] max-md:hidden">{a.name}</span>
       </span>
       <span className="flex flex-col items-center gap-1">
         <span className="sr-only">{`${a.name} ${a.score}, ${b.name} ${b.score}`}</span>
@@ -46,7 +46,7 @@ export function Scoreboard({ a, b, caption, className }: ScoreboardProps) {
         <span className="text-center type-label text-ink-2">{caption}</span>
       </span>
       <span className="flex min-w-0 items-center justify-end gap-3">
-        <span className="truncate text-right text-[15px] leading-6 font-semibold text-ink max-md:hidden">{b.name}</span>
+        <span className="min-w-0 text-right text-[15px] leading-6 font-semibold text-ink [overflow-wrap:anywhere] max-md:hidden">{b.name}</span>
         <Monogram name={b.name} size={48} palette="second" className="max-md:size-8 max-md:rounded-sm max-md:text-[13.5px]" />
       </span>
     </div>
@@ -98,8 +98,8 @@ export function WinnerTable({ title, a, b, rows, label, emptyLabel, className }:
       </thead>
       <tbody>
         {rows.map((row) => (
-          <tr key={row.key ?? row.label} data-row={row.key ?? row.label} className="h-7">
-            <th scope="row" className="text-left type-body font-normal text-ink">
+          <tr key={row.key ?? row.label} data-row={row.key ?? row.label} className="min-h-7">
+            <th scope="row" className="py-1 text-left type-body font-normal text-ink [overflow-wrap:anywhere]">
               {row.label}
             </th>
             {(["a", "b"] as const).map((side) => (

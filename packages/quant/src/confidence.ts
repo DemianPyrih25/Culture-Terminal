@@ -9,15 +9,16 @@ export const CONFIDENCE_START = 100;
 
 /** Hover labels, one per rule; the count and the points sit next to them. */
 export const CONFIDENCE_RULE_LABEL: Readonly<Record<ConfidenceRule, string>> = {
-  dropped_entity: "Dropped or unresolved entity",
-  code_fallback: "CODE FALLBACK",
-  coarse_geohash: "Coarse heatmap grid",
-  stale_momentum: "Momentum from a historical window only",
-  thin_result: "Thin result (fewer than five rows)",
-  quality_gate_drop: "Quality-gate drop",
-  checker_warning: "CHECKER warning",
-  insufficient_evidence: "Signal is insufficient_evidence (V7, an evidence digest or the ANALYST's call)",
-  read_as_nearest_job: "Question read as the nearest job (D41)",
+  dropped_entity: "A name was dropped or could not be matched",
+  code_fallback: "A step fell back to a simpler method (for example a point instead of an area outline)",
+  coarse_geohash: "Some area lift rests on a coarse heatmap grid",
+  stale_momentum: "Momentum comes from a historical window only",
+  thin_result: "A data call returned fewer than five rows",
+  quality_gate_drop: "Very low-popularity results were dropped",
+  checker_warning: "The answer was accepted with a checker warning",
+  insufficient_evidence: "Too little evidence to read a signal",
+  read_as_nearest_job: "The question was read as the nearest job, so part of it is not covered",
+  concept_partly_tagged: "Part of the concept was not tested (a tag search came back empty or a part was never used)",
 };
 
 /** What the run went through. Omitted counts are 0 and omitted booleans false. */
@@ -44,6 +45,12 @@ export interface ConfidenceInput {
   insufficientEvidence?: boolean;
   /** CLERK read the question as the nearest job, so part of it is not covered (D41, READ_AS_NEAREST_JOB). Counts once. */
   readAsNearestJob?: boolean;
+  /**
+   * Part of the question's concept was never tested (D2 of the Part 9 close-out): a find_tags search for a
+   * concept part came back EMPTY_RESULT, or a concept part got no tag and no analog that any call used.
+   * Counts once; alone it caps the note at MED.
+   */
+  conceptPartlyTagged?: boolean;
 }
 
 function occurrences(value: number | undefined, field: keyof ConfidenceInput): number {
@@ -67,6 +74,7 @@ export function computeConfidence(input: ConfidenceInput): Confidence {
     checker_warning: occurrences(input.checkerWarnings, "checkerWarnings"),
     insufficient_evidence: input.insufficientEvidence ? 1 : 0,
     read_as_nearest_job: input.readAsNearestJob ? 1 : 0,
+    concept_partly_tagged: input.conceptPartlyTagged ? 1 : 0,
   };
   const breakdown = ConfidenceRule.options
     .filter((rule) => counts[rule] > 0)

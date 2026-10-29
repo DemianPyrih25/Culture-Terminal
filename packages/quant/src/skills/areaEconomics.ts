@@ -1,4 +1,5 @@
 import {
+  PUBLIC_NOT_CONFIGURED_REASON,
   ANALYST_TOOLS,
   METRO_LABEL,
   publicDataErrorCode,
@@ -117,20 +118,24 @@ function valueOf(r: Rollup, f: MetricField): number | null {
   return r.counts[f];
 }
 
-/** A value as a reader sees it: "41,200 residents", "$71,200 (approx.)", "12% of workers". */
-function display(f: MetricField, v: number, approx: boolean): string {
-  const a = approx ? " (approx.)" : "";
+/**
+ * A value as a reader sees it: "41,200 residents", "$71,200 (approx.)", "12% of workers". `scope` marks
+ * figures that cover more than the row's area ("whole ZIP"), so every citation of one carries it.
+ */
+function display(f: MetricField, v: number, approx: boolean, scope: string | null = null): string {
+  const notes = [isMedian(f) && approx ? "approx." : null, scope].filter((x): x is string => x !== null);
+  const a = notes.length > 0 ? ` (${notes.join(", ")})` : "";
   switch (f) {
     case "population":
-      return `${Math.round(v).toLocaleString("en-US")} residents`;
+      return `${Math.round(v).toLocaleString("en-US")} residents${a}`;
     case "households":
-      return `${Math.round(v).toLocaleString("en-US")} households`;
+      return `${Math.round(v).toLocaleString("en-US")} households${a}`;
     case "median_age":
       return `${v.toFixed(1)} years${a}`;
     case "median_household_income":
       return `$${Math.round(v).toLocaleString("en-US")}${a}`;
     default:
-      return `${Math.round(v * 100)}% of resident workers`;
+      return `${Math.round(v * 100)}% of resident workers${a}`;
   }
 }
 
@@ -140,7 +145,7 @@ export function vintageText(vintage: number): string {
 }
 
 const ERROR_TEXT: Readonly<Record<PublicDataErrorCode, string>> = {
-  not_configured: "Census access is not configured on this server",
+  not_configured: PUBLIC_NOT_CONFIGURED_REASON.census,
   not_found: "Census returned no rows for these areas",
   rate_limited: "the Census API asked us to slow down; try again shortly",
   unavailable: "the Census API could not be reached",
@@ -157,9 +162,18 @@ interface Subject {
   isCity: boolean;
 }
 
+/** True when some of the subject's units are whole ZIP areas that reach beyond it. */
+const hasClippedZip = (s: Subject): boolean => s.units.some((u) => u.kind === "zcta" && u.clipped);
+
+/** The display note of figures that cover more than the row: whole ZIPs for part of one (one ZIP, or the city's border ZIPs). */
+function scopeOf(s: Subject): string | null {
+  if (!hasClippedZip(s)) return null;
+  return s.isCity ? "whole ZIPs" : "whole ZIP";
+}
+
 /** Why a subject's figures are approximate beyond the rollup: whole ZIPs for part of one, a nearest tract. */
 function caveatOf(s: Subject): string | null {
-  if (s.isCity) return null;
+  if (s.isCity) return hasClippedZip(s) ? "border ZIP areas count in full, so the figures cover more than the city itself" : null;
   const u = s.units[0];
   if (u === undefined) return null;
   if (u.kind === "zcta" && u.clipped) return "the area is part of its ZIP area, so whole-ZIP figures are used";
@@ -194,7 +208,9 @@ async function runAreaEconomics(input: EconInput, ctx: SkillCtx): Promise<SkillR
     return [{ key: a.id, name: a.name, ref: a.id, units: [u], isCity: false }];
   });
   if (subjects.length === 0) return skillErrorResult(out, [...notices, "No area maps to Census units."].join(" "));
-  subjects.push({ key: metro, name: `All of ${city}`, ref: metro, units: cityUnits, isCity: true });
+  // A city clipped from border ZIPs is read as those whole ZIPs: its row says so instead of "All of".
+  const cityRowName = cityUnits.some((u) => u.kind === "zcta" && u.clipped) ? `${city} ZIP areas (whole ZIPs)` : `All of ${city}`;
+  subjects.push({ key: metro, name: cityRowName, ref: metro, units: cityUnits, isCity: true });
 
   // One request per geography the city's units need; the areas' units are a subset.
   const geos = censusGeosOf(cityUnits.length > 0 ? cityUnits : subjects.flatMap((s) => s.units));
@@ -259,8 +275,8 @@ async function runAreaEconomics(input: EconInput, ctx: SkillCtx): Promise<SkillR
         label: `${FIELD_LABEL[f]}, ${safeName(s.name)}`,
         subjectRefs: [s.ref, metro],
         value: v,
-        reason: r.found === 0 ? (failure === null ? "not_measured" : "unavailable") : "suppressed",
-        display: v === null ? "" : display(f, v, approx),
+        reason: r.found === 0 ? (failure === null ? "not_measured" : failure === "not_configured" ? "not_configured" : "unavailable") : "suppressed",
+        display: v === null ? "" : display(f, v, approx, scopeOf(s)),
         unit: FIELD_UNIT[f],
         badge,
         formulaId: formulaOf(f),
@@ -314,7 +330,7 @@ async function runAreaEconomics(input: EconInput, ctx: SkillCtx): Promise<SkillR
       columns: allFields.map((c) => ({ key: c.f, label: c.label, unit: c.unit, comparator: null })),
       groups: [
         { key: "areas", label: "Areas", rows: rolled.filter((x) => !x.s.isCity).map(row) },
-        { key: "city", label: `All of ${city}, to compare with`, rows: rolled.filter((x) => x.s.isCity).map(row) },
+        { key: "city", label: `${cityRowName}, to compare with`, rows: rolled.filter((x) => x.s.isCity).map(row) },
       ],
       caption:
         `US Census ACS 5-year estimates, ${vintage - 4}-${vintage}: people who live in each area, not visitors, customers or spending. ` +

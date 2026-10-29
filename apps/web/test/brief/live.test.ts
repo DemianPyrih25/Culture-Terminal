@@ -230,11 +230,10 @@ describe("live brief: priors, key figures and the trace note", () => {
       ["pending", "Distinctiveness", "computing · QUANT"],
       ["pending", "Youth tilt", "waiting on share data"],
       ["pending", "Metros won", "waiting on share data"],
-      // Reported revenue (company_financials) fills only for a listed brand; this one never fills it.
-      ["pending", "Reported revenue", "waiting on filing data"],
+      // No Reported revenue slot: this run never plans company_financials (an unlisted brand, D8).
     ]);
     for (const k of early.evidence.keyFigures) expect(k.metric).toBeNull();
-    expect(early.evidence.aside).toBe("0 of 5 key figures in · exhibits drafted last");
+    expect(early.evidence.aside).toBe("0 of 4 key figures in · exhibits drafted last");
 
     // The first similarity, distinctiveness and youth metrics fill their slots, matched by formula id.
     const state = stateAfter(upTo(events, "plan"));
@@ -245,14 +244,13 @@ describe("live brief: priors, key figures and the trace note", () => {
       ["ready", first("subs.distinctiveness")?.id, first("subs.distinctiveness")?.display],
       ["ready", first("dna.youth_index")?.id, first("dna.youth_index")?.display],
       ["pending", "pending-3", null],
-      ["pending", "pending-4", null],
     ]);
     // An arrived figure is named as the finished brief names it: a youth index is not the slot's share
     // tilt. The metric's own label is the inspector's.
-    expect(later.evidence.keyFigures.map((k) => k.label)).toEqual(["Nearest audience", "Distinctiveness", "Youth index", "Metros won", "Reported revenue"]);
+    expect(later.evidence.keyFigures.map((k) => k.label)).toEqual(["Nearest audience", "Distinctiveness", "Youth index", "Metros won"]);
     expect(later.evidence.keyFigures[0]?.metric?.label).toBe(first("subs.similarity")?.label);
-    expect(later.evidence.keyFigures.map((k) => k.comparator)).toEqual(["with Granite Outfitters", "vs peers", "0 = average", null, null]);
-    expect(later.evidence.aside).toBe("3 of 5 key figures in · exhibits drafted last");
+    expect(later.evidence.keyFigures.map((k) => k.comparator)).toEqual(["with Granite Outfitters", "vs peers", "0 = average", null]);
+    expect(later.evidence.aside).toBe("3 of 4 key figures in · exhibits drafted last");
   });
 
   it("names a lift by its neighbourhood once it arrives, as the finished brief does", () => {
@@ -456,9 +454,8 @@ describe("terminal states", () => {
         ["ready", null],
         ["ready", null],
         ["pending", "not measured · run stopped"],
-        ["pending", "not measured · run stopped"],
       ]);
-      expect(model.evidence.aside).toBe("3 of 5 key figures in · run stopped");
+      expect(model.evidence.aside).toBe("3 of 4 key figures in · run stopped");
       expect(model.trace).toEqual({ state: "stopped", headline: "Not checked", detail: "Checker did not run" });
       expect(model.method.checker).toMatchObject({ state: "stopped", line: null });
       // The calls in flight stopped with the run; the plan steps it never reached did not run.

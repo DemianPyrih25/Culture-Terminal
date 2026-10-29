@@ -8,7 +8,7 @@ import {
   destinationParams,
   TRAVEL_CAPTION,
 } from "../../src/skills/destinationAffinity";
-import { computeTravelQuadrant, labelledRows } from "../../src/skills/destinationAffinity/quadrant";
+import { computeTravelQuadrant, labelledRows, quadrantOf } from "../../src/skills/destinationAffinity/quadrant";
 import { fakeProbe, fakeQloo, fakeRun, FakeRegistry, registerInvented, type Invented } from "./support/fakes";
 
 // Invented destinations and seeds only (D29). The fake insights handler answers the one destination
@@ -315,5 +315,16 @@ describe("computeTravelQuadrant", () => {
     const many = computeTravelQuadrant(travelWorld().map(destination));
     expect(labelledRows(many)).toHaveLength(8);
     expect(labelledRows(many)[0]).toBe(1);
+  });
+});
+
+describe("destination_affinity: the hidden-pocket ceiling (D3)", () => {
+  it("never places a destination at popularity 0.85 or more in the hidden-pocket quadrant, however high the median", () => {
+    expect(quadrantOf(0.9, 0.84, 0.5, 0.95)).toBe("HIDDEN_POCKET");
+    expect(quadrantOf(0.9, 0.85, 0.5, 0.95)).toBe("HEARTLAND");
+    expect(quadrantOf(0.9, 0.9, 0.5, 0.95)).toBe("HEARTLAND");
+    // Below the fit median the split is unchanged.
+    expect(quadrantOf(0.2, 0.9, 0.5, 0.95)).toBe("COLD");
+    expect(quadrantOf(0.2, 0.96, 0.5, 0.95)).toBe("MASS");
   });
 });

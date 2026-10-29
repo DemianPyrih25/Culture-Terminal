@@ -288,6 +288,12 @@ export interface AnswerModel {
   runId: string;
   job: Job | null;
   head: AnswerHead;
+  /**
+   * The product or concept asked about is not in the data (the CONCEPT_NOT_IN_DATA limitation): the
+   * agent's sentence naming the category tested instead, or saying it could not be tested. It leads the
+   * page, before the verdict. Null when every concept had a tag of its own.
+   */
+  concept: string | null;
   /** The "Read as" chip and what the answer does not cover; null when the question fit its job. */
   readAs: AnswerReadAs | null;
   verdict: AnswerVerdict;

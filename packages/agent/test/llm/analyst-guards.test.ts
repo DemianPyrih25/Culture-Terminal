@@ -369,7 +369,7 @@ describe("a tool input that was not valid JSON (eager input streaming, the SDK's
   it("answers the call INVALID_JSON with the text it sent, runs the calls before it and keeps the turn going", async () => {
     const h = await runScripted([{ events: brokenTurnOne() }, respond([stepCall("toolu_share_again", "S2")]), respond([reportCall()])]);
     expect(h.outcome).toMatchObject({ status: "completed", code: "report_accepted", responses: 3, error: null });
-    expect(h.outcome.repairs).toEqual({ plan: false, report: false, truncated: false, invalidJson: true, input: false });
+    expect(h.outcome.repairs).toEqual({ plan: false, report: false, truncated: false, invalidJson: true, input: false, lookup: false });
 
     // The response goes back as it streamed, up to the unparsed call, whose input is {}.
     const second = h.fake.streamRequests[1]!;

@@ -111,9 +111,12 @@ describe("PreviewService", () => {
     const estimateIn = async (metro: "austin" | null) =>
       ok(await new PreviewService(previewDeps(clerkAnswering(clerkReply(site(metro))))).preview("Where should a natural-wine bar open?")).estimate;
     const chained = planScan("site_selection", { intent: site("austin"), primary: null, peers: [] }).chained;
-    expect(chained.map((s) => s.tool)).toEqual(["geo_lift"]);
+    // The quiet category retry (find_tags on the nearest category) runs only when a concept keeps no tag: typical cost 0.
+    expect(chained.map((s) => s.tool)).toEqual(["find_tags", "geo_lift"]);
+    expect(chained[0]?.estimate).toBe(0);
     // Without a gazetteer metro nothing is chained; find_tags costs the same either way.
-    expect((await estimateIn("austin")).networkCalls - (await estimateIn(null)).networkCalls).toBe(chained[0]?.estimate);
+    const chainedCost = chained.reduce((sum, s) => sum + s.estimate, 0);
+    expect((await estimateIn("austin")).networkCalls - (await estimateIn(null)).networkCalls).toBe(chainedCost);
   });
 
   it("reuses the reading of a question for ten minutes: same token, no CLERK call, no cap charge", async () => {

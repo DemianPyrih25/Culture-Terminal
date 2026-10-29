@@ -21,6 +21,7 @@ import {
   addEdgeMetric,
   addEmptyFinding,
   addNeighbourhoodDataset,
+  addPartnersCategoryFinding,
   addPopularityFindings,
   joinNames,
   recordDomainEvidence,
@@ -161,6 +162,7 @@ async function runCrossDomain(input: CrossDomainInput, ctx: SkillCtx): Promise<S
   }
   const answeredHoods = outcomes.flatMap((o) => (o.kind === "answered" && metrics.has(o.domain) ? [o.hood] : []));
   addPopularityFindings(run, answeredHoods, metrics);
+  addPartnersCategoryFinding(run, answeredHoods, metrics);
   addEdgeMetric(run, answeredHoods, domainEvidence);
   if (plan.seeds.length === 1 && answered.length > 0) {
     run.notices.push("With one seed every result is explained by it alone; explainability edges need two or more seeds.");

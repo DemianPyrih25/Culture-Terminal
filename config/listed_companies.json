@@ -1,5 +1,5 @@
 {
-  "$comment": "Brand name -> the US-listed company whose SEC filings company_financials (S13, PLAN §5.2) reads. Names and tickers only, no figures (D29). A brand matches only when the entity resolves exactly (D20) to one of these names; any other brand gets UNAVAILABLE with NOT_A_LISTED_COMPANY, never a guess. `note` says when the brand is part of a larger company: SEC figures are company-wide, never brand-level. Every ticker was checked against the SEC ticker map and has us-gaap revenue in its company facts; foreign IFRS filers are left out. Re-check when a company is acquired, taken private or renames its ticker.",
+  "$comment": "Brand name -> the US-listed company whose SEC filings company_financials (S13, PLAN §5.2) reads. Names and tickers only, no figures (D29). A brand matches only when the entity resolves exactly (D20) to one of these names; any other brand gets UNAVAILABLE with NOT_A_LISTED_COMPANY, never a guess. `note` says when the brand is part of a larger company: SEC figures are company-wide, never brand-level. Every ticker was checked against the SEC ticker map and has us-gaap revenue in its company facts; foreign IFRS filers are left out. The match is on the name Qloo returns (case aside), so each brand is listed under that name as well as its common one; check every key against Qloo with `pnpm exec tsx tools/dev/listed-brands.ts` after editing this file. Re-check when a company is acquired, taken private or renames its ticker.",
   "brands": {
     "Coca-Cola": {
       "ticker": "KO",
@@ -68,12 +68,22 @@
       "company": "The Boston Beer Company, Inc.",
       "note": "A brand of The Boston Beer Company; figures are company-wide."
     },
+    "Samuel Adams Beer": {
+      "ticker": "SAM",
+      "company": "The Boston Beer Company, Inc.",
+      "note": "A brand of The Boston Beer Company; figures are company-wide."
+    },
     "Coors Light": {
       "ticker": "TAP",
       "company": "Molson Coors Beverage Company",
       "note": "A brand of Molson Coors; figures are company-wide."
     },
     "Jack Daniel's": {
+      "ticker": "BF-B",
+      "company": "Brown-Forman Corporation",
+      "note": "A brand of Brown-Forman; figures are company-wide."
+    },
+    "Jack Daniels": {
       "ticker": "BF-B",
       "company": "Brown-Forman Corporation",
       "note": "A brand of Brown-Forman; figures are company-wide."
@@ -124,7 +134,16 @@
       "company": "Yum! Brands, Inc.",
       "note": "A brand of Yum! Brands; figures are company-wide."
     },
+    "Kentucky Fried Chicken": {
+      "ticker": "YUM",
+      "company": "Yum! Brands, Inc.",
+      "note": "A brand of Yum! Brands; figures are company-wide."
+    },
     "Dutch Bros": {
+      "ticker": "BROS",
+      "company": "Dutch Bros Inc."
+    },
+    "Dutch Bros. Coffee": {
       "ticker": "BROS",
       "company": "Dutch Bros Inc."
     },
@@ -151,6 +170,10 @@
       "note": "A brand of Restaurant Brands International; figures are company-wide."
     },
     "Papa John's": {
+      "ticker": "PZZA",
+      "company": "Papa John's International, Inc."
+    },
+    "Papa John's Pizza": {
       "ticker": "PZZA",
       "company": "Papa John's International, Inc."
     },
@@ -222,6 +245,11 @@
       "company": "American Eagle Outfitters, Inc.",
       "note": "American Eagle Outfitters also owns Aerie; figures are company-wide."
     },
+    "American Eagle Outfitters": {
+      "ticker": "AEO",
+      "company": "American Eagle Outfitters, Inc.",
+      "note": "American Eagle Outfitters also owns Aerie; figures are company-wide."
+    },
     "Gap": {
       "ticker": "GAP",
       "company": "Gap Inc.",
@@ -241,6 +269,10 @@
       "ticker": "COLM",
       "company": "Columbia Sportswear Company"
     },
+    "Columbia Sportswear Company": {
+      "ticker": "COLM",
+      "company": "Columbia Sportswear Company"
+    },
     "e.l.f. Cosmetics": {
       "ticker": "ELF",
       "company": "e.l.f. Beauty, Inc.",
@@ -252,6 +284,10 @@
       "note": "The main brand of e.l.f. Beauty; figures are company-wide."
     },
     "Ulta Beauty": {
+      "ticker": "ULTA",
+      "company": "Ulta Beauty, Inc."
+    },
+    "Ulta": {
       "ticker": "ULTA",
       "company": "Ulta Beauty, Inc."
     },
@@ -268,9 +304,19 @@
       "company": "The Estée Lauder Companies Inc.",
       "note": "A brand of The Estée Lauder Companies; figures are company-wide."
     },
+    "Clinique Laboratories, LLC": {
+      "ticker": "EL",
+      "company": "The Estée Lauder Companies Inc.",
+      "note": "A brand of The Estée Lauder Companies; figures are company-wide."
+    },
     "Coty": {
       "ticker": "COTY",
       "company": "Coty Inc."
+    },
+    "Coty Airspun": {
+      "ticker": "COTY",
+      "company": "Coty Inc.",
+      "note": "Coty Airspun is one face-powder line of Coty Inc.; figures are company-wide."
     },
     "Bath & Body Works": {
       "ticker": "BBWI",
@@ -344,11 +390,19 @@
       "ticker": "COOK",
       "company": "Traeger, Inc."
     },
+    "Traeger Grills": {
+      "ticker": "COOK",
+      "company": "Traeger, Inc."
+    },
     "Harley-Davidson": {
       "ticker": "HOG",
       "company": "Harley-Davidson, Inc."
     },
     "Apple": {
+      "ticker": "AAPL",
+      "company": "Apple Inc."
+    },
+    "Apple Inc": {
       "ticker": "AAPL",
       "company": "Apple Inc."
     },
@@ -361,6 +415,10 @@
       "company": "Sonos, Inc."
     },
     "Roku": {
+      "ticker": "ROKU",
+      "company": "Roku, Inc."
+    },
+    "Roku, Inc": {
       "ticker": "ROKU",
       "company": "Roku, Inc."
     },
@@ -427,6 +485,11 @@
       "ticker": "MAR",
       "company": "Marriott International, Inc."
     },
+    "Marriott Hotels": {
+      "ticker": "MAR",
+      "company": "Marriott International, Inc.",
+      "note": "Marriott Hotels is one brand of Marriott International; figures are company-wide."
+    },
     "Hilton": {
       "ticker": "HLT",
       "company": "Hilton Worldwide Holdings Inc."
@@ -436,6 +499,10 @@
       "company": "Hilton Worldwide Holdings Inc."
     },
     "Hyatt": {
+      "ticker": "H",
+      "company": "Hyatt Hotels Corporation"
+    },
+    "Hyatt Hotels Corporation": {
       "ticker": "H",
       "company": "Hyatt Hotels Corporation"
     },
@@ -457,6 +524,10 @@
       "company": "Southwest Airlines Co."
     },
     "Royal Caribbean": {
+      "ticker": "RCL",
+      "company": "Royal Caribbean Cruises Ltd."
+    },
+    "Royal Caribbean International": {
       "ticker": "RCL",
       "company": "Royal Caribbean Cruises Ltd."
     },

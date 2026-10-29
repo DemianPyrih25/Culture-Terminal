@@ -363,7 +363,8 @@ export function whiteSpace(areas: readonly AreaLift[], counts: ReadonlyMap<strin
 }
 
 /**
- * Latent & open (high demand, low supply), Proven & crowded, Saturated (low demand, high supply), Cold.
+ * High demand, few rivals (low supply); high demand, many rivals; low demand, many rivals (high
+ * supply); low demand, few rivals.
  * A Supply_pct of 0 (no area sparser) is never high supply, even when the median falls on that tie.
  */
 export function whiteSpaceQuadrant(demandPct: number, supplyPct: number, demandSplit: number, supplySplit: number): WhiteSpaceQuadrant {
@@ -373,9 +374,10 @@ export function whiteSpaceQuadrant(demandPct: number, supplyPct: number, demandS
   return highSupply ? "SATURATED" : "COLD";
 }
 
+/** The quadrants in a reader's words (Q1 of the Part 9 close-out); the codes stay in the data. */
 export const QUADRANT_LABEL: Readonly<Record<WhiteSpaceQuadrant, string>> = {
-  LATENT_OPEN: "Latent & open",
-  PROVEN_CROWDED: "Proven & crowded",
-  SATURATED: "Saturated",
-  COLD: "Cold",
+  LATENT_OPEN: "high demand, few rivals",
+  PROVEN_CROWDED: "high demand, many rivals",
+  SATURATED: "low demand, many rivals",
+  COLD: "low demand, few rivals",
 };

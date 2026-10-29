@@ -321,7 +321,7 @@ describe("geo_lift: the lift map", () => {
 
     // KPI order: precision first, then lifts from the highest.
     const [precision, ...rest] = run.ledger.metrics;
-    expect(precision).toMatchObject({ key: "lift.precision", formulaId: "lift.confidence", value: 1, display: "gh7 · 1.00", badge: "DERIVED" });
+    expect(precision).toMatchObject({ key: "lift.precision", formulaId: "lift.confidence", value: 1, display: "fine · 1.00", badge: "DERIVED" });
     const lifts = metricsOf(run, "lift.area");
     expect(lifts[0]?.subjectRefs).toEqual(["birch_hollow", "T1"]);
     expect(lifts.every((m) => m.formulaId === "lift.area" && m.badge === "ESTIMATED" && m.comparator === "BASELINE" && m.unit === "lift")).toBe(true);
@@ -331,7 +331,7 @@ describe("geo_lift: the lift map", () => {
     expect(metricsOf(run, "lift.confidence").slice(1).every((m) => m.formulaId === "lift.confidence" && m.badge === "DERIVED")).toBe(true);
     const ws = metricsOf(run, "lift.white_space");
     expect(ws[0]).toMatchObject({ subjectRefs: ["birch_hollow", "T1"], formulaId: "lift.white_space", badge: "ESTIMATED" });
-    expect(ws[0]?.display).toMatch(/Latent & open$/);
+    expect(ws[0]?.display).toMatch(/high demand, few rivals$/);
     expect(ws[0]?.evidenceIds).toEqual(["E1", "E2", "E3"]);
     for (const m of [precision, ...rest]) expect(m?.evidenceIds.length).toBeGreaterThan(0);
 
@@ -356,7 +356,7 @@ describe("geo_lift: the lift map", () => {
 
     const digest = ModelDigest.parse(result.forModel);
     expect(digestFits(digest, { tool: "geo_lift", step: "S2" })).toBe(true);
-    expect(digest.top_rows[0]).toMatchObject({ ref: null, name: "Birch Hollow", values: { area: "birch_hollow", lift_rank: 1, lift_metric: lifts[0]?.id, quadrant: "Latent & open" } });
+    expect(digest.top_rows[0]).toMatchObject({ ref: null, name: "Birch Hollow", values: { area: "birch_hollow", lift_rank: 1, lift_metric: lifts[0]?.id, quadrant: "high demand, few rivals" } });
     expect(JSON.stringify(digest)).not.toContain(LOCALITY);
   });
 
@@ -673,7 +673,7 @@ describe("geo_lift: the areas the question names", () => {
     expect(about("lift.area")[0]?.label).toMatch(/\(named in the question\)$/);
     expect(about("lift.rank")).toMatchObject([{ value: 8, display: `8 of ${ranked.length}`, unit: "rank", badge: "DERIVED", n: ranked.length }]);
     expect(about("lift.confidence")).toHaveLength(1);
-    expect(about("lift.confidence")[0]?.label).toMatch(/gated cells? × map precision/);
+    expect(about("lift.confidence")[0]?.label).toMatch(/^confidence of the .+ lift \(map cells, grid\)$/);
     const venues = about("lift.supply");
     expect(venues).toHaveLength(1);
     expect(venues[0]?.label).toMatch(/in a sample of Qloo-indexed venues, not every business/);

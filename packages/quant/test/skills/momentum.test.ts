@@ -327,8 +327,8 @@ describe("momentum: calls and metrics", () => {
     });
     expect(byKey("mom.delta_26w", "R2")?.display).toBe("-0.078 · rank 3 of 3");
     expect(byKey("mom.delta_26w", "R3")?.display).toMatch(/ · rank 2 of 3$/);
-    expect(byKey("mom.mann_kendall_tau", "R1")).toMatchObject({ formulaId: "mom.mann_kendall", value: 1, display: "+1.00" });
-    expect(byKey("mom.mann_kendall_p", "R1")).toMatchObject({ formulaId: "mom.mann_kendall", display: "<0.001" });
+    expect(byKey("mom.mann_kendall_tau", "R1")).toMatchObject({ formulaId: "mom.mann_kendall", value: 1, display: "+1.00 (a steady rise)" });
+    expect(byKey("mom.mann_kendall_p", "R1")).toMatchObject({ formulaId: "mom.mann_kendall", display: "<0.001 (very unlikely to be chance)" });
     expect(byKey("mom.label", "R1")).toMatchObject({ formulaId: "mom.label", value: 1, display: "Rising" });
     expect(byKey("mom.label", "R2")).toMatchObject({ value: -1, display: "Declining" });
     expect(byKey("mom.label", "R3")).toMatchObject({ value: 0, display: "Flat" });
@@ -550,7 +550,7 @@ describe("momentum: inputs, estimate, digest", () => {
     const digest = ModelDigest.parse(result.forModel);
     expect(digestFits(digest, { tool: "momentum", step: "S4" })).toBe(true);
     expect(digest.metrics.map((m) => m.id)).toEqual(run.ledger.metrics.map((m) => m.id));
-    expect(digest.notices[0]).toBe(`Trending window ${windowText()} is historical: every momentum metric is STALE; cite it with {{WINDOW}}.`);
+    expect(digest.notices[0]).toBe(`Trending window ${windowText()} is historical: every momentum figure describes that past window, not today; name the window with {{WINDOW}} and do not write the badge word.`);
     expect(digest.dataset_ids).toEqual(["D1"]);
     expect(digest.top_rows[0]?.values).toMatchObject({ type: "brand", state: "ok", delta_metric: expect.stringMatching(/^M\d+$/) as string });
     expect(digest.top_rows[3]?.values).toMatchObject({ state: "no_signal", reason: "too few distinct values (a placeholder series)" });

@@ -14,6 +14,7 @@ export {
   areaName,
   buildAnswerModel,
   buildChanges,
+  buildConceptNote,
   buildGhost,
   buildSteps,
   headlineWithPeriod,

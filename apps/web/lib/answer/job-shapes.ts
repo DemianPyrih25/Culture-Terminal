@@ -93,18 +93,16 @@ export const MISSING_TEXT: Readonly<Record<NoValueReason, string>> = {
   not_listed: "Not a listed company",
   not_reported: "Not reported",
   suppressed: "Withheld by the Census",
+  not_configured: "Not configured on this server",
 };
 
 /**
- * Whether a percent column holds 0–1 shares (the share.pct convention) rather than percent points: every
- * value is within ±1.5. A column of points always has one above that.
+ * A cell as its unit prints it in a table of public figures: "$1.2B", "38.4%", "12,480", "34.5". A pct
+ * value is always a 0–1 share: QUANT computes every public percent itself (a margin is profit over
+ * revenue, revenue growth is the change over the prior period, a commute share is mode workers over all
+ * workers), so revenue that tripled (2.0) prints as "200.0%", never as "2.0%".
  */
-function pctIsShare(values: readonly (number | null)[]): boolean {
-  return values.every((v) => v === null || Math.abs(v) <= 1.5);
-}
-
-/** A cell as its unit prints it in a table of public figures: "$1.2B", "38.4%", "12,480", "34.5". */
-export function unitText(value: number, unit: MetricUnit, share = true): string {
+export function unitText(value: number, unit: MetricUnit): string {
   switch (unit) {
     case "usd":
       return formatDollars(value);
@@ -114,7 +112,7 @@ export function unitText(value: number, unit: MetricUnit, share = true): string 
     case "years":
       return value.toFixed(1);
     case "pct": {
-      const points = share ? value * 100 : value;
+      const points = value * 100;
       return `${points < 0 ? "−" : ""}${Math.abs(points).toFixed(1)}%`;
     }
     case "lift":
@@ -138,7 +136,6 @@ const COMPARISON_GROUPS: ReadonlySet<string> = new Set(["city", "metro", "compar
 
 export function dataRows(p: RankedPayload): { body: Extract<ChartBody, { type: "rows" }>; table: ChartTableData; comparisons: number } {
   const tagged = p.groups.flatMap((g) => g.rows.map((r) => ({ r, comparison: r.comparison === true || COMPARISON_GROUPS.has(g.key) })));
-  const share = p.columns.map((_, c) => pctIsShare(tagged.map(({ r }) => r.cells[c]?.value ?? null)));
   const ordered = [...tagged.filter((x) => !x.comparison), ...tagged.filter((x) => x.comparison)];
   const shaped: DataRowData[] = ordered.map(({ r, comparison }) => ({
     label: r.label,
@@ -147,7 +144,7 @@ export function dataRows(p: RankedPayload): { body: Extract<ChartBody, { type: "
     cells: p.columns.map((col, c) => {
       const cell = r.cells[c];
       if (!cell || cell.value === null) return cell?.reason ? MISSING_TEXT[cell.reason] : NO_DATA;
-      return unitText(cell.value, col.unit, share[c]);
+      return unitText(cell.value, col.unit);
     }),
   }));
   const columns = p.columns.map((c) => ({ label: c.label, numeric: true }));

@@ -30,10 +30,12 @@ const PROBES = [metricOf("share.pct", ["R1", "nashville"]), metricOf("share.pct"
 describe("live key-figure slots", () => {
   it("mirror the agent's KPI slots pick for pick", () => {
     type Pick = { key: string; formula?: string; where?: (m: Metric) => boolean; pair?: boolean };
-    const strip = (slots: readonly { picks: readonly Pick[]; count: number; top?: boolean }[]) =>
+    // The agent's `requires` is the web's `onlyWith` (D8): a slot shown only when that skill ran.
+    const strip = (slots: readonly { picks: readonly Pick[]; count: number; top?: boolean; requires?: string; onlyWith?: string }[]) =>
       slots.map((s) => ({
         count: s.count,
         top: s.top ?? false,
+        onlyWith: s.requires ?? s.onlyWith ?? null,
         picks: s.picks.map((p) => ({ key: p.key, formula: p.formula ?? null, pair: p.pair ?? false, where: p.where ? PROBES.map((m) => p.where?.(m)) : null })),
       }));
     for (const job of Job.options) expect(strip(KPI_SLOTS[job]), job).toEqual(strip(AGENT_KPI_SLOTS[job]));
