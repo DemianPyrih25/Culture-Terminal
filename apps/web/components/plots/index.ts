@@ -7,6 +7,8 @@
 export { BarList, barListTable, barShares } from "./bar-list";
 export type { BarListProps, BarListRow } from "./bar-list";
 export { ColumnChart, columnDisplay, columnTable } from "./column-chart";
+export { DataRows, dataRowsTable } from "./data-rows";
+export type { DataRow, DataRowsProps } from "./data-rows";
 export type { ColumnChartProps, ColumnPoint } from "./column-chart";
 export { DIVERGING_DIRECTIONS, DivergingRows, divergingDisplay, divergingShares, divergingTable } from "./diverging-rows";
 export type { DivergingRow, DivergingRowsProps } from "./diverging-rows";
@@ -29,3 +31,5 @@ export type { SlateRow, SlateTableProps } from "./slate-table";
 export type { PlotBaseProps, PlotTable, PlotTag, PlotTone } from "./types";
 export { Scoreboard, WinnerTable, winnerTable } from "./winner-table";
 export type { ScoreboardProps, Side, WinnerRow, WinnerTableProps } from "./winner-table";
+export { VerdictList, verdictListTable } from "./verdict-list";
+export type { VerdictGroup, VerdictItem, VerdictListProps, VerdictTone } from "./verdict-list";

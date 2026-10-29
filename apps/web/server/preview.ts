@@ -40,6 +40,8 @@ import {
   qlooDisabledFromEnv,
 } from "./config";
 import { DESK_LABEL, JOB_LABEL } from "../lib/brief/format";
+import { wordList } from "../lib/answer/copy";
+import { marketLabel } from "../lib/answer/markets";
 import { findAlreadyHave, type AlreadyHave } from "./answer-cache";
 import { laneModeOf, type LaneMode } from "./breakers";
 import { getAnthropic, getDatabase, getQlooClient, laneMode } from "./container";
@@ -265,6 +267,11 @@ const JOB_BASELINE: Readonly<Record<Job, string>> = {
   sponsorship: "within the slate",
   market_selection: "vs US baseline",
   audience_discovery: "vs US baseline",
+  taste_twins: "each area vs its own city",
+  brand_collab: "partners scored on one scale",
+  creator_fit: "one scale per kind of creator",
+  launch_test: "vs the concept's 50th result",
+  city_compare: "each city vs the other map cities",
 };
 
 function scopeOf(intent: Intent): string {
@@ -286,7 +293,26 @@ function scopeOf(intent: Intent): string {
       return "US markets";
     case "audience_discovery":
       return "US · across domains";
+    case "taste_twins": {
+      const source = [area, city].filter((s): s is string => Boolean(s)).join(", ");
+      const target = intent.geo.target_metro !== null ? `twins in ${METRO_LABEL[intent.geo.target_metro]}` : null;
+      return [source, target].filter((s): s is string => Boolean(s)).join(" → ") || `Neighbourhoods in ${MetroId.options.length} US cities`;
+    }
+    case "brand_collab":
+      return "US · partner brands across categories";
+    case "creator_fit":
+      return "US · public figures, artists & podcasts";
+    case "launch_test":
+      return "US · the concept's audience";
+    case "city_compare":
+      return intent.geo.cities.length >= 2 ? wordList(intent.geo.cities.map(marketLabel), "and") : "Two to four US cities";
   }
+}
+
+/** The gazetteer metros the reading names, source first: a twin's target city too, and every compared map city. */
+function metrosOf(intent: Intent): string[] {
+  const ids = [intent.geo.metro, intent.geo.target_metro, ...intent.geo.cities.map((c) => MetroId.safeParse(c).data ?? null)];
+  return [...new Set(ids.filter((m): m is MetroId => m !== null && m !== undefined))].map((m) => METRO_LABEL[m]);
 }
 
 /** How the gate went, for the lens line. */
@@ -332,7 +358,7 @@ function understoodOf(intent: Intent, resolutions: readonly ResolvedMention[], m
     jobLabel: JOB_LABEL[intent.job],
     mnemonic: intent.mnemonic,
     mentions,
-    metros: intent.geo.metro !== null ? [METRO_LABEL[intent.geo.metro]] : [],
+    metros: metrosOf(intent),
     scope: scopeOf(intent),
     lens,
   };

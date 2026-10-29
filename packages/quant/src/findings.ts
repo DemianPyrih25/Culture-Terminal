@@ -1,5 +1,5 @@
 import { LocationMethod, type AgeBucket, type FindingKind, type FindingSuggestion, type Severity, type SkillId } from "@ct/contracts";
-import { spearman } from "./stats";
+import { quantile, spearman } from "./stats";
 import { TASTE_ISLAND_LAST_SHARE, TASTE_ISLAND_MIN_ROWS } from "./subs";
 
 /**
@@ -45,6 +45,9 @@ export const FINDING_SUGGESTION: Readonly<Record<FindingKind, SkillId | null>> =
   POPULARITY_DOMINANCE: "cross_domain",
   LOCATION_FALLBACK: null,
   WEAK_CATEGORY_FIT: "sponsor_slate",
+  TWIN_FOUND: "block_dna",
+  ANALOG_VETOED: "rank_candidates",
+  TASTE_FINANCIALS_SPLIT: null,
 };
 
 /**
@@ -67,6 +70,9 @@ export const FINDING_SEVERITY: Readonly<Record<FindingKind, Severity>> = {
   POPULARITY_DOMINANCE: "medium",
   LOCATION_FALLBACK: "low",
   WEAK_CATEGORY_FIT: "medium",
+  TWIN_FOUND: "medium",
+  ANALOG_VETOED: "medium",
+  TASTE_FINANCIALS_SPLIT: "medium",
 };
 
 // Thresholds (SPEC §4.4) --------------------------------------------------------------------------
@@ -108,6 +114,12 @@ export const HIGH_POPULARITY = 0.95;
 export const POPULARITY_DOMINANCE_MAX_HIGH_SHARE = 0.7;
 /** The first popularity cap to suggest (PLAN §4.4). */
 export const SUGGESTED_POPULARITY_CAP = 0.85;
+/**
+ * UNDER-THE-RADAR never labels a result at or above this popularity, however it sits against its list's
+ * median (ANSWER_QUALITY §3: a mass-market name is not "under the radar"). It is the first cap the
+ * product suggests for less obvious picks, so the two read the same line.
+ */
+export const UNDER_THE_RADAR_MAX_POPULARITY = SUGGESTED_POPULARITY_CAP;
 /** Each further re-run lowers the cap by this much. */
 export const POPULARITY_CAP_STEP = 0.1;
 /** The lowest cap cross_domain accepts. */
@@ -386,13 +398,40 @@ export function blockNewTagsFinding(args: {
   familyTags: number;
   /** The NEW tags that are taxonomy tags, most distinctive first, with their registry refs. */
   signalTags: readonly { name: string; ref: string }[];
+  /**
+   * A whole city's fingerprint: the panel its lists are read against ("the other 12 map cities").
+   * The NEW tags are then the city's own, and the follow-up is concept_vector on them (no candidate refs needed),
+   * not tenants at a site. Null or absent for a neighbourhood against its city.
+   */
+  panel?: string | null;
 }): FindingDraft | null {
   const { areaName, family } = args;
+  const panel = args.panel ?? null;
   const tags = distinctNames(args.newTags);
   if (!isBlockNewTags(family, tags.length, args.familyTags)) return null;
   const signal = [...new Map(args.signalTags.map((t) => [t.ref, `${t.name} (${t.ref})`])).values()].slice(0, BLOCK_SIGNAL_TAGS_MAX);
   const list = family === "SOUND" ? "top music tags" : "top tags";
   const either = signal.length < 2 ? signal.join("") : `${signal.slice(0, -1).join(", ")} or ${signal[signal.length - 1]}`;
+  if (panel !== null) {
+    // A city has no site to rank tenants at, and a concept-only city_compare has no candidate refs to
+    // rank: the follow-up is concept_vector's open call on the NEW tags, which needs none and names
+    // what the city's distinct taste points to (artists for music tags, brands for place tags).
+    const { kind, severity, text } = draft(
+      "BLOCK_NEW_TAGS",
+      `Among its ${list}, ${areaName} has ${family} tags that are not among the ${list} of ${panel}, led by ${listNames(tags)}.`,
+      null,
+    );
+    const type = family === "SOUND" ? "artist" : "brand";
+    return {
+      kind,
+      severity,
+      text,
+      suggestion:
+        signal.length === 0
+          ? null
+          : { tool: "concept_vector", reason: `Name the ${type}s ${areaName}'s distinct taste points to: concept_vector on ${signal.join(", ")}, type ${type}, no analogs.` },
+    };
+  }
   return draft(
     "BLOCK_NEW_TAGS",
     `Among its ${list}, ${areaName} has ${family} tags that are not among the city's ${list}, led by ${listNames(tags)}.`,
@@ -573,4 +612,138 @@ export function emptyResultFinding(args: {
     text: `${capitalise(what)} returned no usable results.`,
     suggestion: args.suggestion,
   };
+}
+
+// S11 Taste Twins ------------------------------------------------------------------------------------
+
+/**
+ * Plain words for a resemblance ρ, used in metric displays and finding texts, so the same value
+ * always reads the same way (ANSWER_QUALITY §3: a small value is called what it is).
+ */
+export const RHO_STRONG = 0.6;
+export const RHO_MODERATE = 0.3;
+export const RHO_WEAK = 0.1;
+
+export function rhoWords(rho: number): string {
+  if (atLeast(rho, RHO_STRONG)) return "strong resemblance";
+  if (atLeast(rho, RHO_MODERATE)) return "moderate resemblance";
+  if (atLeast(rho, RHO_WEAK)) return "weak resemblance";
+  if (rho > -RHO_WEAK) return "about no resemblance";
+  return "opposite pattern";
+}
+
+/** TWIN_FOUND needs a ρ for at least this many checked areas: with fewer, "top" means little. */
+export const TWIN_MIN_AREAS = 3;
+/** A twin sits in the top quarter of the checked areas (PLAN §4.4: ρ ≥ p75)… */
+export const TWIN_QUANTILE = 0.75;
+/**
+ * …and resembles the source at least moderately. The top area always clears its own set's p75, so
+ * without this floor any positive ρ, however weak, would be called a twin.
+ */
+export const TWIN_MIN_RHO = RHO_MODERATE;
+
+export interface TwinCandidate {
+  id: string;
+  name: string;
+  rho: number | null;
+}
+
+/** The checked areas that count as twins (ρ ≥ p75 of the checked areas and ≥ TWIN_MIN_RHO), best first; empty below TWIN_MIN_AREAS. */
+export function twinsOf(areas: readonly TwinCandidate[]): TwinCandidate[] {
+  const scored = areas.filter((a): a is TwinCandidate & { rho: number } => finite(a.rho));
+  if (scored.length < TWIN_MIN_AREAS) return [];
+  const p75 = quantile(
+    scored.map((a) => a.rho),
+    TWIN_QUANTILE,
+  ) as number;
+  const bar = Math.max(p75, TWIN_MIN_RHO);
+  return scored.filter((a) => atLeast(a.rho, bar)).sort((a, b) => b.rho - a.rho || (a.id < b.id ? -1 : 1));
+}
+
+/**
+ * TWIN_FOUND: the areas of the target city whose taste pattern most resembles the source area's,
+ * among the areas checked. Suggests reading the top twin's Block DNA.
+ */
+export function twinFoundFinding(args: {
+  sourceName: string;
+  targetCity: string;
+  areas: readonly TwinCandidate[];
+}): FindingDraft | null {
+  const twins = twinsOf(args.areas);
+  const top = twins[0];
+  if (top === undefined || top.rho === null) return null;
+  const checked = args.areas.filter((a) => finite(a.rho)).length;
+  const names = distinctNames(twins.map((t) => t.name));
+  return draft(
+    "TWIN_FOUND",
+    `Of the ${checked} ${args.targetCity} areas checked, ${listNames(names)} ${names.length === 1 ? "shows" : "show"} the closest taste pattern to ${args.sourceName}, led by ${top.name} (${rhoWords(top.rho)}).`,
+    `Profile the Block DNA of ${top.name} to see what its venue-goers favour.`,
+  );
+}
+
+// S12 Concept Vector ---------------------------------------------------------------------------------
+
+/**
+ * ANALOG_VETOED: one or more of the analogs score below the concept's 50th result in the same call.
+ * Suggests ranking what Qloo finds for the concept (the ADD list, with refs) against the analogs.
+ */
+export function analogVetoedFinding(args: {
+  conceptLabel: string;
+  /** The bar as conceptVector's anchorText names it; "the 50th result" when omitted. */
+  anchor?: string;
+  vetoed: readonly string[];
+  /** Analogs with a KEEP or VETO verdict. */
+  scored: number;
+  /** The concept's own picks, with refs, best first. */
+  adds: readonly { name: string; ref: string }[];
+}): FindingDraft | null {
+  const vetoed = distinctNames(args.vetoed);
+  if (vetoed.length === 0 || args.scored < vetoed.length) return null;
+  const one = vetoed.length === 1;
+  const adds = [...new Map(args.adds.map((a) => [a.ref, `${a.name} (${a.ref})`])).values()].slice(0, MAX_NAMES_IN_TEXT);
+  return draft(
+    "ANALOG_VETOED",
+    `${listNames(vetoed)} ${one ? "scores" : "score"} below ${args.anchor ?? "the 50th result"} for ${args.conceptLabel} in the same Qloo call (${vetoed.length} of ${args.scored} scored analogs): the concept's taste points elsewhere.`,
+    adds.length === 0 ? null : `Rank ${listNames(adds)}, the concept's own top picks, next to the analogs with the concept tags as the signal.`,
+  );
+}
+
+// S13 Company financials -----------------------------------------------------------------------------
+
+/**
+ * TASTE_FINANCIALS_SPLIT reads only clear moves: a momentum change of at least this much (trending
+ * percentile, −1..1) and a revenue change of at least this share. Anything smaller is "about flat".
+ */
+export const SPLIT_MIN_MOMENTUM = 0.05;
+export const SPLIT_MIN_REVENUE_YOY = 0.02;
+
+/** Whether a taste momentum change and a reported revenue change clearly point opposite ways. */
+export function isTasteFinancialsSplit(momentumDelta: number, revenueYoy: number): boolean {
+  if (!finite(momentumDelta) || !finite(revenueYoy)) return false;
+  if (Math.abs(momentumDelta) < SPLIT_MIN_MOMENTUM - EPS || Math.abs(revenueYoy) < SPLIT_MIN_REVENUE_YOY - EPS) return false;
+  return Math.sign(momentumDelta) !== Math.sign(revenueYoy);
+}
+
+/**
+ * TASTE_FINANCIALS_SPLIT: taste momentum and reported revenue moved opposite ways. A note for the bear
+ * case, never a cause: the two measure different things over different periods. No follow-up tool.
+ */
+export function tasteFinancialsSplitFinding(args: {
+  brandName: string;
+  companyName: string;
+  momentumDelta: number;
+  /** "the Apr-Sep 2025 trending window" */
+  momentumWindow: string;
+  revenueYoy: number;
+  /** "the fiscal year ended 2024-12-31" */
+  revenuePeriod: string;
+}): FindingDraft | null {
+  if (!isTasteFinancialsSplit(args.momentumDelta, args.revenueYoy)) return null;
+  const taste = args.momentumDelta > 0 ? "rose" : "fell";
+  const revenue = args.revenueYoy > 0 ? "rose" : "fell";
+  return draft(
+    "TASTE_FINANCIALS_SPLIT",
+    `${args.brandName}'s taste momentum ${taste} in ${args.momentumWindow}, while ${args.companyName}'s reported revenue ${revenue} in ${args.revenuePeriod}: the two point different ways. Note it in the bear case; neither explains the other.`,
+    null,
+  );
 }

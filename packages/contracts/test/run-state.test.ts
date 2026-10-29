@@ -43,7 +43,12 @@ describe("applyEvent", () => {
     expect(s.toolCalls.map((t) => t.toolCallId)).toEqual(["toolu_fixture_1", "toolu_fixture_2"]);
     const [first, second] = s.toolCalls;
     expect(first).toMatchObject({ status: "ok", ok: true, pivot: false, qlooCallIds: ["q1", "q2", "q3"], stepId: "S1" });
-    expect(second).toMatchObject({ status: "partial", pivot: true, triggerFindingId: "F1", qlooCallIds: ["q4"] });
+    expect(second).toMatchObject({ status: "partial", pivot: true, triggerFindingId: "F1", qlooCallIds: ["q4"], publicCallIds: ["p1"] });
+    expect(first?.publicCallIds).toEqual([]);
+    // Public calls cost no Qloo calls: they are counted apart.
+    expect(s.publicCalls).toMatchObject({ network: 0, cached: 1, reused: 0 });
+    expect(s.publicCalls.chips.map((c) => [c.publicCallId, c.source, c.reference])).toEqual([["p1", "sec", "CIK0000000001"]]);
+    expect(s.timeline.find((e) => e.type === "public")?.key).toBe("p1");
 
     expect(Object.keys(s.metrics).sort()).toEqual(["M1", "M2", "M3"]);
     expect(s.metrics.M3?.value).toBeNull();

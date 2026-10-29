@@ -1,4 +1,5 @@
 import type { ConfidenceBand, DatasetEnvelope, DatasetId, GeoLiftPayload, GhostPickCategory, Job, Metric, MetroId, ResolvedMention, RunState } from "@ct/contracts";
+import type { IconName } from "../../components/ui/icons";
 import type { BriefArgument, BriefNextMove, Inline } from "../brief";
 import type { AnswerTopic } from "./copy";
 
@@ -10,7 +11,7 @@ import type { AnswerTopic } from "./copy";
 
 /** What buildAnswerModel reads from the run besides the brief model. */
 export type AnswerRun = Pick<RunState, "resolves"> &
-  Partial<Pick<RunState, "ghost" | "report">> & {
+  Partial<Pick<RunState, "ghost" | "report" | "intent" | "evidence">> & {
     /** The run's metrics by id (the raw values behind the key numbers). */
     metrics?: Readonly<Record<string, Metric>>;
   };
@@ -28,6 +29,20 @@ export interface AnswerHead {
   compare: { subject: string; second: string } | null;
 }
 
+/**
+ * The nearest-job rule (D41, ANSWER_QUALITY §8): the question asked for more than any job covers, so it
+ * was read as the closest job. The top of the answer says which job, and in a plain sentence what is
+ * not covered and why.
+ */
+export interface AnswerReadAs {
+  /** "Real competitors": the job the question was read as. */
+  jobLabel: string;
+  /** What the data does not cover, a few words each ("sales", "rents"); empty when only the sentence is known. */
+  notCovered: string[];
+  /** The plain sentence under the chip. */
+  text: string;
+}
+
 export interface AnswerVerdict {
   /** answer: a call; not_enough: the data could not support one. */
   kind: "answer" | "not_enough";
@@ -39,7 +54,7 @@ export interface AnswerVerdict {
   lowered: string[];
   /** "Taste signals, not buy or sell advice." on the investment desk; null elsewhere. */
   advice: string | null;
-  /** "All 28 numbers checked against Qloo data"; `ok` false prints the caution form. */
+  /** "All 28 numbers checked against Qloo data" (or "Qloo and SEC data"); `ok` false prints the caution form. */
   check: { ok: boolean; text: string } | null;
 }
 
@@ -158,6 +173,33 @@ export interface RankTrackRowData {
   gem: boolean;
 }
 
+/** A concept check's verdict on one name (S12): kept, found in the data, dropped, or not scored. */
+export type VerdictKind = "keep" | "add" | "veto" | "unscored";
+
+export interface VerdictRowData {
+  label: string;
+  /** The value as printed ("0.12 above the bar"), or a reason. */
+  display: string;
+  /** The name's profile page, when its type has one; never for a dropped name. */
+  href: string | null;
+}
+
+export interface VerdictGroupData {
+  verdict: VerdictKind;
+  /** "Kept: the data backs these". */
+  title: string;
+  rows: VerdictRowData[];
+}
+
+/** A row of a figure printed as a table (financials, economics): its name, sublabel and one cell per column. */
+export interface DataRowData {
+  label: string;
+  sublabel: string | null;
+  cells: string[];
+  /** A comparator row (the whole city), drawn apart from the rows it is compared with. */
+  comparison: boolean;
+}
+
 export interface MapAreaData {
   rank: number;
   name: string;
@@ -175,14 +217,16 @@ export type ChartBody =
       tables: { title: string; rows: WinnerRowData[] }[];
     }
   | { type: "map"; data: GeoLiftPayload | null; areas: MapAreaData[]; caption: string }
-  | { type: "more-less"; more: MiniBarData[]; less: MiniBarData[] }
+  | { type: "more-less"; more: MiniBarData[]; less: MiniBarData[]; heads?: [string, string] }
   | { type: "pair"; rows: PairRowData[] }
   | { type: "fit"; rows: FitRowData[]; climbLabel: string }
   | { type: "slate"; rows: SlateRowData[] }
   | { type: "numbered"; rows: ListItemData[] }
-  | { type: "neighbours"; columns: { key: string; label: string; icon: "music" | "mic" | "tv" | "shopping-bag"; items: ListItemData[] }[] }
+  | { type: "neighbours"; columns: { key: string; label: string; icon: IconName; items: ListItemData[] }[] }
   | { type: "diverging"; rows: DivergingRowData[]; max: number }
-  | { type: "ranks"; rows: RankTrackRowData[] };
+  | { type: "ranks"; rows: RankTrackRowData[] }
+  | { type: "verdicts"; groups: VerdictGroupData[] }
+  | { type: "rows"; columns: { label: string; numeric?: boolean }[]; rows: DataRowData[] };
 
 export interface AnswerChart {
   datasetId: DatasetId;
@@ -237,17 +281,20 @@ export interface AnswerArea {
 }
 
 export type AnswerCell =
-  | { slot: "main" | "second" | "map"; span: 2 | 3 | 4 | 6 }
+  | { slot: "main" | "second" | "third" | "map"; span: 2 | 3 | 4 | 6 }
   | { slot: "guesses"; span: 2 | 3 | 6 };
 
 export interface AnswerModel {
   runId: string;
   job: Job | null;
   head: AnswerHead;
+  /** The "Read as" chip and what the answer does not cover; null when the question fit its job. */
+  readAs: AnswerReadAs | null;
   verdict: AnswerVerdict;
   steps: AnswerStep[];
   keyNumbers: AnswerKeyNumber[];
-  charts: { main: AnswerChart | null; second: AnswerChart | null; map: AnswerChart | null };
+  /** `third`: public figures beside the taste read (SEC financials, Census economics), on their own row. */
+  charts: { main: AnswerChart | null; second: AnswerChart | null; third: AnswerChart | null; map: AnswerChart | null };
   /**
    * tenant_mix and area_profile: the area the answer reads, drawn as its boundary in the map slot (no
    * dataset behind it). `corner` pins the visitor's space on a tenant question.

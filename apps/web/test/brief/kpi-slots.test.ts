@@ -60,6 +60,13 @@ describe("live key-figure slots", () => {
     expect(slotFor(null, metricOf("subs.similarity", ["R1", "R2"]))).toBeNull();
   });
 
+  it("fill Top climber only with a rank shift that rose", () => {
+    const shift = (value: number): Metric => ({ ...metricOf("tenant.rank_shift", ["R2", "site", "city"]), value });
+    expect(slotFor("tenant_mix", shift(0.25))?.slot.label).toBe("Top climber");
+    expect(slotFor("tenant_mix", shift(0))).toBeNull();
+    expect(slotFor("area_profile", shift(-0.25))).toBeNull();
+  });
+
   it("take head_to_head's similarity only between the subject and a named peer, when the strip knows them", () => {
     const pick = KPI_SLOTS.head_to_head[0]?.picks[0];
     if (!pick) throw new Error("head_to_head has no overlap pick");

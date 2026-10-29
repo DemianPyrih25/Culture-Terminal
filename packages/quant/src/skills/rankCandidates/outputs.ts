@@ -14,7 +14,7 @@ import {
   type GridRow,
   type ScoreGrid,
 } from "./scoring";
-import { count, listLabels, pushMetric, rowFlags, signed2, unscoredText, type RankRun } from "./shared";
+import { count, listLabels, pushMetric, rowFlags, shiftText, unscoredText, type RankRun } from "./shared";
 
 /**
  * What one rank_candidates call writes (SPEC §5.3 S8, PLAN §4.3): one evidence bundle, a bounded set
@@ -198,7 +198,7 @@ function addTenantMetrics(run: RankRun, grid: ScoreGrid, layout: TenantLayout, e
         subjectRefs: [c.ref, ...subjects],
         value: line.shift,
         reason: "not_scored",
-        display: line.shift === null ? "" : `${signed2(line.shift)} · ${where(line)}`,
+        display: line.shift === null ? "" : `${shiftText(line.shift)} · ${where(line)}`,
         unit: "delta",
         badge: "DERIVED",
         formulaId: "tenant.rank_shift",
@@ -285,7 +285,7 @@ export function addRankMetrics(run: RankRun, grid: ScoreGrid, layout: RankLayout
         subjectRefs: [c.ref, ...[first.spec.subject, last.spec.subject].filter((s): s is string => s !== null)],
         value: end.shift,
         reason: end.reason ?? "not_scored",
-        display: end.shift === null ? "" : `${signed2(end.shift)} · ${rankText(end.first.rank ?? 0, k)} → ${rankText(end.last.rank ?? 0, k)}, ${among}`,
+        display: end.shift === null ? "" : `${shiftText(end.shift)} · ${rankText(end.first.rank ?? 0, k)} → ${rankText(end.last.rank ?? 0, k)}, ${among}`,
         unit: "delta",
         badge: "DERIVED",
         formulaId: shiftFormula,

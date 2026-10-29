@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { createRunBudget } from "../../src/budget";
 import { createRunLedger } from "../../src/ledger";
 import { createEntityRegistry } from "../../src/registry";
-import { analystLimits, refusalOf } from "../../src/run/agentRun";
+import { analystLimits, OUT_OF_SCOPE_CARD, refusalOf } from "../../src/run/agentRun";
 import { isSkillAvailable, UNAVAILABLE_SKILLS } from "../../src/run/catalogue";
 import { createFollowupDeadline } from "../../src/run/followup";
 import { MARKET_CATALOGUE, unknownMarketIssues } from "../../src/run/markets";
@@ -62,6 +62,15 @@ describe("refusalOf", () => {
       "The question was declined (sensitive inference), and no group-level reframe applies.",
     );
     expect(refusalOf(safety(false, null, "  "))).toBe("The question was declined, and no group-level reframe applies.");
+  });
+
+  it("never refuses a business question as out of scope (D41): only one with no business or taste content gets the plain card", () => {
+    const nearest = { nearest: true, not_covered: ["sales"] };
+    expect(refusalOf(intentFor({ safety: { allowed: false, category: "out_of_scope", reframe: null }, read_as: nearest }))).toBeNull();
+    expect(refusalOf(intentFor({ safety: { allowed: true, category: "out_of_scope", reframe: null } }))).toBeNull();
+    expect(refusalOf(safety(false, "out_of_scope", "Ask about a brand."))).toBe(OUT_OF_SCOPE_CARD);
+    // The fixed safety categories still refuse, read as a nearest job or not.
+    expect(refusalOf(intentFor({ safety: { allowed: true, category: "eligibility", reframe: null }, read_as: nearest }))).toContain("eligibility");
   });
 });
 

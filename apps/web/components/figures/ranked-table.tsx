@@ -47,14 +47,24 @@ export interface RankedTableOptions {
 
 export type RankedTableProps = FigureMeta & RankedTableOptions & { data: RankedPayload };
 
-/** Flag words in the FLAG column. TARGET is shown by the highlight, not as a word. */
+/**
+ * Flag words in the FLAG column. TARGET is shown by the highlight, not as a word. KEEP, VETO and ADD are
+ * the concept check's verdicts on the AI's guessed analogs (S12): a vetoed guess reads as dropped (muted
+ * and struck through), never as a pick.
+ */
 export const FLAG_LABEL: Readonly<Record<RowFlag, string>> = {
   UTR: "Under the radar",
   NEW: "New",
   LOCAL: "Local",
   TARGET: "Target",
   GHOST_PICK: "AI pick",
+  KEEP: "AI guess kept",
+  VETO: "AI guess dropped",
+  ADD: "Found in the data",
 };
+
+/** A row the concept check dropped: the AI guessed it, the data did not back it. */
+export const isVetoed = (row: { flags: readonly RowFlag[] }) => row.flags.includes("VETO");
 
 const UNIT_INTERVAL: ReadonlySet<MetricUnit> = new Set(["similarity", "pct", "popularity", "affinity"]);
 /** Units whose bars mark 1 by default, when every value is positive. */
@@ -240,18 +250,26 @@ function Lollipop(props: RankedTableProps & { label: string; style: NumberStyle 
           }
           const { row } = line;
           const cell = row.cells[ci];
-          const strong = highlight.has(row.key);
-          const grey = !strong && comparison.has(row.key);
+          const vetoed = isVetoed(row);
+          const strong = !vetoed && highlight.has(row.key);
+          const grey = !strong && (vetoed || comparison.has(row.key));
           const cy = px(line.y + 8.5);
           const labelClass = strong ? "fill-ink" : grey ? "fill-ink-2" : "fill-ink";
           const text = cell?.value == null ? null : formatNumber(cell.value, unit, style);
           return (
-            <g key={`r-${row.key}`} data-row={row.key} data-tone={strong ? "highlight" : grey ? "comparison" : "default"}>
-              <title>{`${row.label}: ${text ?? reasonLabel(cell?.reason ?? null)}`}</title>
+            <g key={`r-${row.key}`} data-row={row.key} data-tone={strong ? "highlight" : grey ? "comparison" : "default"} data-veto={vetoed || undefined}>
+              <title>{`${row.label}${vetoed ? ` (${FLAG_LABEL.VETO})` : ""}: ${text ?? reasonLabel(cell?.reason ?? null)}`}</title>
               <text x={0} y={px(line.y + 12.5)} fontSize={12} className="fill-ink-2 font-mono">
                 {row.rank ?? ""}
               </text>
-              <text x={RANK_W + GAP} y={px(line.y + 12.5)} fontSize={12} fontWeight={strong ? 600 : 400} className={labelClass}>
+              <text
+                x={RANK_W + GAP}
+                y={px(line.y + 12.5)}
+                fontSize={12}
+                fontWeight={strong ? 600 : 400}
+                className={labelClass}
+                textDecoration={vetoed ? "line-through" : undefined}
+              >
                 {fitText(row.label, labelW, 12, { weight: strong ? 600 : 400 })}
               </text>
               {cell?.value == null ? (
@@ -352,19 +370,24 @@ function SlateStyleTable(props: RankedTableProps & { style: NumberStyle }) {
         </thead>
         <tbody>
           {rows.map((row) => {
-            const strong = highlight.has(row.key);
+            const vetoed = isVetoed(row);
+            const strong = !vetoed && highlight.has(row.key);
             const cell = row.cells[ci];
             const below = cell?.value != null && props.tick != null && cell.value < props.tick;
-            const grey = comparison.has(row.key) || below;
+            const grey = comparison.has(row.key) || below || vetoed;
             return (
               <tr
                 key={row.key}
                 data-row={row.key}
+                data-veto={vetoed || undefined}
                 className={`h-[25.5px] border-b border-line ${strong ? "bg-sunken" : ""}`}
               >
                 <td className="px-2 text-[12px] text-ink-2 tabular-nums">{row.rank ?? "—"}</td>
                 {withSub ? <td className="px-2 text-[13px] text-ink-2">{row.sublabel ?? ""}</td> : null}
-                <th scope="row" className={`px-2 text-left text-[13px] text-ink ${strong ? "font-semibold" : "font-medium"}`}>
+                <th
+                  scope="row"
+                  className={`px-2 text-left text-[13px] ${vetoed ? "text-ink-2 line-through" : "text-ink"} ${strong ? "font-semibold" : "font-medium"}`}
+                >
                   {row.label}
                 </th>
                 <td className="px-2">
@@ -413,7 +436,7 @@ function SlateStyleTable(props: RankedTableProps & { style: NumberStyle }) {
                       {row.flags
                         .filter((f) => f !== "TARGET")
                         .map((f) => (
-                          <span key={f} className="text-[12px] font-medium whitespace-nowrap text-accent-ink">
+                          <span key={f} className={`text-[12px] font-medium whitespace-nowrap ${f === "VETO" ? "text-ink-2" : "text-accent-ink"}`}>
                             {FLAG_LABEL[f]}
                             {props.flagNotes?.[f] ? <sup className="ml-px text-[10px]">{props.flagNotes[f]}</sup> : null}
                           </span>

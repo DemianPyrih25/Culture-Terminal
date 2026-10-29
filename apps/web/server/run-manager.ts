@@ -42,6 +42,7 @@ import {
   type RunPatch,
   type RunStatus,
 } from "@ct/db";
+import type { PublicDataClient } from "@ct/publicdata";
 import type { QlooClient } from "@ct/qloo";
 import { normaliseName, searchParams } from "@ct/quant";
 import { z } from "zod";
@@ -174,6 +175,12 @@ export interface AgentDeps {
   qloo: () => QlooClient;
   /** Null when ANTHROPIC_API_KEY is unset. */
   anthropic: () => AnthropicLike | null;
+  /**
+   * The process-wide SEC EDGAR and US Census client (Part 9). Absent, or throwing when it cannot be
+   * configured, leaves public data off: runs still go, and the company_financials and area_economics
+   * tools say plainly that the data is unavailable.
+   */
+  publicdata?: () => PublicDataClient;
   /**
    * The lane's mode as the breakers decide it (breakers.ts), or a bare mode. replay_only refuses
    * the run with the decision's message.
@@ -459,6 +466,8 @@ interface AgentRunContext {
   parent: { runId: string; caseSummary: string } | null;
   intent: Intent | undefined;
   qloo: QlooClient;
+  /** Null when public data is not set up: the public tools then come back unavailable. */
+  publicdata: PublicDataClient | null;
   anthropic: AnthropicLike;
   startedAt: number;
   spend: SpendMeter;
@@ -480,6 +489,7 @@ interface AgentLaunch {
 interface AgentClients {
   deps: AgentDeps;
   qloo: QlooClient;
+  publicdata: PublicDataClient | null;
   anthropic: AnthropicLike;
 }
 
@@ -833,8 +843,8 @@ export class RunManager {
       throw err;
     }
     if (launch.client !== null) this.forgetSoon();
-    const { qloo, anthropic } = clients;
-    const run: AgentRunContext = { runId, question, lane, mode, pins, parent, intent, qloo, anthropic, startedAt: Date.now(), spend };
+    const { qloo, publicdata, anthropic } = clients;
+    const run: AgentRunContext = { runId, question, lane, mode, pins, parent, intent, qloo, publicdata, anthropic, startedAt: Date.now(), spend };
     void this.driveAgent(run, controller.signal).finally(() => {
       this.active.delete(runId);
       this.bus.close(runId);
@@ -885,11 +895,27 @@ export class RunManager {
         "Live analysis is unavailable: this server has no Anthropic API key. Test runs still work.",
       );
     }
+    let qloo: QlooClient;
     try {
-      return { deps, qloo: deps.qloo(), anthropic };
+      qloo = deps.qloo();
     } catch (err) {
       log.error({ err }, "the Qloo client could not be created; refusing live runs");
       throw new RunManagerError("unavailable", "Live analysis is unavailable: the Qloo client is not configured.");
+    }
+    return { deps, qloo, publicdata: this.publicDataClient(deps), anthropic };
+  }
+
+  /**
+   * The SEC EDGAR and US Census client, or null when it cannot be made (a malformed SEC_USER_AGENT): a run
+   * goes on without public data and its public tools say the data is unavailable. Logged once per failure.
+   */
+  private publicDataClient(deps: AgentDeps): PublicDataClient | null {
+    if (!deps.publicdata) return null;
+    try {
+      return deps.publicdata();
+    } catch (err) {
+      log.error({ err }, "the public-data client could not be created; runs go on without SEC and Census data");
+      return null;
     }
   }
 
@@ -1203,6 +1229,8 @@ export class RunManager {
         mode: run.mode,
         emit: writer.emit,
         qloo: run.qloo,
+        // SEC EDGAR and US Census (Part 9); without it the public tools come back unavailable.
+        publicdata: run.publicdata,
         anthropic: run.anthropic,
         signal: abort.signal,
         pins: run.pins,

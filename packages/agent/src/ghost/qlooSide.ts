@@ -29,6 +29,10 @@ import type { GazetteerLike } from "./places";
  * | tenants | Local brands, Ranked "block.rank_delta" (block_dna) | rank gain vs the city |
  * | partners | Sponsor slate, Slate (sponsor_slate) | best fits by FIT, then runners-up by FIT |
  * | partners | Cultural neighbourhood, Ranked "xdom.under_the_radar" brand group (cross_domain) | rank |
+ * | partners | Concept vector, Ranked KEEP and ADD rows, never VETO (concept_vector) | rank |
+ * | partners | a one-scale ranking from a signal, Ranked "none" group (rank_candidates) | rank |
+ * | neighbourhoods | Taste Twins, Ranked rows that name an area of a map city (taste_twins) | rank (rho) |
+ * | creators | Cultural neighbourhood, Ranked "xdom.under_the_radar" person, artist and podcast groups (cross_domain) | rank |
  *
  * Within a category the sources follow that order, a name already listed is skipped, and the list
  * stops at GHOST_QLOO_SIDE_MAX. The brief's subject (subjectOf) is never one of its own picks,
@@ -99,7 +103,7 @@ const shareMarkets: Extractor = (d) => {
     .map(({ row }) => ({ ...item(row.label, null), market: row.key.slice(METRO_ROW.length) }));
 };
 
-/** Travel-taste destinations by FIT: the markets fallback for a run whose markets were not shareable (director.md §5). */
+/** Travel-taste destinations by FIT: the markets fallback for a run whose markets were not shareable (director.md §6). */
 const travelMarkets: Extractor = (d) => {
   if (!isKind(d, "Quadrant") || !d.formulaIds.includes("trvl.quadrant")) return [];
   return [...d.payload.points].sort(byDesc((p) => p.y)).map((p) => item(p.label, p.ref, p.x));
@@ -171,6 +175,59 @@ const crossDomainBrands: Extractor = (d) => {
   return d.payload.groups.filter((g) => g.key === "brand").flatMap((g) => rankedRows(g, popularityColumn(d)));
 };
 
+/** The cross_domain domains a creator comes from (creator_fit): public figures, artists and podcasts. */
+const CREATOR_GROUPS: ReadonlySet<string> = new Set(["person", "artist", "podcast"]);
+
+const crossDomainCreators: Extractor = (d) => {
+  if (!isKind(d, "Ranked") || !d.formulaIds.includes("xdom.under_the_radar")) return [];
+  return d.payload.groups.filter((g) => CREATOR_GROUPS.has(g.key)).flatMap((g) => rankedRows(g, popularityColumn(d)));
+};
+
+/**
+ * A concept vector's kept analogs and added open-call results, in rank order. A VETO row is the
+ * concept's taste pointing elsewhere: never a pick, so it never counts as one the brief makes.
+ */
+const conceptPartners: Extractor = (d) => {
+  if (!isKind(d, "Ranked") || !d.payload.groups.some((g) => g.rows.some((r) => r.flags.some((f) => f === "KEEP" || f === "VETO" || f === "ADD")))) {
+    return [];
+  }
+  const at = popularityColumn(d);
+  return d.payload.groups.flatMap((g) => rankedRows({ rows: g.rows.filter((r) => r.flags.includes("KEEP") || r.flags.includes("ADD")) }, at));
+};
+
+/** A one-scale ranking from a signal (rank_candidates under a "none" context): brand_collab's partner scoring. */
+const signalRank: Extractor = (d) => {
+  if (!isKind(d, "Ranked") || d.formulaIds.includes("block.rank_delta") || d.formulaIds.includes("xdom.under_the_radar")) return [];
+  return d.payload.groups.filter((g) => g.key === "none").flatMap((g) => rankedRows(g, popularityColumn(d)));
+};
+
+/**
+ * The areas a Taste Twins ranking names, best twin first: Ranked rows that are no entity or tag and
+ * whose key or label is an area of a map city (no other Ranked dataset ranks areas). A row the
+ * gazetteer cannot place is left out, so only areas GHOST could name count.
+ */
+const twinAreas: Extractor = (d, input) => {
+  const geo = input.geo;
+  if (!isKind(d, "Ranked") || geo === undefined) return [];
+  const placed = (row: DatasetOf<"Ranked">["payload"]["groups"][number]["rows"][number]): string | null => {
+    for (const metro of geo.metros()) {
+      if (geo.neighbourhood(metro, row.key) !== null) return `${metro}:${row.key}`;
+      const named = geo.matchNeighbourhood(metro, row.label);
+      if (named !== null) return `${metro}:${named.id}`;
+    }
+    return null;
+  };
+  return d.payload.groups.flatMap((g) =>
+    g.rows
+      .filter((r) => r.rank !== null && r.ref === null && r.tagRef === null && !r.flags.includes("TARGET"))
+      .sort((a, b) => (a.rank ?? 0) - (b.rank ?? 0))
+      .flatMap((r) => {
+        const area = placed(r);
+        return area === null ? [] : [{ ...item(r.label, null), area }];
+      }),
+  );
+};
+
 /**
  * Per category, groups of sources: the first group with any name is used alone (the travel-taste
  * fallback); within a group, every source contributes in order.
@@ -178,9 +235,10 @@ const crossDomainBrands: Extractor = (d) => {
 const SOURCES: Readonly<Record<GhostPickCategory, readonly (readonly Extractor[])[]>> = {
   competitors: [[substitutes]],
   markets: [[shareMarkets], [travelMarkets]],
-  neighbourhoods: [[liftNeighbourhoods, blockArea]],
+  neighbourhoods: [[twinAreas], [liftNeighbourhoods, blockArea]],
   tenants: [[tenantFit, siteRank, localBrands]],
-  partners: [[slate, crossDomainBrands]],
+  partners: [[slate, conceptPartners, signalRank, crossDomainBrands]],
+  creators: [[crossDomainCreators]],
 };
 
 /** Already listed: the same ref, market or area, or (when either has none) the same name. */

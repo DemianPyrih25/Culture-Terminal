@@ -49,9 +49,10 @@ const TWIN_INTENT: Intent = {
   pillar: "investment",
   job: "brand_health",
   mentions: [{ text: TWIN_MENTION, entity_type: "brand", role: "primary", public_figure: false }],
-  geo: { metro: null, area: null, unsupported_place: null, market: null },
-  constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
+  geo: { metro: null, area: null, unsupported_place: null, market: null, target_metro: null, cities: [] },
+  constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
   safety: { allowed: true, category: null, reframe: null },
+  read_as: { nearest: false, not_covered: [] },
   assumptions: [],
   mnemonic: "TWIN COLA <BRAND> HLTH",
 };

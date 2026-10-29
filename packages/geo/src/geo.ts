@@ -3,9 +3,11 @@ import Flatbush from "flatbush";
 import type { MultiPolygon, Polygon } from "geojson";
 import ngeohash from "ngeohash";
 import { GAZETTEER_CATALOG } from "./catalog";
+import { CENSUS_CROSSWALK, censusUnitsOf, censusUnitsOfMetro, type CensusCrosswalk, type CensusUnits } from "./census";
 import {
   GAZETTEER_LOADERS,
   type CatalogArea,
+  type CatalogMetro,
   type Gazetteer,
   type GazetteerCatalog,
   type GazetteerLoader,
@@ -36,6 +38,8 @@ export interface GeoOptions {
   catalog?: GazetteerCatalog;
   /** Without `gazetteers`: how each metro's polygons load. Defaults to GAZETTEER_LOADERS. */
   loaders?: Readonly<Partial<Record<GazetteerMetro, GazetteerLoader>>>;
+  /** The census crosswalk tables behind censusUnits. Defaults to CENSUS_CROSSWALK, the shipped ones. */
+  census?: CensusCrosswalk;
 }
 
 /** The GeoApi createGeo returns: SkillCtx.geo, plus the loader its callers await. */
@@ -48,6 +52,13 @@ export interface Geo extends GeoApi {
   ensure(metro: MetroId): Promise<void>;
   /** Whether locate and polygonWkt answer for the metro now. */
   ready(metro: MetroId): boolean;
+  /**
+   * The Census units of a neighbourhood (census.ts): ZCTAs for a ZIP area, tracts in New York and
+   * Austin; null for an area this Geo does not serve. Loads only the small crosswalk table, no polygons.
+   */
+  censusUnits(metro: MetroId, id: string): Promise<CensusUnits | null>;
+  /** The Census units of every neighbourhood of a city, in list order. */
+  censusUnitsOfMetro(metro: MetroId): Promise<CensusUnits[]>;
 }
 
 /** locate or polygonWkt asked for a metro whose polygons were not loaded first. */
@@ -169,6 +180,8 @@ export function createGeo(options: GeoOptions = {}): Geo {
   const names = new Map<MetroId, NameIndex>();
   const shapes = new Map<MetroId, ShapeIndex>();
   const pending = new Map<MetroId, Promise<void>>();
+  /** What censusUnits answers from: each served metro's catalog entry. */
+  const served: Partial<Record<MetroId, CatalogMetro>> = {};
   let loaders: Readonly<Partial<Record<GazetteerMetro, GazetteerLoader>>> = {};
 
   if (options.gazetteers !== undefined) {
@@ -179,6 +192,7 @@ export function createGeo(options: GeoOptions = {}): Geo {
       shapes.set(metro, indexShapes(metro, g));
       const entry = catalogEntry(g);
       names.set(metro, indexNames(metro, entry.source, entry.areas));
+      served[metro] = entry;
     }
   } else {
     const catalog = options.catalog ?? GAZETTEER_CATALOG;
@@ -188,10 +202,12 @@ export function createGeo(options: GeoOptions = {}): Geo {
       if (entry === undefined) continue;
       if (entry.areas.length > 0 && loaders[metro] === undefined) throw new Error(`catalog.ts lists ${metro} but no gazetteer loads it`);
       names.set(metro, indexNames(metro, entry.source, entry.areas));
+      served[metro] = entry;
     }
   }
 
   const of = (metro: MetroId): NameIndex => names.get(metro) ?? NO_NAMES;
+  const census = { catalog: served, crosswalk: options.census ?? CENSUS_CROSSWALK };
   /** The metro's polygons; null for a metro without neighbourhoods. */
   const shapesOf = (metro: MetroId): ShapeIndex | null => {
     if (of(metro).list.length === 0) return null;
@@ -224,6 +240,8 @@ export function createGeo(options: GeoOptions = {}): Geo {
     boundarySource: (metro) =>
       of(metro).source ?? `No neighbourhood boundaries for ${METRO_LABEL[metro]} in this build; area exhibits are unavailable.`,
     ready: (metro) => of(metro).list.length === 0 || shapes.has(metro),
+    censusUnits: (metro, id) => censusUnitsOf(metro, id, census),
+    censusUnitsOfMetro: (metro) => censusUnitsOfMetro(metro, census),
     ensure(metro) {
       if (of(metro).list.length === 0 || shapes.has(metro)) return Promise.resolve();
       const known = pending.get(metro);

@@ -86,6 +86,28 @@ describe("the answer page", () => {
     expect(html).not.toMatch(/font-serif|text-dim|rounded-brief|bg-paper|data-marker="UNLISTED"/);
   });
 
+  it("says at the top, before the verdict, which job a question was read as and what is not covered (D41)", () => {
+    const html = page(jobRunEvents("launch_test"));
+    expect(at(html, 'data-read-as="true"')).toBeLessThan(at(html, 'data-verdict="answer"'));
+    const note = text(slice(html, 'data-read-as="true"', 'data-verdict="answer"'));
+    expect(note).toContain("Read as: Test a new product");
+    expect(note).toContain("Not covered: pricing.");
+    expect(page(jobRunEvents("brand_health"))).not.toContain("data-read-as");
+  });
+
+  it("draws a concept check with dropped guesses struck through and never linked, and public figures as tables", () => {
+    const html = page(jobRunEvents("launch_test"));
+    expect(html).toContain('data-plot="verdicts"');
+    const dropped = slice(html, 'data-verdict="veto"', "</section>");
+    expect(dropped).toContain("line-through");
+    expect(dropped).not.toContain("href=");
+    expect(html).toContain('data-plot="rows"');
+    expect(text(html)).toContain("10-K filed 2026-02-19");
+    const twins = page(jobRunEvents("taste_twins"));
+    expect(twins).toContain('data-comparison="true"');
+    expect(text(twins)).toContain("All 4 numbers checked against Qloo and Census data");
+  });
+
   it("says when there is not enough data, with the plain chip", () => {
     const html = page(variantEvents(jobRunEvents("brand_health"), "notenough"));
     expect(html).toContain('data-verdict="not_enough"');

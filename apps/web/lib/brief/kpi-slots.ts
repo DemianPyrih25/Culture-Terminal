@@ -1,7 +1,7 @@
 import { AgeBucket, type Job, type Metric, type SkillId } from "@ct/contracts";
 
 /**
- * The key-figure strip per job, all eight, so a live brief can show which figures are in and which are
+ * The key-figure strip per job, all thirteen, so a live brief can show which figures are in and which are
  * still pending before report.final names them, and every figure gets a short label. This mirrors
  * KPI_SLOTS in packages/agent/src/report/kpis.ts (the agent cannot be imported into browser code): each
  * slot takes up to `count` metrics with a value from its first pick that has any, a pick matching a
@@ -46,8 +46,17 @@ export const inMarket = (m: Metric): boolean => {
   return context !== undefined && !AgeBucket.safeParse(context).success && !context.startsWith("urn:");
 };
 
+/** A rank shift that rose: "Top climber" never shows a shift of zero or less (ANSWER_QUALITY §3). */
+const rose = (m: Metric): boolean => (m.value ?? 0) > 0;
+
 // A youth index is its own measure (−1..1 around the average audience, D38), not the share tilt the slot is named after.
 const NEXT_GEN: readonly KpiPick[] = [one("share.youth_tilt"), one("dna.youth_index", { label: "Youth index" })];
+
+/** The SEC figures a brand note shows beside its taste read when the brand is listed (company_financials). */
+const FINANCIALS: readonly KpiPick[] = [
+  one("fin.yoy", { label: "Revenue vs a year before" }),
+  one("fin.revenue", { label: "Reported revenue" }),
+];
 
 export const KPI_SLOTS: Readonly<Record<Job, readonly KpiSlot[]>> = {
   brand_health: [
@@ -55,6 +64,7 @@ export const KPI_SLOTS: Readonly<Record<Job, readonly KpiSlot[]>> = {
     { picks: [one("subs.distinctiveness")], count: 1, label: "Distinctiveness" },
     { picks: NEXT_GEN, count: 1, label: "Youth tilt" },
     { picks: [one("share.metros_won"), one("mom.label", { label: "Momentum" })], count: 1, label: "Metros won" },
+    { picks: FINANCIALS, count: 1, label: "Reported revenue" },
   ],
   head_to_head: [
     { picks: [one("subs.similarity", { pair: true }), one("rank.fit", { label: "Fit" })], count: 1, label: "Audience overlap" },
@@ -68,14 +78,14 @@ export const KPI_SLOTS: Readonly<Record<Job, readonly KpiSlot[]>> = {
   ],
   tenant_mix: [
     { picks: [one("tenant.fit")], count: 1, top: true, label: "Tenant fit" },
-    { picks: [one("tenant.rank_shift")], count: 1, top: true, label: "Top climber" },
+    { picks: [one("tenant.rank_shift", { where: rose })], count: 1, top: true, label: "Top climber" },
     { picks: [one("block.new_tag")], count: 1, label: "New tags" },
     { picks: [one("block.rank_delta")], count: 1, top: true, label: "Over-represented" },
   ],
   area_profile: [
     { picks: [one("block.new_tag")], count: 1, label: "New tags" },
     { picks: [one("block.rank_delta")], count: 2, top: true, label: "Over-represented" },
-    { picks: [one("tenant.rank_shift"), one("xdom.under_the_radar", { label: "Under the radar" })], count: 1, top: true, label: "Top climber" },
+    { picks: [one("tenant.rank_shift", { where: rose }), one("xdom.under_the_radar", { label: "Under the radar" })], count: 1, top: true, label: "Top climber" },
   ],
   sponsorship: [
     { picks: [one("slate.fit", { formula: "slate.best_fit" })], count: 3, label: "Best fit" },
@@ -92,6 +102,30 @@ export const KPI_SLOTS: Readonly<Record<Job, readonly KpiSlot[]>> = {
     { picks: [one("dna.distinctive_tags")], count: 1, label: "Distinctive tags" },
     { picks: [one("xdom.under_the_radar")], count: 2, label: "Under the radar" },
     { picks: [one("trvl.hidden_pocket")], count: 1, top: true, label: "Hidden pocket" },
+  ],
+  taste_twins: [
+    { picks: [one("twin.rho")], count: 2, top: true, label: "Twin match" },
+    { picks: [one("twin.shared_new"), one("block.new_tag", { label: "New tags" })], count: 1, label: "Shared new tastes" },
+    { picks: [one("econ.median_hh_income")], count: 1, label: "Median household income" },
+  ],
+  brand_collab: [
+    { picks: [one("rank.fit"), one("xdom.fit")], count: 3, top: true, label: "Partner fit" },
+    { picks: [one("dna.distinctive_tags")], count: 1, label: "Distinctive tags" },
+    { picks: [one("xdom.under_the_radar")], count: 1, label: "Under the radar" },
+  ],
+  creator_fit: [
+    { picks: [one("rank.fit"), one("xdom.fit")], count: 3, top: true, label: "Creator fit" },
+    { picks: [one("xdom.under_the_radar")], count: 2, label: "Under the radar" },
+  ],
+  launch_test: [
+    { picks: [one("cnpt.precision")], count: 1, label: "AI guesses kept" },
+    { picks: [one("cnpt.verdict")], count: 2, label: "Kept or dropped" },
+    { picks: FINANCIALS, count: 1, label: "Reported revenue" },
+  ],
+  city_compare: [
+    { picks: [one("share.pct", { where: inMarket })], count: 4, top: true, label: "City fit" },
+    { picks: [one("share.metros_won")], count: 1, label: "Cities won" },
+    { picks: [one("block.rank_delta")], count: 1, top: true, label: "Stands out for" },
   ],
 };
 
@@ -153,6 +187,14 @@ export function skillForFormula(formulaId: string): SkillId | null {
       return "sponsor_slate";
     case "resolve":
       return "resolve_entities";
+    case "twin":
+      return "taste_twins";
+    case "cnpt":
+      return "concept_vector";
+    case "fin":
+      return "company_financials";
+    case "econ":
+      return "area_economics";
     default:
       return null;
   }

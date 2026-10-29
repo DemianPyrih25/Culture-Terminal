@@ -44,14 +44,15 @@ import { indexSnapshot, type LedgerSnapshot } from "./ledger";
 import { formatUtcDate, timeRange } from "./report/format";
 import { pickKpis } from "./report/kpis";
 import { POSITION_JOBS } from "./report/position";
-import { buildReceipt, type ReceiptQlooCall, type ReceiptUsage } from "./report/receipt";
+import { isQlooEvidence, publicDisclaimers, readAsLimitation } from "./report/publicData";
+import { buildReceipt, type ReceiptPublicCall, type ReceiptQlooCall, type ReceiptUsage } from "./report/receipt";
 import { exhibitSourceLine } from "./report/sourceLine";
 import { buildScorecard } from "./scorecard";
 import { citedIds, draftProse, plainProse } from "./tokens";
 
 export { buildCaseSummary, type CaseSummaryContext } from "./report/caseSummary";
 export { POSITION_FAILED, POSITION_JOBS, recordPosition, type PositionContext } from "./report/position";
-export type { ReceiptQlooCall, ReceiptUsage } from "./report/receipt";
+export type { ReceiptPublicCall, ReceiptQlooCall, ReceiptUsage } from "./report/receipt";
 
 /**
  * ASSEMBLE (PLAN §4.1 step H, §7; D5, D9): code turns the checked draft into the Report. The model
@@ -85,6 +86,8 @@ export interface ReportContext {
   ledger: LedgerSnapshot;
   /** Every Qloo call of the run, e.g. `RunState.qloo.chips`; `rows` counts thin results per call. */
   qlooCalls: readonly ReceiptQlooCall[];
+  /** Every SEC and Census call of the run (the `public` events); none by default. */
+  publicCalls?: readonly ReceiptPublicCall[];
   usage: ReceiptUsage;
   models: Report["receipt"]["models"];
   /** Secondary mentions dropped or unresolved at the gate (−15 each, §6.4). */
@@ -98,6 +101,11 @@ export interface ReportContext {
   subject?: EntityRef | null;
   /** The peers the question names (the gate's): head_to_head's similarity figure is the pair's. */
   peers?: readonly EntityRef[];
+  /**
+   * The question was read as its nearest job (D41, CLERK's read_as): what it asks that the data does not
+   * cover, for the READ_AS_NEAREST_JOB limitation and its −5 confidence. Null or absent when the job fits.
+   */
+  readAs?: { notCovered: readonly string[] } | null;
 }
 
 export interface AssembleInput extends ReportContext {
@@ -120,7 +128,7 @@ export const POSITION_CAPTION =
 
 /** Exhibits code places itself, ahead of the draft's: the Scorecard, then the Taste Position card. */
 const isLeadKind = (kind: DatasetEnvelope["kind"]): boolean => kind === "Scorecard" || kind === "Position";
-/** The data line of a note that rests on no Qloo evidence (Qloo disabled, or nothing came back). */
+/** The data line of a note that rests on no Qloo evidence (Qloo disabled, or nothing came back): SEC or Census lines stand apart. */
 export const NO_DATA_DISCLAIMER = "Data: Qloo hackathon dataset; this run collected no Qloo evidence.";
 /** A call with fewer rows than this is a thin result (THIN_RESULT, SPEC §6.4). */
 export const THIN_RESULT_ROWS = 5;
@@ -138,10 +146,12 @@ interface ConfidenceCounts {
   checkerWarnings: number;
   /**
    * The note's signal is insufficient_evidence, so it is always LOW (SPEC §6.4): V7 forced it (fewer
-   * than MIN_OK_EVIDENCE ok bundles, or Qloo disabled), the ANALYST chose it, or the note is an
+   * than MIN_OK_EVIDENCE ok Qloo bundles, or Qloo disabled), the ANALYST chose it, or the note is an
    * evidence digest.
    */
   insufficientEvidence: boolean;
+  /** The question was read as its nearest job (D41): −5, once. */
+  readAsNearestJob: boolean;
 }
 
 const scoreConfidence = (c: ConfidenceCounts): Confidence =>
@@ -154,6 +164,7 @@ const scoreConfidence = (c: ConfidenceCounts): Confidence =>
     qualityGateDrops: c.qualityGateDrops,
     checkerWarnings: c.checkerWarnings,
     insufficientEvidence: c.insufficientEvidence,
+    readAsNearestJob: c.readAsNearestJob,
   });
 
 const limitationsFor = (args: {
@@ -353,13 +364,16 @@ function runFacts(ctx: ReportContext) {
   const bundlesWith = (flag: Flag) => ledger.evidence.filter((e) => e.flags.includes(flag));
   const window = trendWindow(ledger);
   const fetched = timeRange(ledger.evidence.map((e) => e.fetchedAt));
+  // The Qloo data line dates Qloo bundles only; SEC and Census figures carry their own period lines.
+  const qlooFetched = timeRange(ledger.evidence.filter(isQlooEvidence).map((e) => e.fetchedAt));
+  const readAs = ctx.readAs ?? null;
   const skillLimitations =
     ctx.skillLimitations ?? [...new Set(ledger.evidence.map((e) => e.skill))].flatMap((s) => SKILL_LIMITATIONS[s]);
-  const dataLine = fetched
+  const dataLine = qlooFetched
     ? dataDisclaimer(
-        formatUtcDate(fetched.from) === formatUtcDate(fetched.to)
-          ? formatUtcDate(fetched.from)
-          : `${formatUtcDate(fetched.from)} to ${formatUtcDate(fetched.to)}`,
+        formatUtcDate(qlooFetched.from) === formatUtcDate(qlooFetched.to)
+          ? formatUtcDate(qlooFetched.from)
+          : `${formatUtcDate(qlooFetched.from)} to ${formatUtcDate(qlooFetched.to)}`,
         window,
       )
     : NO_DATA_DISCLAIMER;
@@ -395,18 +409,23 @@ function runFacts(ctx: ReportContext) {
       coarseGeohash: flags.includes("COARSE_GEOHASH"),
       thinCalls: thinCalls(bundlesWith("THIN_RESULT"), ctx.qlooCalls),
       qualityGateDrops: ledger.evidence.reduce((sum, e) => sum + e.qualityGateDrops, 0),
-      insufficientEvidence: ledger.evidence.filter((e) => e.status === "ok").length < MIN_OK_EVIDENCE,
+      // V7 counts Qloo bundles only: SEC and Census figures sit beside the taste read, never in its place.
+      insufficientEvidence: ledger.evidence.filter((e) => e.status === "ok" && isQlooEvidence(e)).length < MIN_OK_EVIDENCE,
+      readAsNearestJob: readAs !== null,
     },
-    disclaimers: [...FIXED_DISCLAIMERS, dataLine],
-    limitations: (extraFlags: readonly Flag[], openQuestions: readonly string[]) =>
-      limitationsFor({
-        flags: [...flags, ...extraFlags],
+    disclaimers: [...FIXED_DISCLAIMERS, dataLine, ...publicDisclaimers(ledger.metrics, lookup)],
+    /** The flag limitations, the nearest-job one first among them (D41), then the desk, skill and open-question lines. */
+    limitations: (extraFlags: readonly Flag[], openQuestions: readonly string[]) => {
+      const built = limitationsFor({
+        flags: [...flags, ...extraFlags].filter((f) => f !== "READ_AS_NEAREST_JOB"),
         pillar,
         openQuestions,
         skillLimitations,
         window,
         asOf: ctx.createdAt,
-      }),
+      });
+      return readAs === null ? built : [readAsLimitation(ctx.job, readAs.notCovered), ...built];
+    },
     /**
      * The Scorecard dataset first (absent only without hypotheses), then the Taste Position card on the
      * investment desk, then the given exhibits in order.
@@ -433,6 +452,7 @@ function runFacts(ctx: ReportContext) {
     receipt: (numbersTraced: Report["receipt"]["numbersTraced"]) =>
       buildReceipt({
         calls: ctx.qlooCalls,
+        publicCalls: ctx.publicCalls ?? [],
         usage: ctx.usage,
         numbersTraced,
         models: ctx.models,

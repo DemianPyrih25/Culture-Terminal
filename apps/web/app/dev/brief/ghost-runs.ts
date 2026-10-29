@@ -31,7 +31,7 @@ const both = (category: Item["category"], name: string, r: number): Item => ({ n
 const qlooOnly = (category: Item["category"], name: string, r: number): Item => ({ name, category, status: "qloo_only", resolvesInQloo: null, ref: ref(r) });
 const llmOnly = (category: Item["category"], name: string, resolves: boolean): Item => ({ name, category, status: "llm_only", resolvesInQloo: resolves, ref: null });
 
-const NO_PICKS: GhostAnswer["picks"] = { competitors: [], markets: [], neighbourhoods: [], tenants: [], partners: [] };
+const NO_PICKS: GhostAnswer["picks"] = { competitors: [], markets: [], neighbourhoods: [], tenants: [], partners: [], creators: [] };
 
 export const GHOST_SAMPLES: Readonly<Partial<Record<Job, GhostSample>>> = {
   // Marlowe Vance's slate: GHOST reaches for the famous energy drink and a mass lager, and misses the

@@ -53,8 +53,9 @@ export function BarList({ rows, max, label, emptyLabel, className }: BarListProp
               className="grid min-h-9 grid-cols-[136px_minmax(0,1fr)_40px] items-center gap-x-3 md:grid-cols-[200px_minmax(0,1fr)] md:gap-x-0"
             >
               <span className="flex min-w-0 flex-col">
-                <span className="truncate type-body text-ink max-md:text-[14px] max-md:leading-5">{row.label}</span>
-                {row.sublabel ? <span className="truncate type-caption text-ink-2">{row.sublabel}</span> : null}
+                {/* Long names wrap; a card never cuts a name with an ellipsis (ANSWER_QUALITY §11). */}
+                <span className="type-body text-ink [overflow-wrap:anywhere] max-md:text-[14px] max-md:leading-5">{row.label}</span>
+                {row.sublabel ? <span className="type-caption text-ink-2 [overflow-wrap:anywhere]">{row.sublabel}</span> : null}
               </span>
               <span className="relative flex h-6 min-w-0 items-center">
                 <span aria-hidden="true" className="absolute inset-x-0 top-1/2 h-3 -translate-y-1/2 rounded-r-xs bg-sunken" />

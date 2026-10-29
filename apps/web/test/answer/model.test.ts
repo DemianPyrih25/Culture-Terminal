@@ -36,7 +36,8 @@ describe("every job", () => {
     expect(a.verdict.kind).toBe("answer");
     expect(a.verdict.line).toMatch(/\.$/);
     expect(a.verdict.check?.ok).toBe(true);
-    expect(a.verdict.check?.text).toMatch(/^All \d+ numbers checked against Qloo data$/);
+    // Public figures name their source too: "against Qloo and Census data".
+    expect(a.verdict.check?.text).toMatch(/^All \d+ numbers checked against Qloo(, SEC)?( and (SEC|Census))? data$/);
     expect(a.keyNumbers.length).toBeGreaterThan(0);
     expect(a.keyNumbers.length).toBeLessThanOrEqual(3);
     for (const k of a.keyNumbers) expect(k.footnote).not.toBeNull();
@@ -62,7 +63,7 @@ describe("every job", () => {
 
   it.each(Job.options)("%s: lists only figures it does not draw under More charts, at most four", (job) => {
     const a = answer(job);
-    const drawn = [a.charts.main, a.charts.second, a.charts.map].filter((c) => c !== null).map((c) => c.datasetId);
+    const drawn = [a.charts.main, a.charts.second, a.charts.third, a.charts.map].filter((c) => c !== null).map((c) => c.datasetId);
     expect(a.more.length).toBeLessThanOrEqual(4);
     for (const m of a.more) expect(drawn).not.toContain(m.datasetId);
   });
@@ -366,7 +367,7 @@ describe("per job", () => {
 });
 
 describe("AI alone", () => {
-  const NO_PICKS: GhostAnswer["picks"] = { competitors: [], markets: [], neighbourhoods: [], tenants: [], partners: [] };
+  const NO_PICKS: GhostAnswer["picks"] = { competitors: [], markets: [], neighbourhoods: [], tenants: [], partners: [], creators: [] };
   const run = (picks: Partial<GhostAnswer["picks"]>, items: GhostDiff["items"], pop: GhostDiff["meanPopularity"]): AnswerRun => ({
     resolves: [],
     ghost: {
@@ -482,5 +483,92 @@ describe("helpers", () => {
     ]);
     expect(layoutRows("brand_health", { map: false, main: false, second: false, guesses: true })).toEqual([[{ slot: "guesses", span: 6 }]]);
     expect(layoutRows("tenant_mix", { map: false, main: true, second: false, guesses: false })).toEqual([[{ slot: "main", span: 6 }]]);
+  });
+});
+
+describe("Part 9 jobs", () => {
+  const body = <T extends string>(a: AnswerModel, slot: "main" | "second" | "third", type: T) => {
+    const chart = a.charts[slot];
+    expect(chart?.body.type, slot).toBe(type);
+    return chart as NonNullable<AnswerModel["charts"]["main"]> & { body: Extract<NonNullable<AnswerModel["charts"]["main"]>["body"], { type: T }> };
+  };
+
+  it("taste_twins: twins ranked by match with the sample said, the shared tastes, and Census residents beside them", () => {
+    const a = answer("taste_twins");
+    expect(a.head.eyebrow).toContain("Find an area's twin");
+    const twins = body(a, "main", "bars");
+    expect(twins.body.rows[0]).toMatchObject({ label: "ZIP 37206 (East Nashville)", display: "0.71", tone: "accent" });
+    // An area that could not be matched keeps its row and says so; it never reads as 0.
+    expect(twins.body.rows.at(-1)).toMatchObject({ label: "ZIP 37203", display: "No data", fraction: 0 });
+    expect(twins.caption).toContain("1.00 = the same mix of tastes");
+    expect(twins.caption).toContain("6 of 34 Nashville areas checked.");
+    const shared = body(a, "second", "more-less");
+    expect(shared.body.heads).toEqual(["Both have more of", "Both have less of"]);
+    expect(shared.body.more[0]).toMatchObject({ label: "Coffee house", display: "+31 / +27" });
+    const econ = body(a, "third", "rows");
+    expect(econ.body.rows.at(-1)).toMatchObject({ label: "Nashville, all areas", comparison: true });
+    expect(econ.body.rows[0]?.cells).toEqual(["11,840", "33.1", "$68.4K", "19.0%"]);
+    expect(econ.caption).toMatch(/residents .*not customers, foot traffic or spending/);
+    expect(words(a)[0]).toBe("East Nashville | Closest twin | Match 0.71, a close match, best of the 5 areas that could be matched (1.00 = the same mix of tastes)");
+    expect(a.verdict.check?.text).toMatch(/against Qloo and Census data$/);
+  });
+
+  it("brand_collab: partners on one scale, the tags the audiences share, and plain fit numbers", () => {
+    const a = answer("brand_collab");
+    const partners = body(a, "main", "bars");
+    expect(partners.body.rows.map((r) => r.display).slice(0, 2)).toEqual(["94/100", "91/100"]);
+    expect(body(a, "second", "neighbours").body.columns.map((c) => c.label)).toEqual(["Only Larkfield Soda", "Both audiences", "Only Copperline Coffee"]);
+    expect(words(a)).toEqual([
+      "Copperline Coffee | Best-fit partner | Fit 94/100, #1 of the 6 brands scored on one scale",
+      "Fieldnote Outfitters | Next best | Fit 91/100, #2 of the 6 brands scored on one scale",
+      "5 of 14 | Audience tags they share | tags listed for either brand that both audiences carry",
+    ]);
+  });
+
+  it("creator_fit: one column per kind of creator, and a top pick per kind that never compares kinds", () => {
+    const a = answer("creator_fit");
+    expect(body(a, "main", "neighbours").body.columns.map((c) => c.label)).toEqual(["Public figures", "Music", "Podcasts"]);
+    expect(a.charts.main?.caption).toContain("scores compare only within a kind");
+    expect(a.keyNumbers.map((k) => k.label)).toEqual(["Top pick: Public figures", "Top pick: Music", "Top pick: Podcasts"]);
+  });
+
+  it("launch_test: kept, found and dropped guesses, a drop never linked as a pick, financials apart, and the part not covered at the top", () => {
+    const a = answer("launch_test");
+    const verdicts = body(a, "main", "verdicts");
+    expect(verdicts.body.groups.map((g) => g.verdict)).toEqual(["keep", "add", "veto", "unscored"]);
+    const dropped = verdicts.body.groups.find((g) => g.verdict === "veto");
+    expect(dropped?.title).toBe("Dropped: the data does not back these");
+    for (const r of dropped?.rows ?? []) expect(r.href).toBeNull();
+    expect(dropped?.rows[0]?.display).toBe("vetoed: scores below the concept's 50th result");
+    expect(verdicts.body.groups[0]?.rows[0]).toMatchObject({ label: "Red Mesa Pantry", display: "#12 for the concept" });
+    const fin = body(a, "third", "rows");
+    expect(fin.body.rows.find((r) => r.label === "FY2025")).toMatchObject({ sublabel: "10-K filed 2026-02-19", cells: ["$1.4B", "39.2%", "12.1%", "6.2%"] });
+    expect(fin.body.rows[0]?.cells[3]).toBe("Not reported");
+    expect(fin.caption).toContain("Not advice.");
+    expect(a.verdict.advice).toBe("Taste signals, not buy or sell advice.");
+    expect(a.readAs).toEqual({
+      jobLabel: "Test a new product",
+      notCovered: ["pricing"],
+      text: "Not covered: pricing. We have no data on this, so this answer leaves it out.",
+    });
+    // Said once, at the top: the limitation does not repeat under "What could change this".
+    expect(a.changes.join(" ")).not.toContain("pricing");
+    expect(words(a)[0]).toBe("3 of 5 | AI guesses the data backs | scored at least as high as the concept's 50th result (its last, when fewer come back)");
+  });
+
+  it("city_compare: every city's fingerprint in one card, against the other map cities, and residents per city", () => {
+    const a = answer("city_compare");
+    expect(a.head.eyebrow).toContain("Austin, Nashville and Denver");
+    const prints = body(a, "main", "neighbours");
+    expect(prints.body.columns.map((c) => c.label)).toEqual(["Austin", "Nashville", "Denver"]);
+    expect(prints.caption).toContain("than the other cities we map");
+    // The other fingerprints are drawn in that card, so they are not listed again under More charts.
+    expect(a.more).toEqual([]);
+    expect(words(a)[0]).toBe("Natural wine | Austin stands out for | ranks 34 places higher here than in the other cities we map");
+    body(a, "third", "rows");
+  });
+
+  it("a question that fit its job has no Read as note", () => {
+    for (const job of Job.options.filter((j) => j !== "launch_test")) expect(answer(job).readAs, job).toBeNull();
   });
 });

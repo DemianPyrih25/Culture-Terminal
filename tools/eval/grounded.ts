@@ -4,9 +4,10 @@
 // runs table: the record and the run's events go to the eval directory. Run ids start "cli-eval-", a
 // dev-CLI id the web leaves out of its run counts (apps/web/server/run-counts.ts), and the Qloo call log
 // and cache carry it as the origin run.
-import { privatePersonRefusal, refusalOf, runAgent, type AgentRunOptions, type AgentRunResult, type AnthropicLike } from "@ct/agent";
+import { ghostMetroOf, privatePersonRefusal, refusalOf, runAgent, type AgentRunOptions, type AgentRunResult, type AnthropicLike } from "@ct/agent";
 import { DEFAULT_RUN_LIMITS, type EventInput, type EventInputOf, type Intent, type LocalityApi, type RunLimits, type SafetyCategory } from "@ct/contracts";
 import type { QlooClient } from "@ct/qloo";
+import type { PublicDataClient } from "@ct/publicdata";
 import type { EvalQuestion } from "./cases";
 import type { GroundedRecord } from "./records";
 import type { GroundedArm } from "./runner";
@@ -56,7 +57,8 @@ export function groundedRecordOf(run: GroundedRun): GroundedRecord {
     reason: result.reason,
     model: result.model,
     job: intent?.job ?? null,
-    metro: intent?.geo.metro ?? null,
+    // GHOST's neighbourhood picks resolve in this metro: taste_twins' target city, else CLERK's metro.
+    metro: intent === null ? null : ghostMetroOf(intent),
     refusalCategory: result.status === "refused" && intent !== null ? refusalCategoryOf(intent) : null,
     plannedHypotheses: first(events, "plan")?.plan.hypotheses.length ?? null,
     checkerFirstPass: firstCheck?.ok ?? null,
@@ -71,6 +73,8 @@ export function groundedRecordOf(run: GroundedRun): GroundedRecord {
 
 export interface GroundedArmDeps {
   qloo: QlooClient;
+  /** The SEC and Census client (company_financials, area_economics); null runs them as unavailable. */
+  publicdata?: PublicDataClient | null;
   anthropic: AnthropicLike;
   localities: LocalityApi | null;
   /** The agent; tests pass a scripted one. */
@@ -96,6 +100,7 @@ export function createGroundedArm(deps: GroundedArmDeps): GroundedArm {
         mode: "live",
         emit: (event) => events.push(event),
         qloo: deps.qloo,
+        publicdata: deps.publicdata ?? null,
         anthropic: deps.anthropic,
         limits,
         signal,

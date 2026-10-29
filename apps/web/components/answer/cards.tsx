@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState, type ReactNode } from "react";
-import type { AnswerGhost, AnswerModel, AnswerStep, AnswerVerdict } from "../../lib/answer";
+import type { AnswerGhost, AnswerModel, AnswerReadAs, AnswerStep, AnswerVerdict } from "../../lib/answer";
 import { STRENGTH_LABEL, type BriefArgument } from "../../lib/brief";
 import { Button, Card, CardTitle, ConfidenceChip, cx, Icon, Monogram, Tag, TopicTile, type IconName, type TopicKey } from "../ui";
 import { AnswerProse } from "./answer-prose";
@@ -251,5 +251,26 @@ export function GroupLabel({ icon, children }: { icon: IconName; children: React
       <Icon name={icon} size={16} />
       {children}
     </h2>
+  );
+}
+
+/**
+ * The nearest-job note (D41, ANSWER_QUALITY §8): the question asked for more than any job covers, so the
+ * answer says at the top, before the verdict, which job it was read as and what it leaves out. A note
+ * strip, not a card: one chip and one plain sentence.
+ */
+export function ReadAsNote({ readAs, className }: { readAs: AnswerReadAs; className?: string }) {
+  return (
+    <section
+      aria-label="How we read your question"
+      data-read-as="true"
+      className={cx("flex flex-wrap items-center gap-x-3 gap-y-2 rounded-card bg-caution-soft px-4 py-3", className)}
+    >
+      <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-chip bg-surface px-2.5 text-[13px] leading-[18px] font-semibold text-ink">
+        <Icon name="corner-down-right" size={14} className="text-ink-2" />
+        Read as: {readAs.jobLabel}
+      </span>
+      <p className="min-w-0 flex-1 type-body text-caution-ink [overflow-wrap:anywhere]">{readAs.text}</p>
+    </section>
   );
 }

@@ -22,16 +22,17 @@ import {
 } from "@ct/contracts";
 import { getDb } from "@ct/db";
 import { isNetworkCacheStatus, type QlooCallRecord, type QlooClient, type QlooStore, type RunQloo } from "@ct/qloo";
+import type { PublicCallRecord, PublicDataClient, RunPublic } from "@ct/publicdata";
 import { classifyMatches, normaliseName, searchParams, SKILLS } from "@ct/quant";
 import { choiceOption, intOption, listOption, nameArg, parseCli, UsageError, type ParsedOptions } from "./args";
 import { renderDatasets } from "./dataset-view";
-import { formatFixed2, NONE } from "./format";
+import { formatFixed2, NONE, publicChip } from "./format";
 import { ensureMetrosIn, loadGeo } from "./geo";
 import { EXIT, heading, safeIo, type CliIo } from "./io";
 import { callNumbers, evidenceByCall, renderCalls, renderEvidence, renderFindings, renderMetrics, renderQuota } from "./ledger-view";
 import { kvLocalityApi, localitiesKvKey, MalformedPinsError, pgKv, readPins, type KvStore } from "./localities";
 import { renderSubstitutionMap } from "./matrix";
-import { CliError, describeDatabase, openCliQloo, stderrLogger, type CliQloo } from "./qloo-setup";
+import { CliError, describeDatabase, describePublicData, openCliQloo, stderrLogger, type CliQloo } from "./qloo-setup";
 import {
   InputError,
   maxRefNumber,
@@ -232,6 +233,9 @@ export interface SkillSession {
   localities: LocalityApi | null;
   events: EventInput[];
   calls: QlooCallRecord[];
+  /** The SEC and Census scope (company_financials, area_economics); null when no client was opened. */
+  publicScope: RunPublic | null;
+  publicCalls: PublicCallRecord[];
   ctx(toolCallId: string): SkillCtx;
 }
 
@@ -240,18 +244,26 @@ export function cliRunId(now: Date): string {
   return `cli-${now.toISOString().replace(/[-:.]/g, "")}`;
 }
 
-export function createSkillSession(client: QlooClient, geo: GeoApi, now: Date, localities: LocalityApi | null = null): SkillSession {
+export function createSkillSession(
+  client: QlooClient,
+  geo: GeoApi,
+  now: Date,
+  localities: LocalityApi | null = null,
+  publicdata: PublicDataClient | null = null,
+): SkillSession {
   const runId = cliRunId(now);
   const calls: QlooCallRecord[] = [];
+  const publicCalls: PublicCallRecord[] = [];
   const events: EventInput[] = [];
   // Standalone rather than forRun: a cached answer then carries no origin run, so a repeated command
   // shows HIT (forRun would call it REUSED, fetched by an earlier run), and no run cap applies.
   const scope = client.standalone({ onCall: (record) => calls.push(record) });
+  const publicScope = publicdata?.standalone({ onCall: (record) => publicCalls.push(record) }) ?? null;
   const emit = (event: EventInput): void => {
     events.push(event);
   };
   const registry = createEntityRegistry();
-  const ledger = createRunLedger({ emit, provenanceOf: (id) => scope.provenance(id) });
+  const ledger = createRunLedger({ emit, provenanceOf: (id) => scope.provenance(id) ?? publicScope?.provenance(id) ?? null });
   const budget = createRunBudget({
     limits: DEFAULT_RUN_LIMITS,
     qlooNetworkUsed: () => scope.networkUsed(),
@@ -270,8 +282,11 @@ export function createSkillSession(client: QlooClient, geo: GeoApi, now: Date, l
     localities,
     events,
     calls,
+    publicScope,
+    publicCalls,
     ctx: (toolCallId) => ({
       qloo: scope.forTool(toolCallId),
+      publicdata: publicScope?.forTool(toolCallId) ?? null,
       ledger: ledger.forToolCall(toolCallId),
       geo,
       localities,
@@ -529,6 +544,10 @@ async function runFromInput(args: InputSkillArgs, session: SkillSession, io: Cli
 export async function renderUsage(session: SkillSession, qloo: CliQloo, io: CliIo, kitCalls: number | null = null): Promise<void> {
   io.out(heading(`QLOO CALLS (${session.calls.length})`));
   print(io, renderCalls(session.calls, evidenceByCall(session.ledger.snapshot().evidence)));
+  if (session.publicCalls.length > 0) {
+    io.out(heading(`PUBLIC DATA CALLS (${session.publicCalls.length})`));
+    print(io, session.publicCalls.map((c) => `${c.source.padEnd(6)} ${publicChip(c)}`));
+  }
   await qloo.client.flush();
   const tagUsed =
     qloo.tagCap === null ? null : await qloo.store.countNetworkCalls({ env: qloo.client.env, tag: qloo.tag }).catch(() => null);
@@ -598,10 +617,16 @@ export async function runSkillCommand(argv: readonly string[], deps: SkillCliDep
   const kv = deps.kv ?? (storeOption === "pg" ? pgKv(getDb(), `postgres ${describeDatabase(deps.env)}`) : null);
   const kvKey = localitiesKvKey(qloo.client.env);
   const geo = deps.geo === undefined ? await loadGeo() : { geo: deps.geo, source: "provided" };
-  const session = createSkillSession(qloo.client, geo.geo, deps.now?.() ?? new Date(), kv === null ? null : kvLocalityApi(kv, kvKey));
+  const session = createSkillSession(
+    qloo.client,
+    geo.geo,
+    deps.now?.() ?? new Date(),
+    kv === null ? null : kvLocalityApi(kv, kvKey),
+    qloo.publicdata,
+  );
   io.out(
     `run-skill ${args.skill} · Qloo ${qloo.client.env} · tag ${qloo.tag} · cache ${qloo.storeLabel} · geo ${geo.source} · ` +
-      `localities ${await describePins(kv, kvKey)} · run ${session.runId}`,
+      `localities ${await describePins(kv, kvKey)} · public data ${describePublicData(qloo.publicdata)} · run ${session.runId}`,
   );
   let code: number;
   try {

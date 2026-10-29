@@ -13,6 +13,7 @@ function evidenceRecord(n: number): Evidence {
   return {
     id: `E${n}`,
     skill: "peer_landscape",
+    source: "qloo",
     purpose: "peer discovery for Brand Alpha",
     status: "ok",
     qlooCallIds: [`qc_alpha_${n}`],
@@ -123,6 +124,27 @@ describe.skipIf(!probe.ok)("ledger repo against Postgres", () => {
     expect(rows.datasets[0]).toMatchObject({ id: "D1", kind: "Scorecard", payload: scorecard, bytes: datasetBytes(scorecard) });
     expect(rows.datasets[0]?.bytes).toBe(new TextEncoder().encode(JSON.stringify(scorecard)).length);
     expect(rows.findings[0]).toMatchObject({ id: "F1", kind: "TASTE_ISLAND", severity: "high", metricIds: ["M1"], suggestion: finding.suggestion });
+  });
+
+  it("stores an SEC bundle's source and a metric's period", async () => {
+    const runId = await newRun("run-ledger-public");
+    const sec: Evidence = {
+      ...evidenceRecord(1),
+      skill: "company_financials",
+      source: "sec",
+      qlooCallIds: ["pc_alpha_1"],
+      requestIds: ["CIK0000000001"],
+      provenance: {
+        requests: [
+          { source: "sec", method: "GET", host: "data.sec.gov", path: "/api/xbrl/companyfacts/CIK0000000001.json", query: {}, reference: "CIK0000000001" },
+        ],
+      },
+    };
+    const revenue: Metric = { ...metricRecord(1, "E1"), key: "fin.revenue", unit: "usd", value: 1_000_000, display: "$1.0M", period: "FY2024, 10-K filed 2025-01-15" };
+    await insertLedgerSnapshot(db, runId, { evidence: [sec], metrics: [revenue, metricRecord(2, "E1")], datasets: [], findings: [] });
+    const rows = await listLedgerRows(db, runId);
+    expect(rows.evidence[0]).toMatchObject({ source: "sec", provenance: sec.provenance });
+    expect(rows.metrics.map((m) => m.period)).toEqual(["FY2024, 10-K filed 2025-01-15", null]);
   });
 
   it("reads one stored dataset envelope back, and null for an unknown id or run", async () => {

@@ -77,19 +77,21 @@ export type ResolvedSegment =
   | { kind: "text"; text: string }
   | { kind: "metric"; id: MetricId; metric: Metric | null }
   | { kind: "evidence"; id: EvidenceId; evidence: Evidence | null }
-  | { kind: "window" };
+  | { kind: "window" }
+  | { kind: "period"; id: MetricId; metric: Metric | null };
 
 /** Prose split into text and tokens, each token paired with its ledger record (null when unknown). */
 export function resolveProse(text: string, ledger: LedgerLookup): ResolvedSegment[] {
   return tokenizeProse(text).map((s) => {
     if (s.kind === "metric") return { kind: "metric", id: s.id, metric: ledger.metric(s.id) ?? null };
     if (s.kind === "evidence") return { kind: "evidence", id: s.id, evidence: ledger.evidence(s.id) ?? null };
+    if (s.kind === "period") return { kind: "period", id: s.id, metric: ledger.metric(s.id) ?? null };
     return s;
   });
 }
 
 export interface TokenProblems {
-  /** `{{M#}}` tokens with no metric in the ledger, without duplicates. */
+  /** `{{M#}}` and `{{PERIOD:M#}}` tokens with no metric in the ledger, without duplicates. */
   metrics: MetricId[];
   /** `[E#]` tokens with no evidence bundle in the ledger, without duplicates. */
   evidence: EvidenceId[];
@@ -102,7 +104,7 @@ export function tokenProblems(text: string, ledger: LedgerLookup): TokenProblems
   const metrics = new Set<MetricId>();
   const evidence = new Set<EvidenceId>();
   for (const s of resolveProse(text, ledger)) {
-    if (s.kind === "metric" && s.metric === null) metrics.add(s.id);
+    if ((s.kind === "metric" || s.kind === "period") && s.metric === null) metrics.add(s.id);
     if (s.kind === "evidence" && s.evidence === null) evidence.add(s.id);
   }
   return { metrics: [...metrics], evidence: [...evidence], malformed: findMalformedTokens(text) };
@@ -152,10 +154,15 @@ export function windowText(window: TrendWindow | null): string {
   return window ? `${window.start}..${window.end}` : "the trending window";
 }
 
+/** The reporting period or vintage of an SEC or Census metric as plain text (`{{PERIOD:M#}}`). */
+export function periodText(metric: Metric | null): string {
+  return metric?.period ?? "the reporting period";
+}
+
 /**
  * Prose rendered as plain text: metric tokens become their display value and badge, the window
- * token becomes the window, evidence tokens stay as `[E#]` citations. An unknown metric renders as
- * "n/a" so no unbound number can appear.
+ * token becomes the window, period tokens their metric's period, evidence tokens stay as `[E#]`
+ * citations. An unknown metric renders as "n/a" so no unbound number can appear.
  */
 export function renderProse(text: string, ledger: LedgerLookup, window: TrendWindow | null): string {
   return resolveProse(text, ledger)
@@ -169,6 +176,8 @@ export function renderProse(text: string, ledger: LedgerLookup, window: TrendWin
           return `[${s.id}]`;
         case "window":
           return windowText(window);
+        case "period":
+          return periodText(s.metric);
       }
     })
     .join("");

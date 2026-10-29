@@ -10,6 +10,7 @@ import type {
   TokenUsage,
   ValidationIssue,
 } from "@ct/contracts";
+import type { PublicDataClient } from "@ct/publicdata";
 import type { QlooClient } from "@ct/qloo";
 import type { AnalystMode, AnthropicLike } from "./anthropic";
 import type { LedgerSnapshot } from "./ledger";
@@ -37,6 +38,12 @@ export interface AgentRunOptions {
    */
   emit: Emit;
   qloo: QlooClient;
+  /**
+   * SEC EDGAR and US Census reads (company_financials, area_economics; PLAN §5.2). The web and the
+   * tools pass the server's client. Absent or null: those tools answer UNAVAILABLE with a plain reason,
+   * and the opening scan leaves them out.
+   */
+  publicdata?: PublicDataClient | null;
   anthropic: AnthropicLike;
   /** Defaults to DEFAULT_RUN_LIMITS. */
   limits?: RunLimits;

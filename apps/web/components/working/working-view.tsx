@@ -9,6 +9,7 @@ import { cx, KeyNumber, topicForPillar, type KeyNumberProps } from "../ui";
 import { GuessesCard } from "./guesses";
 import { editQuestionHref, NotFoundCard, ProgressCard } from "./progress-card";
 import { ReplayControls, type ReplayControlsProps } from "./replay-controls";
+import { lookupChips } from "./sources";
 import { ReconnectingState, StateCard } from "./state-cards";
 import { StopButton, useStopRun } from "./stop";
 import { WhichOneCard } from "./which-one";
@@ -109,6 +110,8 @@ export function WorkingView({
         readingAs={readingAs(state)}
         editHref={mode === "replay" ? null : editHref}
         noticed={noticed(state)}
+        readAsLine={model.method.interpretation?.readAs?.line ?? null}
+        lookups={lookupChips(state)}
         announcement={progress.announcement}
         variant={replay ? "replay" : "live"}
       />

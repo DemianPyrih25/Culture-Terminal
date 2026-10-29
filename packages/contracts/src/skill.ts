@@ -1,8 +1,21 @@
 import type { z } from "zod";
-import type { EntityType, Flag, KitWorkflow, MarketId, MetroId, Phase, Pillar, SkillId, SkillStatus, ToolMnemonic } from "./enums";
+import type {
+  EntityType,
+  Flag,
+  KitWorkflow,
+  MarketId,
+  MetroId,
+  Phase,
+  Pillar,
+  PublicSource,
+  SkillId,
+  SkillStatus,
+  ToolMnemonic,
+} from "./enums";
 import type { EventInput } from "./events";
 import type { DatasetId, EntityRef, EvidenceId, FindingId, MetricId, TagRef } from "./ids";
 import type { DatasetEnvelope, Evidence, Finding, Metric, QlooCallMeta, QlooResult } from "./ledger";
+import type { PublicCallMeta, PublicDataApi } from "./public-data";
 import type { RunLimits } from "./limits";
 import type {
   InsightsFilterType,
@@ -50,17 +63,26 @@ export interface CacheProbe {
 
 // Ledger (implemented by the agent with @ct/db) --------------------------------------------------------
 
-export interface EvidenceInput {
+interface EvidenceInputBase {
   skill: SkillId;
   purpose: string;
-  /** The calls in this bundle; the ledger derives ids, request ids, caching and provenance from them. */
-  calls: readonly QlooCallMeta[];
   status: SkillStatus;
   summary: string;
   flags: readonly Flag[];
   /** Results this bundle's quality gate dropped (QUALITY_GATE_DROPPED; −5 each, §6.4). Default 0. */
   qualityGateDrops?: number;
 }
+
+/**
+ * One evidence bundle to record. The calls are of one source: Qloo calls (source absent or "qloo"), or
+ * the SEC or Census calls of a public-data skill, whose `source` must match every call's source. The
+ * ledger derives ids, request ids or references, caching and provenance from them.
+ */
+export type EvidenceInput = EvidenceInputBase &
+  (
+    | { source?: "qloo"; calls: readonly QlooCallMeta[] }
+    | { source: PublicSource; calls: readonly PublicCallMeta[] }
+  );
 export type MetricInput = Omit<Metric, "id">;
 export type FindingInput = Omit<Finding, "id">;
 export type DatasetInput = DistributiveOmit<DatasetEnvelope, "id">;
@@ -110,7 +132,46 @@ export interface GeoApi {
   geohashCentroid(geohash: string): LatLon;
   /** Boundary attribution for exhibit captions. */
   boundarySource(metro: MetroId): string;
+  /**
+   * The census units an area's ACS figures come from (@ct/geo's crosswalk); null for an area the
+   * catalog does not list. Optional: a GeoApi without it has no crosswalk, and area_economics answers
+   * unavailable.
+   */
+  censusUnits?(metro: MetroId, id: string): Promise<CensusUnits | null>;
+  /** Every area of a city's units, in catalog order: the city comparator row of area_economics. */
+  censusUnitsOfMetro?(metro: MetroId): Promise<CensusUnits[]>;
 }
+
+/** A ZIP area's census units: whole ZCTAs. */
+export interface ZctaUnits {
+  kind: "zcta";
+  metro: MetroId;
+  areaId: string;
+  /** Five-digit ZCTAs, the id's first, then merged ones in alias order. */
+  zctas: readonly string[];
+  /** The area is part of its ZIP(s) only, so whole-ZIP figures describe more than the area. */
+  clipped: boolean;
+  /** Percent of the ZCTAs' land inside the city's counties; null when 99% or more is. */
+  insidePct: number | null;
+}
+
+/** A New York or Austin area's census units: whole 2020 tracts assigned by interior point. */
+export interface TractUnits {
+  kind: "tract";
+  metro: MetroId;
+  areaId: string;
+  /**
+   * 11-digit tract GEOIDs, sorted. When no tract's interior point lies in the area, the one nearest its
+   * centre (`nearestOnly`), or none when no tract point is close.
+   */
+  tracts: readonly string[];
+  /** The area holds no tract's interior point: its one tract is the nearest, and reaches beyond the area. */
+  nearestOnly: boolean;
+  /** The counties the tracts are in: one ACS tract request each (CensusGeo tract). */
+  counties: readonly { state: string; county: string }[];
+}
+
+export type CensusUnits = ZctaUnits | TractUnits;
 
 // Market localities (implemented by the agent from kv) --------------------------------------------------
 
@@ -193,6 +254,11 @@ export interface RunBudget {
 
 export interface SkillCtx {
   qloo: QlooApi;
+  /**
+   * SEC EDGAR and US Census data (company_financials, area_economics), scoped to this tool call like
+   * `qloo`. Null when the run has no public-data client; those skills then return UNAVAILABLE.
+   */
+  publicdata: PublicDataApi | null;
   ledger: Ledger;
   geo: GeoApi;
   /** Pinned market localities; null when the run has none (metro, city and market contexts are then unavailable). */
@@ -209,7 +275,7 @@ export interface SkillCtx {
 }
 
 export interface SkillResult {
-  /** The digest returned to the model, wrapped by wrapQlooData (≤1.5k tokens). */
+  /** The digest returned to the model, wrapped by wrapToolData (≤1.5k tokens). */
   forModel: ModelDigest;
   evidenceIds: EvidenceId[];
   metricIds: MetricId[];

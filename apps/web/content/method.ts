@@ -227,6 +227,13 @@ export function checkerRules(f: MethodFacts): Readonly<Record<ValidationRule, Ru
         "Where similar venues could not be counted, the note says the count is unknown.",
       action: "Rejects; warns on the repair",
     },
+    V11: {
+      title: "Public figures name their period",
+      text:
+        "A figure from SEC EDGAR filings or the US Census appears with its period or vintage in the same sentence (a fiscal year with its filing, or the ACS 5-year vintage). " +
+        "No sentence ties a financial or Census figure to a taste metric as cause and effect: they are read side by side, never one explaining the other.",
+      action: "Period added by code; a causal link rejects, then warns on the repair",
+    },
   };
 }
 
@@ -299,10 +306,24 @@ export const FORMULA_GROUPS: readonly FormulaGroup[] = [
   { id: "mom", title: "Momentum", skill: "momentum", formulas: ["mom.delta_26w", "mom.mann_kendall", "mom.label", "mom.freshness"] },
   { id: "trvl", title: "Travel taste", skill: "destination_affinity", formulas: ["trvl.quadrant", "trvl.hidden_pocket"] },
   { id: "lift", title: "Lift map and white space", skill: "geo_lift", formulas: ["lift.cell", "lift.area", "lift.confidence", "lift.white_space"] },
-  { id: "block", title: "Block DNA", skill: "block_dna", formulas: ["block.rank_delta", "block.new_tag"] },
+  { id: "block", title: "Block DNA", skill: "block_dna", formulas: ["block.rank_delta", "block.new_tag", "block.panel_rank"] },
   { id: "tenant", title: "Tenant fit", skill: "rank_candidates", formulas: ["tenant.rank_shift", "tenant.fit", "rank.shift"] },
   { id: "xdom", title: "Cultural neighbourhood", skill: "cross_domain", formulas: ["xdom.under_the_radar", "xdom.edge"] },
   { id: "slate", title: "Sponsor slate", skill: "sponsor_slate", formulas: ["slate.best_fit", "slate.under_the_radar", "slate.market_alignment"] },
+  { id: "twin", title: "Taste twins", skill: "taste_twins", formulas: ["twin.rho", "twin.shared_new"] },
+  { id: "cnpt", title: "Concept check", skill: "concept_vector", formulas: ["cnpt.s50", "cnpt.verdict", "cnpt.precision"] },
+  {
+    id: "fin",
+    title: "Company financials (SEC EDGAR)",
+    skill: "company_financials",
+    formulas: ["fin.revenue", "fin.margin", "fin.yoy"],
+  },
+  {
+    id: "econ",
+    title: "Area economics (US Census)",
+    skill: "area_economics",
+    formulas: ["econ.count", "econ.median", "econ.share"],
+  },
   { id: "report", title: "Report level", skill: null, owner: "The report assembler", formulas: ["confidence.run", "confidence.metric"] },
 ];
 
@@ -358,6 +379,7 @@ export const FORMULA_META: Readonly<Record<FormulaId, FormulaMeta>> = {
   },
   "block.rank_delta": { inputs: ["The area's top tags (or brands) from Qloo", "The same list for the whole city"], badge: "DERIVED" },
   "block.new_tag": { inputs: ["The city's top 50 tags", "The area's top 20 tags"], badge: "DERIVED" },
+  "block.panel_rank": { inputs: ["The top-50 tag list of each other map city"], badge: "DERIVED" },
   "tenant.rank_shift": {
     inputs: ["Each candidate's percentile with the site as the location signal", "The same with the city as the signal"],
     badge: "DERIVED",
@@ -375,6 +397,20 @@ export const FORMULA_META: Readonly<Record<FormulaId, FormulaMeta>> = {
     inputs: ["Percentile in each metro call", "National affinity re-ranked over the brands that metro scored"],
     badge: "DERIVED",
   },
+  "twin.rho": {
+    inputs: ["The source area's and each checked area's top tags from Qloo", "The same lists for their two cities"],
+    badge: "DERIVED",
+  },
+  "twin.shared_new": { inputs: ["The NEW tags of the source area and of each checked area"], badge: "DERIVED" },
+  "cnpt.s50": { inputs: ["Qloo's open call for the concept's tags", "The 50th result, scored again in the scoring call"], badge: "MEASURED" },
+  "cnpt.verdict": { inputs: ["Affinity of each analog and of the anchor in one scoring call"], badge: null, noBadge: RULE },
+  "cnpt.precision": { inputs: ["The KEEP and VETO verdicts"], badge: "DERIVED" },
+  "fin.revenue": { inputs: ["US GAAP revenue lines in the company's SEC filings (10-K, 10-Q), latest filing per period"], badge: "MEASURED" },
+  "fin.margin": { inputs: ["Gross profit and operating income as filed", "Revenue for the same period"], badge: "DERIVED" },
+  "fin.yoy": { inputs: ["Revenue for a period and for the same period a year earlier, as filed"], badge: "DERIVED" },
+  "econ.count": { inputs: ["US Census ACS 5-year estimates for each ZIP area or census tract in the area"], badge: "DERIVED" },
+  "econ.median": { inputs: ["Each unit's published median", "Each unit's population"], badge: "ESTIMATED" },
+  "econ.share": { inputs: ["Resident workers by usual commute mode, ACS 5-year"], badge: "DERIVED" },
   "confidence.run": {
     inputs: ["Counts the run collected: dropped names, code fallbacks, thin results, quality-gate drops and checker warnings", "The coarse-map, stale-momentum and insufficient-evidence flags"],
     badge: null,
@@ -427,6 +463,11 @@ export const METHOD_SOURCES = {
   rows: (f: { endpoints: readonly string[]; trendWindow: string; clerkModel: string; analystModel: string }): { key: string; value: string }[] => [
     { key: "Data", value: "Qloo taste graph, group-level only" },
     { key: "Calls", value: f.endpoints.join(" · ") },
+    {
+      key: "Public data",
+      value:
+        "SEC EDGAR company facts (us-gaap revenue, gross profit and operating income as filed, company-wide) and US Census ACS 5-year estimates for residents (population, age, households, income, commute); they cost no Qloo calls",
+    },
     { key: "Window", value: `${f.trendWindow}; nothing after it` },
     { key: "Cache", value: "Shared; the age of every saved copy is shown" },
     { key: "Models", value: `Clerk ${f.clerkModel} · Analyst ${f.analystModel}` },

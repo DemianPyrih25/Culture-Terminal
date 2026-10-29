@@ -1,4 +1,4 @@
-import type { CacheStatus, NumbersTraced, QlooPath, Receipt, TokenUsage } from "@ct/contracts";
+import type { CacheStatus, NumbersTraced, PublicEndpoint, PublicSource, QlooPath, Receipt, TokenUsage } from "@ct/contracts";
 
 /**
  * The run receipt (PLAN §7): Qloo calls by how they were served, endpoints, wall time, LLM spend,
@@ -14,6 +14,13 @@ export interface ReceiptQlooCall {
   cache: CacheStatus;
   /** Rows the response carried (null when none arrived); confidence counts thin results from it. */
   rows?: number | null;
+}
+
+/** One SEC or Census call of the run (the `public` events): it costs no Qloo call and counts apart. */
+export interface ReceiptPublicCall {
+  publicCallId: string;
+  source: PublicSource;
+  endpoint: PublicEndpoint;
 }
 
 export interface ReceiptUsage {
@@ -37,6 +44,8 @@ export const QLOO_CALL_BUCKET: Readonly<Record<CacheStatus, "network" | "cached"
 
 export function buildReceipt(args: {
   calls: readonly ReceiptQlooCall[];
+  /** SEC and Census calls; absent or empty when the note used none. */
+  publicCalls?: readonly ReceiptPublicCall[];
   usage: ReceiptUsage;
   numbersTraced: NumbersTraced;
   models: Receipt["models"];
@@ -57,6 +66,7 @@ export function buildReceipt(args: {
     qlooCached: counts.cached,
     qlooReused: counts.reused,
     endpoints: [...endpoints.values()],
+    publicEndpoints: publicEndpoints(args.publicCalls ?? []),
     ms: Math.max(0, Math.round(args.usage.elapsedMs)),
     usd: Math.max(0, args.usage.llmUsd),
     tokens: args.usage.tokens,
@@ -64,4 +74,15 @@ export function buildReceipt(args: {
     models: args.models,
     economy: args.economy,
   };
+}
+
+/** SEC and Census calls by endpoint, in first-call order; each call id counts once. */
+function publicEndpoints(calls: readonly ReceiptPublicCall[]): Receipt["publicEndpoints"] {
+  const rows = new Map<PublicEndpoint, Receipt["publicEndpoints"][number]>();
+  for (const c of new Map(calls.map((call) => [call.publicCallId, call])).values()) {
+    const row = rows.get(c.endpoint) ?? { source: c.source, endpoint: c.endpoint, calls: 0 };
+    row.calls += 1;
+    rows.set(c.endpoint, row);
+  }
+  return [...rows.values()];
 }

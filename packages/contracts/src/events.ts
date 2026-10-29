@@ -10,6 +10,7 @@ import {
   MentionRole,
   Mode,
   Phase,
+  PublicSource,
   SkillId,
   SkillStatus,
   TerminalRunStatus,
@@ -26,13 +27,14 @@ import {
 import { StoredIntent } from "./intent";
 import { DatasetEnvelope, Evidence, Finding, Metric } from "./ledger";
 import { RunLimits } from "./limits";
+import { PublicEndpoint } from "./public-data";
 import { QlooPath } from "./qloo-types";
 import {
-  GhostAnswer,
   GhostDiff,
   NumbersTraced,
   Report,
   ReportDraftShape,
+  StoredGhostAnswer,
   SubmitPlanInputShape,
   TokenUsage,
   ValidationIssue,
@@ -103,6 +105,8 @@ export const ErrorCode = z.enum([
   "cancelled",
   "invalid_tool_input",
   "internal",
+  "public_unavailable",
+  "public_rate_limited",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
@@ -184,6 +188,26 @@ const E = {
     originRunId: z.string().nullable(),
     error: z.string().nullable(),
   }),
+  /** One SEC or Census call (Part 9): the public-data counterpart of `qloo`. It costs no Qloo calls. */
+  public: event("public", {
+    publicCallId: z.string().min(1),
+    toolCallId: z.string().nullable(),
+    source: PublicSource,
+    endpoint: PublicEndpoint,
+    /** Canonical parameters with long values shortened. Never an API key. */
+    paramsRedacted: z.record(z.string(), z.string()),
+    cache: CacheStatus,
+    ms: z.number().nonnegative(),
+    /** HTTP status, or null when no response arrived. */
+    status: z.int().nullable(),
+    /** PublicCallMeta.reference (CIK, Census dataset and vintage, or mock-<hash>); null when no response arrived. */
+    reference: z.string().nullable(),
+    /** Age of a cached response, for cache chips. */
+    cacheAgeMs: z.number().nonnegative().nullable(),
+    /** The run a reused response came from. */
+    originRunId: z.string().nullable(),
+    error: z.string().nullable(),
+  }),
   finding: event("finding", { finding: Finding, toolCallId: z.string().nullable() }),
   /** CODE FALLBACK: a deterministic ladder step taken by code, e.g. POLYGON → POINT. */
   fallback: event("fallback", {
@@ -223,7 +247,7 @@ const E = {
     adviceTerms: z.int().nonnegative(),
   }),
   reportFinal: event("report.final", { report: Report }),
-  ghost: event("ghost", { answer: GhostAnswer, diff: GhostDiff }),
+  ghost: event("ghost", { answer: StoredGhostAnswer, diff: GhostDiff }),
   /** Running totals for the run so far; each usage event replaces the last. */
   usage: event("usage", {
     llmUsd: z.number().nonnegative(),
@@ -249,6 +273,7 @@ export const RunEvent = z.discriminatedUnion("type", [
   E.toolStart.full,
   E.toolEnd.full,
   E.qloo.full,
+  E.public.full,
   E.finding.full,
   E.fallback.full,
   E.pivot.full,
@@ -276,6 +301,7 @@ export const RunEventInput = z.discriminatedUnion("type", [
   E.toolStart.input,
   E.toolEnd.input,
   E.qloo.input,
+  E.public.input,
   E.finding.input,
   E.fallback.input,
   E.pivot.input,
@@ -306,6 +332,7 @@ export const RUN_EVENT_TYPES = [
   "tool.start",
   "tool.end",
   "qloo",
+  "public",
   "finding",
   "fallback",
   "pivot",

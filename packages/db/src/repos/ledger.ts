@@ -77,6 +77,7 @@ export async function insertLedgerSnapshot(
             // When the bundle's data was fetched (the exhibit's "fetched" line), not when the run ended.
             createdAt: new Date(e.fetchedAt),
             skill: e.skill,
+            source: e.source,
             purpose: e.purpose,
             status: e.status,
             qlooCallIds: [...e.qlooCallIds],
@@ -112,6 +113,7 @@ export async function insertLedgerSnapshot(
             reason: m.reason,
             comparator: m.comparator,
             window: m.window,
+            period: m.period ?? null,
           })),
         )
         .onConflictDoNothing({ target: [metrics.runId, metrics.id] })

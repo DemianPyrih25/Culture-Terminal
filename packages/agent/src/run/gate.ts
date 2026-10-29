@@ -281,7 +281,7 @@ export async function runResolutionGate(input: GateInput): Promise<GateOutcome> 
  * report shows that flag's limitation among the other flags, ordered by severity (SPEC §6.3). Null
  * when nothing was dropped, or when no gate call answered to cite.
  */
-export function gateEvidence(gate: GateResolved): EvidenceInput | null {
+export function gateEvidence(gate: GateResolved): Extract<EvidenceInput, { calls: readonly QlooCallMeta[] }> | null {
   if (gate.dropped === 0 || gate.calls.length === 0) return null;
   return {
     skill: "resolve_entities",

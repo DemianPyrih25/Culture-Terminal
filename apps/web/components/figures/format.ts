@@ -11,7 +11,10 @@ export const MINUS = "−";
 
 /** How a figure prints numbers. */
 export interface NumberStyle {
-  /** Fraction digits; rank and count default to 0, everything else to 2. */
+  /**
+   * Fraction digits; rank, count and people default to 0, years to 1, everything else to 2. For usd
+   * it is the digits of the compact form ("$1.2B": 1, the default); dollars under a million print whole.
+   */
   digits?: number;
   /** false prints ".56" instead of "0.56" for values between −1 and 1 (the dense plots). Default true. */
   leadingZero?: boolean;
@@ -19,11 +22,50 @@ export interface NumberStyle {
   signed?: boolean;
 }
 
-const ZERO_DIGIT_UNITS: ReadonlySet<MetricUnit> = new Set(["rank", "count"]);
+const ZERO_DIGIT_UNITS: ReadonlySet<MetricUnit> = new Set(["rank", "count", "people"]);
 
-/** A number as a figure prints it, e.g. ".56", "1.34", "+0.18", "−0.21". */
+/** "12,340": whole digits with thousands separators, the same in every locale. */
+export function groupDigits(whole: string): string {
+  return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+const USD_SCALES: readonly (readonly [number, string])[] = [
+  [1e12, "T"],
+  [1e9, "B"],
+  [1e6, "M"],
+];
+
+/**
+ * Dollars as SEC and Census numbers print (Part 9): "$1.2B", "$38.4M" from a million up, whole dollars
+ * with separators below ("$72,412"). The sign goes before the "$": "−$40.3M", "+$1.1B" when signed.
+ */
+function formatUsdValue(value: number, style: NumberStyle): string {
+  const abs = Math.abs(value);
+  const scale = USD_SCALES.find(([at]) => abs >= at);
+  let body: string;
+  if (scale) {
+    const [at, suffix] = scale;
+    body = `$${(abs / at).toFixed(style.digits ?? 1)}${suffix}`;
+  } else {
+    body = `$${groupDigits(Math.round(abs).toString())}`;
+  }
+  if (/^\$0(?:\.0+)?[TBM]?$/.test(body)) return body;
+  if (value < 0) return `${MINUS}${body}`;
+  return style.signed ? `+${body}` : body;
+}
+
+/**
+ * A number as a figure prints it, e.g. ".56", "1.34", "+0.18", "−0.21"; dollars "$1.2B" (usd), people
+ * "12,340" and ages "34.6" (years).
+ */
 export function formatNumber(value: number, unit: MetricUnit, style: NumberStyle = {}): string {
-  const digits = style.digits ?? (ZERO_DIGIT_UNITS.has(unit) ? 0 : 2);
+  if (unit === "usd") return formatUsdValue(value, style);
+  if (unit === "people") {
+    const body = groupDigits(Math.round(Math.abs(value)).toString());
+    if (body === "0") return body;
+    return value < 0 ? `${MINUS}${body}` : style.signed ? `+${body}` : body;
+  }
+  const digits = style.digits ?? (ZERO_DIGIT_UNITS.has(unit) ? 0 : unit === "years" ? 1 : 2);
   const signed = style.signed ?? unit === "delta";
   let body = Math.abs(value).toFixed(digits);
   const isZero = Number(body) === 0;
@@ -62,6 +104,9 @@ export const REASON_LABEL: Readonly<Record<NoValueReason, string>> = {
   coarse: "location too coarse",
   self: "same entity",
   error: "request failed",
+  not_listed: "not a listed company",
+  not_reported: "not reported in filings",
+  suppressed: "withheld by the Census",
 };
 
 /** The reason text for a missing value; a missing reason still reads as "not measured". */

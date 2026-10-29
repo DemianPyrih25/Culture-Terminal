@@ -1,6 +1,6 @@
-import { tokenizeProse, type Phase, type QlooChip, type RunState, type ToolCallState } from "@ct/contracts";
+import { isPublicDataTool, tokenizeProse, type Phase, type RunState, type ToolCallState } from "@ct/contracts";
 import { filterLabel, formatClock, formatUsd, formatUtcDateTime, formatUtcTime, plural, TOOL_DATA_LABEL } from "./format";
-import { lastTs, refText, refsForCalls, refsIn, requestRef, type Ledger } from "./ledger";
+import { lastTs, refText, refsForCalls, refsIn, requestRef, sourceName, type Ledger, type LedgerCall } from "./ledger";
 import type { BriefLive, IncomingRequest, Meter, StageRole, StageState, StageView, TraceNote } from "./types";
 
 /**
@@ -93,20 +93,31 @@ export function followUpsDone(state: RunState): boolean {
   return state.toolCalls.some((t) => phaseOf(state, t) === "followup");
 }
 
+/** A tool call's lookups that arrived: its Qloo calls and its SEC or Census calls (Part 9). */
+function callIdsOf(t: ToolCallState): string[] {
+  return [...t.qlooCallIds, ...(t.publicCallIds ?? [])];
+}
+
+/** Every lookup that arrived, Qloo and public. */
+function lookupCount(state: RunState): number {
+  return state.qloo.chips.length + (state.publicCalls?.chips.length ?? 0);
+}
+
 /**
- * Qloo calls that arrived, and the calls the run still expects: the progress line's "7 of ~12 sources".
+ * Lookups (Qloo, SEC, Census) that arrived, and the ones the run still expects: the progress line's "7 of ~12 sources".
  * A plan step expects its estimate until its tools end, then what they made; a running tool its own
  * estimate. There is no estimate before the plan (it would only echo the calls seen) or once no more
  * calls can come.
  */
 export function sourceCounts(state: RunState): { received: number; expected: number | null } {
-  const received = state.qloo.chips.length;
+  const received = lookupCount(state);
   if (state.plan === null || state.draft !== null || followUpsDone(state)) return { received, expected: null };
   const steps = new Map(state.plan.estimates.map((e) => [e.stepId, { estimate: e.calls, calls: 0, started: false, running: false }]));
-  let expected = state.qloo.chips.filter((c) => c.toolCallId === null).length;
+  let expected = state.qloo.chips.filter((c) => c.toolCallId === null).length + (state.publicCalls?.chips ?? []).filter((c) => c.toolCallId === null).length;
   for (const t of state.toolCalls) {
     const running = t.status === "running";
-    const calls = running ? Math.max(t.estimatedCalls ?? 0, t.qlooCallIds.length) : t.qlooCallIds.length;
+    const arrived = callIdsOf(t).length;
+    const calls = running ? Math.max(t.estimatedCalls ?? 0, arrived) : arrived;
     const step = t.stepId === null ? undefined : steps.get(t.stepId);
     if (step === undefined) expected += calls;
     else Object.assign(step, { calls: step.calls + calls, started: true, running: step.running || running });
@@ -143,13 +154,13 @@ const BAR_CHECKED = 0.95;
  * of its events: it never moves back.
  */
 function bandFill(ledger: Ledger, tools: readonly ToolCallState[]): number {
-  const seqOf = (id: string) => ledger.chips.get(id)?.chip.seq ?? Number.POSITIVE_INFINITY;
+  const seqOf = (id: string) => ledger.callById.get(id)?.seq ?? Number.POSITIVE_INFINITY;
   const fillAt = (seq: number) => {
     let done = 0;
     let total = 0;
     for (const t of tools) {
       if (t.startedSeq !== null && t.startedSeq > seq) continue;
-      const calls = t.qlooCallIds.filter((id) => seqOf(id) <= seq).length;
+      const calls = callIdsOf(t).filter((id) => seqOf(id) <= seq).length;
       const expected = Math.max(t.estimatedCalls ?? calls + 1, calls, 1);
       total += expected;
       done += t.endedSeq !== null && t.endedSeq <= seq ? expected : calls;
@@ -157,7 +168,7 @@ function bandFill(ledger: Ledger, tools: readonly ToolCallState[]): number {
     return total === 0 ? 0 : done / total;
   };
   const seqs = new Set([ledger.state.lastSeq]);
-  for (const t of tools) for (const seq of [t.startedSeq, t.endedSeq, ...t.qlooCallIds.map(seqOf)]) if (seq !== null && Number.isFinite(seq)) seqs.add(seq);
+  for (const t of tools) for (const seq of [t.startedSeq, t.endedSeq, ...callIdsOf(t).map(seqOf)]) if (seq !== null && Number.isFinite(seq)) seqs.add(seq);
   let best = 0;
   for (const seq of seqs) best = Math.max(best, fillAt(seq));
   return best;
@@ -217,15 +228,16 @@ function tsOfSeq(state: RunState, seq: number | null): string | null {
 
 const MAX_INCOMING = 6;
 
-function chipText(ledger: Ledger, chip: QlooChip, word: string): string {
-  const refs = refsForCalls(ledger, [chip.qlooCallId]).slice(0, 2).map((r) => refText(ledger, r));
+/** "Qloo /v2/insights · brand ← R1 Juniper Cola", "SEC EDGAR /api/xbrl/companyfacts ← R1 Juniper Cola". */
+function chipText(ledger: Ledger, chip: LedgerCall, word: string): string {
+  const refs = refsForCalls(ledger, [chip.id]).slice(0, 2).map((r) => refText(ledger, r));
   const what = [filterLabel(chip.filterType), refs.length > 0 ? `← ${refs.join(", ")}` : null].filter(Boolean).join(" ");
-  return [`Qloo ${chip.endpoint}`, what || null, word].filter(Boolean).join(" · ");
+  return [`${sourceName(chip.source)} ${chip.endpoint}`, what || null, word].filter(Boolean).join(" · ");
 }
 
-function chipTrace(ledger: Ledger, chip: QlooChip): string {
-  const ref = requestRef(ledger, chip.qlooCallId);
-  const parts = [`req ${ref.shortRequestId}`];
+function chipTrace(ledger: Ledger, chip: LedgerCall): string {
+  const ref = requestRef(ledger, chip.id);
+  const parts = [`${chip.source === "qloo" ? "req" : "ref"} ${ref.shortRequestId}`];
   if (chip.rows !== null) parts.push(plural(chip.rows, "row"));
   parts.push(chip.cache === "miss" ? `${Math.round(chip.ms)} ms` : ref.cacheLabel);
   return parts.join(" · ");
@@ -242,7 +254,7 @@ export function incomingRequests(ledger: Ledger, now: number): IncomingRequest[]
   const rows: IncomingRequest[] = [];
   const estimates = new Map((state.plan?.estimates ?? []).map((e) => [e.stepId, e.calls]));
   const running = state.toolCalls.filter((t) => t.status === "running");
-  const byTool = (t: ToolCallState) => t.qlooCallIds.flatMap((id) => ledger.chips.get(id) ?? []);
+  const byTool = (t: ToolCallState) => callIdsOf(t).flatMap((id) => ledger.callById.get(id) ?? []).sort((a, b) => a.seq - b.seq);
 
   for (const tool of [...running].reverse()) {
     const arrived = byTool(tool);
@@ -250,7 +262,7 @@ export function incomingRequests(ledger: Ledger, now: number): IncomingRequest[]
     const pending = expected === null ? 1 : Math.max(0, expected - arrived.length);
     const last = arrived.at(-1);
     if (pending > 0) {
-      const since = last?.chip.ts ?? tsOfSeq(state, tool.startedSeq);
+      const since = last?.ts ?? tsOfSeq(state, tool.startedSeq);
       const waited = since ? Math.max(0, now - Date.parse(since)) : 0;
       const subjects = refsIn(tool.args).slice(0, 2).map((r) => refText(ledger, r));
       const what = [TOOL_DATA_LABEL[tool.tool], subjects.length > 0 ? `← ${subjects.join(", ")}` : null].filter(Boolean).join(" ");
@@ -259,7 +271,7 @@ export function incomingRequests(ledger: Ledger, now: number): IncomingRequest[]
         state: "fetching",
         toolCallId: tool.toolCallId,
         tool: tool.tool,
-        text: [`Qloo${last ? ` ${last.chip.endpoint}` : ""}`, what, "fetching"].join(" · "),
+        text: [last ? `${sourceName(last.source)} ${last.endpoint}` : isPublicDataTool(tool.tool) ? "Public data" : "Qloo", what, "fetching"].join(" · "),
         trace: `fetching · ${formatClock(waited)}`,
         count: 1,
         sourceIndex: null,
@@ -271,42 +283,40 @@ export function incomingRequests(ledger: Ledger, now: number): IncomingRequest[]
         state: "queued",
         toolCallId: tool.toolCallId,
         tool: tool.tool,
-        text: `Qloo · ${TOOL_DATA_LABEL[tool.tool]} · queued`,
+        text: `${isPublicDataTool(tool.tool) ? "Public data" : "Qloo"} · ${TOOL_DATA_LABEL[tool.tool]} · queued`,
         trace: `${pending - 1} more queued`,
         count: pending - 1,
         sourceIndex: null,
       });
     }
-    for (const { chip, index } of arrived.slice(-2).reverse()) {
+    for (const chip of arrived.slice(-2).reverse()) {
       rows.push({
-        key: chip.qlooCallId,
+        key: chip.id,
         state: "received",
         toolCallId: tool.toolCallId,
         tool: tool.tool,
         text: chipText(ledger, chip, ""),
         trace: chipTrace(ledger, chip),
         count: 1,
-        sourceIndex: index,
+        sourceIndex: chip.index,
       });
     }
   }
 
   const runningIds = new Set(running.map((t) => t.toolCallId));
-  const done = state.qloo.chips
-    .map((chip, index) => ({ chip, index }))
-    .filter(({ chip }) => chip.toolCallId === null || !runningIds.has(chip.toolCallId));
-  for (const { chip, index } of done.slice(-3).reverse()) {
+  const done = ledger.calls.filter((chip) => chip.toolCallId === null || !runningIds.has(chip.toolCallId));
+  for (const chip of done.slice(-3).reverse()) {
     if (rows.length >= MAX_INCOMING) break;
     const tool = chip.toolCallId ? ledger.toolCalls.get(chip.toolCallId) ?? null : null;
     rows.push({
-      key: chip.qlooCallId,
+      key: chip.id,
       state: "received",
       toolCallId: chip.toolCallId,
       tool: tool?.tool ?? null,
       text: chipText(ledger, chip, ""),
       trace: chipTrace(ledger, chip),
       count: 1,
-      sourceIndex: index,
+      sourceIndex: chip.index,
     });
   }
   return rows.slice(0, MAX_INCOMING);
@@ -353,7 +363,7 @@ export function draftNumbers(state: RunState): number {
 /**
  * "27/27 numbers traced · Checker · 0 advice terms · <date>", "0 of ~27 numbers traced · Checker
  * running · 7 sources in, 2 cited" once a draft says which numbers it cites, or "Numbers traced after
- * the check · Checker queued · …" before. `citedSources` counts the Qloo requests the footnotes cite.
+ * the check · Checker queued · …" before. `citedSources` counts the lookups the footnotes cite.
  */
 export function traceNote(state: RunState, citedSources: number): TraceNote {
   if (uncheckedDigest(state)) {
@@ -381,7 +391,7 @@ export function traceNote(state: RunState, citedSources: number): TraceNote {
   if (stoppedEarly(state)) return { state: "stopped", headline: "Not checked", detail: "Checker did not run" };
   const numbers = draftNumbers(state);
   const headline = numbers > 0 ? `0 of ~${numbers} numbers traced` : "Numbers traced after the check";
-  const sources = `${state.qloo.chips.length} ${state.qloo.chips.length === 1 ? "source" : "sources"} in, ${citedSources} cited`;
+  const sources = `${plural(lookupCount(state), "source")} in, ${citedSources} cited`;
   if (state.draft !== null) return { state: "checking", headline, detail: `Checker running · ${sources}` };
   return { state: "pending", headline, detail: `Checker queued · ${sources}` };
 }

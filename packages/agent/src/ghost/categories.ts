@@ -1,4 +1,4 @@
-import { JOB_MNEMONIC, JOB_PILLAR, PILLAR_LABEL, type GeoApi, type GhostPickCategory, type Job, type MetroId } from "@ct/contracts";
+import { JOB_MNEMONIC, JOB_PILLAR, PILLAR_LABEL, type GeoApi, type GhostPickCategory, type Intent, type Job, type MetroId } from "@ct/contracts";
 import { sanitizeQuestion, wrapQuestion } from "../llm/question";
 import { listedAreas } from "../run/areas";
 import { gazetteer } from "../run/gazetteer";
@@ -23,7 +23,24 @@ export const GHOST_JOB_CATEGORIES: Readonly<Record<Job, readonly GhostPickCatego
   market_selection: ["markets"],
   // What else the audience loves, on the brand side: the partners a marketer would reach it through.
   audience_discovery: ["partners"],
+  // The areas of the target city that twin the source area.
+  taste_twins: ["neighbourhoods"],
+  brand_collab: ["partners"],
+  creator_fit: ["creators"],
+  // The partners a new concept should launch with (its kept and added analogs).
+  launch_test: ["partners"],
+  // The cities compared, ranked.
+  city_compare: ["markets"],
 };
+
+/**
+ * The map city whose areas GHOST is shown and its neighbourhood picks are matched in (GhostContext.metro,
+ * GhostForRunOptions.metro): the question's metro, except for taste_twins, whose twins are areas of
+ * the target city.
+ */
+export function ghostMetroOf(intent: Pick<Intent, "job" | "geo">): MetroId | null {
+  return intent.job === "taste_twins" ? (intent.geo.target_metro ?? intent.geo.metro) : intent.geo.metro;
+}
 
 /** Angle brackets escaped, as run/context.ts escapes untrusted text, so no line can open or close a tag. */
 const escapeAngles = (s: string): string => s.replace(/</g, "&lt;").replace(/>/g, "&gt;");

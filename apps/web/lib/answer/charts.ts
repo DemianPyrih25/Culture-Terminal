@@ -13,8 +13,28 @@ import {
 import { DEFAULT_DES_TYPE, desHref, isDesType } from "../../components/des/des-href";
 import { fewRivals, supplyUnknown } from "../../components/figures/lift-scale";
 import { formatTrendWindow, type BriefFigure } from "../brief";
+import { formatDollars, formatPeople } from "../brief/format";
 import { BLOCK_FAMILY_LABEL, CHART_COPY, DOMAIN_COLUMN, ENTITY_NOUN, SPONSOR_ICON } from "./copy";
 import { signed } from "./dna";
+import {
+  contrastColumns,
+  dataRows,
+  fingerprintColumns,
+  fingerprintOf,
+  isEconomics,
+  isFinancials,
+  isFingerprint,
+  isNeighbourhood,
+  isScored,
+  isTagContrast,
+  isTwinPair,
+  isTwins,
+  isVerdicts,
+  scoredBars,
+  twinShared,
+  twinsChart,
+  verdictGroups,
+} from "./job-shapes";
 import { marketState } from "./markets";
 import type { AnswerChart, AnswerDatasets, BarRowData, ChartBody, ChartTableData, MoreChart, PairRowData, WinnerRowData } from "./types";
 
@@ -39,7 +59,8 @@ export interface ChartContext {
   subjectType: keyof typeof ENTITY_NOUN | null;
 }
 
-export type ChartSlot = "main" | "second" | "map";
+/** `third`: the public figures beside the taste read (SEC financials, Census economics), on their own row. */
+export type ChartSlot = "main" | "second" | "third" | "map";
 
 const NO_DATA = "No data";
 
@@ -91,27 +112,43 @@ export function selectFigures(job: Job | null, figures: readonly BriefFigure[], 
   };
   const block = (d: DatasetEnvelope) => isBars(d) && d.payload.method !== null;
   const dna = (d: DatasetEnvelope) => isBars(d) && d.payload.method === null;
-  const none = { main: null, second: null, map: null };
+  const share = (d: DatasetEnvelope) => d.kind === "Matrix" && d.payload.mode === "share";
+  const none = { main: null, second: null, third: null, map: null };
   switch (job) {
     case "brand_health":
-      return { ...none, main: pick((d) => d.kind === "Matrix" && d.payload.mode === "similarity") };
+      // Reported financials sit beside the taste read, never inside it (PLAN §5.5).
+      return { ...none, main: pick((d) => d.kind === "Matrix" && d.payload.mode === "similarity"), second: pick(isFinancials) };
     case "head_to_head":
-      return { ...none, main: pick((d) => isBars(d) && d.payload.series.length === 2 && d.payload.display === "split") ?? pick((d) => isBars(d) && d.payload.series.length === 2) };
+      return {
+        ...none,
+        main: pick((d) => isBars(d) && d.payload.series.length === 2 && d.payload.display === "split") ?? pick((d) => isBars(d) && d.payload.series.length === 2),
+        second: pick(isFinancials),
+      };
     case "site_selection": {
       const lift = bestLiftFigure(figures, fetched)?.figure ?? null;
       if (lift) used.add(lift);
-      return { map: lift, main: null, second: pick(block) };
+      return { map: lift, main: null, second: pick(block), third: pick(isEconomics) };
     }
     case "tenant_mix":
-      return { map: null, main: pick((d) => d.kind === "Slope" && d.payload.scoreLabel !== null), second: pick(block) };
+      return { map: null, main: pick((d) => d.kind === "Slope" && d.payload.scoreLabel !== null), second: pick(block), third: pick(isEconomics) };
     case "area_profile":
-      return { map: null, main: pick((d) => d.kind === "Slope"), second: pick(block) };
+      return { map: null, main: pick((d) => d.kind === "Slope"), second: pick(block), third: pick(isEconomics) };
     case "sponsorship":
       return { ...none, main: pick((d) => d.kind === "Slate"), second: pick((d) => d.kind === "Ranked") };
     case "market_selection":
-      return { ...none, main: pick((d) => d.kind === "Matrix" && d.payload.mode === "share") };
+      return { ...none, main: pick(share) };
     case "audience_discovery":
       return { ...none, main: pick(dna), second: pick((d) => d.kind === "Ranked" && d.payload.groups.length > 1) ?? pick((d) => d.kind === "Ranked") };
+    case "taste_twins":
+      return { ...none, main: pick(isTwins), second: pick(isTwinPair), third: pick(isEconomics) };
+    case "brand_collab":
+      return { ...none, main: pick(isScored) ?? pick(isNeighbourhood), second: pick(isTagContrast) ?? pick(isNeighbourhood) ?? pick(dna) };
+    case "creator_fit":
+      return { ...none, main: pick(isNeighbourhood) ?? pick(isScored), second: pick(isScored) ?? pick(share) };
+    case "launch_test":
+      return { ...none, main: pick(isVerdicts), second: pick(share) ?? pick(isNeighbourhood) ?? pick(dna), third: pick(isFinancials) };
+    case "city_compare":
+      return { ...none, main: pick(isFingerprint), second: pick(share), third: pick(isEconomics) };
     default:
       return none;
   }
@@ -135,6 +172,12 @@ export function formatValue(value: number, unit: MetricUnit): string {
       return String(Math.round(value));
     case "score":
       return value > 1 ? String(Math.round(value)) : value.toFixed(2);
+    case "usd":
+      return formatDollars(value);
+    case "people":
+      return formatPeople(value);
+    case "years":
+      return value.toFixed(1);
     default:
       return value.toFixed(2);
   }
@@ -457,6 +500,63 @@ function agesOf(figures: readonly BriefFigure[], used: BriefFigure | null, fetch
   return null;
 }
 
+/** The city fingerprints of a city comparison, one per city, in report order. */
+export function cityFingerprints(figures: readonly BriefFigure[], fetched: AnswerDatasets): ReturnType<typeof fingerprintOf>[] {
+  const out: ReturnType<typeof fingerprintOf>[] = [];
+  for (const f of figures) {
+    const d = datasetOf(f, fetched);
+    if (d?.kind === "Bars" && isFingerprint(d) && !out.some((x) => x.name === d.payload.series[0]?.label)) out.push(fingerprintOf(d));
+  }
+  return out;
+}
+
+const withStop = (text: string) => (/[.!?]$/.test(text) ? text : `${text}.`);
+
+type RankedShape = Pick<AnswerChart, "kind" | "caption" | "table" | "body"> & { title?: string; stacked?: boolean };
+
+/**
+ * The Part 9 Ranked tables, whatever the job: a concept check, twins, SEC financials, Census economics,
+ * an audience tag contrast or one-scale scoring. Null for any other Ranked table.
+ */
+function shapeRanked(dataset: Extract<DatasetEnvelope, { kind: "Ranked" }>, ctx: ChartContext): RankedShape | null {
+  const p = dataset.payload;
+  if (isVerdicts(dataset)) {
+    const { body, table, counts } = verdictGroups(p);
+    const checked = counts.keep + counts.veto;
+    const sample = checked > 0 ? ` ${checked} AI ${checked === 1 ? "guess was" : "guesses were"} checked.` : " No AI guess could be checked, so only the data's own results are listed.";
+    return { kind: CHART_COPY.verdicts.kind, caption: `${CHART_COPY.verdicts.caption}${sample}`, table, body, stacked: true };
+  }
+  if (isTwins(dataset)) {
+    const { body, table, checked } = twinsChart(p);
+    const group = p.groups.length === 1 ? (p.groups[0]?.label.trim() ?? "") : "";
+    // The skill says how many areas it checked of how many ("6 of 34 Nashville areas checked"): a sample, not every area.
+    const sample = /\bchecked\b/i.test(group)
+      ? ` ${withStop(group)} Areas not checked are not ranked.`
+      : ` Only the ${checked} ${checked === 1 ? "area" : "areas"} with a match are ranked, not every area.`;
+    return { kind: CHART_COPY.twins.kind, caption: `${CHART_COPY.twins.caption}${sample}`, table, body, stacked: true };
+  }
+  if (isFinancials(dataset)) {
+    const { body, table } = dataRows(p);
+    return { kind: CHART_COPY.financials.kind, caption: CHART_COPY.financials.caption, table, body };
+  }
+  if (isEconomics(dataset)) {
+    const { body, table, comparisons } = dataRows(p);
+    const rolled = " Medians for an area are population-weighted averages of its ZIP or tract medians, so they are approximate.";
+    const city = comparisons === 1 ? " The last row is the whole city, to compare with." : comparisons > 1 ? " The last rows are the whole cities, to compare with." : "";
+    return { kind: CHART_COPY.economics.kind, caption: `${CHART_COPY.economics.caption}${rolled}${city}`, table, body };
+  }
+  if (isTagContrast(dataset) && ctx.job === "brand_collab") {
+    const { body, table } = contrastColumns(p);
+    return { kind: "Shared and separate tastes", caption: "Tags each audience has, by presence only: a tag on one side is not a measured difference.", table, body };
+  }
+  if (isScored(dataset) && (ctx.job === "brand_collab" || ctx.job === "creator_fit" || ctx.job === "launch_test")) {
+    const { body, table, scored } = scoredBars(p, ctx.subjectRef);
+    const copy = ctx.job === "creator_fit" ? CHART_COPY.creatorsScored : CHART_COPY.partners;
+    return { kind: copy.kind, caption: `${copy.caption} ${scored} ${scored === 1 ? "name was" : "names were"} scored.`, table, body };
+  }
+  return null;
+}
+
 /** One slot's chart: its figure shaped for its card, or null when the figure's data is not in. */
 export function shapeChart(
   figure: BriefFigure | null,
@@ -489,6 +589,16 @@ export function shapeChart(
     }
     case "Bars": {
       const p = dataset.payload;
+      if (job === "taste_twins" && isTwinPair(dataset)) {
+        const { body, table } = twinShared(p);
+        return { ...base, kind: CHART_COPY.twinShared.kind, caption: CHART_COPY.twinShared.caption, legend: [], stacked: true, table, body };
+      }
+      if (job === "city_compare" && isFingerprint(dataset)) {
+        // Every city's fingerprint in one card, side by side, in report order.
+        const prints = cityFingerprints(figures, fetched);
+        const { body, table } = fingerprintColumns(prints);
+        return { ...base, kind: CHART_COPY.fingerprints.kind, title: prints.length > 1 ? "Each city's strongest tastes, side by side" : figure.title, caption: CHART_COPY.fingerprints.caption, legend: [], table, body };
+      }
       if (job === "head_to_head" && p.series.length === 2) {
         const { body, table } = whoWinsWhere(p, agesOf(figures, figure, fetched), ctx);
         return { ...base, kind: CHART_COPY.winner.kind, caption: CHART_COPY.winner.caption, legend: [], table, body };
@@ -545,7 +655,13 @@ export function shapeChart(
       return { ...base, kind: CHART_COPY.slate.kind, caption: CHART_COPY.slate.caption, legend: [], table, body };
     }
     case "Ranked": {
-      const columns = job === "audience_discovery" && dataset.payload.groups.length > 1;
+      const shaped = shapeRanked(dataset, ctx);
+      if (shaped) return { ...base, legend: [], ...shaped };
+      const columns = (job === "audience_discovery" || job === "creator_fit" || job === "brand_collab" || job === "launch_test") && dataset.payload.groups.length > 1;
+      if (job === "creator_fit") {
+        const { body, table } = rankedList(dataset.payload, columns);
+        return { ...base, kind: CHART_COPY.creators.kind, caption: CHART_COPY.creators.caption, legend: [], table, body };
+      }
       const { body, table } = rankedList(dataset.payload, columns);
       return { ...base, kind: CHART_COPY.alsoLove.kind, caption: CHART_COPY.alsoLove.caption, legend: [], table, body };
     }
@@ -582,12 +698,20 @@ export function moreChartName(figure: BriefFigure, dataset: DatasetEnvelope | nu
     case "Matrix":
       return dataset.payload.mode === "similarity" ? "Whose fans look alike" : "Who wins each market";
     case "Bars":
+      if (isTwinPair(dataset)) return "Two areas side by side";
+      if (isFingerprint(dataset) && dataset.payload.comparator === "BASELINE") return `What sets ${dataset.payload.series[0]?.label ?? "the city"} apart`;
       if (dataset.payload.method !== null) return "What each area has more of";
       return dataset.payload.groups.some((g) => g.key === "METRO") ? "Who wins where" : "Who the fans are";
     case "Slope":
       if (dataset.payload.scoreLabel !== null) return "Tenant fit, full list";
       return /alignment/i.test(dataset.title) ? "Market alignment" : "Who climbs here vs citywide";
     case "Ranked":
+      if (isVerdicts(dataset)) return "AI guesses, checked";
+      if (isTwins(dataset)) return "Closest twin areas";
+      if (isFinancials(dataset)) return "Reported financials";
+      if (isEconomics(dataset)) return "Who lives there";
+      if (isTagContrast(dataset)) return "Shared and separate tastes";
+      if (isScored(dataset)) return "Scored on one scale";
       return "What else they love";
     case "Slate":
       return "Best fit per category";

@@ -311,7 +311,7 @@ describe("audience_dna: a set against its peers", () => {
     expect(metrics.find((m) => m.key === "dna.distinctive_tags")).toMatchObject({
       label: "distinctive facet tags of Brand Alpha (on fewer than half of its peers of the same type)",
       value: 3,
-      display: "3 of 4 facet tags, vs 3 peers of the same type",
+      display: "3 of 4 facet tags distinctive, vs 3 peers of the same type",
       unit: "count",
       comparator: "PEERS",
       n: 3,
@@ -451,7 +451,7 @@ describe("audience_dna: two subjects", () => {
     await audienceDnaSkill.run(input(["R1", "R2", "R3", "R4"]), withBrand.ctx);
     expect(withBrand.ledger.metrics.find((m) => m.key === "dna.distinctive_tags")).toMatchObject({
       value: 2,
-      display: "2 of 4 facet tags, vs 1 peer of the same type",
+      display: "2 of 4 facet tags distinctive, vs 1 peer of the same type",
       n: 1,
     });
   });

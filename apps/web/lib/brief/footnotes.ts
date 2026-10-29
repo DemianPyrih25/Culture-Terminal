@@ -1,12 +1,12 @@
 import { CONFIDENCE_PENALTY, tokenizeProse, type DatasetId, type EvidenceId, type MetricId, type ProseSegment } from "@ct/contracts";
 import { capitalize, formatTrendWindow, plural, TOOL_LABEL } from "./format";
-import { buildLedger, metricView, requestHead, requestsForEvidence, requestTrace, shortRequestTrace, type Ledger } from "./ledger";
+import { buildLedger, metricView, requestHead, requestsForEvidence, requestTrace, shortRequestTrace, sourceName, type Ledger } from "./ledger";
 import { areaReads } from "./location";
-import type { CiteSection, Footnote, FigureLegend, Inline, MetricView } from "./types";
+import type { CiteSection, Footnote, FigureLegend, Inline, MetricView, RequestRef } from "./types";
 
 /**
  * The footnote registry (D6, D36): every cited number gets a superscript that resolves to its metric,
- * its evidence and the Qloo requests behind it. A metric, an evidence bundle or a figure keeps one
+ * its evidence and the requests behind it (Qloo, and SEC EDGAR or US Census for public data). A metric, an evidence bundle or a figure keeps one
  * number however often it is cited. Numbers are handed out on first citation, so a builder that
  * cites in reading order numbers in reading order; `preassign` fixes an order up front instead (live
  * briefs number in arrival order).
@@ -44,6 +44,18 @@ function firstThatFits(...candidates: (string | null)[]): string {
 /** "Distinctiveness vs peers", "Momentum, Apr–Sep 2025 only": a metric's short label with what it is measured against. */
 function shortWhat(view: MetricView): string {
   return `${view.shortLabel}${view.comparatorLabel ? ` ${view.comparatorLabel}` : ""}${view.window ? `, ${view.window} only` : ""}`;
+}
+
+/** ", FY2024" when an SEC or Census number's label does not already name its period or vintage. */
+function periodSuffix(view: MetricView): string {
+  const period = view.period?.trim();
+  return period && !view.label.includes(period) ? `, ${period}` : "";
+}
+
+/** "Qloo request", "SEC EDGAR request", or "request" when a number draws on more than one source. */
+function requestNoun(requests: readonly RequestRef[]): string {
+  const names = new Set(requests.map((r) => sourceName(r.source)));
+  return names.size === 1 ? `${[...names][0]} request` : "request";
 }
 
 export class FootnoteRegistry {
@@ -99,6 +111,12 @@ export class FootnoteRegistry {
         case "window":
           out.push({ kind: "window", text: this.ledger.window ? formatTrendWindow(this.ledger.window) : "the trending window" });
           break;
+        case "period": {
+          // {{PERIOD:M#}}: the reporting period or vintage of an SEC or Census number, as plain text.
+          const period = this.ledger.state.metrics[segment.id]?.period?.trim();
+          out.push({ kind: "text", text: period || "the reported period" });
+          break;
+        }
         case "evidence": {
           // A superscript sits on the word before it: "rows [E4]." prints "rows⁹.", not "rows ⁹.".
           const before = out.at(-1);
@@ -146,7 +164,7 @@ export class FootnoteRegistry {
         const requests = requestsForEvidence(ledger, metric.evidenceIds);
         const head = requestHead(ledger, requests, metric.subjectRefs);
         const shortHead = requestHead(ledger, requests, metric.subjectRefs, { names: false });
-        const what = `${view.label}${view.comparatorLabel ? `, ${view.comparatorLabel}` : ""}${view.window ? `, ${view.window} only` : ""}`;
+        const what = `${view.label}${periodSuffix(view)}${view.comparatorLabel ? `, ${view.comparatorLabel}` : ""}${view.window ? `, ${view.window} only` : ""}`;
         const brief = shortWhat(view);
         if (view.unavailable) {
           const text = [`${view.label}: not measured, ${view.reasonLabel}.`, head ? `${head}.` : null].filter(Boolean).join(" ");
@@ -171,7 +189,7 @@ export class FootnoteRegistry {
             text: [head ? `${head}.` : null, `${what}, computed in QUANT${from}.`].filter(Boolean).join(" "),
             trace: `${label} · ${metric.formulaId}`,
             short: {
-              text: requests.length > 0 ? firstThatFits(`${brief}, from ${plural(requests.length, "Qloo request")}.`, `${brief}.`) : `${brief}.`,
+              text: requests.length > 0 ? firstThatFits(`${brief}, from ${plural(requests.length, requestNoun(requests))}.`, `${brief}.`) : `${brief}.`,
               trace: label,
             },
             metric: view,

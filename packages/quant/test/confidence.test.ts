@@ -12,6 +12,7 @@ const ONE: Readonly<Record<ConfidenceRule, ConfidenceInput>> = {
   quality_gate_drop: { qualityGateDrops: 1 },
   checker_warning: { checkerWarnings: 1 },
   insufficient_evidence: { insufficientEvidence: true },
+  read_as_nearest_job: { readAsNearestJob: true },
 };
 
 describe("computeConfidence", () => {

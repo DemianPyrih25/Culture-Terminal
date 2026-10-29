@@ -1,0 +1,468 @@
+{
+  "$comment": "Brand name -> the US-listed company whose SEC filings company_financials (S13, PLAN §5.2) reads. Names and tickers only, no figures (D29). A brand matches only when the entity resolves exactly (D20) to one of these names; any other brand gets UNAVAILABLE with NOT_A_LISTED_COMPANY, never a guess. `note` says when the brand is part of a larger company: SEC figures are company-wide, never brand-level. Every ticker was checked against the SEC ticker map and has us-gaap revenue in its company facts; foreign IFRS filers are left out. Re-check when a company is acquired, taken private or renames its ticker.",
+  "brands": {
+    "Coca-Cola": {
+      "ticker": "KO",
+      "company": "The Coca-Cola Company",
+      "note": "The Coca-Cola Company also sells Sprite, Fanta and other drinks; figures are company-wide."
+    },
+    "Sprite": {
+      "ticker": "KO",
+      "company": "The Coca-Cola Company",
+      "note": "A brand of The Coca-Cola Company; figures are company-wide."
+    },
+    "Fanta": {
+      "ticker": "KO",
+      "company": "The Coca-Cola Company",
+      "note": "A brand of The Coca-Cola Company; figures are company-wide."
+    },
+    "Pepsi": {
+      "ticker": "PEP",
+      "company": "PepsiCo, Inc.",
+      "note": "PepsiCo also owns Frito-Lay, Gatorade and Quaker; figures are company-wide."
+    },
+    "Mountain Dew": {
+      "ticker": "PEP",
+      "company": "PepsiCo, Inc.",
+      "note": "A brand of PepsiCo; figures are company-wide."
+    },
+    "Gatorade": {
+      "ticker": "PEP",
+      "company": "PepsiCo, Inc.",
+      "note": "A brand of PepsiCo; figures are company-wide."
+    },
+    "Doritos": {
+      "ticker": "PEP",
+      "company": "PepsiCo, Inc.",
+      "note": "A brand of PepsiCo (Frito-Lay); figures are company-wide."
+    },
+    "Dr Pepper": {
+      "ticker": "KDP",
+      "company": "Keurig Dr Pepper Inc.",
+      "note": "A brand of Keurig Dr Pepper; figures are company-wide."
+    },
+    "Monster Energy": {
+      "ticker": "MNST",
+      "company": "Monster Beverage Corporation"
+    },
+    "Monster": {
+      "ticker": "MNST",
+      "company": "Monster Beverage Corporation"
+    },
+    "Celsius": {
+      "ticker": "CELH",
+      "company": "Celsius Holdings, Inc."
+    },
+    "Modelo": {
+      "ticker": "STZ",
+      "company": "Constellation Brands, Inc.",
+      "note": "A beer brand Constellation Brands sells in the US; figures are company-wide."
+    },
+    "Corona": {
+      "ticker": "STZ",
+      "company": "Constellation Brands, Inc.",
+      "note": "Constellation Brands holds the US rights; figures are company-wide."
+    },
+    "Samuel Adams": {
+      "ticker": "SAM",
+      "company": "The Boston Beer Company, Inc.",
+      "note": "A brand of The Boston Beer Company; figures are company-wide."
+    },
+    "Coors Light": {
+      "ticker": "TAP",
+      "company": "Molson Coors Beverage Company",
+      "note": "A brand of Molson Coors; figures are company-wide."
+    },
+    "Jack Daniel's": {
+      "ticker": "BF-B",
+      "company": "Brown-Forman Corporation",
+      "note": "A brand of Brown-Forman; figures are company-wide."
+    },
+    "Starbucks": {
+      "ticker": "SBUX",
+      "company": "Starbucks Corporation"
+    },
+    "McDonald's": {
+      "ticker": "MCD",
+      "company": "McDonald's Corporation"
+    },
+    "Chipotle": {
+      "ticker": "CMG",
+      "company": "Chipotle Mexican Grill, Inc."
+    },
+    "Chipotle Mexican Grill": {
+      "ticker": "CMG",
+      "company": "Chipotle Mexican Grill, Inc."
+    },
+    "Wingstop": {
+      "ticker": "WING",
+      "company": "Wingstop Inc."
+    },
+    "Sweetgreen": {
+      "ticker": "SG",
+      "company": "Sweetgreen, Inc."
+    },
+    "Shake Shack": {
+      "ticker": "SHAK",
+      "company": "Shake Shack Inc."
+    },
+    "Domino's": {
+      "ticker": "DPZ",
+      "company": "Domino's Pizza, Inc."
+    },
+    "Domino's Pizza": {
+      "ticker": "DPZ",
+      "company": "Domino's Pizza, Inc."
+    },
+    "Taco Bell": {
+      "ticker": "YUM",
+      "company": "Yum! Brands, Inc.",
+      "note": "A brand of Yum! Brands; figures are company-wide."
+    },
+    "KFC": {
+      "ticker": "YUM",
+      "company": "Yum! Brands, Inc.",
+      "note": "A brand of Yum! Brands; figures are company-wide."
+    },
+    "Dutch Bros": {
+      "ticker": "BROS",
+      "company": "Dutch Bros Inc."
+    },
+    "CAVA": {
+      "ticker": "CAVA",
+      "company": "CAVA Group, Inc."
+    },
+    "Texas Roadhouse": {
+      "ticker": "TXRH",
+      "company": "Texas Roadhouse, Inc."
+    },
+    "Olive Garden": {
+      "ticker": "DRI",
+      "company": "Darden Restaurants, Inc.",
+      "note": "A brand of Darden Restaurants; figures are company-wide."
+    },
+    "Wendy's": {
+      "ticker": "WEN",
+      "company": "The Wendy's Company"
+    },
+    "Burger King": {
+      "ticker": "QSR",
+      "company": "Restaurant Brands International Inc.",
+      "note": "A brand of Restaurant Brands International; figures are company-wide."
+    },
+    "Papa John's": {
+      "ticker": "PZZA",
+      "company": "Papa John's International, Inc."
+    },
+    "Nike": {
+      "ticker": "NKE",
+      "company": "NIKE, Inc.",
+      "note": "NIKE, Inc. also owns Jordan and Converse; figures are company-wide."
+    },
+    "Converse": {
+      "ticker": "NKE",
+      "company": "NIKE, Inc.",
+      "note": "A brand of Nike; figures are company-wide."
+    },
+    "Lululemon": {
+      "ticker": "LULU",
+      "company": "lululemon athletica inc."
+    },
+    "lululemon athletica": {
+      "ticker": "LULU",
+      "company": "lululemon athletica inc."
+    },
+    "Crocs": {
+      "ticker": "CROX",
+      "company": "Crocs, Inc."
+    },
+    "UGG": {
+      "ticker": "DECK",
+      "company": "Deckers Outdoor Corporation",
+      "note": "A brand of Deckers Brands; figures are company-wide."
+    },
+    "HOKA": {
+      "ticker": "DECK",
+      "company": "Deckers Outdoor Corporation",
+      "note": "A brand of Deckers Brands; figures are company-wide."
+    },
+    "Under Armour": {
+      "ticker": "UAA",
+      "company": "Under Armour, Inc."
+    },
+    "Levi's": {
+      "ticker": "LEVI",
+      "company": "Levi Strauss & Co."
+    },
+    "Levi Strauss & Co.": {
+      "ticker": "LEVI",
+      "company": "Levi Strauss & Co."
+    },
+    "Ralph Lauren": {
+      "ticker": "RL",
+      "company": "Ralph Lauren Corporation"
+    },
+    "The North Face": {
+      "ticker": "VFC",
+      "company": "V.F. Corporation",
+      "note": "A brand of VF Corporation; figures are company-wide."
+    },
+    "Vans": {
+      "ticker": "VFC",
+      "company": "V.F. Corporation",
+      "note": "A brand of VF Corporation; figures are company-wide."
+    },
+    "Abercrombie & Fitch": {
+      "ticker": "ANF",
+      "company": "Abercrombie & Fitch Co.",
+      "note": "Abercrombie & Fitch Co. also owns Hollister; figures are company-wide."
+    },
+    "American Eagle": {
+      "ticker": "AEO",
+      "company": "American Eagle Outfitters, Inc.",
+      "note": "American Eagle Outfitters also owns Aerie; figures are company-wide."
+    },
+    "Gap": {
+      "ticker": "GAP",
+      "company": "Gap Inc.",
+      "note": "Gap Inc. also owns Old Navy, Banana Republic and Athleta; figures are company-wide."
+    },
+    "Old Navy": {
+      "ticker": "GAP",
+      "company": "Gap Inc.",
+      "note": "A brand of Gap Inc.; figures are company-wide."
+    },
+    "Coach": {
+      "ticker": "TPR",
+      "company": "Tapestry, Inc.",
+      "note": "A brand of Tapestry; figures are company-wide."
+    },
+    "Columbia Sportswear": {
+      "ticker": "COLM",
+      "company": "Columbia Sportswear Company"
+    },
+    "e.l.f. Cosmetics": {
+      "ticker": "ELF",
+      "company": "e.l.f. Beauty, Inc.",
+      "note": "The main brand of e.l.f. Beauty; figures are company-wide."
+    },
+    "e.l.f.": {
+      "ticker": "ELF",
+      "company": "e.l.f. Beauty, Inc.",
+      "note": "The main brand of e.l.f. Beauty; figures are company-wide."
+    },
+    "Ulta Beauty": {
+      "ticker": "ULTA",
+      "company": "Ulta Beauty, Inc."
+    },
+    "Estée Lauder": {
+      "ticker": "EL",
+      "company": "The Estée Lauder Companies Inc."
+    },
+    "Estee Lauder": {
+      "ticker": "EL",
+      "company": "The Estée Lauder Companies Inc."
+    },
+    "Clinique": {
+      "ticker": "EL",
+      "company": "The Estée Lauder Companies Inc.",
+      "note": "A brand of The Estée Lauder Companies; figures are company-wide."
+    },
+    "Coty": {
+      "ticker": "COTY",
+      "company": "Coty Inc."
+    },
+    "Bath & Body Works": {
+      "ticker": "BBWI",
+      "company": "Bath & Body Works, Inc."
+    },
+    "Target": {
+      "ticker": "TGT",
+      "company": "Target Corporation"
+    },
+    "Walmart": {
+      "ticker": "WMT",
+      "company": "Walmart Inc.",
+      "note": "Walmart Inc. figures include Sam's Club and international stores; they are company-wide."
+    },
+    "Costco": {
+      "ticker": "COST",
+      "company": "Costco Wholesale Corporation"
+    },
+    "Amazon": {
+      "ticker": "AMZN",
+      "company": "Amazon.com, Inc.",
+      "note": "Amazon.com, Inc. figures include AWS and every other segment; they are company-wide."
+    },
+    "Best Buy": {
+      "ticker": "BBY",
+      "company": "Best Buy Co., Inc."
+    },
+    "Dick's Sporting Goods": {
+      "ticker": "DKS",
+      "company": "Dick's Sporting Goods, Inc."
+    },
+    "DICK'S Sporting Goods": {
+      "ticker": "DKS",
+      "company": "Dick's Sporting Goods, Inc."
+    },
+    "TJ Maxx": {
+      "ticker": "TJX",
+      "company": "The TJX Companies, Inc.",
+      "note": "A banner of The TJX Companies; figures are company-wide."
+    },
+    "T.J. Maxx": {
+      "ticker": "TJX",
+      "company": "The TJX Companies, Inc.",
+      "note": "A banner of The TJX Companies; figures are company-wide."
+    },
+    "Five Below": {
+      "ticker": "FIVE",
+      "company": "Five Below, Inc."
+    },
+    "Etsy": {
+      "ticker": "ETSY",
+      "company": "Etsy, Inc."
+    },
+    "Chewy": {
+      "ticker": "CHWY",
+      "company": "Chewy, Inc."
+    },
+    "Williams-Sonoma": {
+      "ticker": "WSM",
+      "company": "Williams-Sonoma, Inc."
+    },
+    "YETI": {
+      "ticker": "YETI",
+      "company": "YETI Holdings, Inc."
+    },
+    "Peloton": {
+      "ticker": "PTON",
+      "company": "Peloton Interactive, Inc."
+    },
+    "Traeger": {
+      "ticker": "COOK",
+      "company": "Traeger, Inc."
+    },
+    "Harley-Davidson": {
+      "ticker": "HOG",
+      "company": "Harley-Davidson, Inc."
+    },
+    "Apple": {
+      "ticker": "AAPL",
+      "company": "Apple Inc."
+    },
+    "GoPro": {
+      "ticker": "GPRO",
+      "company": "GoPro, Inc."
+    },
+    "Sonos": {
+      "ticker": "SONO",
+      "company": "Sonos, Inc."
+    },
+    "Roku": {
+      "ticker": "ROKU",
+      "company": "Roku, Inc."
+    },
+    "Netflix": {
+      "ticker": "NFLX",
+      "company": "Netflix, Inc."
+    },
+    "Garmin": {
+      "ticker": "GRMN",
+      "company": "Garmin Ltd."
+    },
+    "Logitech": {
+      "ticker": "LOGI",
+      "company": "Logitech International S.A."
+    },
+    "Snapchat": {
+      "ticker": "SNAP",
+      "company": "Snap Inc.",
+      "note": "The app of Snap Inc.; figures are company-wide."
+    },
+    "Pinterest": {
+      "ticker": "PINS",
+      "company": "Pinterest, Inc."
+    },
+    "Instagram": {
+      "ticker": "META",
+      "company": "Meta Platforms, Inc.",
+      "note": "An app of Meta Platforms; figures are company-wide."
+    },
+    "Uber": {
+      "ticker": "UBER",
+      "company": "Uber Technologies, Inc."
+    },
+    "DoorDash": {
+      "ticker": "DASH",
+      "company": "DoorDash, Inc."
+    },
+    "Roblox": {
+      "ticker": "RBLX",
+      "company": "Roblox Corporation"
+    },
+    "Take-Two Interactive": {
+      "ticker": "TTWO",
+      "company": "Take-Two Interactive Software, Inc."
+    },
+    "Xbox": {
+      "ticker": "MSFT",
+      "company": "Microsoft Corporation",
+      "note": "A brand of Microsoft; figures are company-wide."
+    },
+    "GameStop": {
+      "ticker": "GME",
+      "company": "GameStop Corp."
+    },
+    "Airbnb": {
+      "ticker": "ABNB",
+      "company": "Airbnb, Inc."
+    },
+    "Marriott": {
+      "ticker": "MAR",
+      "company": "Marriott International, Inc."
+    },
+    "Marriott International": {
+      "ticker": "MAR",
+      "company": "Marriott International, Inc."
+    },
+    "Hilton": {
+      "ticker": "HLT",
+      "company": "Hilton Worldwide Holdings Inc."
+    },
+    "Hilton Hotels & Resorts": {
+      "ticker": "HLT",
+      "company": "Hilton Worldwide Holdings Inc."
+    },
+    "Hyatt": {
+      "ticker": "H",
+      "company": "Hyatt Hotels Corporation"
+    },
+    "Booking.com": {
+      "ticker": "BKNG",
+      "company": "Booking Holdings Inc.",
+      "note": "A brand of Booking Holdings; figures are company-wide."
+    },
+    "Expedia": {
+      "ticker": "EXPE",
+      "company": "Expedia Group, Inc."
+    },
+    "Delta Air Lines": {
+      "ticker": "DAL",
+      "company": "Delta Air Lines, Inc."
+    },
+    "Southwest Airlines": {
+      "ticker": "LUV",
+      "company": "Southwest Airlines Co."
+    },
+    "Royal Caribbean": {
+      "ticker": "RCL",
+      "company": "Royal Caribbean Cruises Ltd."
+    },
+    "Vail Resorts": {
+      "ticker": "MTN",
+      "company": "Vail Resorts, Inc."
+    }
+  }
+}

@@ -15,10 +15,12 @@ import {
   type QlooResult,
 } from "@ct/contracts";
 import { describe, expect, it, vi } from "vitest";
+import { UNDER_THE_RADAR_MAX_POPULARITY } from "../../src/findings";
 import { isFormulaId } from "../../src/formulas";
 import { SKILL_LIMITATIONS } from "../../src/limitations";
 import { crossDomainSkill, estimateCrossDomainCalls } from "../../src/skills/crossDomain";
 import { computeNeighbourhoods, genreLeafOf, isExplainabilityEdge, isUnderTheRadar } from "../../src/skills/crossDomain/neighbourhood";
+import { categoryBranchOf } from "../../src/skills/crossDomain/requests";
 import { BudgetError, fakeProbe, fakeRun, FakeRegistry, FETCHED_AT } from "./support/fakes";
 
 // The invented world ------------------------------------------------------------------------------------
@@ -245,6 +247,14 @@ describe("cross_domain rules", () => {
     expect(isUnderTheRadar(row(1, null), 0.5, 0.5)).toBe(false);
   });
 
+  it("never lets a mass-market result be the UNDER-THE-RADAR pick, however high its list's median popularity (§3)", () => {
+    const row = (fit: number, popularity: number) => ({ fit, popularity, utr: fit - popularity });
+    // Below a 0.95 median, but at popularity 0.89 the name is well known.
+    expect(isUnderTheRadar(row(1, 0.89), 0.5, 0.95)).toBe(false);
+    expect(isUnderTheRadar(row(1, UNDER_THE_RADAR_MAX_POPULARITY), 0.5, 0.95)).toBe(false);
+    expect(isUnderTheRadar(row(1, 0.8), 0.5, 0.95)).toBe(true);
+  });
+
   it("keeps every seed's share for a row without an edge, and no shares with one seed", () => {
     const entities = MUSIC.map((s) => entity("artist", s));
     const [two] = computeNeighbourhoods([{ domain: "artist", entities }], [NOVA.id, ALPHA.id]);
@@ -278,8 +288,9 @@ describe("cross_domain: requests", () => {
       "filter.popularity.max": 0.85,
       take: 15,
     });
-    // The brand call also leaves out the brand seed's own category: its genre:brand leaf (P5).
-    expect(run.calls[2]?.params).toEqual({ ...run.calls[0]?.params, "filter.exclude.tags": [WATER_LEAF] });
+    // The brand call also leaves out the brand seed's own category: its top-level genre:brand branch
+    // (P5), since many brands carry only that level, not the seed's leaf.
+    expect(run.calls[2]?.params).toEqual({ ...run.calls[0]?.params, "filter.exclude.tags": [WATER_ROOT] });
   });
 
   it("sends no tag signal without seed tags and drops descriptive and unknown refs with a notice", async () => {
@@ -313,6 +324,14 @@ describe("cross_domain: requests", () => {
     // Nothing tells the reader a tag shaped the lists when none was sent.
     expect(only.ledger.evidences[0]?.summary).not.toContain("taste context");
     expect(ranked(only).payload.caption).not.toContain("Seed tags");
+  });
+
+  it("reads a brand's own category as the top-level branch of its genre:brand path, even when only the leaf is tagged", () => {
+    const leafOnly = [{ tagId: "urn:tag:genre:brand:beverage:water:sparkling", name: "Sparkling", type: "urn:tag:genre:brand" }];
+    expect(categoryBranchOf({ tags: leafOnly })?.tagId).toBe(WATER_ROOT);
+    const tag = (tagId: string, name: string) => ({ tagId, name, type: "urn:tag:genre:brand" });
+    expect(categoryBranchOf({ tags: [tag(WATER_ROOT, "Beverage"), tag(WATER_LEAF, "Water")] })).toMatchObject({ tagId: WATER_ROOT, name: "Beverage" });
+    expect(categoryBranchOf({ tags: [] })).toBeNull();
   });
 
   it("notes a brand seed without a category and excludes nothing then", async () => {

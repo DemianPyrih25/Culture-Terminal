@@ -10,7 +10,7 @@ import { checkRun, diffLine, GHOST_USAGE, parseGhostArgs, runDatasets, runGhostC
 
 const RUN = "run-ghost-0001";
 const report = syntheticReport(RUN);
-const answer = { headline: "Brand Beta.", picks: { competitors: ["Brand Beta"], markets: [], neighbourhoods: [], tenants: [], partners: [] }, numeric_claims: [] };
+const answer = { headline: "Brand Beta.", picks: { competitors: ["Brand Beta"], markets: [], neighbourhoods: [], tenants: [], partners: [], creators: [] }, numeric_claims: [] };
 
 function diff(items: GhostDiff["items"] = [], over: Partial<GhostDiff> = {}): GhostDiff {
   return { items, overlapAt5: 0.2, resolvability: 0.5, unsourcedNumericClaims: 2, meanPopularity: { ghost: null, qloo: null }, honestyLine: GHOST_HONESTY_LINE, ...over };

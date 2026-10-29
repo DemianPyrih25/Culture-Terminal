@@ -25,7 +25,7 @@ import { SKILLS } from "../../src/skills/index";
 import { DISCOVERY_TAKE, sponsorSlateSkill } from "../../src/skills/sponsorSlate";
 import { SPONSOR_CATEGORIES, TAG_LOOKUP_TAKE } from "../../src/skills/sponsorSlate/categories";
 import { MAX_SLATE_METRICS } from "../../src/skills/sponsorSlate/outputs";
-import { MAIN_LINE_MIN_TAGS, offCategoryBranch } from "../../src/skills/sponsorSlate/slate";
+import { MAIN_LINE_MIN_TAGS, offCategoryBranch, quadrantOf } from "../../src/skills/sponsorSlate/slate";
 import { BudgetError, FETCHED_AT, fakeProbe, fakeRun, FakeRegistry, insightEntity, registerInvented, type Invented } from "./support/fakes";
 
 // The run tests cover both S10 paths: a category with a probe-verified tag and one whose tag is
@@ -888,6 +888,17 @@ describe("SPONSOR_CATEGORIES", () => {
     const searched = SponsorCategory.options.filter((id) => real.SPONSOR_CATEGORIES[id].tag === null);
     expect(searched).toEqual(SponsorCategory.options.filter((id) => config.categories[id]!.fallback === "semantic_tag_search"));
     expect(searched).toEqual(["outdoor_sporting_retail"]);
+  });
+});
+
+describe("sponsor_slate: quadrantOf", () => {
+  it("puts a high-fit candidate below the slate's median popularity in UNDER-THE-RADAR only when it is not well known (§3)", () => {
+    expect(quadrantOf(0.8, 0.6, 0.5, 0.9)).toBe("HIDDEN_POCKET");
+    // Below a 0.95 median, but popularity 0.94 is a well-known name: high fit · well known.
+    expect(quadrantOf(0.8, 0.94, 0.5, 0.95)).toBe("HEARTLAND");
+    expect(quadrantOf(0.8, 0.85, 0.5, 0.95)).toBe("HEARTLAND");
+    expect(quadrantOf(0.2, 0.94, 0.5, 0.95)).toBe("COLD");
+    expect(quadrantOf(0.2, 0.96, 0.5, 0.95)).toBe("MASS");
   });
 });
 

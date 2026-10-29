@@ -30,6 +30,9 @@ const LOCALITY_SIGNAL = "A metro context is Qloo's locality signal for that metr
 const EXPLAINABILITY = "Explainability shows attribution inside Qloo's model, not causation.";
 const TRAVEL_TASTE =
   "Travel taste shows places this audience's taste points to, not residence, trips taken or ticket demand.";
+const COMPANY_LEVEL =
+  "Company-level reported figures from SEC filings; one brand may be a small part of a company, and none of this is advice.";
+const RESIDENTS_ONLY = "Survey estimates for residents; not customers, foot traffic or spending.";
 
 /** One honest sentence per data-quality flag. TRENDING_HISTORICAL_WINDOW gains its window through flagText. */
 export const FLAG_TEXT: Readonly<Record<Flag, string>> = {
@@ -63,6 +66,12 @@ export const FLAG_TEXT: Readonly<Record<Flag, string>> = {
   NOT_SCORED:
     "Entities tied at a context's floor score show no measurable relationship to that signal, so they are not scored there, never ranked.",
   THIN_RESULT: "Some calls returned fewer than five results, so rankings from them rest on very few items.",
+  READ_AS_NEAREST_JOB:
+    "The question was read as the closest kind of question Culture Terminal answers, so the parts it does not cover (such as sales, prices, rents or foot traffic) are not answered here.",
+  NOT_A_LISTED_COMPANY:
+    "The brand is not mapped to a US-listed company (it may be private or not in our list), so no financial figures are shown and none are guessed.",
+  CENSUS_RESIDENTS_ONLY:
+    "Area figures are US Census survey estimates about the people who live there, not visitors, customers, foot traffic or spending.",
 };
 
 /**
@@ -87,6 +96,9 @@ export const FLAG_SEVERITY: Readonly<Record<Flag, Severity>> = {
   DEMOGRAPHICS_ARE_INDICES: "low",
   SUPPLY_SAMPLE_ONLY: "low",
   SENSITIVE_SEGMENT_BLOCKED: "info",
+  READ_AS_NEAREST_JOB: "high",
+  NOT_A_LISTED_COMPANY: "medium",
+  CENSUS_RESIDENTS_ONLY: "low",
 };
 
 /**
@@ -146,6 +158,20 @@ export const SKILL_LIMITATIONS: Readonly<Record<SkillId, readonly string[]>> = {
     "Each list is capped by popularity, so the most popular names are left out by design.",
   ],
   sponsor_slate: [SPONSOR_FIT, "No return on investment is estimated."],
+  taste_twins: [
+    VENUE_GOERS,
+    "A twin is the most similar taste pattern among the areas checked, not every area of the city, and not a forecast of sales, rents or footfall.",
+    "Music (SOUND) is not compared between areas.",
+  ],
+  concept_vector: [
+    "A VETO means the concept's taste points elsewhere in Qloo's graph, not that the analog is a weak business.",
+    "Each analog is compared with the concept's 50th result (its last, when fewer come back) inside one Qloo call; Qloo has no sales or pricing data.",
+  ],
+  company_financials: [COMPANY_LEVEL, "Reported figures sit beside the taste signals; neither explains the other."],
+  area_economics: [
+    RESIDENTS_ONLY,
+    "Area figures add up the Census units inside each area; medians are population-weighted averages of unit medians, so they are approximate.",
+  ],
 };
 
 /** "start..end", the same window format as the data disclaimer. */

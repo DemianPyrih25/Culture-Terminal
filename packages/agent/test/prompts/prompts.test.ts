@@ -11,6 +11,7 @@ import {
   Job,
   JOB_MNEMONIC,
   JOB_PILLAR,
+  MarketId,
   MentionRole,
   MetroId,
   Priority,
@@ -77,28 +78,29 @@ describe("frozen prompts", () => {
 });
 
 describe("director.md (ANALYST)", () => {
-  // PLAN §4.5: up to about 11,000 tokens, room for the 13 job playbooks and the new tools. The prompt
-  // is the cached prefix, so the extra tokens cost a cache read per response, not a fresh input; a
-  // cap raise is preferred to trimming rules out of it.
-  it("stays within about six to eleven thousand tokens", () => {
+  // PLAN §4.5 planned about 11,000 tokens; the 13 job playbooks, the 18 tools and the public data
+  // physics of Part 9 take it just past that, so the cap is 13,000 (owner: raise caps rather than trim).
+  // The prompt is the cached prefix, so the extra tokens cost a cache read per response, not a fresh input.
+  it("stays within about six to thirteen thousand tokens", () => {
     const tokens = approxTokens(DIRECTOR_PROMPT);
     expect(tokens).toBeGreaterThanOrEqual(6000);
-    expect(tokens).toBeLessThanOrEqual(11000);
+    expect(tokens).toBeLessThanOrEqual(13000);
   });
 
-  it("has the ten planned sections in order", () => {
+  it("has the eleven planned sections in order", () => {
     const headings = [...DIRECTOR_PROMPT.matchAll(/^## (\d+)\. (.+)$/gm)].map((m) => [Number(m[1]), m[2]]);
     expect(headings).toEqual([
       [1, "Role"],
       [2, "Qloo physics"],
-      [3, "Grounding rules"],
-      [4, "Skill catalogue"],
-      [5, "Opening theory per job"],
-      [6, "Hypothesis protocol"],
-      [7, "Investigation policy"],
-      [8, "Report contract"],
-      [9, "Safety"],
-      [10, "Untrusted data"],
+      [3, "Public data physics"],
+      [4, "Grounding rules"],
+      [5, "Skill catalogue"],
+      [6, "Opening theory per job"],
+      [7, "Hypothesis protocol"],
+      [8, "Investigation policy"],
+      [9, "Report contract"],
+      [10, "Safety"],
+      [11, "Untrusted data"],
     ]);
   });
 
@@ -127,6 +129,8 @@ describe("director.md (ANALYST)", () => {
       "{{WINDOW}}",
       "<user_question>",
       "<qloo_data>",
+      "<public_data>",
+      "{{PERIOD:M#}}",
       "trigger_finding_id",
       "not available in this build",
       "INVESTIGATION_BUDGET_EXHAUSTED",
@@ -141,9 +145,12 @@ describe("director.md (ANALYST)", () => {
     }
   });
 
+  /** A job's opening-theory line; taste_twins is a tool too, whose catalogue line reads "(TWIN;" instead. */
+  const jobLine = (job: Job): string => DIRECTOR_PROMPT.split("\n").find((l) => l.startsWith(`- **${job}** (${JOB_MNEMONIC[job]}).`)) ?? "";
+
   it("names every scan skill the build runs in its job's Scan part, and never asks wave 1 to repeat it", () => {
     for (const [job, entries] of Object.entries(SCAN_TABLE)) {
-      const line = DIRECTOR_PROMPT.split("\n").find((l) => l.startsWith(`- **${job}** (`)) ?? "";
+      const line = jobLine(Job.parse(job));
       const [scan = "", wave1 = ""] = line.split("Wave 1:");
       for (const entry of entries.filter((e) => (e.build ?? e.chain) !== undefined && isSkillAvailable(e.tool))) {
         expect(scan, `${job} scan`).toContain(entry.tool);
@@ -154,7 +161,7 @@ describe("director.md (ANALYST)", () => {
 
   it("gives every job its turn-2 move and names the pivots it usually makes", () => {
     for (const job of Job.options) {
-      const line = DIRECTOR_PROMPT.split("\n").find((l) => l.startsWith(`- **${job}** (`)) ?? "";
+      const line = jobLine(job);
       expect(line, job).toMatch(/Turn 2: /);
       const kinds = FindingKind.options.filter((k) => line.includes(k));
       expect(kinds.length, `${job} pivots`).toBeGreaterThan(0);
@@ -273,11 +280,44 @@ describe("clerk.md (CLERK)", () => {
     }
   });
 
-  // PLAN §4.5: at most about 5,500 tokens. A worked example per job, the 13 map city ids and the
-  // market field (D28, D44) take it near 3,900; the rest is room for the 13-job taxonomy. CLERK runs on
-  // Haiku without caching, so each example adds about 130 input tokens, a small fraction of a cent per
-  // run, and the examples are what teach a small model the job-specific fields.
+  // PLAN §4.5 planned about 5,500 tokens; the 13-job taxonomy, the nearest-job rule (D41), the Part 9
+  // intent fields and a worked example per job take it past that, so the cap is 7,000 (owner: raise caps
+  // rather than trim). CLERK runs on Haiku without caching, so each example adds about 180 input tokens,
+  // a small fraction of a cent per run, and the examples are what teach a small model the job-specific fields.
   it("stays compact for a small model", () => {
-    expect(approxTokens(CLERK_PROMPT)).toBeLessThanOrEqual(5500);
+    expect(approxTokens(CLERK_PROMPT)).toBeLessThanOrEqual(7000);
+  });
+
+  it("reads every business question as its nearest job (D41) and refuses only the safety categories", () => {
+    const intents = CLERK_PROMPT.split("\n")
+      .filter((line) => line.startsWith('{"pillar"'))
+      .map((line) => Intent.parse(JSON.parse(line)));
+    // A worked nearest-job example that is not a safety reframe: it names what the data does not cover.
+    const nearest = intents.filter((i) => i.read_as.nearest && i.safety.category === null);
+    expect(nearest.length).toBeGreaterThan(0);
+    for (const i of nearest) expect(i.read_as.not_covered.length, i.mnemonic).toBeGreaterThan(0);
+    for (const i of intents.filter((x) => !x.read_as.nearest)) expect(i.read_as.not_covered, i.mnemonic).toEqual([]);
+    // A refused question is never also read as a nearest job.
+    for (const i of intents.filter((x) => !x.safety.allowed)) expect(i.read_as.nearest, i.mnemonic).toBe(false);
+    expect(CLERK_PROMPT).toContain("Never refuse one for being off this list or for needing data Culture Terminal does not have.");
+    expect(CLERK_PROMPT).toContain("A business question that needs data Culture Terminal does not have is never out_of_scope");
+  });
+
+  it("fills the Part 9 intent fields only for their jobs", () => {
+    const intents = CLERK_PROMPT.split("\n")
+      .filter((line) => line.startsWith('{"pillar"'))
+      .map((line) => Intent.parse(JSON.parse(line)));
+    for (const i of intents) {
+      expect(i.geo.target_metro !== null, i.mnemonic).toBe(i.job === "taste_twins");
+      expect(i.geo.cities.length > 0, i.mnemonic).toBe(i.job === "city_compare");
+      expect(i.constraints.concept_description !== null, i.mnemonic).toBe(i.job === "launch_test");
+    }
+    const twins = intents.find((i) => i.job === "taste_twins");
+    expect(twins?.geo.area).not.toBeNull();
+    expect(twins?.geo.target_metro).not.toBe(twins?.geo.metro);
+    const cities = intents.find((i) => i.job === "city_compare");
+    expect(cities?.geo.cities.length).toBeGreaterThanOrEqual(2);
+    expect(cities?.geo.cities.length).toBeLessThanOrEqual(4);
+    for (const id of cities?.geo.cities ?? []) expect(MarketId.safeParse(id).success, id).toBe(true);
   });
 });

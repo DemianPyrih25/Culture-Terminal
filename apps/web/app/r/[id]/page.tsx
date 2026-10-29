@@ -48,7 +48,7 @@ export default async function PermalinkPage(props: PageProps<"/r/[id]">) {
     <PermalinkAnswer
       model={model}
       // Only what the answer reads from the run: the rest stays on the server.
-      state={{ resolves: state.resolves, metrics: state.metrics, evidence: state.evidence, ghost: state.ghost ?? state.report?.ghost ?? null }}
+      state={{ resolves: state.resolves, metrics: state.metrics, evidence: state.evidence, ghost: state.ghost ?? state.report?.ghost ?? null, intent: state.intent }}
       runId={id}
       mode="static"
       links={{ permalink, replay: `${run}?replay=1` }}

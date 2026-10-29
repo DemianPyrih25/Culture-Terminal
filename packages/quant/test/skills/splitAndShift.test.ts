@@ -87,7 +87,7 @@ describe("pair split and rank shift", () => {
     expect(shifts.map((m) => [m.subjectRefs[0], m.value, m.display])).toEqual([
       ["R1", -1, "-1.00 · 1 of 3 → 3 of 3, among the 3 ranked in every context"],
       ["R3", 1, "+1.00 · 3 of 3 → 1 of 3, among the 3 ranked in every context"],
-      ["R2", 0, "0.00 · 2 of 3 → 2 of 3, among the 3 ranked in every context"],
+      ["R2", 0, "no shift · 2 of 3 → 2 of 3, among the 3 ranked in every context"],
     ]);
     expect(shifts[0]).toMatchObject({ key: "rank.shift", label: "rank shift of Brand Alpha, 55+ vs ≤24", unit: "delta", badge: "DERIVED" });
     expect(run.ledger.datasets[0]?.formulaIds).toEqual(["pct.within_call", "rank.shift"]);
@@ -117,7 +117,7 @@ describe("pair split and rank shift", () => {
       ["R2", 0, null],
       ["R3", 0, null],
     ]);
-    expect(shifts[0]?.display).toBe("0.00 · 1 of 3 → 1 of 3, among the 3 ranked in every context");
+    expect(shifts[0]?.display).toBe("no shift · 1 of 3 → 1 of 3, among the 3 ranked in every context");
     const slope = run.ledger.datasets[0];
     if (slope?.kind !== "Slope") throw new Error("expected a Slope dataset");
     expect(slope.payload.lines.map((l) => l.delta)).toEqual([0, 0, 0, null]);

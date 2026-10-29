@@ -10,7 +10,9 @@ import {
   ADVERSARIAL_QUESTIONS,
   AdversarialKind,
   CORE_QUESTIONS,
+  CORE_QUESTIONS_PER_JOB,
   loadQuestions,
+  OFFLIST_QUESTIONS,
   loadRealityCases,
   QuestionsFile,
   REALITY_CASES,
@@ -35,10 +37,10 @@ const showcases = () => Showcases.parse(JSON.parse(readFileSync(SHOWCASES_JSON, 
 
 const pad = (n: number): string => String(n).padStart(2, "0");
 
-// Twelve core questions covering every job (audience_discovery, the eighth, only once), then one
-// adversarial question of each kind.
+// Twenty-seven core questions covering every job twice (brand_health three times), one adversarial
+// question of each kind, then three off-list questions read as their nearest job.
 function questionsFixture(): z.input<typeof QuestionsFile> {
-  const jobs = [...Job.options, "brand_health", "sponsorship", "tenant_mix", "head_to_head"] as const;
+  const jobs = [...Job.options, ...Job.options, "brand_health"] as const;
   return {
     registered: "2026-01-15",
     questions: [
@@ -58,6 +60,14 @@ function questionsFixture(): z.input<typeof QuestionsFile> {
         job: "audience_discovery" as const,
         question: `Invented adversarial question ${i + 1}?`,
         expected: { handling: "refuse" as const, category: ADVERSARIAL_CATEGORY[kind], note: "A group-level reframe." },
+      })),
+      ...(["area_profile", "audience_discovery", "market_selection"] as const).map((job, i) => ({
+        id: `o${pad(i + 1)}`,
+        set: "offlist" as const,
+        desk: JOB_PILLAR[job],
+        job,
+        question: `Invented off-list question ${i + 1} about rents for Brand Alpha?`,
+        expected: { handling: "nearest" as const, not_covered: ["rent"], note: "Read as the nearest job." },
       })),
     ],
   };
@@ -120,11 +130,26 @@ describe("eval/questions.json", () => {
   const { questions } = loadQuestions();
   const core = questions.filter((q) => q.set === "core");
 
-  it("registers 12 core questions across all four desks and eight jobs, and 4 adversarial ones", () => {
+  it("registers 27 core questions across all four desks and thirteen jobs, at least two per job, 4 adversarial and 3 off-list ones", () => {
     expect(core).toHaveLength(CORE_QUESTIONS);
     expect(questions.filter((q) => q.set === "adversarial")).toHaveLength(ADVERSARIAL_QUESTIONS);
+    expect(questions.filter((q) => q.set === "offlist")).toHaveLength(OFFLIST_QUESTIONS);
     expect(new Set(core.map((q) => q.job))).toEqual(new Set(Job.options));
+    for (const job of Job.options) expect(core.filter((q) => q.job === job).length, job).toBeGreaterThanOrEqual(CORE_QUESTIONS_PER_JOB);
     expect(new Set(core.map((q) => q.desk))).toEqual(new Set(Pillar.options));
+  });
+
+  it("keeps the first twelve core questions as registered before Part 9", () => {
+    expect(core.slice(0, 12).map((q) => q.id)).toEqual(Array.from({ length: 12 }, (_, i) => `q${pad(i + 1)}`));
+  });
+
+  it("reads every off-list question as a nearest job, naming what is not covered", () => {
+    const offList = questions.flatMap((q) => (q.set === "offlist" ? [q] : []));
+    for (const q of offList) {
+      expect(q.expected.handling).toBe("nearest");
+      expect(q.expected.not_covered.length).toBeGreaterThan(0);
+      expect(q.desk).toBe(JOB_PILLAR[q.job]);
+    }
   });
 
   it("asks every showcase question of config/showcases.json verbatim, with its desk and job, first", () => {
@@ -205,13 +230,20 @@ describe("the question schema", () => {
     expect(QuestionsFile.safeParse(unknown).success).toBe(false);
   });
 
-  it("rejects a core set that misses a job, and the wrong number of questions", () => {
+  it("rejects a core set that misses a job or covers one once, and the wrong number of questions", () => {
     const fixture = questionsFixture();
-    Object.assign(fixture.questions[7]!, { job: "brand_health", desk: "investment" });
-    expect(issues(QuestionsFile.safeParse(fixture))).toContain("no core question for job audience_discovery");
+    const missing = Job.options[7]!;
+    for (const q of fixture.questions) if (q.set === "core" && q.job === missing) Object.assign(q, { job: "brand_health", desk: "investment" });
+    expect(issues(QuestionsFile.safeParse(fixture))).toContain(`no core question for job ${missing}`);
+    const once = questionsFixture();
+    Object.assign(once.questions[7]!, { job: "brand_health", desk: "investment" });
+    expect(issues(QuestionsFile.safeParse(once))).toContain(`job ${missing} has 1 core question(s), expected at least ${CORE_QUESTIONS_PER_JOB}`);
     const short = questionsFixture();
-    short.questions.splice(11, 1);
-    expect(issues(QuestionsFile.safeParse(short))).toContain("11 core questions, expected 12");
+    short.questions.splice(26, 1);
+    expect(issues(QuestionsFile.safeParse(short))).toContain(`26 core questions, expected ${CORE_QUESTIONS}`);
+    const noOffList = questionsFixture();
+    noOffList.questions.pop();
+    expect(issues(QuestionsFile.safeParse(noOffList))).toContain(`2 off-list questions, expected ${OFFLIST_QUESTIONS}`);
   });
 
   it("rejects an adversarial set that misses a kind or expects the wrong category", () => {

@@ -89,3 +89,21 @@ describe("pickKpis", () => {
     expect(ids(pickKpis("brand_health", [gap, cited], [cited.id]))).toEqual([cited.id]);
   });
 });
+
+describe("pickKpis: the Part 9 jobs and the public-data figures", () => {
+  it("leads taste_twins with the best twins by rho, then shared NEW tags and the residents' income", () => {
+    const rho = [0.2, 0.6, 0.4].map((v, i) => metric("twin.rho", v, [`area_${i}`, "source"]));
+    const shared = metric("twin.shared_new", 3, ["area_1"]);
+    const income = metric("econ.median_hh_income", 61_000, ["source"]);
+    expect(ids(pickKpis("taste_twins", [...rho, shared, income], []))).toEqual([rho[1]!.id, rho[2]!.id, shared.id, income.id]);
+  });
+
+  it("shows launch_test's analog precision and verdicts, and a listed brand's revenue change beside its taste figures", () => {
+    const precision = metric("cnpt.precision", 0.5, ["T1"]);
+    const verdict = metric("cnpt.verdict", 1, ["R2"]);
+    expect(ids(pickKpis("launch_test", [verdict, precision], []))).toEqual([precision.id, verdict.id]);
+    const yoy = metric("fin.yoy", 0.12, ["R1"], { period: "FY2025, 10-K filed 2025-03-20" });
+    const similarity = metric("subs.similarity", 0.62, ["R1", "R2"]);
+    expect(ids(pickKpis("brand_health", [similarity, yoy], []))).toEqual([similarity.id, yoy.id]);
+  });
+});

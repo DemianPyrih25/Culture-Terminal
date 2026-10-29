@@ -1,4 +1,5 @@
 import type { NoValueReason, QlooEntity, QuadrantName, SponsorCategory } from "@ct/contracts";
+import { UNDER_THE_RADAR_MAX_POPULARITY } from "../../findings";
 import { median, withinCallPercentiles } from "../../stats";
 import type { EntityDraft } from "../common";
 import { displayRanks } from "../format";
@@ -225,8 +226,13 @@ export function pooledAffinities(responses: readonly { signal: string; rows: rea
   return [...pooled.values()];
 }
 
+/**
+ * The slate quadrant. A candidate at or above UNDER_THE_RADAR_MAX_POPULARITY is well known whatever the
+ * slate's median: high fit makes it HEARTLAND, never the UNDER-THE-RADAR quadrant.
+ */
 export function quadrantOf(fit: number, popularity: number, medianFit: number, medianPopularity: number): QuadrantName {
-  if (fit >= medianFit) return popularity >= medianPopularity ? "HEARTLAND" : "HIDDEN_POCKET";
+  const known = popularity >= medianPopularity || popularity >= UNDER_THE_RADAR_MAX_POPULARITY;
+  if (fit >= medianFit) return known ? "HEARTLAND" : "HIDDEN_POCKET";
   return popularity >= medianPopularity ? "MASS" : "COLD";
 }
 
@@ -242,7 +248,7 @@ export interface ScoredSlate {
   placed: number[];
   medianFit: number | null;
   medianPopularity: number | null;
-  /** UNDER-THE-RADAR: A ≥ median A and p < median p, over the placed candidates. */
+  /** UNDER-THE-RADAR: A ≥ median A and p < median p, over the placed candidates, and p below UNDER_THE_RADAR_MAX_POPULARITY. */
   utr: boolean[];
   quadrant: (QuadrantName | null)[];
 }

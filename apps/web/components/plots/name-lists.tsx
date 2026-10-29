@@ -22,7 +22,8 @@ export interface NameItem {
 }
 
 function Name({ item, arrow }: { item: NameItem; arrow: boolean }) {
-  const text = <span className="min-w-0 truncate type-body text-ink">{item.name}</span>;
+  // Long names wrap; a card never cuts a name with an ellipsis (ANSWER_QUALITY §11).
+  const text = <span className="min-w-0 type-body text-ink [overflow-wrap:anywhere]">{item.name}</span>;
   if (!item.href) return text;
   return (
     <Link href={item.href} className="inline-flex min-w-0 items-center gap-1 hover:underline">
@@ -56,7 +57,7 @@ export function NumberedList({ items, columns = 2, label, emptyLabel, className 
         <li
           key={item.key ?? item.name}
           data-row={item.key ?? item.name}
-          className="flex h-10 min-w-0 items-center gap-3"
+          className="flex min-h-10 min-w-0 items-center gap-3 py-1"
         >
           <span className="w-4 shrink-0 type-label text-ink-2 tabular-nums">{i + 1}</span>
           <Monogram name={item.name} size={24} />

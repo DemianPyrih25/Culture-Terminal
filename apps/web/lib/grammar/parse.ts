@@ -9,6 +9,9 @@ import { EntityType, JOB_MNEMONIC, JOB_PILLAR, type Job, type Pillar } from "@ct
  *   <A> VS <B>             two brands            <NAME> MKTS            launch and tour cities
  *   <AREA>, <CITY> DNA     a neighbourhood       <NAME> AUD             who the audience is
  *   <AREA>, <CITY> TEN     tenants for a block   <CONCEPT> SITE <CITY>  where to open
+ *   <NAME> COLLAB          collaboration partners <NAME> CRTR          creators who fit
+ *   <CONCEPT> LNCH         test a new product    <AREA>, <CITY> TWIN <CITY>  an area's twin elsewhere
+ *   <A> VS <B> [VS <C> [VS <D>]] CITY [<CONCEPT>]  compare two to four cities
  *
  * The keywords are typed in capitals, VS included, so a sentence that merely ends in "site" or "ten",
  * or compares two things in passing ("How is Juniper Cola doing vs its peers"), is never read as a
@@ -30,12 +33,16 @@ export interface CompiledCommand {
   mnemonic: string;
   /** The named entities, primary first; empty for the place jobs. */
   names: CommandName[];
-  /** The neighbourhood of DNA and TEN. */
+  /** The neighbourhood of DNA, TEN and TWIN (its source). */
   area: string | null;
-  /** The city of DNA, TEN and SITE. */
+  /** The city of DNA, TEN and SITE; TWIN's source city. */
   city: string | null;
-  /** The concept of SITE. */
+  /** The concept of SITE and LNCH, or the optional one of CITY. */
   concept: string | null;
+  /** TWIN: the city to find the twin in. */
+  targetCity?: string | null;
+  /** CITY: the two to four cities as typed, in order. */
+  cities?: string[];
 }
 
 /** Longest name, area, city or concept a command takes. */
@@ -48,7 +55,7 @@ const PART = /^[\p{L}\p{N}][\p{L}\p{N} '’&.!+\-]*$/u;
 const TYPE_MARKER = /\s*<([A-Za-z_]+)>$/;
 
 /** The usual type of a job's subject, printed when none is typed. */
-const DEFAULT_TYPE: Partial<Record<Job, EntityType>> = { brand_health: "brand", sponsorship: "artist" };
+const DEFAULT_TYPE: Partial<Record<Job, EntityType>> = { brand_health: "brand", sponsorship: "artist", brand_collab: "brand", creator_fit: "brand" };
 
 /** Jobs written as "<NAME> KEYWORD". */
 const NAMED_JOBS: ReadonlyArray<{ keyword: string; job: Job }> = [
@@ -56,7 +63,16 @@ const NAMED_JOBS: ReadonlyArray<{ keyword: string; job: Job }> = [
   { keyword: JOB_MNEMONIC.sponsorship, job: "sponsorship" },
   { keyword: JOB_MNEMONIC.market_selection, job: "market_selection" },
   { keyword: JOB_MNEMONIC.audience_discovery, job: "audience_discovery" },
+  { keyword: JOB_MNEMONIC.brand_collab, job: "brand_collab" },
+  { keyword: JOB_MNEMONIC.creator_fit, job: "creator_fit" },
 ];
+
+/** How many cities CITY compares. */
+const CITIES_MIN = 2;
+const CITIES_MAX = 4;
+
+/** A typed city as code compiles a market id: "Kansas City" → "KANSAS_CITY" (compileMnemonic upper-cases the id). */
+const cityId = (city: string) => city.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "_").replace(/^_+|_+$/g, "");
 
 const up = (s: string) => s.toUpperCase();
 
@@ -88,7 +104,12 @@ function compiled(job: Job, fields: Omit<CompiledCommand, "job" | "pillar">): Co
 /** The command the input spells, or null when it is not one (natural language, or a malformed command). */
 export function parseCommand(input: string): CompiledCommand | null {
   const text = input.replace(/\s+/g, " ").trim();
-  if (text === "" || text.length > 3 * PART_MAX) return null;
+  if (text === "" || text.length > 5 * PART_MAX) return null;
+
+  // <A> VS <B> [VS <C> [VS <D>]] CITY [<CONCEPT>]: read before the two-name form, which it contains.
+  const cityCompare = parseCityCompare(text);
+  if (cityCompare !== undefined) return cityCompare;
+  if (text.length > 3 * PART_MAX) return null;
 
   // <A> VS <B>: exactly two names.
   const sides = text.split(/ VS\.? /);
@@ -108,6 +129,23 @@ export function parseCommand(input: string): CompiledCommand | null {
     });
   }
   if (sides.length > 2) return null;
+
+  // <AREA>, <CITY> TWIN <CITY>
+  const twin = /^([^,]+),(.+) TWIN (.+)$/.exec(text);
+  if (twin) {
+    const area = part(twin[1]);
+    const city = part(twin[2]);
+    const target = part(twin[3]);
+    if (area === null || city === null || target === null) return null;
+    return compiled("taste_twins", {
+      mnemonic: `${up(area)}, ${up(city)} ${JOB_MNEMONIC.taste_twins} ${up(target)}`,
+      names: [],
+      area,
+      city,
+      concept: null,
+      targetCity: target,
+    });
+  }
 
   // <AREA>, <CITY> DNA | TEN
   const place = /^([^,]+),([^,]+) (DNA|TEN)$/.exec(text);
@@ -140,7 +178,15 @@ export function parseCommand(input: string): CompiledCommand | null {
     });
   }
 
-  // <NAME> HLTH | SPON | MKTS | AUD
+  // <CONCEPT> LNCH
+  const launch = new RegExp(`^(.+) ${JOB_MNEMONIC.launch_test}$`).exec(text);
+  if (launch) {
+    const concept = part(launch[1]);
+    if (concept === null) return null;
+    return compiled("launch_test", { mnemonic: `${up(concept)} ${JOB_MNEMONIC.launch_test}`, names: [], area: null, city: null, concept });
+  }
+
+  // <NAME> HLTH | SPON | MKTS | AUD | COLLAB | CRTR
   for (const { keyword, job } of NAMED_JOBS) {
     if (!text.endsWith(` ${keyword}`)) continue;
     const name = nameWithType(text.slice(0, -keyword.length - 1), job);
@@ -149,4 +195,37 @@ export function parseCommand(input: string): CompiledCommand | null {
     return compiled(job, { mnemonic: `${up(name.text)}${typed} ${keyword}`, names: [name], area: null, city: null, concept: null });
   }
   return null;
+}
+
+/**
+ * The CITY form, or undefined when the input is not one. The keyword is the last " CITY" whose left
+ * side splits into two to four cities on VS, so a city typed "KANSAS CITY" stays a city; what follows
+ * the keyword is the concept. A CITY form with a malformed part is null (a broken command).
+ */
+function parseCityCompare(text: string): CompiledCommand | null | undefined {
+  const keyword = JOB_MNEMONIC.city_compare;
+  const at: number[] = [];
+  for (let i = text.indexOf(` ${keyword}`); i >= 0; i = text.indexOf(` ${keyword}`, i + 1)) {
+    const after = text.charAt(i + keyword.length + 1);
+    if (after === "" || after === " ") at.push(i);
+  }
+  for (const i of at.reverse()) {
+    const sides = text.slice(0, i).split(/ VS\.? /);
+    if (sides.length < CITIES_MIN) continue;
+    if (sides.length > CITIES_MAX) return null;
+    const cities = sides.map(part);
+    const rest = text.slice(i + keyword.length + 1).trim();
+    const concept = rest === "" ? null : part(rest);
+    if (cities.some((c) => c === null) || (rest !== "" && concept === null)) return null;
+    const named = cities as string[];
+    return compiled("city_compare", {
+      mnemonic: `${named.map((c) => up(cityId(c))).join(" VS ")} ${keyword}${concept ? ` ${up(concept)}` : ""}`,
+      names: [],
+      area: null,
+      city: named[0] ?? null,
+      concept,
+      cities: named,
+    });
+  }
+  return undefined;
 }

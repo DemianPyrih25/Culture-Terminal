@@ -1,6 +1,6 @@
 import { METRO_LABEL, MetroId, type GhostPickCategory, type Job } from "@ct/contracts";
 import { buildGhostView, ghostOf, inlineText, type BriefModel, type Inline } from "../brief";
-import { selectFigures, shapeChart, moreCharts, type ChartContext } from "./charts";
+import { cityFingerprints, selectFigures, shapeChart, moreCharts, type ChartContext } from "./charts";
 import {
   ADVICE_LINE,
   ANSWER_JOB_LABEL,
@@ -13,7 +13,9 @@ import {
   PILLAR_TOPIC,
   PLACE_JOBS,
   TOPIC_LABEL,
+  wordList,
 } from "./copy";
+import { marketLabel } from "./markets";
 import { buildKeyNumbers } from "./key-numbers";
 import type {
   AnswerArea,
@@ -23,6 +25,7 @@ import type {
   AnswerGhost,
   AnswerHead,
   AnswerModel,
+  AnswerReadAs,
   AnswerRun,
   AnswerStep,
   AnswerSubjects,
@@ -59,11 +62,25 @@ function metroOf(city: string | null): MetroId | null {
   return MetroId.options.find((m) => METRO_LABEL[m].toLowerCase() === key) ?? null;
 }
 
-/** The place a place answer reads: "Austin, TX" for a site search, the area's name for a block. */
-export function answerPlace(model: BriefModel): string | null {
+/**
+ * The place a place answer reads: "Austin, TX" for a site search, the area's name for a block, "East
+ * Side → Denver" for a twin search, "Austin, Denver and Nashville" for a city comparison. The twin's
+ * target and the compared cities come from the run's reading when the page has it.
+ */
+export function answerPlace(model: BriefModel, intent: AnswerRun["intent"] = null): string | null {
   const job = model.header.job;
+  if (job === "city_compare") {
+    const cities = intent?.geo.cities ?? [];
+    return cities.length > 0 ? wordList(cities.map(marketLabel), "and") : (model.location?.city ?? null);
+  }
   if (!job || !PLACE_JOBS.has(job) || !model.location) return null;
   const city = model.location.city;
+  if (job === "taste_twins") {
+    const source = model.location.areas[0]?.name;
+    const from = source ? areaName(source) : city;
+    const target = intent?.geo.target_metro ? METRO_LABEL[intent.geo.target_metro] : null;
+    return from && target ? `${from} → ${target}` : (from ?? target);
+  }
   if (job === "site_selection") {
     const metro = metroOf(city);
     return city ? (metro ? `${city}, ${METRO_STATE[metro]}` : city) : null;
@@ -72,11 +89,11 @@ export function answerPlace(model: BriefModel): string | null {
   return area ? areaName(area) : city;
 }
 
-function buildHead(model: BriefModel, fallbackQuestion: string | null, subjects: AnswerSubjects): AnswerHead {
+function buildHead(model: BriefModel, fallbackQuestion: string | null, subjects: AnswerSubjects, intent: AnswerRun["intent"]): AnswerHead {
   const { header } = model;
   const topic = header.pillar ? PILLAR_TOPIC[header.pillar] : null;
   const job = header.job;
-  const place = answerPlace(model);
+  const place = answerPlace(model, intent);
   const date = header.date;
   const eyebrow = [topic ? TOPIC_LABEL[topic] : null, job ? ANSWER_JOB_LABEL[job] : null, place, date ? `Data as of ${date}` : null].filter(Boolean).join(" · ");
   const mobileEyebrow = [topic ? TOPIC_LABEL[topic] : null, date].filter(Boolean).join(" · ");
@@ -85,6 +102,39 @@ function buildHead(model: BriefModel, fallbackQuestion: string | null, subjects:
       ? { subject: subjects.primary.name ?? subjects.primary.mention, second: subjects.second.name ?? subjects.second.mention }
       : null;
   return { topic, eyebrow, mobileEyebrow, question: header.question ?? fallbackQuestion ?? "", compare };
+}
+
+const NEAREST_FLAG = "READ_AS_NEAREST_JOB";
+
+const NEAREST_FALLBACK = "This answers the closest question we cover, not every part of what you asked.";
+
+/** "Not covered: sales and rents. We have no data on these, so this answer leaves them out." */
+function notCoveredSentence(items: readonly string[]): string {
+  const one = items.length === 1;
+  return `Not covered: ${wordList(items, "and")}. We have no data on ${one ? "this" : "these"}, so this answer leaves ${one ? "it" : "them"} out.`;
+}
+
+/**
+ * The nearest-job chip (D41, ANSWER_QUALITY §8): from the method view's interpretation, else the run's
+ * reading, else the READ_AS_NEAREST_JOB limitation; null when the question fit its job.
+ */
+export function buildReadAs(model: BriefModel, intent: AnswerRun["intent"] = null): AnswerReadAs | null {
+  const job = model.header.job;
+  const jobLabel = job ? ANSWER_JOB_LABEL[job] : null;
+  const clean = (items: readonly string[]) => [...new Set(items.map((i) => i.replace(/\s+/g, " ").trim()).filter((i) => i !== ""))];
+  const limitation = model.risks.limitations.find((l) => l.flag === NEAREST_FLAG)?.text.trim() || null;
+  const mapped = model.method.interpretation?.readAs ?? null;
+  if (mapped) {
+    const notCovered = clean(mapped.notCovered);
+    const label = mapped.jobLabel.trim() || jobLabel;
+    if (!label) return null;
+    return { jobLabel: label, notCovered, text: notCovered.length > 0 ? notCoveredSentence(notCovered) : (limitation ?? NEAREST_FALLBACK) };
+  }
+  if (intent?.read_as?.nearest && jobLabel) {
+    const notCovered = clean(intent.read_as.not_covered);
+    return { jobLabel, notCovered, text: notCovered.length > 0 ? notCoveredSentence(notCovered) : (limitation ?? NEAREST_FALLBACK) };
+  }
+  return limitation && jobLabel ? { jobLabel, notCovered: [], text: limitation } : null;
 }
 
 const withPeriod = (text: string) => (/[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);
@@ -117,7 +167,14 @@ export function headlineWithPeriod(inlines: readonly Inline[] | null): Inline[] 
   return out;
 }
 
-function buildVerdict(model: BriefModel): AnswerVerdict {
+/** "Qloo", "Qloo and SEC": the sources the run's evidence came from, Qloo first. */
+function sourcesOf(run: AnswerRun): string {
+  const have = new Set(Object.values(run.evidence ?? {}).map((e) => e.source ?? "qloo"));
+  const names = [...(have.size === 0 || have.has("qloo") ? ["Qloo"] : []), ...(have.has("sec") ? ["SEC"] : []), ...(have.has("census") ? ["Census"] : [])];
+  return wordList(names, "and");
+}
+
+function buildVerdict(model: BriefModel, run: AnswerRun): AnswerVerdict {
   const { header, answer, conviction, method } = model;
   const notEnough = answer.signal?.signal === "insufficient_evidence";
   const line = notEnough ? NOT_ENOUGH_LINE : (header.finding ?? answer.signal?.label ?? "");
@@ -125,9 +182,8 @@ function buildVerdict(model: BriefModel): AnswerVerdict {
   let check: AnswerVerdict["check"] = null;
   if (checker.traced !== null && checker.total !== null && checker.total > 0) {
     const ok = checker.state === "passed" && checker.traced === checker.total;
-    check = ok
-      ? { ok, text: `All ${checker.total} numbers checked against Qloo data` }
-      : { ok, text: `${checker.traced} of ${checker.total} numbers checked against Qloo data` };
+    const against = `against ${sourcesOf(run)} data`;
+    check = ok ? { ok, text: `All ${checker.total} numbers checked ${against}` } : { ok, text: `${checker.traced} of ${checker.total} numbers checked ${against}` };
   }
   return {
     kind: notEnough ? "not_enough" : "answer",
@@ -171,7 +227,7 @@ export function buildGhost(job: Job | null, run: AnswerRun): AnswerGhost | null 
   return { category: cat.category, title, subline, ai, data };
 }
 
-export function buildChanges(model: BriefModel): string[] {
+export function buildChanges(model: BriefModel, readAsShown = false): string[] {
   const out: string[] = [];
   for (const c of model.risks.changes) {
     const text = inlineText(c.condition).replace(/\s+/g, " ").trim();
@@ -180,31 +236,41 @@ export function buildChanges(model: BriefModel): string[] {
   for (const l of model.risks.limitations) {
     // A boundary credit is an attribution the map keeps, not a caveat.
     if (/^Boundaries\s*©/i.test(l.text)) continue;
+    // What the question asked beyond its job already leads the page (the Read as chip).
+    if (readAsShown && l.flag === NEAREST_FLAG) continue;
     out.push(l.text.trim());
   }
   return out.slice(0, CHANGES_MAX);
 }
+
+/** The public figures (SEC financials, Census economics) take a row of their own under the taste read. */
+const THIRD_ROW: readonly AnswerCell[] = [{ slot: "third", span: 6 }];
 
 /** Rows C and D per job (§2.7–2.10): which chart slot sits where, then cells with nothing to show drop out. */
 const LAYOUT: Readonly<Record<Job, AnswerCell[][]>> = {
   brand_health: [[{ slot: "main", span: 4 }, { slot: "guesses", span: 2 }], [{ slot: "second", span: 6 }]],
   head_to_head: [[{ slot: "main", span: 4 }, { slot: "guesses", span: 2 }], [{ slot: "second", span: 6 }]],
   market_selection: [[{ slot: "main", span: 4 }, { slot: "guesses", span: 2 }], [{ slot: "second", span: 6 }]],
-  site_selection: [[{ slot: "map", span: 6 }], [{ slot: "second", span: 4 }, { slot: "guesses", span: 2 }]],
+  site_selection: [[{ slot: "map", span: 6 }], [{ slot: "second", span: 4 }, { slot: "guesses", span: 2 }], [...THIRD_ROW]],
   sponsorship: [[{ slot: "main", span: 6 }], [{ slot: "second", span: 4 }, { slot: "guesses", span: 2 }]],
-  tenant_mix: [[{ slot: "map", span: 3 }, { slot: "main", span: 3 }], [{ slot: "second", span: 4 }, { slot: "guesses", span: 2 }]],
-  area_profile: [[{ slot: "map", span: 3 }, { slot: "main", span: 3 }], [{ slot: "second", span: 4 }, { slot: "guesses", span: 2 }]],
+  tenant_mix: [[{ slot: "map", span: 3 }, { slot: "main", span: 3 }], [{ slot: "second", span: 4 }, { slot: "guesses", span: 2 }], [...THIRD_ROW]],
+  area_profile: [[{ slot: "map", span: 3 }, { slot: "main", span: 3 }], [{ slot: "second", span: 4 }, { slot: "guesses", span: 2 }], [...THIRD_ROW]],
   audience_discovery: [[{ slot: "main", span: 3 }, { slot: "guesses", span: 3 }], [{ slot: "second", span: 6 }]],
+  taste_twins: [[{ slot: "main", span: 4 }, { slot: "guesses", span: 2 }], [{ slot: "second", span: 6 }], [{ slot: "third", span: 6 }]],
+  brand_collab: [[{ slot: "main", span: 4 }, { slot: "guesses", span: 2 }], [{ slot: "second", span: 6 }]],
+  creator_fit: [[{ slot: "main", span: 6 }], [{ slot: "second", span: 4 }, { slot: "guesses", span: 2 }]],
+  launch_test: [[{ slot: "main", span: 4 }, { slot: "guesses", span: 2 }], [{ slot: "second", span: 6 }], [{ slot: "third", span: 6 }]],
+  city_compare: [[{ slot: "main", span: 6 }], [{ slot: "second", span: 4 }, { slot: "guesses", span: 2 }], [{ slot: "third", span: 6 }]],
 };
 
 const GHOST_WIDE: ReadonlySet<Job> = new Set<Job>(["brand_health", "head_to_head", "audience_discovery"]);
 
 /** The rows with only what the answer has; a cell left alone in its row takes the whole row. */
-export function layoutRows(job: Job | null, has: { main: boolean; second: boolean; map: boolean; guesses: boolean }): AnswerCell[][] {
+export function layoutRows(job: Job | null, has: { main: boolean; second: boolean; third?: boolean; map: boolean; guesses: boolean }): AnswerCell[][] {
   const plan: readonly AnswerCell[][] = job ? LAYOUT[job] : LAYOUT.brand_health;
   const rows: AnswerCell[][] = [];
   for (const row of plan) {
-    const kept = row.filter((c) => has[c.slot]);
+    const kept = row.filter((c) => has[c.slot] === true);
     if (kept.length === 0) continue;
     if (kept.length === 1) {
       const only = kept[0] as AnswerCell;
@@ -225,7 +291,7 @@ export interface AnswerLayout {
  * alone card they sit beside Change in row E (4 + 2); otherwise beside a chart that is alone in the row
  * above or below (4 + 2). Only when neither fits do they keep the whole row.
  */
-export function answerLayout(job: Job | null, has: { main: boolean; second: boolean; map: boolean; guesses: boolean }, ghost: boolean): AnswerLayout {
+export function answerLayout(job: Job | null, has: { main: boolean; second: boolean; third?: boolean; map: boolean; guesses: boolean }, ghost: boolean): AnswerLayout {
   const rows = layoutRows(job, has);
   const at = rows.findIndex((r) => r.length === 1 && r[0]?.slot === "guesses");
   if (at < 0) return { rows, guessesBesideChange: false };
@@ -237,10 +303,12 @@ export function answerLayout(job: Job | null, has: { main: boolean; second: bool
   return { rows: rows.flatMap((r, i) => (i === at ? [] : i === beside ? [merged] : [r])), guessesBesideChange: false };
 }
 
-function placeholderOf(model: BriefModel, subjects: AnswerSubjects): string {
+function placeholderOf(model: BriefModel, subjects: AnswerSubjects, intent: AnswerRun["intent"]): string {
   const job = model.header.job;
   if (job && PLACE_JOBS.has(job)) {
-    const place = job === "site_selection" ? model.location?.city : answerPlace(model);
+    const source = model.location?.areas[0]?.name;
+    const place =
+      job === "site_selection" ? model.location?.city : job === "taste_twins" ? (source ? areaName(source) : model.location?.city) : answerPlace(model, intent);
     if (place) return `Ask a follow-up about ${place}`;
   }
   const names = [subjects.primary, job === "head_to_head" ? subjects.second : null]
@@ -288,6 +356,7 @@ export function buildAnswerModel(model: BriefModel, run: AnswerRun, options: Bui
   const charts: AnswerModel["charts"] = {
     main: shapeChart(picked.main, ctx, figures, fetched),
     second: shapeChart(picked.second, ctx, figures, fetched),
+    third: shapeChart(picked.third, ctx, figures, fetched),
     map: shapeChart(picked.map, ctx, figures, fetched),
   };
   const used = new Set<string>(
@@ -299,16 +368,23 @@ export function buildAnswerModel(model: BriefModel, run: AnswerRun, options: Bui
   if (job === "head_to_head" && charts.main?.body.type === "winner") {
     for (const f of figures) if (f.kind === "Bars" && f.datasetId !== charts.main.datasetId && f.dataset?.kind === "Bars" && f.dataset.payload.groups.some((g) => g.key === "AGE")) used.add(f.datasetId);
   }
+  // city_compare draws every city's fingerprint inside its one card.
+  if (job === "city_compare" && charts.main?.body.type === "neighbours") {
+    for (const p of cityFingerprints(figures, fetched)) used.add(p.datasetId);
+  }
   const guesses = model.priors.items.length;
   const area = answerArea(model);
   // A lift map whose data is still on its way (undefined: loading; null: the fetch failed) keeps the map's row.
   const mapPending = job === "site_selection" && charts.map === null && figures.some((f) => f.kind === "GeoLift" && f.dataset === null && fetched[f.datasetId] === undefined);
   const ghost = model.terminal?.kind === "refused" || model.terminal?.kind === "needs_input" ? null : buildGhost(job, run);
+  const intent = run.intent ?? null;
+  const readAs = buildReadAs(model, intent);
   return {
     runId: model.runId,
     job,
-    head: buildHead(model, options.fallbackQuestion ?? null, subjects),
-    verdict: buildVerdict(model),
+    head: buildHead(model, options.fallbackQuestion ?? null, subjects, intent),
+    readAs,
+    verdict: buildVerdict(model, run),
     steps: buildSteps(model),
     keyNumbers: buildKeyNumbers({
       job,
@@ -324,14 +400,14 @@ export function buildAnswerModel(model: BriefModel, run: AnswerRun, options: Bui
     mapPending,
     ...answerLayout(
       job,
-      { main: charts.main !== null, second: charts.second !== null, map: charts.map !== null || area !== null || mapPending, guesses: guesses > 0 },
+      { main: charts.main !== null, second: charts.second !== null, third: charts.third !== null, map: charts.map !== null || area !== null || mapPending, guesses: guesses > 0 },
       ghost !== null,
     ),
     ghost,
     ghostSpan: job && GHOST_WIDE.has(job) ? 3 : 4,
-    changes: buildChanges(model),
+    changes: buildChanges(model, readAs !== null),
     why: { count: model.evidence.arguments.length, thesis: model.answer.thesis, arguments: model.evidence.arguments },
     more: moreCharts(figures, used, fetched),
-    ask: { moves: model.nextMoves, placeholder: placeholderOf(model, subjects) },
+    ask: { moves: model.nextMoves, placeholder: placeholderOf(model, subjects, intent) },
   };
 }

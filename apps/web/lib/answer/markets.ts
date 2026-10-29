@@ -17,6 +17,8 @@ const ALL: readonly MarketEntry[] = [...metros.gazetteer, ...metros.markets];
 
 const BY_ID: ReadonlyMap<string, string> = new Map(ALL.map((m) => [m.id, m.state]));
 
+const LABEL_BY_ID: ReadonlyMap<string, string> = new Map(ALL.map((m) => [m.id, m.label]));
+
 const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 /** Only names that point at one state: "Portland" or "Springfield" in two states would guess. */
@@ -34,4 +36,19 @@ const BY_NAME: ReadonlyMap<string, string> = (() => {
 /** The row's two-letter state, or null when the row is not a known market. */
 export function marketState(row: { key: string; label: string }): string | null {
   return BY_ID.get(row.key.replace(/^metro:/, "")) ?? BY_NAME.get(words(row.label)) ?? null;
+}
+
+/**
+ * A market id as a reader knows it ("kansas_city" → "Kansas City"): its config label, else the id in
+ * words, so a city outside the list still prints as its name rather than an id.
+ */
+export function marketLabel(id: string): string {
+  const key = id.replace(/^metro:/, "");
+  const known = LABEL_BY_ID.get(key);
+  if (known) return known;
+  return key
+    .split(/[_\s]+/)
+    .filter((w) => w !== "")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
 }

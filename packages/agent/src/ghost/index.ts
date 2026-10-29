@@ -1,6 +1,6 @@
 // GHOST (SPEC §6.6 item 2, D23): the run's ANALYST model with no tools, its picks resolved in Qloo,
 // and the diff against the finished brief.
-export { GHOST_EARLIER_MAX, GHOST_JOB_CATEGORIES, ghostUserMessage, type GhostContext } from "./categories";
+export { GHOST_EARLIER_MAX, GHOST_JOB_CATEGORIES, ghostMetroOf, ghostUserMessage, type GhostContext } from "./categories";
 export {
   GHOST_MAX_RETRIES,
   GHOST_MAX_TOKENS,

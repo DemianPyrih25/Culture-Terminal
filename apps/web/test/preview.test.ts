@@ -104,8 +104,8 @@ describe("PreviewService", () => {
         pillar: "location",
         job: "site_selection",
         mentions: [],
-        geo: { metro, area: null, unsupported_place: null, market: null },
-        constraints: { concepts: ["natural-wine bar"], sponsor_categories: [], domains: [], ages: [], notes: [] },
+        geo: { metro, area: null, unsupported_place: null, market: null, target_metro: null, cities: [] },
+        constraints: { concepts: ["natural-wine bar"], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
         mnemonic: "NATURAL-WINE BAR SITE AUSTIN",
       });
     const estimateIn = async (metro: "austin" | null) =>

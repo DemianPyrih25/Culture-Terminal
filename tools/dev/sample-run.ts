@@ -46,6 +46,7 @@ import {
   type QlooTool,
   type Transport,
 } from "@ct/qloo";
+import { createMemoryPublicStore, createMockPublicTransport, createPublicDataClient, type PublicDataClient } from "@ct/publicdata";
 import { discoveryParams, normaliseName, searchParams } from "@ct/quant";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
@@ -321,6 +322,24 @@ function sampleQloo(clock: VirtualClock, outageFrom: number): QlooClient {
     tagCap: null,
     rps: 3,
     store: l1OnlyStore(),
+    now: clock.now,
+    sleep: clock.sleep,
+    random: () => 0.5,
+  });
+}
+
+/**
+ * The SEC and Census client on the mock transport (QLOO_MOCK semantics: invented, deterministic). The
+ * sample brand is invented and not a listed company, so its scan plans no company_financials step;
+ * the client is passed so the run is built the way the app builds one.
+ */
+function samplePublicData(clock: VirtualClock): PublicDataClient {
+  return createPublicDataClient({
+    env: "mock",
+    transport: createMockPublicTransport({ now: clock.now }),
+    store: createMemoryPublicStore(),
+    tag: "sample-run",
+    secUserAgent: null,
     now: clock.now,
     sleep: clock.sleep,
     random: () => 0.5,
@@ -616,13 +635,14 @@ const INTENT: Intent = {
   pillar: "investment",
   job: "brand_health",
   mentions: [{ text: SAMPLE_BRAND, entity_type: "brand", role: "primary", public_figure: false }],
-  geo: { metro: null, area: null, unsupported_place: null, market: null },
-  constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
+  geo: { metro: null, area: null, unsupported_place: null, market: null, target_metro: null, cities: [] },
+  constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
   safety: {
     allowed: true,
     category: "financial_advice",
     reframe: "How distinct and how central Juniper Cola's audience taste is among the brands it shares taste with",
   },
+  read_as: { nearest: false, not_covered: [] },
   assumptions: ["US taste data", "Moat read as a distinct audience taste, not as market share"],
   mnemonic: "JUNIPER COLA <BRAND> HLTH",
 };
@@ -1028,6 +1048,7 @@ async function record(clock: VirtualClock, qloo: QlooClient, scene: Scene): Prom
       mode: "live",
       emit: (input) => stamped.push({ input, at: clock.now() }),
       qloo,
+      publicdata: samplePublicData(clock),
       anthropic,
       limits: DEFAULT_RUN_LIMITS,
       signal: new AbortController().signal,

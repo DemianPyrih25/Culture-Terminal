@@ -110,18 +110,26 @@ export const EVIDENCE_TOKEN_RE = /\[(E[1-9]\d*)\]/;
 /** `{{WINDOW}}`: renders the trending window; a STALE metric must sit beside it (CHECKER V8). */
 export const WINDOW_TOKEN = "{{WINDOW}}";
 export const WINDOW_TOKEN_RE = /\{\{WINDOW\}\}/;
+/**
+ * `{{PERIOD:M12}}`: renders the reporting period or vintage of an SEC or Census metric (Metric.period),
+ * e.g. "FY2024, 10-K filed 2025-02-14" or "ACS 2019-2023 5-year". Every SEC or Census metric must sit
+ * beside its period token (CHECKER V11). Group 1 is the metric id.
+ */
+export const PERIOD_TOKEN_RE = /\{\{PERIOD:(M[1-9]\d*)\}\}/;
 
-/** Any well-formed token. Group 1 is a metric id or WINDOW; group 2 is an evidence id. */
-export const TOKEN_RE = /\{\{(M[1-9]\d*|WINDOW)\}\}|\[(E[1-9]\d*)\]/;
+/** Any well-formed token. Group 1 is a metric id or WINDOW; group 2 is an evidence id; group 3 is a period token's metric id. */
+export const TOKEN_RE = /\{\{(M[1-9]\d*|WINDOW)\}\}|\[(E[1-9]\d*)\]|\{\{PERIOD:(M[1-9]\d*)\}\}/;
 
 export const metricToken = (id: MetricId): string => `{{${id}}}`;
 export const evidenceToken = (id: EvidenceId): string => `[${id}]`;
+export const periodToken = (id: MetricId): string => `{{PERIOD:${id}}}`;
 
 export type ProseSegment =
   | { kind: "text"; text: string }
   | { kind: "metric"; id: MetricId }
   | { kind: "evidence"; id: EvidenceId }
-  | { kind: "window" };
+  | { kind: "window" }
+  | { kind: "period"; id: MetricId };
 
 /** Splits prose into text and token segments, in order. Text segments are never empty. */
 export function tokenizeProse(text: string): ProseSegment[] {
@@ -131,8 +139,9 @@ export function tokenizeProse(text: string): ProseSegment[] {
   for (const m of text.matchAll(re)) {
     const start = m.index;
     if (start > last) out.push({ kind: "text", text: text.slice(last, start) });
-    const [whole, metricOrWindow, evidence] = m;
-    if (evidence !== undefined) out.push({ kind: "evidence", id: evidence as EvidenceId });
+    const [whole, metricOrWindow, evidence, period] = m;
+    if (period !== undefined) out.push({ kind: "period", id: period as MetricId });
+    else if (evidence !== undefined) out.push({ kind: "evidence", id: evidence as EvidenceId });
     else if (metricOrWindow === "WINDOW") out.push({ kind: "window" });
     else out.push({ kind: "metric", id: metricOrWindow as MetricId });
     last = start + whole.length;
@@ -144,6 +153,11 @@ export function tokenizeProse(text: string): ProseSegment[] {
 /** Metric ids cited as `{{M#}}`, in order of first appearance, without duplicates. */
 export function extractMetricIds(text: string): MetricId[] {
   return unique(tokenizeProse(text).flatMap((s) => (s.kind === "metric" ? [s.id] : [])));
+}
+
+/** Metric ids named by `{{PERIOD:M#}}` tokens, in order of first appearance, without duplicates. */
+export function extractPeriodMetricIds(text: string): MetricId[] {
+  return unique(tokenizeProse(text).flatMap((s) => (s.kind === "period" ? [s.id] : [])));
 }
 
 /** Evidence ids cited as `[E#]`, in order of first appearance, without duplicates. */

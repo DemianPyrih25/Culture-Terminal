@@ -85,11 +85,16 @@ export interface ResolveGhostPicksOptions {
   signal?: AbortSignal;
 }
 
-/** The entity type an entity list is searched as: every competitor, tenant and partner GHOST names is a brand (ghost.md). */
+/**
+ * The entity type an entity list is searched as: every competitor, tenant and partner GHOST names is a
+ * brand (ghost.md); a creator is searched as a public figure (person), so an artist or podcast GHOST
+ * names may find no exact match and is then reported unchecked, never matched to another entity.
+ */
 const ENTITY_TYPE: Readonly<Record<Exclude<GhostPickCategory, "markets" | "neighbourhoods">, EntityType>> = {
   competitors: "brand",
   tenants: "brand",
   partners: "brand",
+  creators: "person",
 };
 
 const isPlace = (c: GhostPickCategory): c is "markets" | "neighbourhoods" => c === "markets" || c === "neighbourhoods";

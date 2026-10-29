@@ -30,10 +30,10 @@ export function PermalinkAnswer(props: Omit<AnswerPageProps, "state"> & { state:
   const describe = useMemo(() => {
     const answer = buildAnswerModel(
       model,
-      { resolves: state.resolves, ghost: state.ghost ?? null, report: state.report ?? null, metrics: state.metrics },
+      { resolves: state.resolves, ghost: state.ghost ?? null, report: state.report ?? null, metrics: state.metrics, intent: state.intent ?? null, evidence: state.evidence },
       { datasets: props.datasets ?? {} },
     );
-    return answerNumberCopy(answer.keyNumbers, [answer.charts.main, answer.charts.second, answer.charts.map]);
+    return answerNumberCopy(answer.keyNumbers, [answer.charts.main, answer.charts.second, answer.charts.third, answer.charts.map]);
   }, [model, state, props.datasets]);
   const ghost = (state.ghost ?? state.report?.ghost ?? null) !== null;
   return (

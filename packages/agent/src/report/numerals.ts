@@ -162,6 +162,28 @@ export function mergedAgeBuckets(numeral: string): string[] | null {
   return from < to ? BUCKETS.filter((b) => b.from >= from && b.to <= to).map((b) => b.label) : null;
 }
 
+/** The integers that end a Qloo age bucket ("30" of "30–34", "44" of "35–44"). */
+const BUCKET_EDGES = new Set(["18", "24", "25", "29", "30", "34", "35", "44", "45", "54", "55"]);
+const EDGE = [...BUCKET_EDGES].join("|");
+
+/** Words that put a bare number in an age context: "aged 30", "the 30s", "up to 44", "under 35", "older". */
+const AGE_CONTEXT_RE = new RegExp(
+  String.raw`\b(?:age[ds]?|years?\sold|older|younger|buckets?|(?:${EDGE})s)\b|\b(?:up\sto|under|over|early|mid|late)[\s-]+(?:${EDGE})\b`,
+  "iu",
+);
+
+/** Qloo's six age buckets as prose labels them, in order: "≤24", "25–29", …, "55+". */
+export const AGE_BUCKET_LABELS: readonly string[] = BUCKETS.map((b) => b.label);
+
+/**
+ * The bare numbers V3 flagged that read as loose ages: a bucket edge ("30", "44") in a text that speaks
+ * of ages ("the early 30s", "up to 44", "aged 35"). The repair is told to name Qloo's bucket labels.
+ */
+export function looseAgeNumbers(text: string, bare: readonly string[]): string[] {
+  if (!AGE_CONTEXT_RE.test(stripTokens(text))) return [];
+  return bare.filter((b) => BUCKET_EDGES.has(b.trim()));
+}
+
 /**
  * The numerals in `text` that V3 counts as violations, as written (e.g. "0.82", "45%", "1,200",
  * "twelve"), and each age range that merges Qloo buckets as one ("30–44").

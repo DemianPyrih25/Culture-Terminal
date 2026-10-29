@@ -2,7 +2,8 @@
 // QLOO_RPS), over the shared Postgres cache by default so repeated commands are served from it and
 // every network call counts against the tag's cap like any other dev agent. Live Qloo always goes
 // through that cache: a memory store would start the tag's count at 0 in every process and
-// re-fetch what earlier runs already have, so --memory is for synthetic data only.
+// re-fetch what earlier runs already have, so --memory is for synthetic data only. The SEC and Census
+// client (@ct/publicdata) is opened beside it over the same kind of store: QLOO_MOCK=1 mocks it too.
 import { closeDb, getDb, pingDb, resolveDatabaseUrl } from "@ct/db";
 import {
   createMemoryQlooStore,
@@ -15,6 +16,14 @@ import {
   type QlooLogger,
   type QlooStore,
 } from "@ct/qloo";
+import {
+  createMemoryPublicStore,
+  createPgPublicStore,
+  createPublicDataClient,
+  publicDataOptionsFromEnv,
+  type PublicDataClient,
+  type PublicStore,
+} from "@ct/publicdata";
 
 /** A failure the CLI reports as a plain message with exit code 1 (no stack trace). */
 export class CliError extends Error {
@@ -39,6 +48,12 @@ export interface CliQlooOptions {
 
 export interface CliQloo {
   client: QlooClient;
+  /**
+   * The SEC EDGAR and US Census client, or null when it could not be built (a malformed SEC_USER_AGENT):
+   * company_financials and area_economics then answer unavailable. Without SEC_USER_AGENT or
+   * CENSUS_API_KEY it exists but that source reports not configured.
+   */
+  publicdata: PublicDataClient | null;
   store: QlooStore;
   /** Where the cache lives, for the header line. */
   storeLabel: string;
@@ -90,6 +105,7 @@ export async function openCliQloo(options: CliQlooOptions): Promise<CliQloo> {
   // Checked before any store or client exists, so a refused command opens nothing.
   if (options.store === "memory" && qlooEnv !== "mock") throw new CliError(MEMORY_NEEDS_MOCK);
   let store: QlooStore;
+  let publicStore: PublicStore = createMemoryPublicStore();
   let storeLabel: string;
   let usesDb = false;
   if (options.store === "pg") {
@@ -99,6 +115,7 @@ export async function openCliQloo(options: CliQlooOptions): Promise<CliQloo> {
       throw new CliError(postgresUnreachable(env, qlooEnv));
     }
     store = createPgQlooStore(db);
+    publicStore = createPgPublicStore(db);
     storeLabel = `postgres ${describeDatabase(env)}`;
     usesDb = true;
   } else if (options.store === "memory") {
@@ -121,8 +138,15 @@ export async function openCliQloo(options: CliQlooOptions): Promise<CliQloo> {
     if (usesDb) await closeDb();
     throw new CliError(err instanceof Error ? err.message : String(err));
   }
+  let publicdata: PublicDataClient | null = null;
+  try {
+    publicdata = createPublicDataClient(publicDataOptionsFromEnv(env, { store: publicStore, logger: options.logger, fetch: options.fetch }));
+  } catch (err) {
+    options.logger.warn(`public data (SEC, Census) is off: ${err instanceof Error ? err.message : String(err)}`);
+  }
   return {
     client,
+    publicdata,
     store,
     storeLabel,
     tag,
@@ -130,12 +154,24 @@ export async function openCliQloo(options: CliQlooOptions): Promise<CliQloo> {
     tagCap: client.env === "mock" ? null : tagCap,
     close: async () => {
       try {
-        await client.flush();
+        await Promise.all([client.flush(), publicdata?.flush()]);
       } finally {
         if (usesDb) await closeDb();
       }
     },
   };
+}
+
+/** "mock", "dev (SEC on, Census off: CENSUS_API_KEY not set)" or "off": the public-data part of a CLI header. */
+export function describePublicData(client: PublicDataClient | null): string {
+  if (client === null) return "off";
+  if (client.env === "mock") return "mock";
+  const off = [
+    client.configured.sec ? null : "SEC_USER_AGENT",
+    client.configured.census ? null : "CENSUS_API_KEY",
+  ].filter((v) => v !== null);
+  const state = `SEC ${client.configured.sec ? "on" : "off"}, Census ${client.configured.census ? "on" : "off"}`;
+  return `${client.env} (${state}${off.length === 0 ? "" : `: ${off.join(" and ")} not set`})`;
 }
 
 /** Warnings and errors from the client go to stderr; debug and info stay quiet. */

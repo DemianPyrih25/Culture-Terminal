@@ -107,6 +107,11 @@ export function signed2(x: number): string {
   return `${x > 0 ? "+" : ""}${fixed2(x)}`;
 }
 
+/** A rank shift in words when it rounds to nothing ("no shift", never a bare "0.00" that reads as a score), else signed2. */
+export function shiftText(x: number): string {
+  return Math.abs(Number(fixed2(x))) === 0 ? "no shift" : signed2(x);
+}
+
 /** The client refused the row's audience before sending it: qloo_param on an audience context (D21). */
 function refusedAudience(row: GridRow): boolean {
   return row.spec.kind === "audience" && row.failure?.code === "qloo_param";

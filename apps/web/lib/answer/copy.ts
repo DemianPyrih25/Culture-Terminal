@@ -16,6 +16,11 @@ export const ANSWER_JOB_LABEL: Readonly<Record<Job, string>> = {
   market_selection: "Launch & tour cities",
   audience_discovery: "Who they are",
   area_profile: "What an area is like",
+  taste_twins: "Find an area's twin",
+  brand_collab: "Brand collaborations",
+  creator_fit: "Creators who fit",
+  launch_test: "Test a new product",
+  city_compare: "Compare cities",
 };
 
 /** The topic each desk belongs to (the tile and the eyebrow's first words). */
@@ -62,7 +67,7 @@ export function wordList(items: readonly string[], conjunction: "and" | "or"): s
 export const MAP_CITIES: readonly string[] = Object.values(METRO_LABEL).sort((a, b) => a.localeCompare(b));
 
 /** The jobs that read a place: their eyebrow names it and their follow-up field asks about it. */
-export const PLACE_JOBS: ReadonlySet<Job> = new Set<Job>(["site_selection", "tenant_mix", "area_profile"]);
+export const PLACE_JOBS: ReadonlySet<Job> = new Set<Job>(["site_selection", "tenant_mix", "area_profile", "taste_twins", "city_compare"]);
 
 /** The jobs on the investment desk carry the advice line under the verdict. */
 export const ADVICE_LINE = "Taste signals, not buy or sell advice.";
@@ -77,6 +82,11 @@ export const GHOST_JOB_CATEGORY: Readonly<Record<Job, GhostPickCategory>> = {
   sponsorship: "partners",
   market_selection: "markets",
   audience_discovery: "partners",
+  taste_twins: "neighbourhoods",
+  brand_collab: "partners",
+  creator_fit: "creators",
+  launch_test: "partners",
+  city_compare: "markets",
 };
 
 /** The plural noun of a pick category: "AI alone matched 2 of the data's top 5 rivals". */
@@ -86,6 +96,7 @@ export const GHOST_NOUN: Readonly<Record<GhostPickCategory, string>> = {
   neighbourhoods: "areas",
   tenants: "tenants",
   partners: "brands",
+  creators: "creators",
 };
 
 /** The title when the AI's picks are clearly better known than the data's (10 points or more). */
@@ -95,6 +106,7 @@ export const GHOST_OBVIOUS_TITLE: Readonly<Record<GhostPickCategory, string>> = 
   neighbourhoods: "AI alone picked busier areas",
   tenants: "AI alone suggested the obvious tenants",
   partners: "AI alone named the biggest brands",
+  creators: "AI alone named the most famous creators",
 };
 
 /** How many points of mean popularity make the AI's picks "obvious". */
@@ -124,6 +136,39 @@ export const CHART_COPY = {
   alsoLove: { kind: "What else they love", caption: "Ranked by how much more these fans like them than average." },
   fans: { kind: "Who the fans are", caption: "How much more or less each group likes it than average. Not shares of shoppers." },
   markets: { kind: "Where it out-draws its peers" },
+  twins: {
+    kind: "Closest twins",
+    caption:
+      "Match compares how each area differs from its own city with how the source area differs from its city. 1.00 = the same mix of tastes; 0 = unrelated; below 0 = opposite.",
+  },
+  twinShared: {
+    kind: "What the two areas share",
+    caption:
+      "Tastes both areas rank higher (or lower) than their own city; the numbers are places up or down, the source area first. Shared taste, not foot traffic or spending.",
+  },
+  verdicts: {
+    kind: "AI guesses, checked against the data",
+    caption:
+      "Kept = the concept's taste scores it at least as high as the concept's 50th result (its last, when fewer come back), in the same request. Dropped = lower: the taste points elsewhere, which says nothing about the business. Found in the data = a top result no guess named.",
+  },
+  partners: { kind: "Best-fit partners", caption: "Scored on one scale in one request: 100 = the best fit among the names checked. Taste fit, not sales or deal terms." },
+  creators: {
+    kind: "Creators who fit",
+    caption: "Ranked within each kind of creator; scores compare only within a kind. Public figures only. Taste fit, not reach or fees.",
+  },
+  creatorsScored: {
+    kind: "Scored on one scale",
+    caption: "Creators of one kind scored in one request: 100 = the best fit among the names checked. Taste fit, not reach or fees.",
+  },
+  fingerprints: { kind: "What sets each city apart", caption: "Tastes each city ranks higher than the other cities we map do, on average. Shared taste, not sales or foot traffic." },
+  financials: {
+    kind: "Reported financials",
+    caption: "Company-level figures as reported in SEC filings; one brand may be a small part of its company. Not advice.",
+  },
+  economics: {
+    kind: "Who lives there",
+    caption: "Census survey estimates for residents (ACS 5-year), not customers, foot traffic or spending.",
+  },
   generic: { kind: "Chart" },
 } as const;
 
@@ -138,7 +183,8 @@ export const SPONSOR_ICON: Readonly<Partial<Record<SponsorCategory, "beer" | "wi
 };
 
 /** Neighbour column heads by domain. */
-export const DOMAIN_COLUMN: Readonly<Record<string, { label: string; icon: "music" | "mic" | "tv" | "shopping-bag" }>> = {
+export const DOMAIN_COLUMN: Readonly<Record<string, { label: string; icon: "music" | "mic" | "tv" | "shopping-bag" | "user-round" }>> = {
+  person: { label: "Public figures", icon: "user-round" },
   artist: { label: "Music", icon: "music" },
   podcast: { label: "Podcasts", icon: "mic" },
   tv_show: { label: "TV", icon: "tv" },

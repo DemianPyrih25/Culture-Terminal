@@ -127,6 +127,8 @@ export interface MetricSpec {
   evidenceIds: readonly EvidenceId[];
   n: number | null;
   comparator: Comparator | null;
+  /** The period or vintage of an SEC or Census figure, as {{PERIOD:M#}} renders it (V11). */
+  period?: string | null;
 }
 
 /** Adds a metric with the UNAVAILABLE invariants and per-metric confidence filled in (§6.4). */
@@ -148,6 +150,7 @@ export function addSkillMetric(ledger: Ledger, spec: MetricSpec): Metric {
     conf: metricConfidence(badge, spec.n),
     comparator: spec.comparator,
     window: null,
+    ...(spec.period === undefined ? {} : { period: spec.period }),
   });
 }
 

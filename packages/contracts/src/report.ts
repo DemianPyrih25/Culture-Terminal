@@ -12,6 +12,7 @@ import {
   Mode,
   Pillar,
   Priority,
+  PublicSource,
   Signal,
   SkillId,
   Strength,
@@ -26,6 +27,7 @@ import {
   StepIdSchema,
 } from "./ids";
 import { QUESTION_MAX_CHARS } from "./limits";
+import { PublicEndpoint } from "./public-data";
 import { QlooPath } from "./qloo-types";
 import { VizComponent } from "./viz-compat";
 
@@ -263,12 +265,22 @@ export const GhostAnswer = z.strictObject({
     neighbourhoods: z.array(z.string()),
     tenants: z.array(z.string()),
     partners: z.array(z.string()),
+    /** Creators GHOST would pick (creator_fit). */
+    creators: z.array(z.string()),
   }),
   numeric_claims: z.array(z.string()).describe("Every number GHOST states, verbatim."),
 });
 export type GhostAnswer = z.infer<typeof GhostAnswer>;
 
-export const GhostPickCategory = z.enum(["competitors", "markets", "neighbourhoods", "tenants", "partners"]);
+/** A GhostAnswer as events and reports store it: answers stored before `creators` existed read as no creator picks. */
+export const StoredGhostAnswer = z.preprocess((raw) => {
+  if (typeof raw !== "object" || raw === null) return raw;
+  const picks = (raw as { picks?: unknown }).picks;
+  if (typeof picks !== "object" || picks === null || "creators" in picks) return raw;
+  return { ...raw, picks: { ...picks, creators: [] } };
+}, GhostAnswer);
+
+export const GhostPickCategory = z.enum(["competitors", "markets", "neighbourhoods", "tenants", "partners", "creators"]);
 export type GhostPickCategory = z.infer<typeof GhostPickCategory>;
 
 export const GHOST_HONESTY_LINE = "Agreement is measured against Qloo's taste graph, not outcomes.";
@@ -295,7 +307,11 @@ export type GhostDiff = z.infer<typeof GhostDiff>;
 
 // CHECKER (§6.2) ----------------------------------------------------------------------------------------
 
-export const ValidationRule = z.enum(["V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10"]);
+/**
+ * V11 (Part 9): every SEC or Census metric appears with its period or vintage token (PERIOD_TOKEN), and
+ * no prose links a financial figure to a taste metric causally.
+ */
+export const ValidationRule = z.enum(["V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10", "V11"]);
 export type ValidationRule = z.infer<typeof ValidationRule>;
 
 export const ValidationIssue = z.object({
@@ -329,12 +345,13 @@ export const ConfidenceRule = z.enum([
   "quality_gate_drop",
   "checker_warning",
   "insufficient_evidence",
+  "read_as_nearest_job",
 ]);
 export type ConfidenceRule = z.infer<typeof ConfidenceRule>;
 
 /**
- * Points subtracted from 100 per occurrence (coarse_geohash, stale_momentum and insufficient_evidence
- * count once). insufficient_evidence alone puts a note in the LOW band: V7 left no reading to trust.
+ * Points subtracted from 100 per occurrence (coarse_geohash, stale_momentum, insufficient_evidence and
+ * read_as_nearest_job count once). insufficient_evidence alone puts a note in the LOW band: V7 left no reading to trust.
  */
 export const CONFIDENCE_PENALTY: Readonly<Record<ConfidenceRule, number>> = {
   dropped_entity: 15,
@@ -345,6 +362,7 @@ export const CONFIDENCE_PENALTY: Readonly<Record<ConfidenceRule, number>> = {
   quality_gate_drop: 5,
   checker_warning: 5,
   insufficient_evidence: 60,
+  read_as_nearest_job: 5,
 };
 
 export function confidenceBand(score: number): ConfidenceBand {
@@ -370,6 +388,18 @@ export const FIXED_DISCLAIMERS = [
   "Aggregated group-level taste signals; no individual-level inference.",
   "Affinity ≠ sales, share or causation.",
 ] as const;
+
+/**
+ * Source lines for public data (PLAN §6), added to the disclaimers only when the note used that source.
+ * `period` names the fiscal periods shown (e.g. "FY2022 to FY2024 and the latest quarter"); `vintage`
+ * the ACS release (e.g. "2019-2023").
+ */
+export function secDisclaimer(period: string): string {
+  return `Financial figures: SEC EDGAR filings as reported, ${period}.`;
+}
+export function censusDisclaimer(vintage: string): string {
+  return `Area figures: US Census ACS 5-year estimates, ${vintage}.`;
+}
 
 /** The data line closing every disclaimer list; `window` is shown only when the note used trending. */
 export function dataDisclaimer(fetchedAt: string, window: TrendWindow | null): string {
@@ -428,6 +458,10 @@ export const Receipt = z.object({
   qlooCached: z.int().nonnegative(),
   qlooReused: z.int().nonnegative(),
   endpoints: z.array(z.object({ path: QlooPath, filterType: z.string().nullable(), calls: z.int().positive() })),
+  /** SEC and Census calls by endpoint (0 Qloo calls). Reports stored before Part 9 read as none. */
+  publicEndpoints: z
+    .array(z.object({ source: PublicSource, endpoint: PublicEndpoint, calls: z.int().positive() }))
+    .default([]),
   ms: z.int().nonnegative(),
   usd: z.number().nonnegative(),
   tokens: TokenUsage,
@@ -478,7 +512,7 @@ export const Report = z.object({
   ),
   limitations: z.array(Limitation),
   disclaimers: z.array(z.string()),
-  ghost: z.object({ answer: GhostAnswer, diff: GhostDiff }).nullable(),
+  ghost: z.object({ answer: StoredGhostAnswer, diff: GhostDiff }).nullable(),
   nextMoves: draft.next_moves,
   /** CHECKER warnings the report was accepted with. */
   warnings: z.array(ValidationIssue),

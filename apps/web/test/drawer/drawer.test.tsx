@@ -53,7 +53,7 @@ describe("the tabs", () => {
   it("summary: the check line, the counts, the confidence and what lowered it", () => {
     const html = panel("summary");
     expect(html).toContain('data-check="passed"');
-    expect(text(html)).toContain("All 25 numbers checked against Qloo data.");
+    expect(text(html)).toContain("All 25 numbers checked against their sources.");
     expect(text(html)).toMatch(/25 numbers · 21 sources · \d+ saved cop(y|ies), \d+ fetched live/);
     expect(text(html)).toMatch(/(High|Medium|Low) confidence/);
     expect(text(html)).toContain("not by the AI");
@@ -99,12 +99,12 @@ describe("the tabs", () => {
     expect(out).toContain("How we read the question");
     expect(out).toContain("What we looked up");
     expect(out).toContain("Where the plan changed");
-    expect(out).toContain("Every number was traced to its Qloo lookup");
+    expect(out).toContain("Every number was traced to its lookup in Qloo");
     expect(out).not.toMatch(/ANALYST|CHECKER|QUANT/);
   });
 
   it("says when a check was not passed", () => {
-    expect(checkLine(model)).toEqual({ ok: true, text: "All 25 numbers checked against Qloo data" });
+    expect(checkLine(model)).toEqual({ ok: true, text: "All 25 numbers checked against their sources" });
     const draft = modelOf(before(SAMPLE, "validation")).model;
     expect(checkLine(draft).ok).toBe(false);
   });

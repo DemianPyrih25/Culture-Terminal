@@ -1,6 +1,6 @@
-import { AGE_BUCKET_LABEL, METRO_LABEL, type RunState, type ToolCallState } from "@ct/contracts";
-import { DESK_LABEL, filterLabel, JOB_LABEL, MATCH_LABEL, plural, shortRequestId, TOOL_LABEL } from "./format";
-import { cacheLabel, refText, refsForCalls, type Ledger } from "./ledger";
+import { AGE_BUCKET_LABEL, METRO_LABEL, type IntentReadAs, type RunState, type ToolCallState } from "@ct/contracts";
+import { DESK_LABEL, filterLabel, JOB_LABEL, MATCH_LABEL, plural, TOOL_LABEL } from "./format";
+import { cacheLabel, refText, refsForCalls, shortReference, type Ledger } from "./ledger";
 import { stoppedEarly, uncheckedDigest } from "./live";
 import type {
   BriefMethod,
@@ -8,6 +8,7 @@ import type {
   BriefSources,
   CheckerLine,
   Interpretation,
+  ReadAs,
   MethodCall,
   MethodFallback,
   MethodPivot,
@@ -17,7 +18,8 @@ import type {
 
 /**
  * Mechanics last: how the brief was made (CLERK's reading, the plan steps joined with the tool calls
- * that ran them, ANALYST PIVOT and CODE FALLBACK lines, the CHECKER line) and every Qloo request.
+ * that ran them, ANALYST PIVOT and CODE FALLBACK lines, the CHECKER line) and every lookup: Qloo
+ * requests and, from Part 9, SEC EDGAR and US Census requests.
  */
 
 /** A call still running when the run ended stopped with it (run.end leaves tool calls as they were). */
@@ -66,6 +68,7 @@ export function methodSteps(state: RunState): MethodStep[] {
       phase: first?.phase ?? null,
       estimate: estimateOf(calls),
       actual: sum(calls.map((c) => c.qlooCallIds.length)),
+      publicActual: sum(calls.map((c) => c.publicCallIds?.length ?? 0)),
       status: stepStatus(calls, ended),
       calls: calls.map((c) => call(c, ended)),
       pivot: calls.some((c) => c.pivot),
@@ -116,6 +119,29 @@ export function methodFallbacks(state: RunState): MethodFallback[] {
   }));
 }
 
+/** "sales", "sales and prices", "sales, prices and rents". */
+function listText(items: readonly string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
+
+/**
+ * D41: a question read as the nearest job, as the chip and the plain sentence at the top of the answer
+ * (ANSWER_QUALITY §8). Null when the job fits the question as asked.
+ */
+export function readAsOf(intent: NonNullable<RunState["intent"]>): ReadAs | null {
+  // Optional for intents built before Part 9 that bypassed StoredIntent.
+  const readAs = intent.read_as as IntentReadAs | undefined;
+  if (!readAs?.nearest) return null;
+  const jobLabel = JOB_LABEL[intent.job];
+  const notCovered = [...new Set(readAs.not_covered.map((s) => s.trim()).filter((s) => s !== ""))];
+  const line =
+    notCovered.length > 0
+      ? `Read as ${jobLabel}, the closest question Culture Terminal answers. Not covered: ${listText(notCovered)}; there is no data on ${notCovered.length === 1 ? "it" : "them"} here.`
+      : `Read as ${jobLabel}, the closest question Culture Terminal answers. Part of the question is not covered.`;
+  return { jobLabel, notCovered, chip: `Read as: ${jobLabel}`, line };
+}
+
 /** CLERK's reading of the question: what the A02 "Understood as" row shows. */
 export function interpretation(state: RunState): Interpretation | null {
   const intent = state.intent;
@@ -151,6 +177,7 @@ export function interpretation(state: RunState): Interpretation | null {
     detail: [`${DESK_LABEL[intent.pillar]} lens`, names].filter(Boolean).join(" · "),
     assumptions: intent.assumptions,
     reframe: intent.safety.reframe,
+    readAs: readAsOf(intent),
     resolves: state.resolves.map((r) => ({
       mention: r.mention,
       entityType: r.entityType,
@@ -202,8 +229,9 @@ export function checkerLine(state: RunState): CheckerLine {
 
 export function buildMethod(state: RunState): BriefMethod {
   const steps = methodSteps(state);
-  const total = state.qloo.chips.length;
-  const cached = state.qloo.cached + state.qloo.reused;
+  const publicCalls = state.publicCalls ?? { network: 0, cached: 0, reused: 0, chips: [] };
+  const total = state.qloo.chips.length + publicCalls.chips.length;
+  const cached = state.qloo.cached + state.qloo.reused + publicCalls.cached + publicCalls.reused;
   return {
     line: `${plural(steps.length, "step")} · ${plural(total, "request")}, ${cached} cached · computed in code, then traced`,
     steps,
@@ -215,50 +243,62 @@ export function buildMethod(state: RunState): BriefMethod {
       clerk: state.report?.receipt.models.clerk ?? null,
       analyst: state.report?.receipt.models.analyst ?? state.model,
     },
-    requests: { total, network: state.qloo.network, cached: state.qloo.cached, reused: state.qloo.reused },
+    requests: {
+      total,
+      network: state.qloo.network + publicCalls.network,
+      cached: state.qloo.cached + publicCalls.cached,
+      reused: state.qloo.reused + publicCalls.reused,
+    },
   };
 }
 
-/** Every Qloo request in arrival order; `footnotes` is filled in once the footnotes are numbered. */
+/**
+ * Every lookup in arrival order, Qloo and public (SEC EDGAR, US Census); `footnotes` is filled in once
+ * the footnotes are numbered. A public lookup's `requestId` is its reference (a CIK, or the Census
+ * dataset, vintage and geography).
+ */
 export function buildSources(ledger: Ledger): BriefSources {
   const { state } = ledger;
-  const items: BriefSource[] = state.qloo.chips.map((chip, i) => {
-    const tool = chip.toolCallId ? ledger.toolCalls.get(chip.toolCallId) ?? null : null;
+  const items: BriefSource[] = ledger.calls.map((call, i) => {
+    const tool = call.toolCallId ? (ledger.toolCalls.get(call.toolCallId) ?? null) : null;
     return {
       n: i + 1,
-      qlooCallId: chip.qlooCallId,
-      toolCallId: chip.toolCallId,
+      qlooCallId: call.id,
+      source: call.source,
+      host: call.host,
+      toolCallId: call.toolCallId,
       tool: tool?.tool ?? null,
-      endpoint: chip.endpoint,
-      filterType: chip.filterType,
-      filterLabel: filterLabel(chip.filterType),
-      refs: refsForCalls(ledger, [chip.qlooCallId]).map((r) => refText(ledger, r)),
-      params: Object.entries(chip.paramsRedacted),
-      rows: chip.rows,
-      ms: chip.ms,
-      status: chip.status,
-      error: chip.error,
-      cache: chip.cache,
-      cacheAgeMs: chip.cacheAgeMs,
-      cacheLabel: cacheLabel(chip.cache, chip.cacheAgeMs, chip.ts, chip.originRunId),
-      originRunId: chip.originRunId,
-      requestId: chip.requestId,
-      shortRequestId: shortRequestId(chip.requestId),
-      at: chip.ts,
-      evidenceIds: ledger.evidenceByCall.get(chip.qlooCallId) ?? [],
+      endpoint: call.endpoint,
+      filterType: call.filterType,
+      filterLabel: filterLabel(call.filterType),
+      refs: refsForCalls(ledger, [call.id]).map((r) => refText(ledger, r)),
+      params: Object.entries(call.paramsRedacted),
+      rows: call.rows,
+      ms: call.ms,
+      status: call.status,
+      error: call.error,
+      cache: call.cache,
+      cacheAgeMs: call.cacheAgeMs,
+      cacheLabel: cacheLabel(call.cache, call.cacheAgeMs, call.ts, call.originRunId),
+      originRunId: call.originRunId,
+      requestId: call.requestId,
+      shortRequestId: shortReference(call.source, call.requestId),
+      at: call.ts,
+      evidenceIds: ledger.evidenceByCall.get(call.id) ?? [],
       footnotes: [],
     };
   });
   const endpoints = new Map<string, BriefSources["endpoints"][number]>();
-  for (const chip of state.qloo.chips) {
-    const key = `${chip.endpoint} ${chip.filterType ?? ""}`;
-    const e = endpoints.get(key) ?? { path: chip.endpoint, filterType: chip.filterType, filterLabel: filterLabel(chip.filterType), calls: 0 };
+  for (const call of ledger.calls) {
+    const key = `${call.endpoint} ${call.filterType ?? ""}`;
+    const e = endpoints.get(key) ?? { path: call.endpoint, filterType: call.filterType, filterLabel: filterLabel(call.filterType), calls: 0 };
     e.calls += 1;
     endpoints.set(key, e);
   }
-  const cached = state.qloo.cached + state.qloo.reused;
+  const publicCalls = state.publicCalls ?? { cached: 0, reused: 0 };
+  const cached = state.qloo.cached + state.qloo.reused + publicCalls.cached + publicCalls.reused;
   return {
-    line: `${plural(items.length, "request")} · ${cached} cached · ${plural(new Set(state.qloo.chips.map((c) => c.endpoint)).size, "endpoint")}`,
+    line: `${plural(items.length, "request")} · ${cached} cached · ${plural(new Set(ledger.calls.map((c) => c.endpoint)).size, "endpoint")}`,
     items,
     endpoints: [...endpoints.values()],
   };

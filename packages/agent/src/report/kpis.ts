@@ -45,15 +45,22 @@ const inMarket = (m: Metric): boolean => {
   return context !== undefined && !AgeBucket.safeParse(context).success && !context.startsWith("urn:");
 };
 
+/** A rank shift that rose: a climber slot never shows a shift of zero or less (ANSWER_QUALITY §3). */
+const rose = (m: Metric): boolean => (m.value ?? 0) > 0;
+
 const NEXT_GEN: readonly KpiPick[] = [one("share.youth_tilt"), one("dna.youth_index")];
 
+/** The SEC figures a brand note shows beside its taste read when the brand is listed (company_financials). */
+const FINANCIALS: readonly KpiPick[] = [one("fin.yoy"), one("fin.revenue")];
+
 export const KPI_SLOTS: Readonly<Record<Job, readonly KpiSlot[]>> = {
-  // Nearest audience, distinctiveness rank, next-gen rank, metros won (else the momentum label).
+  // Nearest audience, distinctiveness rank, next-gen rank, metros won (else the momentum label), reported revenue change when listed.
   brand_health: [
     { picks: [one("subs.similarity")], count: 1 },
     { picks: [one("subs.distinctiveness")], count: 1 },
     { picks: NEXT_GEN, count: 1 },
     { picks: [one("share.metros_won"), one("mom.label")], count: 1 },
+    { picks: FINANCIALS, count: 1 },
   ],
   // The pair's similarity (else its fit), metros won A/B, youth tilt A/B.
   head_to_head: [
@@ -70,7 +77,7 @@ export const KPI_SLOTS: Readonly<Record<Job, readonly KpiSlot[]>> = {
   // The best tenant fit, the top climber, NEW tags, the most over-represented tag.
   tenant_mix: [
     { picks: [one("tenant.fit")], count: 1, top: true },
-    { picks: [one("tenant.rank_shift")], count: 1, top: true },
+    { picks: [one("tenant.rank_shift", { where: rose })], count: 1, top: true },
     { picks: [one("block.new_tag")], count: 1 },
     { picks: [one("block.rank_delta")], count: 1, top: true },
   ],
@@ -78,7 +85,7 @@ export const KPI_SLOTS: Readonly<Record<Job, readonly KpiSlot[]>> = {
   area_profile: [
     { picks: [one("block.new_tag")], count: 1 },
     { picks: [one("block.rank_delta")], count: 2, top: true },
-    { picks: [one("tenant.rank_shift"), one("xdom.under_the_radar")], count: 1, top: true },
+    { picks: [one("tenant.rank_shift", { where: rose }), one("xdom.under_the_radar")], count: 1, top: true },
   ],
   // Best fit per category, the UNDER-THE-RADAR count, the strongest market.
   sponsorship: [
@@ -98,6 +105,35 @@ export const KPI_SLOTS: Readonly<Record<Job, readonly KpiSlot[]>> = {
     { picks: [one("dna.distinctive_tags")], count: 1 },
     { picks: [one("xdom.under_the_radar")], count: 2 },
     { picks: [one("trvl.hidden_pocket")], count: 1, top: true },
+  ],
+  // The best twins by rho, the shared NEW tags, the source area's resident median income.
+  taste_twins: [
+    { picks: [one("twin.rho")], count: 2, top: true },
+    { picks: [one("twin.shared_new"), one("block.new_tag")], count: 1 },
+    { picks: [one("econ.median_hh_income")], count: 1 },
+  ],
+  // The best-scored partners, the shared audience tags, an under-the-radar partner.
+  brand_collab: [
+    { picks: [one("rank.fit"), one("xdom.fit")], count: 3, top: true },
+    { picks: [one("dna.distinctive_tags")], count: 1 },
+    { picks: [one("xdom.under_the_radar")], count: 1 },
+  ],
+  // The best-scored creators (one per kind where scored), the under-the-radar picks.
+  creator_fit: [
+    { picks: [one("rank.fit"), one("xdom.fit")], count: 3, top: true },
+    { picks: [one("xdom.under_the_radar")], count: 2 },
+  ],
+  // Analog precision, the kept and vetoed verdicts, the subject's reported revenue change when listed.
+  launch_test: [
+    { picks: [one("cnpt.precision")], count: 1 },
+    { picks: [one("cnpt.verdict")], count: 2 },
+    { picks: FINANCIALS, count: 1 },
+  ],
+  // Each city's share percentile (the named entity's), the cities won, the biggest fingerprint gap.
+  city_compare: [
+    { picks: [one("share.pct", { where: inMarket })], count: 4, top: true },
+    { picks: [one("share.metros_won")], count: 1 },
+    { picks: [one("block.rank_delta")], count: 1, top: true },
   ],
 };
 

@@ -107,6 +107,23 @@ export function namedMarkets(intent: Intent, markets: readonly RunMarket[]): Mar
 }
 
 /**
+ * The cities a city_compare question names (CLERK's geo.cities), as market ids config/metros.json
+ * lists, primary first, without repeats, at most four. CLERK writes snake-case market ids; a city it
+ * writes as a name ("New York", "St. Louis") matches a market's label or search name by whole words.
+ * Anything config does not list is left out rather than guessed; the caller needs two or more.
+ */
+export function compareCities(intent: Pick<Intent, "geo">): MarketId[] {
+  const found = intent.geo.cities.flatMap((text) => {
+    const id = MarketId.safeParse(text.trim().toLowerCase().replace(/[\s.-]+/g, "_").replace(/_+$/, ""));
+    if (id.success && byId.has(id.data)) return [id.data];
+    const named = words(text);
+    const market = MARKET_CATALOGUE.find((m) => words(m.label) === named || words(m.query) === named);
+    return market === undefined ? [] : [market.id];
+  });
+  return [...new Set(found)].slice(0, 4);
+}
+
+/**
  * The market tier the CLERK notes ask for ("eight secondary-market dates", clerk.md), by whole word,
  * or null when they name neither tier or both.
  */

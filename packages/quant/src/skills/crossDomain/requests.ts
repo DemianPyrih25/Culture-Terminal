@@ -16,7 +16,7 @@ import { categoryTagOf } from "../peerSelection";
  * The S9 requests (SPEC §5.3 S9; PROBE_FINDINGS "Part 5 consequences" 5): one open insights call per
  * domain with the seeds, the seed tags as taste context, explainability and a popularity cap. Every
  * parameter is allowlisted for all five domains (G15, P5); the brand call also excludes the seeds'
- * own genre:brand category (P5).
+ * own genre:brand category, its top-level branch (P5; categoryBranchOf).
  */
 
 export type CrossDomainInput = ToolInput<"cross_domain">;
@@ -70,7 +70,7 @@ export interface CrossDomainPlan {
   seeds: RegisteredEntity[];
   /** Genre taxonomy seed tags only: descriptive tags give no signal (G1), category tags are filters. */
   tags: RegisteredTag[];
-  /** The brand seeds' genre:brand leaves, excluded from the brand domain (P5). */
+  /** The brand seeds' own genre:brand categories (top-level branches), excluded from the brand domain (P5). */
   excludeTags: EntityTagRef[];
   domains: Domain[];
   popularityMax: number;
@@ -101,13 +101,31 @@ export function planCrossDomain(input: CrossDomainInput, registry: EntityRegistr
   const excludeTags: EntityTagRef[] = [];
   if (domains.includes("brand")) {
     for (const seed of seeds.filter((s) => s.type === "brand")) {
-      const category = categoryTagOf(seed);
+      const category = categoryBranchOf(seed);
       if (category === null) {
         notices.push(`${safeName(seed.name)} has no genre:brand tag, so the brand list may include its own category.`);
       } else if (!excludeTags.some((t) => t.tagId === category.tagId)) excludeTags.push(category);
     }
   }
   return { seeds, tags, excludeTags, domains, popularityMax: input.popularity_max, notices };
+}
+
+const BRAND_GENRE = "urn:tag:genre:brand:";
+
+/**
+ * A brand's own category as the brand call excludes it: the top-level genre:brand branch of its
+ * category path ("urn:tag:genre:brand:beverage" for a ":beverage:water" leaf). Qloo tags many brands
+ * with the top level only, so excluding the seed's deepest leaf left its own-category rivals in the
+ * list (a live brand_collab discovery returned 10 of 15 brands from the seed's own branch, none of
+ * them carrying its leaf). Null when the seed has no genre:brand tag.
+ */
+export function categoryBranchOf(seed: { tags: readonly EntityTagRef[] }): EntityTagRef | null {
+  const leaf = categoryTagOf(seed);
+  if (leaf === null) return null;
+  const top = leaf.tagId.slice(BRAND_GENRE.length).split(":")[0] ?? "";
+  if (top === "") return leaf;
+  const branchId = `${BRAND_GENRE}${top}`;
+  return seed.tags.find((t) => t.tagId === branchId) ?? { ...leaf, tagId: branchId };
 }
 
 /** One domain's request, without filter.type (the insights() argument). */

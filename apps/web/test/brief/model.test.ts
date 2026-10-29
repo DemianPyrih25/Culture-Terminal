@@ -436,7 +436,8 @@ describe("buildBriefModel: a finished brief", () => {
     ]);
     expect(method.steps[2]).toMatchObject({ pivot: true, triggerFindingId: "F1" });
     expect(method.steps[2]?.purpose).toMatch(/^Follow-up on F1: /);
-    expect(method.line).toBe("3 steps · 4 requests, 3 cached · computed in code, then traced");
+    // 4 Qloo requests and 1 cached SEC EDGAR request (the fixture's public call).
+    expect(method.line).toBe("3 steps · 5 requests, 4 cached · computed in code, then traced");
     expect(method.pivots.map((p) => p.line)).toEqual([expect.stringMatching(/^ANALYST PIVOT · F1 → Cultural neighbourhood: .+/)]);
     expect(method.fallbacks.map((f) => f.line)).toEqual(["CODE FALLBACK · POLYGON → POINT: polygon returned no tags"]);
     expect(method.interpretation).toMatchObject({

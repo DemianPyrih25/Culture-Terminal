@@ -25,8 +25,8 @@ const siteIntent = (mentions: Mention[], metro: MetroId | null = "austin", areaT
     pillar: "location",
     job: "site_selection",
     mentions,
-    geo: { metro, area: areaText, unsupported_place: null, market: null },
-    constraints: { concepts: ["ramen counter"], sponsor_categories: [], domains: [], ages: [], notes: [] },
+    geo: { metro, area: areaText, unsupported_place: null, market: null, target_metro: null, cities: [] },
+    constraints: { concepts: ["ramen counter"], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
     assumptions: [],
   });
 

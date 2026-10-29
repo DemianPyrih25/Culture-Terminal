@@ -22,7 +22,7 @@ import { formatUsd } from "./format";
 import { EXIT, safeIo, type CliIo } from "./io";
 import { createRunPersistence, type RunPersistence } from "./persist";
 import { kvLocalityApi, localitiesKvKey, pgKv, type KvStore } from "./localities";
-import { CliError, openCliQloo, stderrLogger, type CliQloo } from "./qloo-setup";
+import { CliError, describePublicData, openCliQloo, stderrLogger, type CliQloo } from "./qloo-setup";
 import { renderAgentResult } from "./report-view";
 import { cliRunId } from "./skill-cli";
 import { checkSpend, DEFAULT_DEV_USD_CAP, readSpend, readUsdCap, reserveSpend, settleSpend, SPEND_FILE } from "./spend";
@@ -39,7 +39,8 @@ export const RUN_AGENT_USAGE = [
   "  --memory           cache Qloo answers in memory instead of the shared Postgres cache (with --mock-qloo only)",
   "  --persist          store the run and its events in Postgres (runs, run_events)",
   "  -h, --help         this text",
-  "env: ANTHROPIC_API_KEY (required), LLM_DEV_USD_CAP (default 15), QLOO_* as for the app",
+  "env: ANTHROPIC_API_KEY (required), LLM_DEV_USD_CAP (default 15), QLOO_* as for the app,",
+  "     SEC_USER_AGENT (live SEC filings) and CENSUS_API_KEY (live Census figures); QLOO_MOCK=1 mocks both",
   "Ctrl+C cancels the run; the spend tally holds the run's worst case until it returns.",
   "exit codes: 0 completed, 1 failed or not completed, 2 bad arguments or no --yes, 3 needs a choice",
 ].join("\n");
@@ -313,7 +314,10 @@ export async function runAgentCommand(argv: readonly string[], deps: AgentCliDep
     }
   };
 
-  io.out(`run ${runId} · Qloo ${qloo.client.env} · tag ${qloo.tag} · cache ${qloo.storeLabel}${persistence !== null ? " · persisted" : ""}\n`);
+  io.out(
+    `run ${runId} · Qloo ${qloo.client.env} · tag ${qloo.tag} · cache ${qloo.storeLabel} · public data ${describePublicData(qloo.publicdata)}` +
+      `${persistence !== null ? " · persisted" : ""}\n`,
+  );
   const startedAt = now().getTime();
   const trace = createTracePrinter(io, () => now().getTime());
   const emit = (event: EventInput): void => {
@@ -330,6 +334,7 @@ export async function runAgentCommand(argv: readonly string[], deps: AgentCliDep
       mode: args.mode,
       emit,
       qloo: qloo.client,
+      publicdata: qloo.publicdata,
       anthropic: (deps.createAnthropic ?? createAnthropic)(apiKey),
       limits,
       signal,

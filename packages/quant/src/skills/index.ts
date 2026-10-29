@@ -11,6 +11,10 @@ import { crossDomainSkill } from "./crossDomain";
 import { sponsorSlateSkill } from "./sponsorSlate";
 import { peerLandscapeSkill } from "./peerLandscape";
 import { resolveEntitiesSkill } from "./resolve";
+import { tasteTwinsSkill } from "./tasteTwins";
+import { conceptVectorSkill } from "./conceptVector";
+import { companyFinancialsSkill } from "./companyFinancials";
+import { areaEconomicsSkill } from "./areaEconomics";
 
 /**
  * The skills behind the ANALYST tools (PLAN §10.1): one per SkillId, each in its own module. Every
@@ -29,9 +33,19 @@ export const SKILLS: SkillRegistry = {
   block_dna: blockDnaSkill,
   cross_domain: crossDomainSkill,
   sponsor_slate: sponsorSlateSkill,
+  taste_twins: tasteTwinsSkill,
+  concept_vector: conceptVectorSkill,
+  company_financials: companyFinancialsSkill,
+  area_economics: areaEconomicsSkill,
 };
 
 export { unavailableSkill } from "./unavailable";
+// The listed-company map S13 reads (config/listed_companies.json); the agent offers company_financials only for a mapped brand.
+export { LISTED_COMPANIES, listedCompanyOf, makeCompanyFinancialsSkill, type ListedCompanies, type ListedCompany } from "./companyFinancials";
+// Request builders shared with tools/dev/cli/warm-metros.ts, so warmed city sides are the keys skills ask for.
+export { brandParams, tagParams } from "./blockDna/calls";
+export { cityLocation } from "./blockDna/location";
+export { PANEL_MIN_CITIES, panelMetros } from "./blockDna/city";
 export { resolveEntitiesSkill, classifyMatches, searchParams, unmatchedLimitation, SEARCH_TAKE } from "./resolve";
 export type { MatchAlternative, MatchClassification, ResolveMatchClass, SearchResult } from "./resolve";
 export { peerLandscapeSkill, estimatePeerLandscapeCalls, discoveryParams, DISCOVERY_TAKE } from "./peerLandscape";

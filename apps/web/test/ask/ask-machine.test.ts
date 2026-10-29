@@ -347,9 +347,10 @@ describe("readingGap", () => {
     pillar: "investment",
     job: "brand_health",
     mentions: [],
-    geo: { metro: null, area: null, unsupported_place: null, market: null },
-    constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
+    geo: { metro: null, area: null, unsupported_place: null, market: null, target_metro: null, cities: [] },
+    constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
     safety: { allowed: true, category: null, reframe: null },
+    read_as: { nearest: false, not_covered: [] },
     assumptions: [],
     mnemonic: "",
   };
@@ -373,7 +374,7 @@ describe("readingGap", () => {
       lens: "",
     };
   };
-  const austin = { metro: "austin" as const, area: null, unsupported_place: null, market: null };
+  const austin = { metro: "austin" as const, area: null, unsupported_place: null, market: null, target_metro: null, cities: [] };
   const concepts = (...c: string[]) => ({ ...blank.constraints, concepts: c });
 
 
@@ -399,9 +400,28 @@ describe("readingGap", () => {
       [{ job: "area_profile" }, "A neighbourhood and its city, one of the 13 cities we map", `Add a neighbourhood and its city: ${CITIES}.`],
       [{ job: "tenant_mix", geo: austin }, "A neighbourhood in Austin", "Add a neighbourhood in Austin."],
       [
-        { job: "area_profile", geo: { metro: null, area: "Riverside", unsupported_place: null, market: null } },
+        { job: "area_profile", geo: { ...blank.geo, area: "Riverside" } },
         "The neighbourhood's city, one of the 13 cities we map",
         `Add the neighbourhood's city: ${CITIES}.`,
+      ],
+      [{ job: "brand_collab" }, "A brand to find collaboration partners for", "Add the brand you want to find collaboration partners for."],
+      [{ job: "creator_fit" }, "A brand whose audience the creators should fit", "Add the brand whose audience the creators should fit."],
+      [{ job: "launch_test" }, "The product or concept to test", "Add the product or concept you want to test, in a few words."],
+      [{ job: "city_compare", geo: { ...blank.geo, cities: ["austin"] } }, "Two to four US cities to compare", "Add the two to four US cities you want to compare."],
+      [
+        { job: "taste_twins", geo: { ...austin, area: "Riverside" } },
+        "The city to look in, one of the 13 cities we map",
+        `Add the city to look for its twin in: ${CITIES}.`,
+      ],
+      [
+        { job: "taste_twins", geo: { ...blank.geo, target_metro: "denver" } },
+        "The area to match and its city, one of the 13 cities we map",
+        `Add the neighbourhood you want to match and its city: ${CITIES}.`,
+      ],
+      [
+        { job: "taste_twins" },
+        "An area, its city and a city to look in, one of the 13 cities we map",
+        `Add the neighbourhood you want to match, its city and the city to look for its twin in: ${CITIES}.`,
       ],
     ];
     for (const [over, need, text] of short) {
@@ -421,6 +441,11 @@ describe("readingGap", () => {
       { job: "site_selection", geo: austin, constraints: concepts("ramen counter") },
       { job: "area_profile", geo: { ...austin, area: "Riverside" } },
       { job: "tenant_mix", geo: { ...austin, area: "Riverside" } },
+      { job: "brand_collab", mentions: [brand("Juniper Cola", "primary")] },
+      { job: "creator_fit", mentions: [brand("Juniper Cola", "primary")] },
+      { job: "launch_test", constraints: concepts("small-batch hot sauce") },
+      { job: "city_compare", geo: { ...blank.geo, cities: ["austin", "denver", "nashville"] } },
+      { job: "taste_twins", geo: { ...austin, area: "Riverside", target_metro: "denver" } },
     ];
     for (const over of complete) {
       const reading = understood(over);

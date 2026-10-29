@@ -4,7 +4,7 @@ import path from "node:path";
 import { closeDb, getKv, isConnectionError, migrateUrl, resolveDatabaseUrl, type Queryable } from "@ct/db";
 import { audienceCatalogueKvKey, readAudienceCatalogue, resolveQlooEnv } from "@ct/qloo";
 import { shutdownGraceMsFromEnv } from "./config";
-import { getDatabase, getRunManager, peekQlooClient } from "./container";
+import { getDatabase, getRunManager, peekPublicDataClient, peekQlooClient } from "./container";
 import { logLocalityCoverage, readLocalityCoverage } from "./localities";
 import { log } from "./log";
 
@@ -187,6 +187,24 @@ async function flushQloo(): Promise<void> {
   }
 }
 
+/** The same for the SEC and Census client (call-log rows and shared cache entries), at most QLOO_FLUSH_MS. */
+async function flushPublicData(): Promise<void> {
+  const client = peekPublicDataClient();
+  if (!client) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<"deadline">((resolve) => {
+    timer = setTimeout(() => resolve("deadline"), QLOO_FLUSH_MS);
+  });
+  try {
+    const outcome = await Promise.race([client.flush().then(() => "flushed" as const), deadline]);
+    if (outcome === "deadline") log.warn({ waitedMs: QLOO_FLUSH_MS }, "SIGTERM: public-data writes still pending; going on without them");
+  } catch (err) {
+    log.warn({ err }, "SIGTERM: the public-data flush failed");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * SIGTERM (a Railway redeploy): refuse new runs at once, give active runs the grace period, then
  * mark the rest incomplete, and let the Qloo client finish its writes. With NEXT_MANUAL_SIG_HANDLE
@@ -207,7 +225,7 @@ export function installShutdownHandler(): void {
         log.error({ err }, "drain failed");
       }
       // Before the pool closes: the quota snapshot is otherwise written at most every 5 s.
-      await flushQloo();
+      await Promise.all([flushQloo(), flushPublicData()]);
       if (process.env.NEXT_MANUAL_SIG_HANDLE) {
         await closeDb().catch(() => undefined);
         process.exit(0);

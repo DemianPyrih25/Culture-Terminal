@@ -108,11 +108,11 @@ describe("buildRunContext", () => {
         },
       },
     });
-    const intent = intentFor({ job: "area_profile", pillar: "location", geo: { metro: "nashville", area: "Maple Hollow", unsupported_place: null, market: null } });
+    const intent = intentFor({ job: "area_profile", pillar: "location", geo: { metro: "nashville", area: "Maple Hollow", unsupported_place: null, market: null, target_metro: null, cities: [] } });
     expect(buildRunContext(input({ geo }, intent))).toContain("AREAS (nashville): maple_hollow (Maple Hollow)");
     expect(buildRunContext(input({ geo }, intent))).not.toContain("AREA NOT ON THE MAP");
     // A named area the gazetteer cannot match is never dropped silently: the note must say it has no numbers of its own.
-    const unmatched = intentFor({ job: "site_selection", pillar: "location", geo: { metro: "nashville", area: "Quarry Glen Village", unsupported_place: null, market: null } });
+    const unmatched = intentFor({ job: "site_selection", pillar: "location", geo: { metro: "nashville", area: "Quarry Glen Village", unsupported_place: null, market: null, target_metro: null, cities: [] } });
     expect(buildRunContext(input({ geo }, unmatched))).toContain(
       'AREA NOT ON THE MAP: the question names "Quarry Glen Village", which matches no nashville area id, so it has no lift, rank or competitor count of its own.',
     );
@@ -126,7 +126,7 @@ describe("buildRunContext", () => {
     const geo = createGeo();
     const all = geo.neighbourhoods("los_angeles");
     expect(all.length).toBeGreaterThan(AREAS_MAX);
-    const intent = intentFor({ job: "area_profile", pillar: "location", geo: { metro: "los_angeles", area: "Venice", unsupported_place: null, market: null } });
+    const intent = intentFor({ job: "area_profile", pillar: "location", geo: { metro: "los_angeles", area: "Venice", unsupported_place: null, market: null, target_metro: null, cities: [] } });
     const line = buildRunContext(input({ geo }, intent))
       .split("\n")
       .find((l) => l.startsWith("AREAS"));
@@ -147,7 +147,7 @@ describe("buildRunContext", () => {
     expect(buildRunContext(input({ markets }))).toContain(
       "MARKETS: major: nashville (Nashville, TN), austin (Austin, TX), portland (Portland, OR); secondary: knoxville (Knoxville, TN), boise (Boise, ID)\n",
     );
-    const intent = intentFor({ job: "tenant_mix", pillar: "location", geo: { metro: "austin", area: null, unsupported_place: null, market: null } });
+    const intent = intentFor({ job: "tenant_mix", pillar: "location", geo: { metro: "austin", area: null, unsupported_place: null, market: null, target_metro: null, cities: [] } });
     expect(buildRunContext(input({ markets }, intent))).toContain("MARKETS: major: nashville (Nashville, TN), austin (Austin, TX)\n");
   });
 
@@ -156,8 +156,8 @@ describe("buildRunContext", () => {
       job: "site_selection",
       pillar: "location",
       mentions: [],
-      geo: { metro: "austin", area: null, unsupported_place: null, market: null },
-      constraints: { concepts: ["cocktail bar"], sponsor_categories: [], domains: [], ages: [], notes: [] },
+      geo: { metro: "austin", area: null, unsupported_place: null, market: null, target_metro: null, cities: [] },
+      constraints: { concepts: ["cocktail bar"], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
     });
     const text = buildRunContext(input({}, intent));
     expect(text).toContain("- find_tags (TAGS) for 1 concept(s): running now, about 7 network calls.");
@@ -180,11 +180,38 @@ describe("buildRunContext", () => {
     expect(text).toContain("- destination_affinity (TRVL) from R1: running now, about 1 network calls.");
     expect(text).toContain(
       "- share_of_taste (SHARE) for R1 and the person peers your wave-1 resolve_entities registers, by markets nashville, austin, nyc, los_angeles, chicago, atlanta, denver, seattle: " +
-        "runs once your wave-1 calls return, about 8 network calls; with no such peer from them it reads the scan's own neighbours of that type, " +
-        "and is skipped without either.",
+        "runs once your wave-1 calls return, about 8 network calls. Give it peers: resolve two or three same-type rivals your prior names in wave 1. " +
+        "With none it reads the scan's own neighbours of that type, which are taste neighbours, not rivals, and is skipped without either.",
     );
     expect(text).not.toContain("share_of_taste (SHARE): skipped");
     expect(text).toContain("- Opening scan: about 9 network calls of that budget.");
+  });
+});
+
+describe("buildRunContext: the Part 9 jobs", () => {
+  const geo = createGeo({ gazetteers: {} });
+  const intent = (patch: Partial<Intent>) => intentFor({ pillar: "location", ...patch });
+
+  it("lists every market for city_compare with the cities compared, and says plainly when fewer than two are known", () => {
+    const compare = intent({ job: "city_compare", geo: { ...intentFor().geo, cities: ["austin", "Boise", "atlantis"] } });
+    const text = buildRunContext(input({ markets: MARKET_CATALOGUE, geo }, compare));
+    expect(text).toMatch(/^MARKETS: major: .*boise \(Boise, ID\)/m);
+    expect(text).toContain("CITIES COMPARED: austin (Austin, TX), boise (Boise, ID) (1 other named city is not on MARKETS and has no figures)");
+    const one = intent({ job: "city_compare", geo: { ...intentFor().geo, cities: ["austin", "<b>atlantis</b>"] } });
+    expect(buildRunContext(input({ markets: MARKET_CATALOGUE, geo }, one))).toContain(
+      "CITIES COMPARED: fewer than two of the question's cities are on MARKETS (named: austin, &lt;b&gt;atlantis&lt;/b&gt;), so no side-by-side comparison can run;",
+    );
+  });
+
+  it("lists the areas of both taste_twins cities, each labelled with its role", () => {
+    const twins = intent({ job: "taste_twins", geo: { ...intentFor().geo, metro: "nashville", area: "Riverbend", target_metro: "austin" } });
+    const lines = buildRunContext(input({ geo }, twins)).split("\n").filter((l) => l.startsWith("AREAS ("));
+    expect(lines.map((l) => l.slice(0, l.indexOf(":")))).toEqual(["AREAS (nashville, the source city)", "AREAS (austin, the target city)"]);
+  });
+
+  it("tells the model which tools still answer when Qloo is off and a public-data client is on", () => {
+    const text = buildRunContext(input({ qlooEnabled: false, publicData: true, scan: { plan: emptyScan(), estimates: new Map() } }));
+    expect(text).toContain("Every Qloo tool answers with no data, so the note can only be insufficient_evidence. Only company_financials and area_economics still read SEC and Census data.");
   });
 });
 
@@ -193,18 +220,27 @@ describe("evidenceStatus", () => {
 
   it("counts only ok bundles and names them while V7 would still force the signal", () => {
     expect(evidenceStatus([bundle("E1", "ok"), bundle("E2", "ok"), bundle("E3", "partial")], true, true)).toBe(
-      "EVIDENCE: 2 evidence bundles are ok (E1, E2). A report submitted with fewer than 3 ok bundles is forced to insufficient_evidence (V7), " +
+      "EVIDENCE: 2 Qloo evidence bundles are ok (E1, E2). A report submitted with fewer than 3 ok bundles is forced to insufficient_evidence (V7), " +
         "even when the priors look resolved. Before submit_report, follow up on the finding most likely to change the signal " +
         "with an available tool; submit now only if none can add an ok bundle.",
     );
-    expect(evidenceStatus([bundle("E1", "ok")], true, true)).toMatch(/^EVIDENCE: 1 evidence bundle is ok \(E1\)\./);
-    expect(evidenceStatus([bundle("E1", "empty")], true, true)).toMatch(/^EVIDENCE: no evidence bundle is ok\./);
+    expect(evidenceStatus([bundle("E1", "ok")], true, true)).toMatch(/^EVIDENCE: 1 Qloo evidence bundle is ok \(E1\)\./);
+    expect(evidenceStatus([bundle("E1", "empty")], true, true)).toMatch(/^EVIDENCE: no Qloo evidence bundle is ok\./);
+  });
+
+  it("never counts SEC or Census bundles towards V7's three ok Qloo bundles", () => {
+    const sec = { id: "E3" as const, status: "ok" as const, source: "sec" as const };
+    const census = { id: "E4" as const, status: "ok" as const, source: "census" as const };
+    expect(evidenceStatus([bundle("E1", "ok"), bundle("E2", "ok"), sec, census], true, true)).toMatch(
+      /^EVIDENCE: 2 Qloo evidence bundles are ok \(E1, E2\)\./,
+    );
+    expect(evidenceStatus([bundle("E1", "ok"), bundle("E2", "ok"), { ...sec, source: "qloo" as const }], true, true)).toBeNull();
   });
 
   it("only states the V7 outcome when turn 3 comes next, since no follow-up is left", () => {
     const line = evidenceStatus([bundle("E1", "ok")], true, false);
     expect(line).toBe(
-      "EVIDENCE: 1 evidence bundle is ok (E1). With fewer than 3 ok bundles the signal is forced to insufficient_evidence (V7); " +
+      "EVIDENCE: 1 Qloo evidence bundle is ok (E1). With fewer than 3 ok bundles the signal is forced to insufficient_evidence (V7); " +
         "say in the report what the missing evidence leaves open.",
     );
     expect(line).not.toMatch(/follow up/i);

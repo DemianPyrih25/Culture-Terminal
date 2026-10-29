@@ -1,6 +1,7 @@
 import "server-only";
 import { Lane, Mode, QUESTION_MAX_CHARS, reduceRunEvents } from "@ct/contracts";
-import { getDatasetEnvelope, getRun, isConnectionError, lastSeq, pingDb, requestCancel } from "@ct/db";
+import { getDatasetEnvelope, getRun, isConnectionError, lastPublicSuccess, lastSeq, pingDb, requestCancel } from "@ct/db";
+import type { PublicDataClient } from "@ct/publicdata";
 import type { QlooClient } from "@ct/qloo";
 import { z } from "zod";
 import { isRunId } from "../lib/run-id";
@@ -14,6 +15,7 @@ import {
   getDatabase,
   getMode,
   getModeService,
+  getPublicDataClient,
   getQlooClient,
   getRunManager,
   getStoredMode,
@@ -501,6 +503,36 @@ function qlooHealth() {
   };
 }
 
+/**
+ * SEC EDGAR and US Census (PLAN §10.3, Part 9): which sources can be called, and the last 2xx network
+ * call to each in this environment (ISO, or null when there has been none or the database cannot say).
+ * A client that cannot be made (a malformed SEC_USER_AGENT) reads as neither configured.
+ */
+async function publicDataHealth(dbOk: boolean) {
+  let client: PublicDataClient;
+  try {
+    client = getPublicDataClient();
+  } catch {
+    return { env: null, configured: { sec: false, census: false }, sec_last_success: null, census_last_success: null };
+  }
+  const last = async (source: "sec" | "census") => {
+    if (!dbOk) return null;
+    const at = await within(
+      lastPublicSuccess(getDatabase(), { env: client.env, source }).catch(() => null),
+      HEALTH_DB_TIMEOUT_MS,
+      null,
+    );
+    return at === null ? null : at.toISOString();
+  };
+  const [sec, census] = await Promise.all([last("sec"), last("census")]);
+  return {
+    env: client.env,
+    configured: { sec: client.configured.sec, census: client.configured.census },
+    sec_last_success: sec,
+    census_last_success: census,
+  };
+}
+
 /** A lane's decision as health prints it. */
 function laneHealth(decision: ModeDecision) {
   return { mode: decision.mode, breaker: decision.breaker, reason: decision.reason, until: decision.until };
@@ -545,6 +577,7 @@ export async function health(): Promise<Response> {
   }
   const access = getAccessService();
   const modes = getModeService();
+  const publicdata = await publicDataHealth(ok);
   return json(
     {
       ok,
@@ -557,6 +590,7 @@ export async function health(): Promise<Response> {
       migrations,
       runs,
       qloo: qlooHealth(),
+      publicdata,
       llm: {
         today_usd: todayUsd === null ? null : Math.round(todayUsd * 10_000) / 10_000,
         cap: llmDailyUsdCapFromEnv(),

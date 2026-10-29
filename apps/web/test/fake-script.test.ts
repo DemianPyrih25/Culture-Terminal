@@ -46,8 +46,9 @@ describe("fake run script", () => {
 
   it("covers every event type except the ones a fake run never takes", () => {
     const seen = new Set<RunEventType>(events.map((e) => e.type));
-    // The brand-health sample's scan runs every scan skill and walks no location ladder, so it has no CODE FALLBACK.
-    const notInFakeRun: RunEventType[] = ["needs_input", "ghost", "error", "fallback"];
+    // The brand-health sample's scan runs every scan skill that applies and walks no location ladder, so it has
+    // no CODE FALLBACK. Its brand is invented and not a listed company, so no SEC or Census call (`public`) is made.
+    const notInFakeRun: RunEventType[] = ["needs_input", "ghost", "error", "fallback", "public"];
     for (const type of RUN_EVENT_TYPES) {
       if (!notInFakeRun.includes(type)) expect(seen, type).toContain(type);
     }
@@ -107,8 +108,9 @@ describe("fake run script: the brand-health sample replayed as a test run", () =
     expect(script.steps.map((s) => s.input.type)).toEqual(sample.slice(0, -1).map((e) => e.type));
   });
 
-  it("replays a sample whose opening scan ran every scan skill of its job", () => {
-    const planned = SCAN_TABLE.brand_health.map((entry) => entry.tool);
+  it("replays a sample whose opening scan ran every scan skill of its job that applies", () => {
+    // company_financials joins only for a brand in config/listed_companies.json; the sample's brand is invented.
+    const planned = SCAN_TABLE.brand_health.map((entry) => entry.tool).filter((tool) => tool !== "company_financials");
     const ran = sample.flatMap((e) => (e.type === "tool.start" && e.phase === "scan" ? [e.tool] : []));
     expect(ran).toEqual(planned);
   });

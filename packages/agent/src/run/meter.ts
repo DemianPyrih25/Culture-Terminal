@@ -1,7 +1,8 @@
 import type { Emit, EventInput, EventInputOf, TokenUsage } from "@ct/contracts";
+import type { PublicCallRecord } from "@ct/publicdata";
 import type { QlooCallRecord } from "@ct/qloo";
 import { addTokenUsage, emptyTokenUsage } from "../pricing";
-import { QLOO_CALL_BUCKET, type ReceiptQlooCall } from "../report/receipt";
+import { QLOO_CALL_BUCKET, type ReceiptPublicCall, type ReceiptQlooCall } from "../report/receipt";
 
 /**
  * Run plumbing shared by every stage: the guarded event sink and the run's meters (LLM spend,
@@ -48,6 +49,7 @@ export interface QlooCounts {
 
 export class RunMeter {
   readonly #calls = new Map<string, QlooCallRecord>();
+  readonly #publicCalls = new Map<string, PublicCallRecord>();
   #usd = 0;
   #unmeteredUsd = 0;
   #tokens: TokenUsage = emptyTokenUsage();
@@ -59,6 +61,11 @@ export class RunMeter {
 
   recordCall(record: QlooCallRecord): void {
     this.#calls.set(record.qlooCallId, record);
+  }
+
+  /** One SEC or Census call: it costs no Qloo call, so it never counts in qloo(); the receipt lists it apart. */
+  recordPublicCall(record: PublicCallRecord): void {
+    this.#publicCalls.set(record.publicCallId, record);
   }
 
   /** One LLM response (or the CLERK request): measured USD and its tokens. */
@@ -100,6 +107,10 @@ export class RunMeter {
       cache: c.cache,
       rows: c.rows,
     }));
+  }
+
+  receiptPublicCalls(): ReceiptPublicCall[] {
+    return [...this.#publicCalls.values()].map((c) => ({ publicCallId: c.publicCallId, source: c.source, endpoint: c.endpoint }));
   }
 
   /** The running totals; each `usage` event replaces the last. */

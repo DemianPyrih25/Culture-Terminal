@@ -273,7 +273,7 @@ export interface ReadingGap {
   text: string;
 }
 
-type NamedJob = Exclude<Job, "head_to_head" | "site_selection" | "area_profile" | "tenant_mix">;
+type NamedJob = Exclude<Job, "head_to_head" | "site_selection" | "area_profile" | "tenant_mix" | "taste_twins" | "launch_test" | "city_compare">;
 
 /** What the named jobs need when the question names no one. */
 const NAME_NEED: Readonly<Record<NamedJob, ReadingGap>> = {
@@ -284,6 +284,8 @@ const NAME_NEED: Readonly<Record<NamedJob, ReadingGap>> = {
     need: "A brand, artist or show whose audience to read",
     text: "Add the brand, artist or show whose audience you want to know.",
   },
+  brand_collab: { need: "A brand to find collaboration partners for", text: "Add the brand you want to find collaboration partners for." },
+  creator_fit: { need: "A brand whose audience the creators should fit", text: "Add the brand whose audience the creators should fit." },
 };
 
 /** "Atlanta, Austin, … or Seattle": the 13 map cities a place question can name. */
@@ -333,6 +335,29 @@ export function readingGap(understood: Understood): ReadingGap | null {
       }
       return city ? { need: `The neighbourhood's city, ${MAPPED}`, text: `Add the neighbourhood's city: ${METROS}.` } : null;
     }
+    case "taste_twins": {
+      // "<AREA>, <CITY> TWIN <CITY>": the source area and its city, then the city to look in.
+      const area = has("AREA");
+      const source = understood.mnemonic.includes(", <CITY> ");
+      const target = /TWIN <CITY>$/.test(understood.mnemonic.trim());
+      if ((area || source) && target) {
+        return {
+          need: `An area, its city and a city to look in, ${MAPPED}`,
+          text: `Add the neighbourhood you want to match, its city and the city to look for its twin in: ${METROS}.`,
+        };
+      }
+      if (area || source) {
+        return {
+          need: `The area to match and its city, ${MAPPED}`,
+          text: `Add the neighbourhood you want to match and its city: ${METROS}.`,
+        };
+      }
+      return target ? { need: `The city to look in, ${MAPPED}`, text: `Add the city to look for its twin in: ${METROS}.` } : null;
+    }
+    case "city_compare":
+      return has("CITY") ? { need: "Two to four US cities to compare", text: "Add the two to four US cities you want to compare." } : null;
+    case "launch_test":
+      return has("CONCEPT") ? { need: "The product or concept to test", text: "Add the product or concept you want to test, in a few words." } : null;
     default:
       return has("NAME") ? NAME_NEED[understood.job] : null;
   }

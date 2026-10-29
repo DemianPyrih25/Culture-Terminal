@@ -36,6 +36,11 @@ export const JOB_ACTIVE_PHRASE: Readonly<Record<Job, string>> = {
   sponsorship: "Scoring sponsor fit",
   market_selection: "Ranking markets",
   audience_discovery: "Profiling the audience",
+  taste_twins: "Matching areas across the two cities",
+  brand_collab: "Scoring possible partners",
+  creator_fit: "Scoring creators for the audience",
+  launch_test: "Checking the concept against the data",
+  city_compare: "Comparing the cities",
 };
 
 /** How long a run usually takes, by lane: the public lane is the fast one. */
@@ -58,7 +63,7 @@ const ENTITY_NOUN: Readonly<Record<EntityType, string>> = {
 
 type Tenses = readonly [pending: string, active: string, done: string];
 
-function tenses(key: WorkingStepKey, primary: string | null): Tenses {
+function tenses(key: WorkingStepKey, primary: string | null, publicData: boolean): Tenses {
   switch (key) {
     case "read":
       return ["Read your question", "Reading your question", "Read your question"];
@@ -67,7 +72,10 @@ function tenses(key: WorkingStepKey, primary: string | null): Tenses {
       return [`Find ${what} in Qloo`, `Finding ${what} in Qloo`, `Found ${what} in Qloo`];
     }
     case "pull":
-      return ["Pull taste data", "Pulling taste data", "Pulled taste data"];
+      // SEC filings or Census figures joined the taste data (company_financials, area_economics).
+      return publicData
+        ? ["Pull taste and public data", "Pulling taste and public data", "Pulled taste and public data"]
+        : ["Pull taste data", "Pulling taste data", "Pulled taste data"];
     case "write":
       return ["Write the answer", "Writing the answer", "Wrote the answer"];
     case "check":
@@ -123,8 +131,10 @@ export interface WorkingProgress {
 export function workingProgress(state: RunState): WorkingProgress {
   const primary = primaryName(state);
   const states = stepStates(state);
+  // Runs stored before public data have no publicCalls.
+  const publicData = (state.publicCalls?.chips.length ?? 0) > 0;
   const steps = STEP_KEYS.map((key): WorkingStep => {
-    const [pending, active, done] = tenses(key, primary);
+    const [pending, active, done] = tenses(key, primary, publicData);
     const s = states[key];
     return { key, state: s, label: s === "done" ? done : s === "active" ? active : pending };
   });

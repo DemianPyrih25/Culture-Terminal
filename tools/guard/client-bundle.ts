@@ -14,6 +14,8 @@ export const SERVER_ONLY_ENV = [
   "IP_HASH_SALT",
   "ADMIN_TOKEN",
   "JUDGE_CODE",
+  "SEC_USER_AGENT",
+  "CENSUS_API_KEY",
 ] as const;
 
 const RULES: readonly TextRule[] = [

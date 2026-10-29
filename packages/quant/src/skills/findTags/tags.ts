@@ -58,12 +58,21 @@ function singular(word: string): string {
   return word.length > 3 && word.endsWith("s") && !word.endsWith("ss") && !word.endsWith("us") ? word.slice(0, -1) : word;
 }
 
+/**
+ * A place noun in "-ery" folded onto its maker in "-er", so the place and the trade read as one word:
+ * "roastery" and "Roasters", "brewery" and "Brewer", "cidery" and "Cider", "grocery" and "Grocer".
+ * Short words ("very", "every") stay.
+ */
+function trade(word: string): string {
+  return word.length >= 6 && word.endsWith("ery") ? word.slice(0, -1) : word;
+}
+
 export function conceptWords(text: string): Set<string> {
   return new Set(
     normaliseConcept(text)
       .split(" ")
       .filter((w) => w !== "" && !FILLER.has(w))
-      .map(singular),
+      .map((w) => trade(singular(w))),
   );
 }
 

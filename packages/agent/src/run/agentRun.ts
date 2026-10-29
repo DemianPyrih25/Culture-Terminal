@@ -2,6 +2,7 @@ import {
   DEFAULT_RUN_LIMITS,
   FindingIdSchema,
   isId,
+  isPublicDataTool,
   normalizeIntent,
   RunLimits,
   SkillId,
@@ -11,13 +12,13 @@ import {
   type Intent,
   type Phase,
   type RegisteredEntity,
-  type RegisteredTag,
   type Report,
   type SafetyCategory,
   type StepId,
   type SubmitPlanInputShape,
   type TerminalRunStatus,
 } from "@ct/contracts";
+import { publicEventFrom } from "@ct/publicdata";
 import { qlooErrorCode, qlooEventFrom } from "@ct/qloo";
 import { runAnalyst, type AnalystOutcome, type AnalystToolCall, type AnalystToolEnd } from "../analyst";
 import { ANALYST_MODELS, CLERK_MODEL } from "../anthropic";
@@ -32,6 +33,7 @@ import type { AgentRunOptions, AgentRunResult } from "../run";
 import { POSITION_FAILED, recordPosition } from "../report/position";
 import { recordScorecard } from "../scorecard";
 import { areaMentionsToGeo } from "./areaMentions";
+import { runAreaMetros } from "./areas";
 import { loadRunAudiences, NO_RUN_AUDIENCES } from "./audiences";
 import { ALL_SKILLS, toolLabel, UNAVAILABLE_SKILLS } from "./catalogue";
 import { buildRunContext, evidenceStatus, findingLeads, type RanCall } from "./context";
@@ -40,7 +42,7 @@ import { gazetteer } from "./gazetteer";
 import { gateEvidence, privatePersonNames, privatePersonRefusal, runResolutionGate, type GateResolved } from "./gate";
 import { RunEvents, RunMeter } from "./meter";
 import { runMarkets, unknownMarketIssues } from "./markets";
-import { emptyScan, namedAreaIds, planScan, type ScanPlan } from "./scan";
+import { chainFeed, emptyScan, namedAreaIds, planScan, type ScanPlan } from "./scan";
 import { estimateSkillCalls, runSkillCall, shortError, SkillsRan, type SkillCallOutcome, type SkillRunnerDeps } from "./tools";
 
 /**
@@ -50,7 +52,11 @@ import { estimateSkillCalls, runSkillCall, shortError, SkillsRan, type SkillCall
  * outlives the call: background scan and tool runs are stopped or awaited before it returns.
  */
 
-/** Categories CLERK refuses on (clerk.md "Safety"); financial_advice is answered as taste-signal health. */
+/**
+ * The fixed safety categories CLERK refuses on (clerk.md "Safety"); financial_advice is answered as
+ * taste-signal health. out_of_scope is no refusal category (D41): a business question is read as its
+ * nearest job, and only a question with no business or taste content at all gets OUT_OF_SCOPE_CARD.
+ */
 const REFUSAL_CATEGORIES: ReadonlySet<SafetyCategory> = new Set([
   "private_individual",
   "sensitive_inference",
@@ -58,8 +64,12 @@ const REFUSAL_CATEGORIES: ReadonlySet<SafetyCategory> = new Set([
   "eligibility",
   "residential_screening",
   "injection",
-  "out_of_scope",
 ]);
+
+/** The plain card for a question with no business or taste content at all (D41): no reframe, no Qloo call. */
+export const OUT_OF_SCOPE_CARD =
+  "This is not something Culture Terminal answers: it reads audience taste for business decisions about brands, " +
+  "places, markets, partners and audiences, and the question has none of those to read.";
 
 export const SCAN_RESULTS_HEADER =
   "OPENING SCAN RESULTS: code ran these with default arguments in parallel with your turn; cite them like any other evidence.";
@@ -68,9 +78,14 @@ type JsonArgs = EventInputOf<"pivot">["args"];
 
 const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
 
-/** Code is authoritative over CLERK's safety call: a refusal category refuses even if `allowed` says otherwise. */
+/**
+ * Code is authoritative over CLERK's safety call: a refusal category refuses even if `allowed` says
+ * otherwise. out_of_scope never refuses a question CLERK read as a nearest job (D41); without one it
+ * gets the plain out-of-scope card when CLERK did not allow it.
+ */
 export function refusalOf(intent: Intent): string | null {
   const { allowed, category, reframe } = intent.safety;
+  if (category === "out_of_scope") return allowed || intent.read_as.nearest ? null : OUT_OF_SCOPE_CARD;
   if (allowed && (category === null || !REFUSAL_CATEGORIES.has(category))) return null;
   if (reframe !== null && reframe.trim() !== "") return reframe.trim();
   return `The question was declined${category === null ? "" : ` (${category.replace(/_/g, " ")})`}, and no group-level reframe applies.`;
@@ -229,12 +244,26 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       onWarn: () => events.emit(meter.usageEvent()),
       signal: runAbort.signal,
     });
+    // SEC and Census reads: their calls are logged and shown apart from Qloo's and cost no Qloo call.
+    const runPublic =
+      options.publicdata?.forRun({
+        runId: options.runId,
+        onCall: (record) => {
+          meter.recordPublicCall(record);
+          events.emit(publicEventFrom(record));
+        },
+        signal: runAbort.signal,
+      }) ?? null;
     const registry = createEntityRegistry();
-    const runLedger = createRunLedger({ emit: events.emit, provenanceOf: (id) => runQloo.provenance(id) });
+    const runLedger = createRunLedger({
+      emit: events.emit,
+      provenanceOf: (id) => runQloo.provenance(id) ?? runPublic?.provenance(id) ?? null,
+    });
     ledger = runLedger;
     const geo = gazetteer();
-    // The AREAS list the model sees: prose may name these areas, digits and all (V3).
-    const areas = read.geo.metro === null ? [] : geo.neighbourhoods(read.geo.metro).map((n) => n.name);
+    // The AREAS lists the model sees (every map city the run reads): prose may name these areas, digits and all (V3).
+    const areaMetros = runAreaMetros(read);
+    const areas = areaMetros.flatMap((metro) => geo.neighbourhoods(metro).map((n) => n.name));
 
     let gate: GateResolved = { kind: "resolved", entities: [], primary: null, peers: [], dropped: 0, limitations: [], calls: [], primaryCalls: [] };
     if (qlooEnabled) {
@@ -270,6 +299,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       pillar,
       events,
       qloo: runQloo,
+      publicdata: runPublic,
       ledger: runLedger,
       registry,
       geo,
@@ -296,7 +326,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
     };
     const markets = await runMarkets(deps.localities, geo);
     const scan: ScanPlan = qlooEnabled
-      ? planScan(job, { intent: read, primary: gate.primary, peers: gate.peers, geo, markets })
+      ? planScan(job, { intent: read, primary: gate.primary, peers: gate.peers, geo, markets, publicData: runPublic !== null })
       : emptyScan();
     // Estimated before the scan starts: once its requests are in flight the probe counts them as cached.
     const scanEstimates = new Map(
@@ -362,19 +392,23 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         const outcomes = await Promise.all(scan.steps.map((s) => scanCall(s.toolCallId, s.tool, s.input, scanEstimates.get(s.toolCallId) ?? null)));
         for (const o of outcomes) notePeers(o, scanPeers);
         const digests = outcomes.map((o) => o.content);
-        // Chained steps read the tags their scan step returned (geo_lift on find_tags' rows), not the
-        // whole registry, which wave-1 calls running alongside may already have added to.
-        const tagsFrom = (tool: SkillId): RegisteredTag[] =>
-          outcomes
-            .flatMap((o, i) => (scan.steps[i]?.tool === tool ? (o.result?.forModel.top_rows ?? []) : []))
-            .flatMap((row) => (row.ref !== null && isId("T", row.ref) ? (registry.tag(row.ref) ?? []) : []));
+        const ran: { tool: SkillId; outcome: SkillCallOutcome }[] = outcomes.map((outcome, i) => ({ tool: scan.steps[i]!.tool, outcome }));
+        // Chained steps read what their scan step returned (geo_lift on find_tags' rows, scoring on
+        // cross_domain's), not the whole registry, which wave-1 calls running alongside may already have
+        // added to. A chained step may follow another, so each one's outcome joins `ran` in turn.
+        const feedFrom = (tool: SkillId) =>
+          chainFeed(
+            ran.flatMap((r) => (r.tool === tool && r.outcome.result !== null ? [r.outcome.result.forModel] : [])),
+            { registry, ledger: runLedger, geo, metros: areaMetros },
+          );
         for (const step of scan.chained) {
-          const input = step.input(tagsFrom(step.after));
+          const input = step.input(feedFrom(step.after));
           if (input === null) {
             digests.push(`SCAN NOTE: ${toolLabel(step.tool)} did not run: ${toolLabel(step.after)} returned nothing it can use.`);
             continue;
           }
           const outcome = await scanCall(step.toolCallId, step.tool, input, await estimateSkillCalls(deps, step.tool, input));
+          ran.push({ tool: step.tool, outcome });
           digests.push(outcome.content);
         }
         return digests;
@@ -392,8 +426,10 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       scan: { plan: scan, estimates: scanEstimates },
       markets,
       audiences: audiences.segments,
-      unavailable: qlooEnabled ? UNAVAILABLE_SKILLS : ALL_SKILLS,
+      // With Qloo off, only the public-data tools can still answer, and only with a public-data client.
+      unavailable: qlooEnabled ? UNAVAILABLE_SKILLS : ALL_SKILLS.filter((s) => runPublic === null || !isPublicDataTool(s)),
       qlooEnabled,
+      publicData: runPublic !== null,
       caseSummary: options.parent?.caseSummary ?? null,
       question: options.question,
     });
@@ -548,6 +584,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         plan,
         ledger: snapshot,
         qlooCalls: meter.receiptCalls(),
+        publicCalls: meter.receiptPublicCalls(),
         usage: { elapsedMs: meter.elapsedMs(), llmUsd: meter.usd(), tokens: meter.tokens() },
         models: { clerk: CLERK_MODEL, analyst: outcome.model, ghost: null },
         droppedEntities: gate.dropped,
@@ -555,6 +592,8 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         skillLimitations: [...skillsRan.limitations(), ...gate.limitations, ...cardLimitations],
         subject: gate.primary?.ref ?? null,
         peers: gate.peers.map((p) => p.ref),
+        // D41: a question read as its nearest job says what the data does not cover, and costs 5 points.
+        readAs: read.read_as.nearest ? { notCovered: read.read_as.not_covered } : null,
       };
       report = check !== null ? assembleReport({ ...context, check }) : buildIncompleteReport({ ...context, reason });
     } catch (err) {

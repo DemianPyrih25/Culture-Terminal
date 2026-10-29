@@ -1,8 +1,11 @@
 import {
+  extractPeriodMetricIds,
   findMalformedTokens,
   isId,
   metricToken,
+  periodToken,
   ReportDraft,
+  stripTokens,
   tokenizeProse,
   VERDICT_TAG_LIMITS,
   verdictTagProblems,
@@ -31,8 +34,18 @@ import {
   namePatterns,
 } from "./report/demographics";
 import { wordList } from "./report/format";
-import { areaAliases, mergedAgeBuckets, numberWords, numeralNames, numeralValues, numeralViolations } from "./report/numerals";
+import {
+  AGE_BUCKET_LABELS,
+  areaAliases,
+  looseAgeNumbers,
+  mergedAgeBuckets,
+  numberWords,
+  numeralNames,
+  numeralValues,
+  numeralViolations,
+} from "./report/numerals";
 import { phraseHits, type PhraseHit } from "./report/phrases";
+import { isQlooEvidence, metricPublicSource } from "./report/publicData";
 import { misattributedTokens, type SubjectEntity } from "./report/subjects";
 import {
   argumentUnit,
@@ -46,16 +59,16 @@ import {
 } from "./tokens";
 
 /**
- * CHECKER (SPEC §6.2, D23): code-only validation of a submit_report draft, rules V1–V10. It takes
+ * CHECKER (SPEC §6.2, D23): code-only validation of a submit_report draft, rules V1–V11. It takes
  * the draft as the strict tool guarantees it (structure only) and enforces what strict mode strips:
- * id formats (V1) and lengths and counts (V9). V7 and V8 are fixed by code, never rejected. A
+ * id formats (V1) and lengths and counts (V9). V7, V8 and V11's period tokens are fixed by code, never rejected. A
  * rejection buys one repair turn; on the second attempt every rejection is downgraded to a warning
  * and the report is accepted (each warning costs confidence, §6.4). The verdict tag names the finding
  * in a few words and is judged with the headline (V4, V9, V10); on the second attempt code cuts or
  * drops it instead (forced), since the brief prints the signal label in its place, and it costs nothing.
  */
 
-/** Below this many ok evidence bundles the signal is forced to insufficient_evidence (V7). */
+/** Below this many ok Qloo evidence bundles the signal is forced to insufficient_evidence (V7); SEC and Census bundles do not count. */
 export const MIN_OK_EVIDENCE = 3;
 /**
  * V3 rejects when a report has more bare numbers than this; fewer are warnings. Zero: any bare number
@@ -152,6 +165,7 @@ export function checkReport<D extends ReportDraftShape>(input: CheckReportInput<
     ...(tagSettled ? [] : tagNumberIssues(draft.verdict_tag, blocking)),
     ...referenceIssues(draft, plan, lookup, blocking),
     ...fields.flatMap((f) => tokenIssues(f, lookup, blocking)),
+    ...fields.flatMap((f) => seamIssues(f, lookup, blocking)),
     ...fields.flatMap((f) => subjectIssues(f, lookup, entities, blocking)),
     ...numeralIssues(numerals, lookup, bareCount > V3_REJECT_ABOVE ? blocking : "warn"),
     ...phrases.flatMap(({ path, hits }) => phraseIssues(path, hits, blocking)),
@@ -159,11 +173,14 @@ export function checkReport<D extends ReportDraftShape>(input: CheckReportInput<
     ...claimUnits(draft, fields).flatMap((u) => affinityIssues(u, lookup, blocking)),
     ...demographicIssues(tagSettled ? fields : [...fields, tag], unmeasured, blocking),
     ...competitionIssues(tagSettled ? competitionFields : [...competitionFields, tag], uncounted, gapOf(ledger), blocking),
+    ...claimUnits(draft, fields).flatMap((u) => publicCausalIssues(u, lookup, blocking)),
   ];
 
   if (forced) issues.push(forced);
   else if (tagSettled) issues.push(...settleVerdictTag(patched, unmeasured(tag), uncounted(tag)));
   issues.push(...injectWindows(claimUnits(patched, draftProse(patched)), ledger));
+  issues.push(...strayPeriods(draftProse(patched), lookup));
+  issues.push(...injectPeriods(claimUnits(patched, draftProse(patched)), lookup));
   issues.sort((a, b) => a.rule.localeCompare(b.rule, "en", { numeric: true }));
 
   return {
@@ -309,6 +326,53 @@ function tokenIssues(field: ProseField, ledger: LedgerLookup, blocking: Blocking
   return out;
 }
 
+/** Punctuation that ends the clause a token sits in; a bracket does not ("not measured ({{M6}})" still prints twice). */
+const CLAUSE_BREAK = /[.;:,!?]/u;
+
+/** Words of a text as the seam check compares them: lower case, letters and digits only, a plural "s" dropped. */
+function seamWords(text: string): string[] {
+  return (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).map((w) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w));
+}
+
+/** The longest run (up to 4 words, at least 3 letters besides digits) that ends `before` and starts `after`, as words; [] when none. */
+function seamOverlap(before: readonly string[], after: readonly string[]): string[] {
+  for (let k = Math.min(4, before.length, after.length); k >= 1; k--) {
+    const tail = before.slice(before.length - k);
+    // Repeated digits are V3's (a typed copy of what the token prints); this judges words.
+    if (tail.every((w, i) => w === after[i]) && tail.join("").replace(/\p{N}/gu, "").length >= 3) return tail;
+  }
+  return [];
+}
+
+/**
+ * A token whose display repeats the words around it (§11 display bugs): "ranks last in {{M34}}" when
+ * {{M34}} prints "last in 0 of 5 rows" reads "ranks last in last in 0 of 5 rows". The words beside the
+ * token are judged against the start and the end of what it prints.
+ */
+function seamIssues(field: ProseField, ledger: LedgerLookup, blocking: Blocking): ValidationIssue[] {
+  if (field.role === "followup") return [];
+  const segments = tokenizeProse(field.text);
+  const out: ValidationIssue[] = [];
+  segments.forEach((segment, i) => {
+    if (segment.kind !== "metric") return;
+    const display = ledger.metric(segment.id)?.display ?? "";
+    const shown = seamWords(display);
+    if (shown.length === 0) return;
+    const prev = segments[i - 1];
+    const next = segments[i + 1];
+    // Only the words in the token's own clause count: "{{M14}}. New tags…" starts another sentence.
+    const before = prev?.kind === "text" ? seamOverlap(seamWords(prev.text.split(CLAUSE_BREAK).at(-1) ?? ""), shown) : [];
+    const after = next?.kind === "text" ? seamOverlap(shown, seamWords(next.text.split(CLAUSE_BREAK)[0] ?? "")) : [];
+    const repeated = [before, after].filter((w) => w.length > 0).map((w) => `"${w.join(" ")}"`);
+    if (repeated.length === 0) return;
+    const message =
+      `${field.path}: {{${segment.id}}} already prints "${display}", so the words ${repeated.join(" and ")} beside it ` +
+      "print twice; delete them from the sentence, or rewrite it so it reads once.";
+    out.push(issue("V2", blocking, message, field.path, [segment.id]));
+  });
+  return out;
+}
+
 /**
  * A token set beside the wrong entity: its sentence names registered entities but none the metric
  * measures (report/subjects). Next moves carry no tokens; V2 above already rejects any there.
@@ -339,6 +403,7 @@ function followupTokenIssues(field: ProseField, blocking: Blocking): ValidationI
 function tokenText(segment: Exclude<ProseSegment, { kind: "text" }>): string {
   if (segment.kind === "metric") return metricToken(segment.id);
   if (segment.kind === "evidence") return `[${segment.id}]`;
+  if (segment.kind === "period") return periodToken(segment.id);
   return WINDOW_TOKEN;
 }
 
@@ -371,6 +436,15 @@ function numeralAdvice(text: string, bare: readonly string[], ledger: LedgerLook
     );
   }
   let rest = bare.filter((b) => mergedAgeBuckets(b) === null);
+  const ages = looseAgeNumbers(text, rest);
+  if (ages.length > 0) {
+    const plural = new Set(ages).size > 1;
+    clauses.push(
+      `${listed(ages)} ${plural ? "read" : "reads"} as ${plural ? "ages" : "an age"}: write each age as one of Qloo's bucket labels ` +
+        `(${AGE_BUCKET_LABELS.join(", ")}) next to the {{M#}} token of the metric that measures that bucket, never "the 30s" or "up to 44"`,
+    );
+    rest = rest.filter((b) => !ages.includes(b));
+  }
   for (const id of new Set(metricTokenOccurrences(text))) {
     const display = ledger.metric(id)?.display ?? "";
     const shown = new Set(numeralValues(display));
@@ -486,10 +560,10 @@ function affinityIssues(unit: ClaimUnit, ledger: LedgerLookup, blocking: Blockin
 // V7: forced signal ------------------------------------------------------------------------------------------
 
 function forceSignal(draft: ReportDraftShape, ledger: LedgerSnapshot, qlooEnabled: boolean): ValidationIssue | null {
-  const ok = ledger.evidence.filter((e) => e.status === "ok").length;
+  const ok = ledger.evidence.filter((e) => e.status === "ok" && isQlooEvidence(e)).length;
   if ((qlooEnabled && ok >= MIN_OK_EVIDENCE) || draft.signal === "insufficient_evidence") return null;
   const why = qlooEnabled
-    ? `only ${ok} evidence bundles are ok and ${MIN_OK_EVIDENCE} are needed`
+    ? `only ${ok} Qloo evidence bundles are ok and ${MIN_OK_EVIDENCE} are needed`
     : "Qloo is disabled for this run";
   const from = draft.signal;
   draft.signal = "insufficient_evidence";
@@ -589,6 +663,104 @@ function injectWindows(units: readonly ClaimUnit[], ledger: LedgerSnapshot): Val
     );
     const listed = ids.map((id) => `{{${id}}}`).join(", ");
     out.push(issue("V8", "injected", `${host.path}: added the trending window beside STALE ${listed}.`, host.path, ids));
+  }
+  return out;
+}
+
+// V11: SEC and Census figures carry their period, and never explain a taste signal (or the reverse) ------------
+
+/**
+ * Every claim or label that cites an SEC or Census metric with a value and does not show that
+ * metric's `{{PERIOD:M#}}` gets it, like V8's window: right after the metric's first token, or
+ * appended when the metric is cited only in an argument's metric_ids. One period token anywhere in an
+ * argument covers the argument. A filing period or ACS vintage is part of the figure, so code adds it
+ * rather than spend a repair turn on it (PLAN §6).
+ */
+function injectPeriods(units: readonly ClaimUnit[], ledger: LedgerLookup): ValidationIssue[] {
+  const out: ValidationIssue[] = [];
+  for (const unit of units) {
+    const ids = citedIds("M", unit.metricIds, unit.fields.map((f) => f.text)).filter((id) => {
+      const m = ledger.metric(id);
+      return m !== undefined && m.value !== null && typeof m.period === "string" && metricPublicSource(m, ledger) !== null;
+    });
+    const shown = new Set(unit.fields.flatMap((f) => extractPeriodMetricIds(f.text)));
+    const missing = ids.filter((id) => !shown.has(id));
+    if (missing.length === 0) continue;
+    // A field may take several periods: each insertion reads the text the last one wrote.
+    const now = new Map<ProseField, string>();
+    const textOf = (f: ProseField): string => now.get(f) ?? f.text;
+    for (const id of missing) {
+      const host = unit.fields.find((f) => metricTokenOccurrences(textOf(f)).includes(id)) ?? unit.fields[0];
+      if (host === undefined) continue;
+      const text = textOf(host);
+      const next = metricTokenOccurrences(text).includes(id)
+        ? insertAfterMetricToken(text, id, ` (${periodToken(id)})`)
+        : `${text.trimEnd()} (${periodToken(id)})`;
+      host.set(next);
+      now.set(host, next);
+    }
+    const listed = missing.map((id) => `{{${id}}}`).join(", ");
+    out.push(issue("V11", "injected", `${unit.path}: added the reporting period beside SEC or Census ${listed}.`, unit.path, missing));
+  }
+  return out;
+}
+
+/**
+ * A `{{PERIOD:M#}}` on a metric that has no period (a Qloo metric) would print "the reporting period"
+ * about a taste figure: code removes it (V2 already reports one whose metric does not exist).
+ */
+function strayPeriods(fields: readonly ProseField[], ledger: LedgerLookup): ValidationIssue[] {
+  return fields.flatMap((field) => {
+    const stray = extractPeriodMetricIds(field.text).filter((id) => {
+      const m = ledger.metric(id);
+      return m !== undefined && (typeof m.period !== "string" || metricPublicSource(m, ledger) === null);
+    });
+    if (stray.length === 0) return [];
+    let text = field.text;
+    for (const id of stray) text = text.split(` (${periodToken(id)})`).join("").split(periodToken(id)).join("");
+    field.set(text.replace(/\s{2,}/g, " ").trim());
+    const listed = stray.map((id) => periodToken(id)).join(", ");
+    return [issue("V11", "forced", `${field.path}: removed ${listed}: only SEC and Census figures have a reporting period.`, field.path, stray)];
+  });
+}
+
+/** Words that tie one thing to another as its cause or effect. */
+const CAUSAL_LINK =
+  /\b(?:because(?:\s+of)?|due\s+to|driven\s+by|drives?|drove|driving|fuel(?:s|ed|ing)?|leads?\s+to|led\s+to|results?\s+(?:in|from)|resulted\s+(?:in|from)|explains?|explained\s+by|thanks\s+to|translates?\s+into|translated\s+into|boost(?:s|ed|ing)?)\b/i;
+/** A negation just before the link ("does not explain", "neither explains") states that there is no causal tie. */
+const NEGATED = /\b(?:not|never|no|nor|neither)\s+(?:\w+\s+)?$|n't\s+(?:\w+\s+)?$/i;
+/** A financial or resident figure named in words. */
+const PUBLIC_WORDS = /\b(?:revenues?|sales|margins?|profits?|earnings|income|incomes|filings?|population|households?|commut\w*|residents?)\b/i;
+/** A taste signal named in words. */
+const TASTE_WORDS = /\b(?:taste|affinit(?:y|ies)|fans?|audiences?|momentum|popularity|signals?|lift|twins?|fingerprints?)\b/i;
+
+/**
+ * V11's second half: in a claim that cites an SEC or Census figure, no sentence may tie a financial or
+ * resident figure and a taste signal together as cause and effect ("revenue grew because fans …",
+ * "higher incomes drive the lift"). Public figures and taste signals are reported side by side.
+ */
+function publicCausalIssues(unit: ClaimUnit, ledger: LedgerLookup, blocking: Blocking): ValidationIssue[] {
+  if (unit.role !== "claim") return [];
+  const cited = citedIds("M", unit.metricIds, unit.fields.map((f) => f.text)).flatMap((id) => ledger.metric(id) ?? []);
+  const isPublic = (id: string) => {
+    const m = ledger.metric(id as MetricId);
+    return m !== undefined && metricPublicSource(m, ledger) !== null;
+  };
+  if (!cited.some((m) => metricPublicSource(m, ledger) !== null)) return [];
+  const out: ValidationIssue[] = [];
+  for (const field of unit.fields) {
+    for (const sentence of field.text.split(/(?<=[.!?])\s+/)) {
+      const link = CAUSAL_LINK.exec(sentence);
+      if (link === null || NEGATED.test(sentence.slice(0, link.index))) continue;
+      const tokens = metricTokenOccurrences(sentence);
+      const publicSide = tokens.some(isPublic) || PUBLIC_WORDS.test(stripTokens(sentence));
+      const tasteSide = tokens.some((id) => !isPublic(id)) || TASTE_WORDS.test(stripTokens(sentence));
+      if (!publicSide || !tasteSide) continue;
+      const message =
+        `${field.path}: "${link[0]}" ties an SEC or Census figure and a taste signal together as cause and effect; ` +
+        "report them side by side (financials and resident figures describe the company or the area, taste signals what its audience likes) and never as one explaining the other.";
+      out.push(issue("V11", blocking, message, field.path, [link[0]]));
+    }
   }
   return out;
 }

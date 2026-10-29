@@ -677,6 +677,7 @@ describe("the GHOST questions", () => {
         neighbourhoods: ["Old Mill"],
         tenants: [],
         partners: ["Brand Beta"],
+        creators: [],
       },
       numeric_claims: [],
     };

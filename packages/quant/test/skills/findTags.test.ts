@@ -192,6 +192,17 @@ describe("find_tags: tag vocabulary", () => {
     expect(nameMatches(query, conceptWords("Natural Wine Shop"))).toBe(false);
     expect(nameMatches(conceptWords("the"), conceptWords("The"))).toBe(false);
   });
+
+  it("reads a place in -ery and its trade in -er(s) as one word, and nothing looser", () => {
+    const roastery = conceptWords("specialty coffee roastery");
+    expect(nameMatches(roastery, conceptWords("Coffee roasters"))).toBe(true);
+    expect(nameMatches(roastery, conceptWords("Coffee roastery"))).toBe(true);
+    expect(nameMatches(conceptWords("brewery"), conceptWords("Brewer"))).toBe(true);
+    expect(nameMatches(conceptWords("cidery"), conceptWords("Cider bar"))).toBe(true);
+    expect(nameMatches(roastery, conceptWords("Coffee store"))).toBe(false);
+    expect(nameMatches(roastery, conceptWords("Brewing"))).toBe(false);
+    expect([...conceptWords("every bakery")]).toEqual(["every", "baker"]);
+  });
 });
 
 describe("find_tags: the curated map", () => {

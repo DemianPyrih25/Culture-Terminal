@@ -11,6 +11,7 @@ import type {
   DatasetKind,
   EntityType,
   EvidenceId,
+  EvidenceSource,
   Flag,
   FindingId,
   HypothesisId,
@@ -25,6 +26,7 @@ import type {
   PickerCandidate,
   Pillar,
   Priority,
+  PublicEndpoint,
   QlooPath,
   RunStatus,
   SafetyCategory,
@@ -81,6 +83,8 @@ export interface MetricView {
   stale: boolean;
   /** "Apr–Sep 2025" for a STALE metric; null otherwise. */
   window: string | null;
+  /** The reporting period or vintage of an SEC or Census number ("FY2024", "ACS 2019–2023"); null or absent otherwise. */
+  period?: string | null;
 }
 
 /**
@@ -98,15 +102,25 @@ export type Inline =
 
 // Footnotes -------------------------------------------------------------------------------------------
 
-/** One Qloo request as the brief cites it: what opens when a number is clicked. */
+/** The endpoint a lookup went to: a Qloo path, or an SEC or Census endpoint template (Part 9). */
+export type SourceEndpoint = QlooPath | PublicEndpoint;
+
+/**
+ * One request as the brief cites it: what opens when a number is clicked. Most are Qloo requests; an
+ * SEC or Census request (Part 9) has `source` "sec" or "census", its call id in `qlooCallId` (the
+ * field name predates public data, like Evidence.qlooCallIds) and its reference (a CIK, or the Census
+ * dataset, vintage and geography) in `requestId`.
+ */
 export interface RequestRef {
   qlooCallId: string;
+  /** Where the data came from; absent reads as "qloo". */
+  source?: EvidenceSource;
   /** Index into `BriefModel.sources.items`, or null when the run did not stream this call. */
   sourceIndex: number | null;
   requestId: string | null;
-  /** "ab12…cd34". */
+  /** "ab12…cd34"; a public reference whole when it is short. */
   shortRequestId: string;
-  endpoint: QlooPath | null;
+  endpoint: SourceEndpoint | null;
   filterType: string | null;
   /** "brand", "demographics". */
   filterLabel: string | null;
@@ -348,7 +362,7 @@ export interface FigureSource {
   text: string;
   /** The place a location figure reads ("East Nashville", "Austin"); null for every other figure. */
   place: string | null;
-  endpoints: { path: QlooPath; filterLabels: string[] }[];
+  endpoints: { path: SourceEndpoint; filterLabels: string[] }[];
   requestCount: number;
   computedInCode: boolean;
   requestId: string | null;
@@ -485,6 +499,8 @@ export interface MethodStep {
   estimate: number | null;
   /** Qloo calls actually made or served. */
   actual: number;
+  /** SEC and Census calls made or served (Part 9); they cost no Qloo calls. Absent reads as 0. */
+  publicActual?: number;
   status: StepStatus;
   calls: MethodCall[];
   pivot: boolean;
@@ -526,8 +542,26 @@ export interface Interpretation {
   assumptions: string[];
   /** A group-level reframe CLERK applied (financial advice), or null. */
   reframe: string | null;
+  /**
+   * D41: the question asked for more than any job covers and was read as the nearest job. `line` is the
+   * plain sentence for the top of the answer: "Read as Brand health. Not covered: sales and prices."
+   * Null (or absent) when the job fits the question as asked.
+   */
+  readAs?: ReadAs | null;
   resolves: { mention: string; entityType: EntityType; match: MatchClass; matchLabel: string; name: string | null; applied: boolean }[];
   ms: number | null;
+}
+
+/** The "Read as" chip and its sentence (D41, ANSWER_QUALITY §8). */
+export interface ReadAs {
+  /** The job the question was read as, in reader words. */
+  jobLabel: string;
+  /** What the question asks that the data does not cover ("sales", "rents"); may be empty. */
+  notCovered: string[];
+  /** "Read as: Brand health". */
+  chip: string;
+  /** "Read as Brand health. Not covered: sales and prices; Culture Terminal has no data on them." */
+  line: string;
 }
 
 export interface CheckerLine {
@@ -557,13 +591,22 @@ export interface BriefMethod {
   requests: { total: number; network: number; cached: number; reused: number };
 }
 
+/**
+ * One lookup, in arrival order: a Qloo request, or an SEC or Census request (Part 9). For a public one
+ * `qlooCallId` holds its public call id, `requestId` its reference (a CIK, or the Census dataset, vintage
+ * and geography), and there is no filter type or row count.
+ */
 export interface BriefSource {
   /** 1-based, in arrival order. */
   n: number;
   qlooCallId: string;
+  /** Where the data came from; absent reads as "qloo". */
+  source?: EvidenceSource;
+  /** The host of an SEC or Census request ("data.sec.gov"); null or absent for Qloo. */
+  host?: string | null;
   toolCallId: string | null;
   tool: ToolName | null;
-  endpoint: QlooPath;
+  endpoint: SourceEndpoint;
   filterType: string | null;
   filterLabel: string | null;
   /** Subject refs with names where known: "R1 Juniper Cola". */
@@ -591,7 +634,7 @@ export interface BriefSources {
   /** "24 requests · 11 cached · 3 endpoints". */
   line: string;
   items: BriefSource[];
-  endpoints: { path: QlooPath; filterType: string | null; filterLabel: string | null; calls: number }[];
+  endpoints: { path: SourceEndpoint; filterType: string | null; filterLabel: string | null; calls: number }[];
 }
 
 // Location -----------------------------------------------------------------------------------------------

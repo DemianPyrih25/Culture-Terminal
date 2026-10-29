@@ -2,7 +2,16 @@ import { defineConfig, globalIgnores } from "eslint/config";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 
-const SERVER_ONLY_PACKAGES = ["@ct/agent", "@ct/agent/*", "@ct/qloo", "@ct/qloo/*", "@ct/db", "@ct/db/*"];
+const SERVER_ONLY_PACKAGES = [
+  "@ct/agent",
+  "@ct/agent/*",
+  "@ct/qloo",
+  "@ct/qloo/*",
+  "@ct/publicdata",
+  "@ct/publicdata/*",
+  "@ct/db",
+  "@ct/db/*",
+];
 
 export default defineConfig([
   ...nextVitals,

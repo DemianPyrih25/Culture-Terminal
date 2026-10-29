@@ -12,7 +12,7 @@ import { LiftMapCard } from "../figures/lift-map-card";
 import { Button, ChartCard, ChartTable, cx, Icon, IconButton, KeyNumber, Popover, Tag } from "../ui";
 import { GUESS_CAPTION, GuessesCard, StateCard } from "../working";
 import { AskNextCard } from "./ask-next";
-import { AIAloneCard, ChangeCard, NextStepsCard, VerdictCard, WhyRow } from "./cards";
+import { AIAloneCard, ChangeCard, NextStepsCard, ReadAsNote, VerdictCard, WhyRow } from "./cards";
 import { ChartBodyView } from "./chart-bodies";
 import { useFetchedDatasets } from "./datasets";
 import { ChartSheet, MoreCharts } from "./more-charts";
@@ -26,7 +26,7 @@ import { ChartSheet, MoreCharts } from "./more-charts";
  */
 
 /** What the page reads from the run besides the brief model (a full RunState fits). */
-export type AnswerPageState = Pick<RunState, "resolves"> & Partial<Pick<RunState, "metrics" | "ghost" | "report" | "evidence">>;
+export type AnswerPageState = Pick<RunState, "resolves"> & Partial<Pick<RunState, "metrics" | "ghost" | "report" | "evidence" | "intent">>;
 
 export interface AnswerPageProps {
   model: BriefModel;
@@ -233,7 +233,10 @@ function writeChartParam(chart: MoreChart | null) {
 
 export function AnswerPage({ model, state, runId = model.runId, links, fallbackQuestion = null, datasets }: AnswerPageProps) {
   const fetched = useFetchedDatasets(model.evidence.figures, datasets);
-  const run = useMemo(() => ({ resolves: state.resolves, ghost: state.ghost ?? null, report: state.report ?? null, metrics: state.metrics }), [state]);
+  const run = useMemo(
+    () => ({ resolves: state.resolves, ghost: state.ghost ?? null, report: state.report ?? null, metrics: state.metrics, intent: state.intent ?? null, evidence: state.evidence }),
+    [state],
+  );
   const answer = useMemo(() => buildAnswerModel(model, run, { datasets: fetched, fallbackQuestion }), [model, run, fetched, fallbackQuestion]);
   const [sheet, setSheet] = useState<MoreChart | null>(null);
 
@@ -282,6 +285,8 @@ export function AnswerPage({ model, state, runId = model.runId, links, fallbackQ
           actions={<HeadActions permalink={links.permalink} replay={links.replay} />}
           className="pb-0.5"
         />
+
+        {answer.readAs ? <ReadAsNote readAs={answer.readAs} /> : null}
 
         <div className={ROW}>
           {model.terminal?.kind === "incomplete" ? (

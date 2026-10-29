@@ -18,5 +18,7 @@ export { draftKeyNumber } from "./draft-numbers";
 export { handOver } from "./hand-over";
 export { AnswerMissing } from "./missing";
 export type { MissingKind } from "./missing";
+export { lookupChips } from "./sources";
+export type { LookupChip } from "./sources";
 export { WorkingView } from "./working-view";
 export type { WorkingReplay, WorkingViewProps } from "./working-view";

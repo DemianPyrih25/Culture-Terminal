@@ -115,6 +115,26 @@ export function formatUsd(usd: number): string {
 }
 
 /**
+ * A reported dollar amount (SEC filings, Census incomes) in a reader's words: "$1.2B", "$845.0M",
+ * "$72.4K", "$950", with the typographic minus for a loss ("−$31.5M").
+ */
+export function formatDollars(value: number): string {
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "−" : "";
+  const scaled = (n: number, suffix: string) => `${sign}$${n.toFixed(1)}${suffix}`;
+  if (abs >= 1e12) return scaled(abs / 1e12, "T");
+  if (abs >= 1e9) return scaled(abs / 1e9, "B");
+  if (abs >= 1e6) return scaled(abs / 1e6, "M");
+  if (abs >= 1e4) return scaled(abs / 1e3, "K");
+  return `${sign}$${Math.round(abs).toLocaleString("en-US")}`;
+}
+
+/** A head count with thousands separators: "12,480". */
+export function formatPeople(value: number): string {
+  return Math.round(value).toLocaleString("en-US");
+}
+
+/**
  * A request id shortened to its first and last four characters, "ab12…cd34", so it can be matched
  * against the ledger without printing the whole id. Short ids are returned whole.
  */
@@ -163,6 +183,11 @@ export const JOB_LABEL: Readonly<Record<Job, string>> = {
   sponsorship: "Sponsor fit",
   market_selection: "Launch & tour cities",
   audience_discovery: "Who they are",
+  taste_twins: "Find an area's twin",
+  brand_collab: "Brand collaborations",
+  creator_fit: "Creators who fit",
+  launch_test: "Test a new product",
+  city_compare: "Compare cities",
 };
 
 /** The brief's running head is terser where the full label would crowd it (A05: "INVESTMENT · COMPETITORS"). */
@@ -209,6 +234,8 @@ export function convictionRuleLabel(rule: ConfidenceRule, count: number, window:
       return many ? `${count} checker warnings` : "A checker warning";
     case "insufficient_evidence":
       return "Signal is insufficient evidence";
+    case "read_as_nearest_job":
+      return "Answered as the closest question we cover";
   }
 }
 
@@ -258,6 +285,9 @@ export const NO_VALUE_LABEL: Readonly<Record<NoValueReason, string>> = {
   coarse: "location data too coarse",
   self: "same entity",
   error: "the request failed",
+  not_listed: "not a listed company: no public filings to read",
+  not_reported: "not in the company's filings",
+  suppressed: "withheld by the Census for privacy or a small sample",
 };
 
 export const CACHE_LABEL: Readonly<Record<CacheStatus, string>> = {
@@ -301,6 +331,10 @@ export const TOOL_LABEL: Readonly<Record<ToolName, string>> = {
   block_dna: "Block DNA",
   cross_domain: "Cultural neighbourhood",
   sponsor_slate: "Sponsor slate",
+  taste_twins: "Taste twins",
+  concept_vector: "Concept check",
+  company_financials: "Company filings",
+  area_economics: "Area census",
   submit_report: "Report",
 };
 
@@ -319,6 +353,10 @@ export const TOOL_DATA_LABEL: Readonly<Record<ToolName, string>> = {
   block_dna: "block data",
   cross_domain: "neighbour data",
   sponsor_slate: "sponsor data",
+  taste_twins: "twin data",
+  concept_vector: "concept data",
+  company_financials: "filing data",
+  area_economics: "census data",
   submit_report: "the report",
 };
 
@@ -383,14 +421,36 @@ export const METRIC_SHORT_LABEL: Readonly<Record<string, string>> = {
   "lift.white_space": "White space",
   "block.rank_delta": "Over-represented",
   "block.new_tag": "New tags",
+  "block.panel_rank": "City panel rank",
   "tenant.rank_shift": "Rank shift",
   "tenant.fit": "Tenant fit",
   "rank.shift": "Rank shift",
+  "rank.fit": "Fit",
+  "xdom.fit": "Fit",
   "xdom.under_the_radar": "Under the radar",
   "xdom.edge": "Seed link",
   "slate.best_fit": "Best fit",
   "slate.under_the_radar": "Under-the-radar fit",
   "slate.market_alignment": "Market fit",
+  "twin.rho": "Twin match",
+  "twin.shared_new": "Shared new tastes",
+  "cnpt.s50": "The concept's bar",
+  "cnpt.verdict": "Kept or dropped",
+  "cnpt.analog_affinity_vs_s50": "Against the bar",
+  "cnpt.precision": "AI guesses kept",
+  "fin.revenue": "Revenue",
+  "fin.gross_margin": "Gross margin",
+  "fin.operating_margin": "Operating margin",
+  "fin.yoy": "Revenue vs a year before",
+  "econ.population": "Residents",
+  "econ.median_age": "Median age",
+  "econ.median_hh_income": "Median household income",
+  "econ.households": "Households",
+  "econ.commute_share": "Commute share",
+  "econ.count": "Census count",
+  "econ.median": "Census median",
+  "econ.share": "Census share",
+  "fin.margin": "Margin",
   "confidence.run": "Conviction",
   "confidence.metric": "Metric confidence",
 };

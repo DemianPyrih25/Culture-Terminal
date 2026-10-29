@@ -46,9 +46,10 @@ function intentFor(q: string): Intent {
     pillar: "investment",
     job: "brand_health",
     mentions: [{ text: "Brand Alpha", entity_type: "brand", role: "primary", public_figure: false }],
-    geo: { metro: null, area: null, unsupported_place: null, market: null },
-    constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
+    geo: { metro: null, area: null, unsupported_place: null, market: null, target_metro: null, cities: [] },
+    constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
     safety: refused ? { allowed: false, category: "private_individual", reframe: null } : { allowed: true, category: null, reframe: null },
+    read_as: { nearest: false, not_covered: [] },
     assumptions: [],
     mnemonic: "BRAND ALPHA <BRAND> HLTH",
   };
@@ -76,7 +77,7 @@ function scriptedAgent() {
 function fakeGhost(): GhostApi {
   return {
     runGhost: async (o) => ({
-      answer: { headline: "Foxglove Cola leads.", picks: { competitors: ["Foxglove Cola"], markets: [], neighbourhoods: [], tenants: [], partners: [] }, numeric_claims: ["70%"] },
+      answer: { headline: "Foxglove Cola leads.", picks: { competitors: ["Foxglove Cola"], markets: [], neighbourhoods: [], tenants: [], partners: [], creators: [] }, numeric_claims: ["70%"] },
       usage: { input: 900, output: 300, cacheRead: 0, cacheCreation: 0 },
       usd: 0.01,
       ms: 3_000,

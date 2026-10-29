@@ -13,9 +13,10 @@ function intent(overrides: { safety?: Partial<Intent["safety"]>; mentions?: Inte
     pillar: "investment",
     job: "head_to_head",
     mentions: overrides.mentions ?? [{ text: "Brand Alpha", entity_type: "brand", role: "primary", public_figure: false }],
-    geo: { metro: overrides.metro ?? null, area: null, unsupported_place: null, market: null },
-    constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
+    geo: { metro: overrides.metro ?? null, area: null, unsupported_place: null, market: null, target_metro: null, cities: [] },
+    constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
     safety: { allowed: true, category: null, reframe: null, ...overrides.safety },
+    read_as: { nearest: false, not_covered: [] },
     assumptions: [],
     mnemonic: "BRAND ALPHA VS <B>",
   };

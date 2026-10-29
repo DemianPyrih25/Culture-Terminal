@@ -8,7 +8,7 @@ import { stateOf } from "./support";
 
 vi.mock("server-only", () => ({}));
 
-const NO_PICKS: GhostAnswer["picks"] = { competitors: [], markets: [], neighbourhoods: [], tenants: [], partners: [] };
+const NO_PICKS: GhostAnswer["picks"] = { competitors: [], markets: [], neighbourhoods: [], tenants: [], partners: [], creators: [] };
 
 function ghostRun(answer: Partial<GhostAnswer> = {}, diff: Partial<GhostDiff> = {}): GhostRun {
   return {

@@ -249,13 +249,28 @@ describe("Intent (CLERK structured output)", () => {
     const legacyGeo = { metro: intent.geo.metro, area: intent.geo.area, unsupported_place: intent.geo.unsupported_place };
     const legacy = { ...intent, geo: legacyGeo };
     expect(Intent.safeParse(legacy).success).toBe(false);
-    expect(StoredIntent.parse(legacy)).toEqual({ ...intent, geo: { ...legacyGeo, market: null } });
+    expect(StoredIntent.parse(legacy)).toEqual({ ...intent, geo: { ...legacyGeo, market: null, target_metro: null, cities: [] } });
     const event = { seq: 2, ts: ts(1), runId: RUN_ID, type: "clerk", intent: legacy, ms: 900 };
     expect(RunEvent.parse(event)).toMatchObject({ type: "clerk", intent: { geo: { market: null } } });
   });
 
+  it("backfills the Part 9 intent fields of a stored intent, and requires them from CLERK", () => {
+    const geo: Record<string, unknown> = { ...intent.geo };
+    delete geo.target_metro;
+    delete geo.cities;
+    const constraints: Record<string, unknown> = { ...intent.constraints };
+    delete constraints.concept_description;
+    const legacy: Record<string, unknown> = { ...intent, geo, constraints };
+    delete legacy.read_as;
+    expect(Intent.safeParse(legacy).success).toBe(false);
+    expect(StoredIntent.parse(legacy)).toEqual(intent);
+    // A stored value is kept, never overwritten by the backfill.
+    const twin = { ...intent, geo: { ...intent.geo, target_metro: "austin" as const } };
+    expect(StoredIntent.parse(twin)).toEqual(twin);
+  });
+
   it("searches a place in the market CLERK named for it, else in the question's map city (D44)", () => {
-    const geo = { metro: null, area: null, unsupported_place: null, market: null };
+    const geo = { metro: null, area: null, unsupported_place: null, market: null, target_metro: null, cities: [] };
     // A venue in another city than the metro is searched in its own city.
     expect(placeSearchMarket({ ...geo, metro: "chicago", market: "portland" })).toBe("portland");
     expect(placeSearchMarket({ ...geo, metro: "chicago" })).toBe("chicago");
@@ -274,10 +289,24 @@ describe("Intent (CLERK structured output)", () => {
 
   it("compiles the mnemonic for every job shape", () => {
     expect(compileMnemonic({ ...intent, job: "head_to_head" })).toBe("JUNIPER COLA VS AURORA FOOTWEAR");
-    const geo = { metro: "nashville" as const, area: "Marlowe Ridge", unsupported_place: null, market: null };
+    const geo = { ...intent.geo, metro: "nashville" as const, area: "Marlowe Ridge" };
     expect(compileMnemonic({ ...intent, job: "tenant_mix", geo })).toBe("MARLOWE RIDGE, NASHVILLE TEN");
-    const site = { ...intent, job: "site_selection" as const, geo, constraints: { ...intent.constraints, concepts: ["listening bar"] } };
+    const concept = { ...intent.constraints, concepts: ["listening bar"] };
+    const site = { ...intent, job: "site_selection" as const, geo, constraints: concept };
     expect(compileMnemonic(site)).toBe("LISTENING BAR SITE NASHVILLE");
+    expect(compileMnemonic({ ...intent, job: "taste_twins", geo: { ...geo, target_metro: "austin" } })).toBe(
+      "MARLOWE RIDGE, NASHVILLE TWIN AUSTIN",
+    );
+    expect(compileMnemonic({ ...intent, job: "taste_twins", geo })).toBe("MARLOWE RIDGE, NASHVILLE TWIN <CITY>");
+    const cities = { ...intent.geo, cities: ["austin", "nashville", "denver"] };
+    expect(compileMnemonic({ ...intent, job: "city_compare", geo: cities })).toBe("AUSTIN VS NASHVILLE VS DENVER CITY");
+    expect(compileMnemonic({ ...intent, job: "city_compare", geo: cities, constraints: concept })).toBe(
+      "AUSTIN VS NASHVILLE VS DENVER CITY LISTENING BAR",
+    );
+    expect(compileMnemonic({ ...intent, job: "city_compare" })).toBe("<CITY> VS <CITY> CITY");
+    expect(compileMnemonic({ ...intent, job: "launch_test", constraints: concept })).toBe("LISTENING BAR LNCH");
+    expect(compileMnemonic({ ...intent, job: "brand_collab" })).toBe("JUNIPER COLA <BRAND> COLLAB");
+    expect(compileMnemonic({ ...intent, job: "creator_fit" })).toBe("JUNIPER COLA <BRAND> CRTR");
   });
 
   it("GhostAnswer is in the structured-output subset too", () => {

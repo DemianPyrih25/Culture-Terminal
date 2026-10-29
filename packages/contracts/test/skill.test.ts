@@ -106,6 +106,7 @@ describe("skill contract", () => {
         finding: () => undefined,
       },
       geo: {} as SkillCtx["geo"],
+      publicdata: null,
       localities: null,
       registry: {} as SkillCtx["registry"],
       emit: (e: EventInput) => emitted.push(e),

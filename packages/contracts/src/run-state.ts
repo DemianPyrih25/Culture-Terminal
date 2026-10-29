@@ -44,6 +44,8 @@ export interface ToolCallState {
   flags: Flag[];
   /** Qloo calls attributed to this tool call, in arrival order. */
   qlooCallIds: string[];
+  /** SEC and Census calls attributed to this tool call, in arrival order. */
+  publicCallIds: string[];
   /** An ANALYST PIVOT: a follow-up the model made because of a finding. */
   pivot: boolean;
   error: { code: ErrorCode; message: string } | null;
@@ -64,6 +66,17 @@ export interface QlooTotals {
   chips: QlooChip[];
 }
 
+export type PublicChip = Stamped<"public">;
+
+/** SEC and Census calls (Part 9). They cost no Qloo calls, so they never count toward QlooTotals. */
+export interface PublicTotals {
+  network: number;
+  cached: number;
+  reused: number;
+  byCache: Record<CacheStatus, number>;
+  chips: PublicChip[];
+}
+
 export interface DatasetState {
   id: DatasetId;
   kind: DatasetKind;
@@ -78,7 +91,7 @@ export interface TimelineEntry {
   seq: number;
   ts: string;
   type: RunEventType;
-  /** The id the entry points at (tool call, Qloo call, finding, metric, evidence or dataset), if any. */
+  /** The id the entry points at (tool call, Qloo or public call, finding, metric, evidence or dataset), if any. */
   key: string | null;
 }
 
@@ -106,6 +119,7 @@ export interface RunState {
 
   toolCalls: ToolCallState[];
   qloo: QlooTotals;
+  publicCalls: PublicTotals;
   findings: Finding[];
   fallbacks: Stamped<"fallback">[];
   pivots: Stamped<"pivot">[];
@@ -153,6 +167,13 @@ export function initialRunState(runId: string): RunState {
       byCache: { hit: 0, miss: 0, stale: 0, coalesced: 0, reused: 0 },
       chips: [],
     },
+    publicCalls: {
+      network: 0,
+      cached: 0,
+      reused: 0,
+      byCache: { hit: 0, miss: 0, stale: 0, coalesced: 0, reused: 0 },
+      chips: [],
+    },
     findings: [],
     fallbacks: [],
     pivots: [],
@@ -189,6 +210,7 @@ function newToolCall(toolCallId: string, tool: ToolName): ToolCallState {
     findingIds: [],
     flags: [],
     qlooCallIds: [],
+    publicCallIds: [],
     pivot: false,
     error: null,
     startedSeq: null,
@@ -217,6 +239,8 @@ function timelineKey(event: RunEvent): string | null {
       return event.toolCallId;
     case "qloo":
       return event.qlooCallId;
+    case "public":
+      return event.publicCallId;
     case "finding":
       return event.finding.id;
     case "metric":
@@ -345,6 +369,24 @@ export function applyEvent(state: RunState, event: RunEvent): RunState {
             )
           : s.toolCalls;
       return { ...s, qloo, toolCalls };
+    }
+    case "public": {
+      const bucket = CACHE_BUCKET[event.cache];
+      const prev = s.publicCalls;
+      const publicCalls: PublicTotals = {
+        ...prev,
+        [bucket]: prev[bucket] + 1,
+        byCache: { ...prev.byCache, [event.cache]: prev.byCache[event.cache] + 1 },
+        chips: [...prev.chips, strip(event)],
+      };
+      const toolCallId = event.toolCallId;
+      const toolCalls =
+        toolCallId !== null && s.toolCalls.some((t) => t.toolCallId === toolCallId)
+          ? s.toolCalls.map((t) =>
+              t.toolCallId === toolCallId ? { ...t, publicCallIds: [...t.publicCallIds, event.publicCallId] } : t,
+            )
+          : s.toolCalls;
+      return { ...s, publicCalls, toolCalls };
     }
     case "finding":
       return {

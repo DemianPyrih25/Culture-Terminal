@@ -21,7 +21,7 @@ import { createEntityRegistry, type RunRegistry } from "../../src/registry";
 
 // Answers ------------------------------------------------------------------------------------------
 
-const NO_PICKS: GhostAnswer["picks"] = { competitors: [], markets: [], neighbourhoods: [], tenants: [], partners: [] };
+const NO_PICKS: GhostAnswer["picks"] = { competitors: [], markets: [], neighbourhoods: [], tenants: [], partners: [], creators: [] };
 
 export function answer(picks: Partial<GhostAnswer["picks"]> = {}, numericClaims: string[] = [], headline = "Brand Alpha is a niche."): GhostAnswer {
   return { headline, picks: { ...NO_PICKS, ...picks }, numeric_claims: numericClaims };

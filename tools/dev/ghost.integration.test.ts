@@ -28,7 +28,7 @@ const D1: DatasetEnvelope = subsMap("D1", ["R1", "Brand Alpha"], [
 ]);
 const ANSWER: GhostAnswer = {
   headline: "Brand Alpha competes with Brand Beta for about 70% of its audience.",
-  picks: { competitors: ["Brand Beta", "Brand Omega"], markets: [], neighbourhoods: [], tenants: [], partners: [] },
+  picks: { competitors: ["Brand Beta", "Brand Omega"], markets: [], neighbourhoods: [], tenants: [], partners: [], creators: [] },
   numeric_claims: ["about 70%"],
 };
 

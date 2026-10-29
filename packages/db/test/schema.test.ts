@@ -21,7 +21,7 @@ function primaryKeyOf(name: string): string[] {
 }
 
 describe("schema", () => {
-  it("defines exactly the 12 tables of PLAN §3.2", () => {
+  it("defines exactly the 14 tables of PLAN §3.2 (public_cache and public_calls from Part 9)", () => {
     expect([...byName.keys()].sort()).toEqual(
       [
         "datasets",
@@ -30,6 +30,8 @@ describe("schema", () => {
         "ip_usage",
         "kv",
         "metrics",
+        "public_cache",
+        "public_calls",
         "qloo_cache",
         "qloo_calls",
         "run_events",
@@ -48,6 +50,8 @@ describe("schema", () => {
     }
     expect(primaryKeyOf("qloo_cache")).toEqual(["key"]);
     expect(primaryKeyOf("qloo_calls")).toEqual(["id"]);
+    expect(primaryKeyOf("public_cache")).toEqual(["key"]);
+    expect(primaryKeyOf("public_calls")).toEqual(["id"]);
     expect(primaryKeyOf("usage_daily")).toEqual(["day", "metric", "lane"]);
     expect(primaryKeyOf("ip_usage")).toEqual(["day", "ip_hash"]);
     expect(primaryKeyOf("kv")).toEqual(["key"]);
@@ -66,6 +70,10 @@ describe("schema", () => {
     expect(indexCols("qloo_cache")["qloo_cache_expires_idx"]).toEqual(["expires_at"]);
     expect(indexCols("qloo_calls")["qloo_calls_ts_idx"]).toEqual(["ts"]);
     expect(indexCols("qloo_calls")["qloo_calls_run_idx"]).toEqual(["run_id", "ts"]);
+    expect(indexCols("public_cache")["public_cache_expires_idx"]).toEqual(["expires_at"]);
+    expect(indexCols("public_calls")["public_calls_ts_idx"]).toEqual(["ts"]);
+    expect(indexCols("public_calls")["public_calls_run_idx"]).toEqual(["run_id", "ts"]);
+    expect(indexCols("public_calls")["public_calls_source_ts_idx"]).toEqual(["source", "ts"]);
   });
 
   it("keeps the 72-hour answer-cache window of D26", () => {

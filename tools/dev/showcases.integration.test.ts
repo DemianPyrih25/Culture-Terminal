@@ -378,7 +378,7 @@ describe.skipIf(!probe.ok)("the showcase tool against Postgres", () => {
       const agent = scriptedAgent((o) => (o.question === TRUST ? { status: "refused", report: null, reason: "Political targeting." } : {}));
       const answer: GhostAnswer = {
         headline: "Brand Alpha fits Brand Beta.",
-        picks: { competitors: ["Brand Beta"], markets: [], neighbourhoods: [], tenants: [], partners: [] },
+        picks: { competitors: ["Brand Beta"], markets: [], neighbourhoods: [], tenants: [], partners: [], creators: [] },
         numeric_claims: [],
       };
       const reply = fakeGaMessage({ model: "claude-sonnet-5-5", content: [{ type: "text", text: JSON.stringify(answer), citations: null }] });

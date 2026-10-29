@@ -757,7 +757,7 @@ export function writeRealityRaw(run: RealityRun, dir: URL | string = PRIVATE_EVA
 
 /** The job GHOST is asked under per kind, and the pick category its top five are read from. */
 export const REALITY_GHOST: Readonly<Record<RealityKind, { job: Job; category: GhostPickCategory }>> = {
-  brand_collaboration: { job: "audience_discovery", category: "partners" },
+  brand_collaboration: { job: "brand_collab", category: "partners" },
   tour_sponsor: { job: "sponsorship", category: "partners" },
   comedian_market: { job: "market_selection", category: "markets" },
   dtc_neighbourhood: { job: "site_selection", category: "neighbourhoods" },

@@ -1,6 +1,6 @@
 // pnpm llm:bench  (tsx --env-file=.env tools/llm-bench/run.ts)
 //
-// The LLM bench (PLAN §4.2, D22, D23): a synthetic three-turn ANALYST run with the real 14 tools,
+// The LLM bench (PLAN §4.2, D22, D23): a synthetic three-turn ANALYST run with the real 18 tools,
 // on sonnet-medium, sonnet-low and haiku-medium. It spends real money, guarded by a hard cap
 // (LLM_BENCH_USD_CAP, default $1.50), and writes raw results to .private/llm-bench/.
 import { performance } from "node:perf_hooks";

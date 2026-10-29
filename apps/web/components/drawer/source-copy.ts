@@ -1,8 +1,9 @@
 import type { BriefSource } from "../../lib/brief";
 
 /**
- * The words of a Qloo lookup in the How we know drawer: what it fetched, its endpoint line, how fresh it
- * is, and its request pairs. Pure.
+ * The words of a lookup in the How we know drawer: what it fetched, its endpoint line, how fresh it is,
+ * and its request pairs. A lookup is a Qloo request, or (Part 9) an SEC EDGAR or US Census request,
+ * which names its host and reference instead of a filter and a request id. Pure.
  */
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
@@ -31,12 +32,18 @@ function typeWord(urn: string | null | undefined): string | null {
 
 const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-/** What a lookup fetched, in plain words: "Audience data for Juniper Cola and 5 more". */
+/** What a lookup fetched, in plain words: "Audience data for Juniper Cola and 5 more", "Reported financials for Juniper Cola's company (SEC EDGAR filings)". */
 export function sourceDescription(source: Pick<BriefSource, "endpoint" | "filterType" | "refs" | "params">): string {
   const names = namesText(source.refs);
   const param = (name: string) => source.params.find(([k]) => k === name)?.[1] ?? null;
   const forNames = names ? ` for ${names}` : "";
   switch (source.endpoint) {
+    case "/files/company_tickers.json":
+      return "Listed company lookup in SEC EDGAR";
+    case "/api/xbrl/companyfacts":
+      return `Reported financials${names ? ` for ${names}'s company` : ""} (SEC EDGAR filings)`;
+    case "/data/acs/acs5":
+      return `Resident estimates${forNames} (US Census ACS 5-year)`;
     case "/search": {
       const type = typeWord(param("types")?.split(",")[0] ?? null);
       return type ? `${sentence(type)} names matched in Qloo` : "Names matched in Qloo";
@@ -58,8 +65,11 @@ export function sourceDescription(source: Pick<BriefSource, "endpoint" | "filter
   }
 }
 
-/** "/v2/insights · brand · 46 rows". */
-export function sourceLine(source: Pick<BriefSource, "endpoint" | "filterLabel" | "rows">): string {
+/** "/v2/insights · brand · 46 rows"; an SEC or Census lookup "data.sec.gov/api/xbrl/companyfacts · SEC EDGAR". */
+export function sourceLine(source: Pick<BriefSource, "endpoint" | "filterLabel" | "rows" | "source" | "host">): string {
+  if (source.source === "sec" || source.source === "census") {
+    return [`${source.host ?? ""}${source.endpoint}`, source.source === "sec" ? "SEC EDGAR" : "US Census Bureau"].join(" · ");
+  }
   return [source.endpoint, source.filterLabel, source.rows === null ? null : `${source.rows} ${source.rows === 1 ? "row" : "rows"}`].filter(Boolean).join(" · ");
 }
 
@@ -114,10 +124,17 @@ export function paramValue(value: string, names: ReadonlyMap<string, string> = n
     .replace(/,(?=\S)/g, ", ");
 }
 
-/** The request block's pairs: the redacted parameters (refs named), then the short request id. */
-export function requestPairs(source: Pick<BriefSource, "params" | "shortRequestId" | "requestId">, names?: ReadonlyMap<string, string>): [string, string][] {
-  const pairs: [string, string][] = source.params.filter(([k]) => !/api[-_]?key|authorization|secret|token|password/i.test(k)).map(([k, v]) => [k, paramValue(v, names)]);
-  if (source.requestId) pairs.push(["request id", source.shortRequestId]);
+/**
+ * The request block's pairs: the redacted parameters (refs named), then the short request id, or for an
+ * SEC or Census lookup its reference (a CIK, or the Census dataset, vintage and geography). Never a key.
+ */
+export function requestPairs(
+  source: Pick<BriefSource, "params" | "shortRequestId" | "requestId" | "source">,
+  names?: ReadonlyMap<string, string>,
+): [string, string][] {
+  const pairs: [string, string][] = source.params.filter(([k]) => !/api[-_]?key|authorization|secret|token|password|^key$/i.test(k)).map(([k, v]) => [k, paramValue(v, names)]);
+  const publicSource = source.source === "sec" || source.source === "census";
+  if (source.requestId) pairs.push([publicSource ? "reference" : "request id", publicSource ? source.requestId : source.shortRequestId]);
   return pairs;
 }
 

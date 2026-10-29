@@ -3,8 +3,9 @@ import type { ReactNode } from "react";
 
 /**
  * Report prose inside figures (D6): a {{M#}} token prints its metric's display text, an [E#]
- * citation becomes a superscript footnote, {{WINDOW}} the trending window. A metric the caller did
- * not bind prints "n/a", so no unbound number ever appears. Text is never parsed as HTML.
+ * citation becomes a superscript footnote, {{WINDOW}} the trending window, {{PERIOD:M#}} the reporting
+ * period or vintage of an SEC or Census number. A metric the caller did not bind prints "n/a", so no
+ * unbound number ever appears. Text is never parsed as HTML.
  */
 
 export interface ProseBindings {
@@ -14,6 +15,8 @@ export interface ProseBindings {
   footnotes?: Readonly<Record<string, number>>;
   /** The trending window as printed, e.g. "Apr–Sep 2025". */
   window?: string;
+  /** Reporting period or vintage per metric id, e.g. { M7: "FY2024" } (Metric.period). */
+  periods?: Readonly<Record<string, string>>;
 }
 
 /** Renders one piece of prose; the brief passes its own to make numbers open their requests. */
@@ -26,6 +29,8 @@ export function renderProse(text: string, bindings: ProseBindings = {}): ReactNo
         return segment.text;
       case "window":
         return bindings.window ?? "the trending window";
+      case "period":
+        return bindings.periods?.[segment.id] ?? "the reported period";
       case "metric": {
         const note = bindings.footnotes?.[segment.id];
         return (
@@ -56,6 +61,8 @@ export function plainProse(text: string, bindings: ProseBindings = {}): string {
           return segment.text;
         case "window":
           return bindings.window ?? "the trending window";
+        case "period":
+          return bindings.periods?.[segment.id] ?? "the reported period";
         case "metric":
           return bindings.metrics?.[segment.id]?.display ?? "n/a";
         case "evidence": {

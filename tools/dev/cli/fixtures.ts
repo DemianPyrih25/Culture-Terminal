@@ -30,6 +30,7 @@ export function syntheticLedger(): LedgerSnapshot {
       {
         id: "E1",
         skill: "peer_landscape",
+        source: "qloo",
         purpose: "Triangular similarity scoring for the Substitution Map",
         status: "ok",
         qlooCallIds: ["qc_synthetic_1"],
@@ -98,6 +99,7 @@ export function syntheticReport(runId: string): Report {
       qlooCached: 2,
       qlooReused: 1,
       endpoints: [{ path: "/v2/insights", filterType: "urn:entity:brand", calls: 6 }],
+      publicEndpoints: [],
       ms: 42_000,
       usd: 0.31,
       tokens: { input: 30_000, output: 4_000, cacheRead: 20_000, cacheCreation: 8_000 },

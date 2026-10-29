@@ -8,9 +8,9 @@ import type { IconName } from "../components/ui/icons";
 export const HOW_PAGE = {
   metaTitle: "How it works · Culture Terminal",
   metaDescription:
-    "How Culture Terminal answers: plain-English questions, Qloo taste data, every number computed in code and checked before you see it.",
+    "How Culture Terminal answers: plain-English questions, Qloo taste data with SEC EDGAR filings and US Census figures where they help, every number computed in code and checked before you see it.",
   title: "How it works",
-  lead: "Ask in plain English. We pull taste data from Qloo, compute every number in code, check each one, and write a one-page answer.",
+  lead: "Ask in plain English. We pull taste data from Qloo, add public company filings and Census figures where they help, compute every number in code, check each one, and write a one-page answer.",
   analystsLink: "For analysts: every formula and rule",
   ask: "Ask a question",
 } as const;
@@ -30,12 +30,12 @@ export const HOW_STEPS: readonly HowStep[] = [
   {
     icon: "database",
     title: "We measure",
-    text: "Before looking, the AI writes down what it expects. Then our code queries Qloo and calculates every figure. The AI never types a number.",
+    text: "Before looking, the AI writes down what it expects. Then our code queries Qloo, and SEC EDGAR or the US Census when the question needs company financials or who lives in an area, and calculates every figure. The AI never types a number.",
   },
   {
     icon: "shield-check",
     title: "We check",
-    text: "Before you see the answer, every number is traced to its Qloo source and advice wording is blocked. Click Source on any number to see it.",
+    text: "Before you see the answer, every number is traced to its source (Qloo, an SEC filing or a Census table) and advice wording is blocked. Click Source on any number to see it.",
   },
 ];
 
@@ -47,6 +47,8 @@ export function readingBullets(trendWindow: string): string[] {
     "Confidence (High, Medium, Low) rates how complete and fresh the data was, not how likely the answer is to be right. Fixed rules set it; the AI can't.",
     "Affinity means shared taste. It is not sales, market share or cause.",
     `Trend figures come from Qloo's latest trend window, ${trendWindow}.`,
+    "Company financials are as reported in SEC EDGAR filings, company-wide, with their fiscal period. A brand may be a small part of its company, and private companies have none.",
+    "Area figures are US Census ACS 5-year estimates about residents, with their vintage: not customers, foot traffic or spending.",
     "Missing data says No data, never zero.",
   ];
 }
@@ -69,6 +71,6 @@ export const HOW_NOTES: readonly { title: string; text: string }[] = [
   },
   {
     title: "Data and models",
-    text: "Taste data: Qloo. Reading questions and writing answers: Claude, by Anthropic. Numbers and checks: our own code. Each answer is dated when it was made.",
+    text: "Taste data: Qloo. Company financials: SEC EDGAR filings. Area figures: the US Census Bureau's American Community Survey through the Census Data API; this product uses the Census Bureau Data API but is not endorsed or certified by the Census Bureau. Reading questions and writing answers: Claude, by Anthropic. Numbers and checks: our own code. Each answer is dated when it was made.",
   },
 ];

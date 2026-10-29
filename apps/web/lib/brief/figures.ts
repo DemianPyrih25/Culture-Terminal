@@ -1,7 +1,7 @@
-import type { DatasetEnvelope, EvidenceId, LocationMethod, QlooPath } from "@ct/contracts";
-import { filterLabel, plural, shortRequestId } from "./format";
-import { requestsForEvidence, type Ledger } from "./ledger";
-import type { FigureLegend, FigureSource, LegendSeries } from "./types";
+import type { DatasetEnvelope, EvidenceId, LocationMethod } from "@ct/contracts";
+import { filterLabel, plural } from "./format";
+import { requestsForEvidence, sourceName, type Ledger } from "./ledger";
+import type { FigureLegend, FigureSource, LegendSeries, SourceEndpoint } from "./types";
 
 /** Figure helpers: legend data per dataset kind, short column codes and the source line. */
 
@@ -96,6 +96,8 @@ export function methodHrefFor(formulaIds: readonly string[]): string {
 
 /**
  * "Source: Qloo /v2/insights · 8 requests · computed in code", with the endpoints and the first request id.
+ * Public data names its source: "Source: SEC EDGAR /api/xbrl/companyfacts · 2 requests · computed in code",
+ * "Source: US Census Bureau /data/acs/acs5 · …"; a figure from both reads "Qloo /v2/tags + US Census Bureau …".
  * A location figure names the place it reads and how (A06): "Source: Qloo /v2/insights · location ← East
  * Nashville · 3 requests · read by POINT · computed in code".
  */
@@ -106,16 +108,21 @@ export function figureSource(
   location: { place: string | null; method: LocationMethod | null } | null = null,
 ): FigureSource {
   const requests = requestsForEvidence(ledger, evidenceIds);
-  const endpoints = new Map<QlooPath, string[]>();
+  const endpoints = new Map<SourceEndpoint, string[]>();
+  const bySource = new Map<string, SourceEndpoint[]>();
   for (const r of requests) {
     if (r.endpoint === null) continue;
     const labels = endpoints.get(r.endpoint) ?? [];
     const f = filterLabel(r.filterType);
     if (f && !labels.includes(f)) labels.push(f);
     endpoints.set(r.endpoint, labels);
+    const name = sourceName(r.source);
+    const list = bySource.get(name) ?? [];
+    if (!list.includes(r.endpoint)) list.push(r.endpoint);
+    bySource.set(name, list);
   }
   const first = requests[0] ?? null;
-  const where = endpoints.size > 0 ? `Qloo ${[...endpoints.keys()].join(" + ")}` : "Culture Terminal analysis";
+  const where = bySource.size > 0 ? [...bySource].map(([name, paths]) => `${name} ${paths.join(" + ")}`).join(" + ") : "Culture Terminal analysis";
   const parts = [`Source: ${where}`];
   if (location?.place) parts.push(`location ← ${location.place}`);
   if (requests.length > 0) parts.push(plural(requests.length, "request"));
@@ -128,7 +135,7 @@ export function figureSource(
     requestCount: requests.length,
     computedInCode: true,
     requestId: first?.requestId ?? null,
-    shortRequestId: first ? shortRequestId(first.requestId) : null,
+    shortRequestId: first ? first.shortRequestId : null,
     line,
   };
 }

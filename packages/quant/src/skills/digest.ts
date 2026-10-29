@@ -1,5 +1,6 @@
 import {
   DATA_NOTICE,
+  dataNoticeFor,
   digestFits,
   Flag,
   MODEL_DIGEST_MAX_ROWS,
@@ -48,9 +49,10 @@ export function orderedFlags(flags: Iterable<Flag>): Flag[] {
   return Flag.options.filter((f) => set.has(f));
 }
 
-export function buildSkillDigest(parts: DigestParts): ModelDigest {
+/** `tool` picks the data notice: the public-data tools carry PUBLIC_DATA_NOTICE, the rest DATA_NOTICE. */
+export function buildSkillDigest(parts: DigestParts, tool?: ToolName): ModelDigest {
   return {
-    _data_notice: DATA_NOTICE,
+    _data_notice: tool === undefined ? DATA_NOTICE : dataNoticeFor(tool),
     status: parts.status,
     evidence_ids: [...parts.evidenceIds],
     dataset_ids: [...parts.datasetIds],
@@ -115,7 +117,7 @@ export function fitSkillDigest(digest: ModelDigest, target: DigestTarget, totalR
 }
 
 export function skillResult(parts: DigestParts, target: DigestTarget): SkillResult {
-  const forModel = fitSkillDigest(buildSkillDigest(parts), target, parts.rows.length);
+  const forModel = fitSkillDigest(buildSkillDigest(parts, target.tool), target, parts.rows.length);
   return {
     forModel,
     evidenceIds: [...parts.evidenceIds],

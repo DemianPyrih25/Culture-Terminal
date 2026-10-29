@@ -1,5 +1,6 @@
 import type { WorkingStep, WorkingStepState } from "../../lib/brief/steps";
 import { ButtonLink, Card, cx, Icon, Spinner } from "../ui";
+import type { LookupChip } from "./sources";
 
 /**
  * C/ProgressCard (N03 early, N04 late, replay): the status title and the time, the progress track, the
@@ -74,13 +75,36 @@ export interface ProgressCardProps {
   editHref: string | null;
   /** "Noticed: … Looking closer."; null hides the line. */
   noticed: string | null;
+  /**
+   * D41: the question was read as the nearest job; the plain sentence of what is not covered. Null or
+   * absent hides it.
+   */
+  readAsLine?: string | null;
+  /**
+   * Lookups so far by source ("Qloo 12", "SEC EDGAR 2"). Shown once public data is among them, so a
+   * reader sees that filings or Census figures joined the taste data.
+   */
+  lookups?: readonly LookupChip[];
   /** The polite announcement: the active step only, never the ticking time. */
   announcement: string;
   /** recording: a replay. */
   variant?: "live" | "replay";
 }
 
-export function ProgressCard({ title, time, fraction, steps, readingAs, editHref, noticed, announcement, variant = "live" }: ProgressCardProps) {
+export function ProgressCard({
+  title,
+  time,
+  fraction,
+  steps,
+  readingAs,
+  editHref,
+  noticed,
+  readAsLine = null,
+  lookups = [],
+  announcement,
+  variant = "live",
+}: ProgressCardProps) {
+  const showLookups = lookups.some((l) => l.source !== "qloo");
   return (
     <Card padding="lg" aria-label="Progress" data-progress-card={variant} className="flex flex-col gap-7 max-md:gap-5">
       <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between md:gap-6">
@@ -93,6 +117,23 @@ export function ProgressCard({ title, time, fraction, steps, readingAs, editHref
       </div>
       <ProgressTrack fraction={fraction} label={variant === "replay" ? "Recording progress" : "Progress"} />
       <StepList steps={steps} />
+      {showLookups ? (
+        <ul aria-label="Lookups so far" className="flex flex-wrap gap-2" data-lookups>
+          {lookups.map((l) => (
+            <li key={l.source} data-lookup={l.source} className="rounded-xs bg-sunken px-2 py-0.5 type-label text-ink-2 tabular-nums">
+              {l.label}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {readAsLine ? (
+        <p className="flex items-start gap-2 type-body text-ink" data-read-as>
+          <span className="flex h-6 shrink-0 items-center">
+            <Icon name="circle-question-mark" size={16} className="text-ink-2" />
+          </span>
+          {readAsLine}
+        </p>
+      ) : null}
       {readingAs || editHref || noticed ? (
         <div className="flex flex-col gap-3">
           {readingAs || editHref ? (

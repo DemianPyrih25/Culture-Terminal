@@ -17,11 +17,13 @@ import {
   Badge,
   CacheStatus,
   Comparator,
+  EvidenceSource,
   FindingKind,
   IsoDateTime,
   Flag,
   MetricUnit,
   NoValueReason,
+  PublicSource,
   Severity,
   SkillId,
   SkillStatus,
@@ -30,8 +32,8 @@ import { DatasetIdSchema, EvidenceIdSchema, FindingIdSchema, MetricIdSchema } fr
 import { QlooPath } from "./qloo-types";
 
 /**
- * The evidence ledger (PLAN §6): E# bundles of Qloo calls, M# metrics computed from them,
- * D# datasets and F# findings. Every number in a note traces M# → E# → request id.
+ * The evidence ledger (PLAN §6): E# bundles of Qloo or public-data calls, M# metrics computed from
+ * them, D# datasets and F# findings. Every number in a note traces M# → E# → request id or reference.
  */
 
 const isoTs = IsoDateTime;
@@ -57,24 +59,61 @@ export interface QlooResult<T> {
 }
 
 /** One request in the Qloo kit's provenance envelope (D30). Query values are canonical strings, lists comma-joined. */
-export const ProvenanceRequest = z.object({
+export const QlooProvenanceRequest = z.object({
+  /** Absent in requests stored before Part 9; a request without `source` is a Qloo request. */
+  source: z.literal("qloo").optional(),
   method: z.literal("GET"),
   path: QlooPath,
   query: z.record(z.string(), z.string()),
 });
+export type QlooProvenanceRequest = z.infer<typeof QlooProvenanceRequest>;
+
+/**
+ * One SEC or Census request: the concrete host and path (e.g. data.sec.gov
+ * `/api/xbrl/companyfacts/CIK0000000001.json`) and the canonical query without any API key, so the
+ * request can be repeated by anyone. `reference` is the call's PublicCallMeta reference.
+ */
+export const PublicProvenanceRequest = z.object({
+  source: PublicSource,
+  method: z.literal("GET"),
+  host: z.string().min(1),
+  path: z.string().startsWith("/"),
+  query: z.record(z.string(), z.string()),
+  reference: z.string().min(1),
+});
+export type PublicProvenanceRequest = z.infer<typeof PublicProvenanceRequest>;
+
+export const ProvenanceRequest = z.union([QlooProvenanceRequest, PublicProvenanceRequest]);
 export type ProvenanceRequest = z.infer<typeof ProvenanceRequest>;
+
+export function isPublicProvenanceRequest(r: ProvenanceRequest): r is PublicProvenanceRequest {
+  return r.source !== undefined && r.source !== "qloo";
+}
+
+export function isQlooProvenanceRequest(r: ProvenanceRequest): r is QlooProvenanceRequest {
+  return !isPublicProvenanceRequest(r);
+}
+
+/** The source a provenance request belongs to. */
+export function provenanceSource(r: ProvenanceRequest): EvidenceSource {
+  return r.source ?? "qloo";
+}
 
 export const Provenance = z.object({ requests: z.array(ProvenanceRequest) });
 export type Provenance = z.infer<typeof Provenance>;
 
 /**
  * E#: one skill evidence bundle. `qlooCallIds`, `requestIds` and `provenance.requests` are parallel
- * arrays, one entry per call.
+ * arrays, one entry per call. One bundle holds calls of one source. The field names predate public
+ * data and are kept for stored runs: for an SEC or Census bundle `qlooCallIds` holds the public call
+ * ids (PublicCallMeta.publicCallId) and `requestIds` their references (PublicCallMeta.reference).
  */
 export const Evidence = z
   .object({
     id: EvidenceIdSchema,
     skill: SkillId,
+    /** Where the bundle's data came from. Bundles stored before Part 9 read as qloo. */
+    source: EvidenceSource.default("qloo"),
     purpose: z.string(),
     status: SkillStatus,
     qlooCallIds: z.array(z.string().min(1)).min(1),
@@ -92,7 +131,10 @@ export const Evidence = z
   .refine(
     (e) => e.requestIds.length === e.qlooCallIds.length && e.provenance.requests.length === e.qlooCallIds.length,
     { message: "qlooCallIds, requestIds and provenance.requests must align" },
-  );
+  )
+  .refine((e) => e.provenance.requests.every((r) => provenanceSource(r) === e.source), {
+    message: "every provenance request must come from the bundle's source",
+  });
 export type Evidence = z.infer<typeof Evidence>;
 
 /**
@@ -121,6 +163,11 @@ export const Metric = z
     conf: z.number().min(0).max(1).nullable(),
     comparator: Comparator.nullable(),
     window: TrendWindow.nullable(),
+    /**
+     * The reporting period or vintage of an SEC or Census metric, as {{PERIOD:M#}} renders it, e.g.
+     * "FY2024, 10-K filed 2025-02-14" or "ACS 2019-2023 5-year" (CHECKER V11). Absent or null for Qloo metrics.
+     */
+    period: z.string().min(1).nullable().optional(),
   })
   .refine((m) => (m.value === null) === (m.badge === "UNAVAILABLE"), {
     message: "value is null exactly when the badge is UNAVAILABLE",

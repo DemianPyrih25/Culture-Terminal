@@ -1,9 +1,10 @@
 // Every job end to end (PLAN Part 5 "Done when"): the scripted fake ANALYST over the real Qloo client
 // on the mock transport, with the pinned market localities the mock resolves. Each run must complete
-// with at least one ANALYST PIVOT, on a finding its job's playbook lists (director.md §5), and no
+// with at least one ANALYST PIVOT, on a finding its job's playbook lists (director.md §6), and no
 // CHECKER issue. Invented entities only (D29).
 import {
   FindingKind,
+  JOB_MNEMONIC,
   Report,
   type EventInput,
   type EventInputOf,
@@ -58,9 +59,10 @@ function seen(req: AnalystRequest): Seen {
   };
 }
 
-/** The pivots a job's playbook lists (its director.md §5 line), e.g. LATENT_DEMAND for site_selection. */
+/** The pivots a job's playbook lists (its director.md §6 line), e.g. LATENT_DEMAND for site_selection. */
 function playbookPivots(job: Job): FindingKind[] {
-  const line = DIRECTOR_PROMPT.split("\n").find((l) => l.startsWith(`- **${job}** (`)) ?? "";
+  // "(MNEM)." tells the job line apart from a tool line of the same name (taste_twins is both).
+  const line = DIRECTOR_PROMPT.split("\n").find((l) => l.startsWith(`- **${job}** (${JOB_MNEMONIC[job]}).`)) ?? "";
   return FindingKind.options.filter((k) => line.includes(k));
 }
 
@@ -232,7 +234,7 @@ describe("every job runs end to end with a pivot and no CHECKER issue", () => {
         { text: "Brand Alpha", entity_type: "brand", role: "primary", public_figure: false },
         { text: "Brand Beta", entity_type: "brand", role: "peer", public_figure: false },
       ],
-      geo: { metro: "austin", area: null, unsupported_place: null, market: null },
+      geo: { metro: "austin", area: null, unsupported_place: null, market: null, target_metro: null, cities: [] },
       mnemonic: "BRAND ALPHA VS BRAND BETA",
     });
     const { report, events, result } = await runJob({
@@ -271,8 +273,8 @@ describe("every job runs end to end with a pivot and no CHECKER issue", () => {
       job: "site_selection",
       pillar: "location",
       mentions: [],
-      geo: { metro: "austin", area: null, unsupported_place: null, market: null },
-      constraints: { concepts: ["coffee shop"], sponsor_categories: [], domains: [], ages: [], notes: [] },
+      geo: { metro: "austin", area: null, unsupported_place: null, market: null, target_metro: null, cities: [] },
+      constraints: { concepts: ["coffee shop"], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
       mnemonic: "COFFEE SHOP SITE AUSTIN",
     });
     const { report, events } = await runJob({
@@ -307,7 +309,7 @@ describe("every job runs end to end with a pivot and no CHECKER issue", () => {
       job: "area_profile",
       pillar: "location",
       mentions: [],
-      geo: { metro: "austin", area: "Barton Hills", unsupported_place: null, market: null },
+      geo: { metro: "austin", area: "Barton Hills", unsupported_place: null, market: null, target_metro: null, cities: [] },
       mnemonic: "BARTON HILLS, AUSTIN DNA",
     });
     await runJob({
@@ -346,8 +348,8 @@ describe("every job runs end to end with a pivot and no CHECKER issue", () => {
       job: "tenant_mix",
       pillar: "location",
       mentions: [],
-      geo: { metro: "nashville", area: "Hermitage", unsupported_place: null, market: null },
-      constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: ["vacant storefront"] },
+      geo: { metro: "nashville", area: "Hermitage", unsupported_place: null, market: null, target_metro: null, cities: [] },
+      constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: ["vacant storefront"], concept_description: null },
       mnemonic: "HERMITAGE, NASHVILLE TEN",
     });
     const { report } = await runJob({
@@ -396,7 +398,7 @@ describe("every job runs end to end with a pivot and no CHECKER issue", () => {
       job: "sponsorship",
       pillar: "marketing",
       mentions: [{ text: "Artist Lumen", entity_type: "artist", role: "primary", public_figure: false }],
-      constraints: { concepts: [], sponsor_categories: ["beer", "energy_drinks"], domains: [], ages: [], notes: ["markets: Dallas, Miami", "tour"] },
+      constraints: { concepts: [], sponsor_categories: ["beer", "energy_drinks"], domains: [], ages: [], notes: ["markets: Dallas, Miami", "tour"], concept_description: null },
       mnemonic: "ARTIST LUMEN <ARTIST> SPON",
     });
     const { events } = await runJob({
@@ -463,7 +465,7 @@ describe("every job runs end to end with a pivot and no CHECKER issue", () => {
         { text: "Comedian Vega", entity_type: "person", role: "primary", public_figure: true },
         { text: "Comedian Rhea", entity_type: "person", role: "peer", public_figure: true },
       ],
-      constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: ["markets: Denver, Boise"] },
+      constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: ["markets: Denver, Boise"], concept_description: null },
       mnemonic: "COMEDIAN VEGA <PERSON> MKTS",
     });
     const { events } = await runJob({
@@ -551,8 +553,8 @@ describe("pivots on findings a turn-2 step leaves standing or a deferred scan st
       job: "tenant_mix",
       pillar: "location",
       mentions: [],
-      geo: { metro: "nashville", area: "Hermitage", unsupported_place: null, market: null },
-      constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: ["vacant storefront"] },
+      geo: { metro: "nashville", area: "Hermitage", unsupported_place: null, market: null, target_metro: null, cities: [] },
+      constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: ["vacant storefront"], concept_description: null },
       mnemonic: "HERMITAGE, NASHVILLE TEN",
     });
     const contexts = [
@@ -613,7 +615,7 @@ describe("pivots on findings a turn-2 step leaves standing or a deferred scan st
       job: "market_selection",
       pillar: "marketing",
       mentions: [{ text: "Comedian Vega", entity_type: "person", role: "primary", public_figure: true }],
-      constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: ["new dates"] },
+      constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: ["new dates"], concept_description: null },
       mnemonic: "COMEDIAN VEGA <PERSON> MKTS",
     });
     const { events, fake } = await runJob({
@@ -678,7 +680,7 @@ describe("pivots on findings a turn-2 step leaves standing or a deferred scan st
       job: "audience_discovery",
       pillar: "audience",
       mentions: [{ text: "Brand Delta", entity_type: "brand", role: "primary", public_figure: false }],
-      constraints: { concepts: [], sponsor_categories: [], domains: ["podcast"], ages: [], notes: [] },
+      constraints: { concepts: [], sponsor_categories: [], domains: ["podcast"], ages: [], notes: [], concept_description: null },
       mnemonic: "BRAND DELTA <BRAND> AUD",
     });
     const { events, fake } = await runJob({
@@ -723,7 +725,7 @@ describe("pivots on findings a turn-2 step leaves standing or a deferred scan st
       job: "market_selection",
       pillar: "marketing",
       mentions: [{ text: "Comedian Vega", entity_type: "person", role: "primary", public_figure: true }],
-      constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: ["eight secondary-market dates"] },
+      constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: ["eight secondary-market dates"], concept_description: null },
       mnemonic: "COMEDIAN VEGA <PERSON> MKTS",
     });
     const secondary: MarketId[] = ["louisville", "kansas_city", "indianapolis", "columbus", "charlotte", "richmond", "birmingham", "knoxville"];
@@ -767,5 +769,280 @@ describe("pivots on findings a turn-2 step leaves standing or a deferred scan st
     // MARKETS tells the model which tier each market is.
     const marketsLine = userTextsOf(fake.streamRequests[0]!)[0]?.split("\n").find((line) => line.startsWith("MARKETS: ")) ?? "";
     expect(marketsLine).toMatch(/^MARKETS: major: nashville \(Nashville, TN\), .*; secondary: louisville \(Louisville, KY\), /);
+  });
+});
+
+// The five Part 9 jobs ----------------------------------------------------------------------------------
+
+describe("every Part 9 job runs end to end with a pivot and no CHECKER issue", () => {
+  it("taste_twins: the twins in the target city in the scan, the source area's Block DNA in wave 1, a pivot on what they found", async () => {
+    const question = "My cafe does well in Hermitage, Nashville. Where is its taste twin in Austin?";
+    const intent = intentFor({
+      job: "taste_twins",
+      pillar: "location",
+      mentions: [],
+      geo: { metro: "nashville", area: "Hermitage", unsupported_place: null, market: null, target_metro: "austin", cities: [] },
+      mnemonic: "HERMITAGE, NASHVILLE TWIN AUSTIN",
+    });
+    const { events, fake } = await runJob({
+      question,
+      intent,
+      stream: [
+        respond([
+          planCall(plan(question, [{ id: "S1", tool: "block_dna", purpose: "What sets the source area apart from Nashville." }], "taste_twins")),
+          toolUse("toolu_block", "block_dna", { area: areaArg("nashville", "Hermitage"), include_brands: true, ...step("S1") }),
+        ]),
+        (req) => {
+          // The mock's twins resemble the source only weakly, so no TWIN_FOUND: the source area's NEW tags lead instead.
+          const finding = findingOf(req, ["TWIN_FOUND", "BLOCK_NEW_TAGS", "LATENT_DEMAND"]);
+          // The top twin by name from the TWIN rows, as the model reads it, in the target city's AREAS.
+          const rows = digestsIn(req, "TWIN").flatMap((d) => d.top_rows);
+          const twin = rows.map((r) => gazetteer().matchNeighbourhood("austin", r.name)).find((n) => n !== null);
+          if (twin === undefined || twin === null) throw new Error(`no Austin area among the TWIN rows: ${rows.map((r) => r.name).join(", ")}`);
+          if (finding.kind !== "BLOCK_NEW_TAGS") {
+            return respond([
+              toolUse("toolu_pivot", "block_dna", { area: { kind: "nbhd", ref: twin.id, metro: "austin" }, include_brands: false, ...pivotOn(finding) }),
+            ]);
+          }
+          // The source's local brands, read at the top twin against Austin: what would carry over.
+          const brands = registered(digestsIn(req, "BLOCK"), "brand").slice(0, 6);
+          return respond([
+            toolUse("toolu_pivot", "rank_candidates", {
+              type: "brand",
+              candidates: brands,
+              signal_entities: [],
+              signal_tags: [],
+              contexts: [
+                { kind: "site", area: { kind: "nbhd", ref: twin.id, metro: "austin" } },
+                { kind: "city", metro: "austin" },
+              ],
+              ...pivotOn(finding),
+            }),
+          ]);
+        },
+        reportTurn("Hermitage's twin", [
+          ASK("The twin's tenants", "Which brands fit a storefront in Austin's best Hermitage twin?"),
+          ASK("A cafe in Austin", "Which Austin neighbourhood suits a cafe?"),
+        ]),
+      ],
+    });
+    const scan = ofType(events, "tool.start").find((e) => e.tool === "taste_twins");
+    expect(scan).toMatchObject({ phase: "scan", args: { source: { kind: "nbhd", metro: "nashville" }, target_metro: "austin", target_areas: [] } });
+    // The model saw both cities' areas, the target labelled as such.
+    const context = userTextsOf(fake.streamRequests[0]!)[0] ?? "";
+    expect(context).toMatch(/^AREAS \(nashville, the source city\)/m);
+    expect(context).toMatch(/^AREAS \(austin, the target city\)/m);
+  });
+
+  it("brand_collab: partner discovery, one-scale scoring and the subject-vs-partner DNA in the scan, the playbook's move as the pivot", async () => {
+    const question = "Which brands would make a credible collaboration with Brand Kappa?";
+    const intent = intentFor({
+      job: "brand_collab",
+      pillar: "marketing",
+      mentions: [{ text: "Brand Kappa", entity_type: "brand", role: "primary", public_figure: false }],
+      mnemonic: "BRAND KAPPA <BRAND> COLLAB",
+    });
+    const { events } = await runJob({
+      question,
+      intent,
+      stream: [
+        respond([
+          planCall(plan(question, [{ id: "S1", tool: "resolve_entities", purpose: "Resolve the partners the priors expect." }], "rank_candidates")),
+          toolUse("toolu_res", "resolve_entities", {
+            mentions: [
+              { text: "Brand Gamma", type: "brand", metro: null },
+              { text: "Brand Delta", type: "brand", metro: null },
+            ],
+            ...step("S1"),
+          }),
+        ]),
+        (req) => {
+          const finding = findingOf(req, ["POPULARITY_DOMINANCE", "DROPPED_CANDIDATES"]);
+          if (finding.kind === "DROPPED_CANDIDATES") {
+            const pool = [...registered(digestsIn(req, "RES"), "brand"), ...registered(digestsIn(req, "XDOM"), "brand")].filter((r) => r !== "R1");
+            return respond([
+              toolUse("toolu_pivot", "rank_candidates", {
+                type: "brand",
+                candidates: [...new Set(pool)].slice(0, 8),
+                signal_entities: ["R1"],
+                signal_tags: [],
+                contexts: [{ kind: "none" }],
+                ...pivotOn(finding),
+              }),
+            ]);
+          }
+          return respond([toolUse("toolu_pivot", "cross_domain", { seeds: ["R1"], seed_tags: [], domains: ["brand"], popularity_max: 0.85, ...pivotOn(finding) })]);
+        },
+        reportTurn("Brand Kappa's partners", [
+          ASK("The partner's fans", "Who is the Brand Gamma audience?"),
+          ASK("Where to launch the drop", "Which markets suit a Brand Kappa collaboration drop?"),
+        ]),
+      ],
+    });
+    const scan = ofType(events, "tool.start").filter((e) => e.phase === "scan");
+    expect(scan.map((e) => e.tool)).toEqual(["cross_domain", "rank_candidates", "audience_dna", "cross_domain"]);
+    expect(scan[1]?.args).toMatchObject({ type: "brand", signal_entities: ["R1"], contexts: [{ kind: "none" }] });
+    expect((scan[1]?.args as { candidates: string[] }).candidates).not.toContain("R1");
+    expect(scan[2]?.args).toMatchObject({ set: expect.arrayContaining(["R1"]), compare_with: expect.stringMatching(/^R\d+$/) });
+    // The pair's shared neighbourhood: the subject and the partner the DNA step mirrors, over music.
+    expect(scan[3]?.args).toMatchObject({ seeds: ["R1", (scan[2]?.args as { compare_with: string }).compare_with], domains: ["artist"] });
+  });
+
+  it("creator_fit: artists and podcasts discovered and each kind scored on its own scale, the playbook's move as the pivot", async () => {
+    const question = "Which creators fit Brand Delta's audience?";
+    const intent = intentFor({
+      job: "creator_fit",
+      pillar: "marketing",
+      mentions: [{ text: "Brand Delta", entity_type: "brand", role: "primary", public_figure: false }],
+      mnemonic: "BRAND DELTA <BRAND> CRTR",
+    });
+    const { events } = await runJob({
+      question,
+      intent,
+      stream: [
+        respond([
+          planCall(plan(question, [{ id: "S1", tool: "audience_dna", purpose: "Who the brand's audience is." }], "cross_domain")),
+          toolUse("toolu_dna", "audience_dna", { set: ["R1"], compare_with: null, ...step("S1") }),
+        ]),
+        (req) =>
+          respond([
+            toolUse("toolu_pivot", "cross_domain", {
+              seeds: ["R1"],
+              seed_tags: [],
+              domains: ["artist", "podcast"],
+              popularity_max: 0.85,
+              ...pivotOn(findingOf(req, ["POPULARITY_DOMINANCE", "DROPPED_CANDIDATES"])),
+            }),
+          ]),
+        reportTurn("Brand Delta's creators", [
+          ASK("A sponsor slate", "Which sponsors fit Brand Delta's top artist?"),
+          ASK("The audience", "Who is the Brand Delta audience?"),
+        ]),
+      ],
+    });
+    const scan = ofType(events, "tool.start").filter((e) => e.phase === "scan");
+    expect(scan[0]?.args).toMatchObject({ domains: ["artist", "podcast"] });
+    // Each kind is scored apart: an artist rank and a podcast rank are separate scales.
+    const scored = scan.filter((e) => e.tool === "rank_candidates").map((e) => (e.args as { type: string }).type);
+    expect(scored.length).toBeGreaterThan(0);
+    expect(new Set(scored).size).toBe(scored.length);
+  });
+
+  it("launch_test: the concept's open call keeps or vetoes the analogs the question names, ANALOG_VETOED as the pivot", async () => {
+    const question = "We are a small premium hot-sauce brand like Brand Gamma and Brand Delta. Which partners fit first?";
+    const intent = intentFor({
+      job: "launch_test",
+      mentions: [
+        { text: "Brand Gamma", entity_type: "brand", role: "peer", public_figure: false },
+        { text: "Brand Delta", entity_type: "brand", role: "peer", public_figure: false },
+      ],
+      constraints: { concepts: ["hot sauce"], sponsor_categories: [], domains: [], ages: [], notes: ["first partners"], concept_description: "a small premium hot-sauce brand" },
+      mnemonic: "HOT SAUCE LNCH",
+    });
+    const { events } = await runJob({
+      question,
+      intent,
+      stream: [
+        respond([
+          planCall(plan(question, [{ id: "S1", tool: "resolve_entities", purpose: "Resolve another analog the priors expect." }], "concept_vector")),
+          toolUse("toolu_res", "resolve_entities", { mentions: [{ text: "Brand Epsilon", type: "brand", metro: null }], ...step("S1") }),
+        ]),
+        (req) => {
+          const finding = findingOf(req, ["ANALOG_VETOED", "POPULARITY_DOMINANCE"]);
+          if (finding.kind === "POPULARITY_DOMINANCE") {
+            const seed = registered(digestsIn(req, "CNPT"), "brand")[0] ?? "R1";
+            return respond([toolUse("toolu_pivot", "cross_domain", { seeds: [seed], seed_tags: [], domains: ["podcast"], popularity_max: 0.85, ...pivotOn(finding) })]);
+          }
+          // RANK the ADDs beside the KEEPs on the concept's own tags (the usual pivot).
+          const vector = digestsIn(req, "CNPT")[0];
+          const brands = [...(vector?.top_rows ?? []).flatMap((r) => (r.ref !== null && r.ref.startsWith("R") ? [r.ref] : [])), ...registered(digestsIn(req, "CNPT"), "brand")];
+          const tags = (digestsIn(req, "TAGS")[0]?.top_rows ?? []).flatMap((r) => (r.ref !== null && r.ref.startsWith("T") ? [r.ref] : [])).slice(0, 3);
+          return respond([
+            toolUse("toolu_pivot", "rank_candidates", {
+              type: "brand",
+              candidates: [...new Set(brands)].slice(0, 10),
+              signal_entities: [],
+              signal_tags: tags,
+              contexts: [{ kind: "none" }],
+              ...pivotOn(finding),
+            }),
+          ]);
+        },
+        reportTurn("The hot-sauce concept", [
+          ASK("Podcasts that fit", "Which podcasts fit a premium hot-sauce brand?"),
+          ASK("Markets to launch in", "Which markets suit a premium hot-sauce launch?"),
+        ]),
+      ],
+    });
+    const vector = ofType(events, "tool.start").find((e) => e.tool === "concept_vector" && e.phase === "scan");
+    expect(vector?.args).toMatchObject({ type: "brand", analogs: ["R1", "R2"] });
+  });
+
+  it("city_compare: each city's fingerprint and the named brand's share across the cities in the scan, a pivot on what they found", async () => {
+    const question = "Austin, Nashville, Denver or Chicago for Brand Delta against Brand Epsilon, Brand Rho and Brand Tau?";
+    const intent = intentFor({
+      job: "city_compare",
+      pillar: "location",
+      mentions: [
+        { text: "Brand Delta", entity_type: "brand", role: "primary", public_figure: false },
+        { text: "Brand Epsilon", entity_type: "brand", role: "peer", public_figure: false },
+        { text: "Brand Rho", entity_type: "brand", role: "peer", public_figure: false },
+        { text: "Brand Tau", entity_type: "brand", role: "peer", public_figure: false },
+      ],
+      geo: { metro: null, area: null, unsupported_place: null, market: null, target_metro: null, cities: ["austin", "nashville", "denver", "chicago"] },
+      mnemonic: "AUSTIN VS NASHVILLE VS DENVER VS CHICAGO CITY",
+    });
+    const { events, fake } = await runJob({
+      question,
+      intent,
+      // A city fingerprint reads each map city against the others, so they are all pinned here.
+      pinned: [...PINNED, "nyc", "los_angeles", "miami", "seattle", "boston", "houston", "dallas", "san_francisco"],
+      stream: [
+        respond([planCall(plan(question, [{ id: "S1", tool: "share_of_taste", purpose: "The brand's share in two more markets." }], "block_dna"))]),
+        (req) => {
+          const finding = findingOf(req, ["METRO_OUTLIER", "BLOCK_NEW_TAGS", "LATENT_DEMAND"]);
+          if (finding.kind === "BLOCK_NEW_TAGS") {
+            const brands = registered(digestsIn(req, "BLOCK"), "brand").slice(0, 6);
+            return respond([
+              toolUse("toolu_pivot", "rank_candidates", {
+                type: "brand",
+                candidates: ["R1", "R2", ...brands.filter((b) => b !== "R1" && b !== "R2")].slice(0, 8),
+                signal_entities: [],
+                signal_tags: [],
+                contexts: [
+                  { kind: "metro", market: "austin" },
+                  { kind: "metro", market: "nashville" },
+                ],
+                ...pivotOn(finding),
+              }),
+            ]);
+          }
+          return respond([
+            toolUse("toolu_pivot", "share_of_taste", {
+              type: "brand",
+              set: ["R1", "R2", "R3", "R4"],
+              ages: [],
+              audiences: [],
+              metros: ["atlanta", "boise"],
+              ...pivotOn(finding),
+            }),
+          ]);
+        },
+        reportTurn("Four cities for Brand Delta", [
+          ASK("Where in Austin", "Which Austin neighbourhood suits a Brand Delta store?"),
+          ASK("Where in Denver", "Which Denver neighbourhood suits a Brand Delta store?"),
+        ]),
+      ],
+    });
+    const scan = ofType(events, "tool.start").filter((e) => e.phase === "scan");
+    const cities = ["austin", "nashville", "denver", "chicago"];
+    expect(scan.filter((e) => e.tool === "block_dna").map((e) => e.args)).toEqual(
+      cities.map((market) => expect.objectContaining({ area: { kind: "city", market } })),
+    );
+    expect(scan.find((e) => e.tool === "share_of_taste")?.args).toMatchObject({ set: ["R1", "R2", "R3", "R4"], metros: cities });
+    const context = userTextsOf(fake.streamRequests[0]!)[0] ?? "";
+    expect(context).toContain("CITIES COMPARED: austin (Austin, TX), nashville (Nashville, TN), denver (Denver, CO), chicago (Chicago, IL)");
+    // The four map cities' areas are listed, each its own line.
+    expect(context.split("\n").filter((l) => l.startsWith("AREAS ("))).toHaveLength(4);
   });
 });

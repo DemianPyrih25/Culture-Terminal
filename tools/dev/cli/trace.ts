@@ -2,7 +2,7 @@
 // and step, a CHECKER result one per issue). Metric and evidence events are not printed: the ledger
 // is summarised with the report and its receipt.
 import { compileMnemonic, type EventInput, type EventInputOf, type Intent, type ResolvedMention } from "@ct/contracts";
-import { formatBytes, formatCount, formatFixed2, formatMs, formatTokens, formatUsd, idList, NONE, qlooChip } from "./format";
+import { formatBytes, formatCount, formatFixed2, formatMs, formatTokens, formatUsd, idList, NONE, publicChip, qlooChip } from "./format";
 import type { CliIo } from "./io";
 import { clean, truncate } from "./table";
 
@@ -89,6 +89,10 @@ export function formatEvent(event: EventInput, state: TraceState): string[] {
       // Gate and scan bookkeeping calls belong to no tool call.
       const tool = event.toolCallId === null ? "no tool" : (state.tools.get(event.toolCallId) ?? event.toolCallId);
       return [`  qloo [${tool}] ${qlooChip(event)}`];
+    }
+    case "public": {
+      const tool = event.toolCallId === null ? "no tool" : (state.tools.get(event.toolCallId) ?? event.toolCallId);
+      return [`  ${event.source} [${tool}] ${publicChip(event)}`];
     }
     case "finding": {
       const f = event.finding;

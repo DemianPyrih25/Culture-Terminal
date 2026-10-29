@@ -778,6 +778,57 @@ Some names are left out:
   - Richardson (282 m), Irving (99 m), Grand Prairie (108 m) and Glenn Heights (155 m), each in a ZIP area of over 5 km².
 - Cockrell Hill: a small city inside 75211, which is mostly Dallas, so it is not used as 75211's label.
 
+### Census crosswalk
+
+Area economics reads US Census ACS estimates (see "US Census Bureau Data API" below) for the Census units each neighbourhood is made of. Which units those are comes from two polygon-free tables built by `tools/geo/tracts.ts`, plus the ZIP areas' own ids. None of these tables hold any ACS figures.
+
+| | |
+|---|---|
+| Dataset | 2020 Census Gazetteer Files: census tracts (`2020_Gaz_tracts_national`), with each tract's GEOID, land area and interior point (`INTPTLAT`, `INTPTLONG`). 2020 ZCTA to county relationship file (`tab20_zcta520_county20_natl`), with the land area of each ZCTA and of its part in each county. |
+| Publisher | U.S. Census Bureau, Geography Division |
+| URL | <https://www2.census.gov/geo/docs/maps-data/data/gazetteer/2020_Gazetteer/2020_Gaz_tracts_national.zip> and <https://www2.census.gov/geo/docs/maps-data/data/rel2020/zcta520/tab20_zcta520_county20_natl.txt> |
+| Licence | Public domain. Census Bureau geography is a work of the U.S. Government, which is not subject to copyright in the United States (17 U.S.C. § 105). |
+| Retrieved | 2026-10-27 |
+| Used in | `packages/geo/src/data/tracts-nyc.ts` and `tracts-austin.ts`, built by `tools/geo/tracts.ts --metro <nyc\|austin> --gazetteer <file>`; `packages/geo/src/data/zcta-clip.ts`, built by `tools/geo/tracts.ts --zcta-clip --relation <file>` |
+
+Method:
+
+1. ZIP-area cities (Nashville and the ten cities above). An area's units are the ZCTA in its id, plus every ZCTA merged into it, which it answers to as "ZIP <code>". ACS reports whole ZCTAs, so an area clipped to its city's counties gets figures for the whole ZIP. Such an area is marked as clipped when its name carries a "(… part)" label, or when less than 90% of its ZCTAs' land lies inside the counties. The second test is needed because a clipped area named after a place, such as "ZIP 80227 (Bear Valley)", has no part label. The land shares come from the relationship file, for the counties each city section above names. Only areas with less than 99% of their land inside are listed, as whole percents.
+2. New York and Austin. Their areas are not ZIP areas, so their units are 2020 census tracts. Each tract with land is assigned whole to the area whose shipped outline holds its interior point. A tract whose point lies in no area is left out, for example one in a park, an airport or a cemetery that New York's community districts leave out, or one outside Austin's planning areas. Water-only tracts are left out too. In New York, 2,246 tracts are assigned to the 59 districts. In Austin, 118 tracts are assigned to 61 of the 65 planning areas.
+3. Four Austin planning areas are smaller than the tracts around them and hold no tract's interior point: East Cesar Chavez, North Loop, Southeast and West Congress. For each, the tract whose interior point lies nearest the area's centre stands in, within 2 km. Its figures describe more than the area, and the data marks it as a stand-in.
+4. A tract that crosses an area's border counts entirely for the area that holds its interior point. Area figures are therefore approximate at the edges, and more so for small areas made of one or two tracts.
+
+## SEC EDGAR
+
+Company financials (revenue, gross profit and operating income) are read at runtime from the U.S. Securities and Exchange Commission's EDGAR system.
+
+| | |
+|---|---|
+| Dataset | XBRL company facts (`https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json`), and the ticker to CIK map (`https://www.sec.gov/files/company_tickers.json`) |
+| Publisher | U.S. Securities and Exchange Commission |
+| URL | <https://www.sec.gov/search-filings/edgar-application-programming-interfaces> |
+| Licence | Public information. The SEC's website policies state that information presented on sec.gov is public information and may be copied or further distributed without the SEC's permission. Filings are the filers' own reported figures. |
+| Access | The SEC's fair access policy: every request declares a User-Agent with the product name and a contact address, and requests stay under the SEC's limit of 10 per second (this app allows 5). |
+| Used in | `packages/publicdata` (the client), and the company financials tool. The brand to ticker map, `config/listed_companies.json`, holds names and tickers only. |
+
+**No SEC figures are stored in this repository.** Responses are cached privately in the application's database for up to 7 days, and test fixtures use invented companies and values. Every figure is shown as reported, with its fiscal period, form and filing date, and its evidence names the filing's accession number. Figures are company-wide: where a brand is part of a larger company, the answer says so. They are reported figures, not investment advice.
+
+## US Census Bureau Data API
+
+This product uses the Census Bureau Data API but is not endorsed or certified by the Census Bureau.
+
+| | |
+|---|---|
+| Dataset | American Community Survey (ACS) 5-year estimates, by ZIP Code Tabulation Area and by census tract |
+| Publisher | U.S. Census Bureau |
+| URL | <https://api.census.gov/data.html> (`https://api.census.gov/data/<vintage>/acs/acs5`) |
+| Licence | Public domain (17 U.S.C. § 105). Use of the API is subject to the Census Bureau's [API terms of service](https://www.census.gov/data/developers/about/terms-of-service.html), which ask for the notice above. |
+| Used in | `packages/publicdata` (the client), the area economics tool, and the census crosswalk above |
+
+Only a fixed set of fields is requested: total population, median age, households, median household income, and how workers commute (drove alone, public transit, walked, bicycle, worked from home). No race, ethnicity, religion or other sensitive variables are ever requested. Each vintage is cached privately in the application's database. **No Census estimates are stored in this repository**, and test fixtures use invented areas and values.
+
+ACS figures are estimates from a survey, with margins of error. They describe residents, not visitors or workers who live elsewhere. An area's figures are rolled up from its ZCTAs or tracts (see "Census crosswalk"): counts are summed, and medians are a population-weighted average of the units' medians, which is an approximation. Every answer names the ACS vintage it used.
+
 ## Qloo
 
 Taste data comes from the [Qloo](https://qloo.com) API at runtime. **No Qloo data is stored in this repository**: no responses, scores, entity IDs or request IDs. Responses are cached privately in the application's database, and `pnpm guard` and gitleaks check every commit for leaks.

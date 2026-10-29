@@ -42,6 +42,17 @@ export type CacheStatus = (typeof CACHE_STATUSES)[number];
 /** Canonical (qloo_cache) or redacted (qloo_calls) query parameters, one string per key. */
 export type QlooParams = Record<string, string>;
 
+/** The public data sources (PLAN §5.2): SEC EDGAR and the US Census Bureau. */
+export const PUBLIC_SOURCES = ["sec", "census"] as const;
+export type PublicSourceName = (typeof PUBLIC_SOURCES)[number];
+
+/** Where an evidence bundle's data came from. */
+export const EVIDENCE_SOURCES = ["qloo", ...PUBLIC_SOURCES] as const;
+export type EvidenceSourceName = (typeof EVIDENCE_SOURCES)[number];
+
+/** Canonical (public_cache) or redacted (public_calls) query parameters, never an API key. */
+export type PublicParams = Record<string, string>;
+
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType() {
     return "bytea";
@@ -127,7 +138,7 @@ export const runEvents = pgTable(
   (t) => [primaryKey({ name: "run_events_pk", columns: [t.runId, t.seq] })],
 );
 
-/** E# evidence bundles: one skill call, one or more Qloo calls. */
+/** E# evidence bundles: one skill call, one or more Qloo calls, or SEC or Census calls (one source per bundle). */
 export const evidence = pgTable(
   "evidence",
   {
@@ -137,6 +148,8 @@ export const evidence = pgTable(
     id: text("id").notNull(),
     createdAt: tstz("created_at").notNull().defaultNow(),
     skill: text("skill").notNull(),
+    // qloo, sec or census; rows written before Part 9 are Qloo bundles.
+    source: text("source").$type<EvidenceSourceName>().notNull().default("qloo"),
     purpose: text("purpose"),
     status: text("status"),
     qlooCallIds: textArray("qloo_call_ids"),
@@ -179,6 +192,8 @@ export const metrics = pgTable(
     comparator: text("comparator"),
     // TrendWindow {start, end} of a STALE metric (CHECKER V8), or null.
     window: jsonb("window").$type<unknown>(),
+    // Reporting period or vintage of an SEC or Census metric (CHECKER V11), or null.
+    period: text("period"),
   },
   (t) => [primaryKey({ name: "metrics_pk", columns: [t.runId, t.id] })],
 );
@@ -270,6 +285,64 @@ export const qlooCalls = pgTable(
   ],
 );
 
+/**
+ * L2 cache for SEC EDGAR and US Census responses (PLAN §5.2), the counterpart of qloo_cache. Rows hold
+ * fetched public data and are never dumped into git (D29). The key never includes an API key.
+ */
+export const publicCache = pgTable(
+  "public_cache",
+  {
+    // sha256 hex of "pd-v1|GET|" + source + "|" + path + "?" + canonical query string (no key).
+    key: text("key").primaryKey(),
+    source: text("source").$type<PublicSourceName>().notNull(),
+    path: text("path").notNull(),
+    params: jsonb("params").$type<PublicParams>().notNull(),
+    status: integer("status").notNull(),
+    // gzip of the response body.
+    body: bytea("body").notNull(),
+    // PublicCallMeta.reference: CIK, Census dataset and vintage, or mock-<hash>.
+    reference: text("reference"),
+    fetchedAt: tstz("fetched_at").notNull().defaultNow(),
+    // Null for pinned entries (Census vintages).
+    expiresAt: tstz("expires_at"),
+    pinned: boolean("pinned").notNull().default(false),
+    hits: integer("hits").notNull().default(0),
+    lastHitAt: tstz("last_hit_at"),
+    originRunId: text("origin_run_id"),
+  },
+  (t) => [index("public_cache_expires_idx").on(t.expiresAt)],
+);
+
+/**
+ * One row per SEC or Census network or cache event. Kept apart from qloo_calls so public calls never
+ * count toward the Qloo caps or the Qloo health figures. run_id has no foreign key.
+ */
+export const publicCalls = pgTable(
+  "public_calls",
+  {
+    id: text("id").primaryKey().default(sql`gen_random_uuid()::text`),
+    ts: tstz("ts").notNull().defaultNow(),
+    env: text("env").notNull(),
+    tag: text("tag"),
+    runId: text("run_id"),
+    source: text("source").$type<PublicSourceName>().notNull(),
+    path: text("path").notNull(),
+    params: jsonb("params").$type<PublicParams>().notNull(),
+    cacheKey: text("cache_key"),
+    cacheStatus: text("cache_status").$type<CacheStatus>().notNull(),
+    // Null for cache hits that never reached the network.
+    httpStatus: integer("http_status"),
+    ms: integer("ms"),
+    reference: text("reference"),
+    error: text("error"),
+  },
+  (t) => [
+    index("public_calls_ts_idx").on(t.ts),
+    index("public_calls_run_idx").on(t.runId, t.ts),
+    index("public_calls_source_ts_idx").on(t.source, t.ts),
+  ],
+);
+
 /** Daily counters (Qloo fresh calls, LLM USD, runs). Global counters use lane "all". */
 export const usageDaily = pgTable(
   "usage_daily",
@@ -328,6 +401,8 @@ export type DatasetRow = typeof datasets.$inferSelect;
 export type FindingRow = typeof findings.$inferSelect;
 export type QlooCacheRow = typeof qlooCache.$inferSelect;
 export type QlooCallRow = typeof qlooCalls.$inferSelect;
+export type PublicCacheRow = typeof publicCache.$inferSelect;
+export type PublicCallRow = typeof publicCalls.$inferSelect;
 export type UsageDailyRow = typeof usageDaily.$inferSelect;
 export type IpUsageRow = typeof ipUsage.$inferSelect;
 export type KvRow = typeof kv.$inferSelect;

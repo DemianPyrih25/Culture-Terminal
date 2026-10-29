@@ -58,6 +58,20 @@ export function qlooChip(call: QlooChipInput): string {
   return `${call.endpoint}${type} ${cacheLabel(call.cache)} ${formatMs(call.ms)} req ${call.requestId ?? NONE}${rows}${error}`;
 }
 
+export interface PublicChipInput {
+  endpoint: string;
+  cache: QlooChipInput["cache"];
+  ms: number;
+  reference: string | null;
+  error: string | null;
+}
+
+/** An SEC or Census call: endpoint, cache, time and the reference (CIK, Census vintage or mock-<hash>). */
+export function publicChip(call: PublicChipInput): string {
+  const error = call.error === null ? "" : ` · error: ${call.error}`;
+  return `${call.endpoint} ${cacheLabel(call.cache)} ${formatMs(call.ms)} ref ${call.reference ?? NONE}${error}`;
+}
+
 /** A metric's value as the CLIs show it: the display string, or "—" with the reason it has none. */
 export function metricValue(metric: Pick<Metric, "value" | "display" | "reason">): string {
   if (metric.value === null) return `${NONE} (${metric.reason ?? "unavailable"})`;

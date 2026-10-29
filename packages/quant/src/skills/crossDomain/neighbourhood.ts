@@ -1,4 +1,5 @@
 import type { Domain, NoValueReason, QlooEntity } from "@ct/contracts";
+import { UNDER_THE_RADAR_MAX_POPULARITY } from "../../findings";
 import { detectFloor, median, qualityGate, withinCallPercentiles } from "../../stats";
 import { insightTags, type EntityTagRef } from "../common";
 import { displayRanks } from "../format";
@@ -28,7 +29,8 @@ export function isExplainabilityEdge(share: number, seedCount: number): boolean 
 
 /**
  * Whether a row may be its domain's UNDER-THE-RADAR pick: FIT at or above the domain's median FIT
- * and popularity below its median popularity, as slate.under_the_radar reads it (SPEC §5.3 S10), and
+ * and popularity below its median popularity, as slate.under_the_radar reads it (SPEC §5.3 S10), popularity
+ * below UNDER_THE_RADAR_MAX_POPULARITY (a mass-market name is never under the radar), and
  * U > 0. The top row always has FIT 1, so U alone would flag a pick in almost every list, however
  * mainstream.
  */
@@ -43,6 +45,7 @@ export function isUnderTheRadar(
     row.utr !== null &&
     row.fit >= medianFit - EPS &&
     row.popularity < medianPopularity - EPS &&
+    row.popularity < UNDER_THE_RADAR_MAX_POPULARITY - EPS &&
     row.utr > EPS
   );
 }

@@ -37,6 +37,7 @@ import {
 } from "../pricing";
 import { Answers } from "./answers";
 import { describeLlmError, type LlmErrorInfo } from "./errors";
+import { decodeInputEscapes } from "./escapes";
 import { History } from "./history";
 import { NoteCoalescer } from "./notes";
 import { readSkillInput } from "./inputs";
@@ -433,8 +434,9 @@ export class AnalystLoop {
    * structurally valid one with its issues. Returns the issues, or null when the plan was accepted.
    */
   #takePlan(use: ToolUseBlock, answers: Answers): string[] | null {
-    const shape = SubmitPlanInputShape.safeParse(use.input);
-    const parsed = parseToolInput("submit_plan", use.input);
+    const input = decodeInputEscapes(use.input);
+    const shape = SubmitPlanInputShape.safeParse(input);
+    const parsed = parseToolInput("submit_plan", input);
     const issues = parsed.ok ? [] : issueLines(parsed.error);
     if (shape.success) {
       this.#submittedPlan = shape.data;
@@ -677,10 +679,11 @@ export class AnalystLoop {
     const attempt: 1 | 2 = this.#repairs.report ? 2 : 1;
     const final = this.#repairs.report || this.#responses >= this.#o.limits.modelResponses;
 
-    const shape = ReportDraftShape.safeParse(reportUse.input);
+    const input = decodeInputEscapes(reportUse.input);
+    const shape = ReportDraftShape.safeParse(input);
     if (!shape.success) {
       // Strict mode should never send this; without the structure there is nothing to assemble.
-      const parsed = parseToolInput("submit_report", reportUse.input);
+      const parsed = parseToolInput("submit_report", input);
       const issues = parsed.ok ? [] : issueLines(parsed.error);
       if (!final) {
         answers.reject(reportUse, "INVALID_REPORT", "fix these issues and call submit_report again.", issues);

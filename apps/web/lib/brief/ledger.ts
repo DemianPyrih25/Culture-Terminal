@@ -1,10 +1,12 @@
-import { METRO_LABEL } from "@ct/contracts";
+import { isQlooProvenanceRequest, METRO_LABEL, PUBLIC_ENDPOINTS, PUBLIC_SOURCE_LABEL } from "@ct/contracts";
 import type {
   CacheStatus,
   EvidenceId,
+  EvidenceSource,
   Metric,
+  ProvenanceRequest,
+  PublicChip,
   QlooChip,
-  QlooPath,
   RunState,
   RunEventType,
   ToolCallState,
@@ -23,16 +25,48 @@ import {
   plural,
   shortRequestId,
 } from "./format";
-import type { MetricView, RequestRef } from "./types";
+import type { MetricView, RequestRef, SourceEndpoint } from "./types";
 
 /**
- * An index over one RunState for the brief: metrics, evidence and Qloo calls by id, the run's
- * entity names, and when each ledger item arrived. Built once per model.
+ * One lookup of the run, Qloo or public (SEC, Census), as the brief lists it. `id` is the Qloo or public
+ * call id; `requestId` is the Qloo request id or the public reference (a CIK, or the Census dataset,
+ * vintage and geography). A public call has no filter type and no row count.
+ */
+export interface LedgerCall {
+  id: string;
+  source: EvidenceSource;
+  /** Position in `Ledger.calls`, which is also the index into `BriefModel.sources.items`. */
+  index: number;
+  seq: number;
+  ts: string;
+  toolCallId: string | null;
+  endpoint: SourceEndpoint;
+  /** The host of a public call; null for Qloo. */
+  host: string | null;
+  filterType: string | null;
+  paramsRedacted: Record<string, string>;
+  rows: number | null;
+  ms: number;
+  status: number | null;
+  error: string | null;
+  cache: CacheStatus;
+  cacheAgeMs: number | null;
+  originRunId: string | null;
+  requestId: string | null;
+}
+
+/**
+ * An index over one RunState for the brief: metrics, evidence and Qloo and public calls by id, the
+ * run's entity names, and when each ledger item arrived. Built once per model.
  */
 export interface Ledger {
   state: RunState;
+  /** Qloo calls by id; `index` is the call's position in `calls`. */
   chips: Map<string, { chip: QlooChip; index: number }>;
-  /** Qloo call id → the evidence bundles that used it. */
+  /** Every lookup, Qloo and public (SEC, Census), in arrival order. */
+  calls: LedgerCall[];
+  callById: Map<string, LedgerCall>;
+  /** Qloo or public call id → the evidence bundles that used it. */
   evidenceByCall: Map<string, EvidenceId[]>;
   toolCalls: Map<string, ToolCallState>;
   /** R# → entity name, from the resolution gate and the datasets; T# → tag name, from the datasets. */
@@ -121,9 +155,63 @@ function metricWindow(state: RunState): TrendWindow | null {
   return null;
 }
 
+function qlooCall(chip: QlooChip): Omit<LedgerCall, "index"> {
+  return {
+    id: chip.qlooCallId,
+    source: "qloo",
+    seq: chip.seq,
+    ts: chip.ts,
+    toolCallId: chip.toolCallId,
+    endpoint: chip.endpoint,
+    host: null,
+    filterType: chip.filterType,
+    paramsRedacted: chip.paramsRedacted,
+    rows: chip.rows,
+    ms: chip.ms,
+    status: chip.status,
+    error: chip.error,
+    cache: chip.cache,
+    cacheAgeMs: chip.cacheAgeMs,
+    originRunId: chip.originRunId,
+    requestId: chip.requestId,
+  };
+}
+
+function publicCall(chip: PublicChip): Omit<LedgerCall, "index"> {
+  return {
+    id: chip.publicCallId,
+    source: chip.source,
+    seq: chip.seq,
+    ts: chip.ts,
+    toolCallId: chip.toolCallId,
+    endpoint: chip.endpoint,
+    host: PUBLIC_ENDPOINTS[chip.endpoint].host,
+    filterType: null,
+    paramsRedacted: chip.paramsRedacted,
+    rows: null,
+    ms: chip.ms,
+    status: chip.status,
+    error: chip.error,
+    cache: chip.cache,
+    cacheAgeMs: chip.cacheAgeMs,
+    originRunId: chip.originRunId,
+    requestId: chip.reference,
+  };
+}
+
+/** Qloo and public calls merged in arrival order (a run with no public calls keeps the Qloo order as is). */
+function ledgerCalls(state: RunState): LedgerCall[] {
+  const publicChips = state.publicCalls?.chips ?? [];
+  const all = [...state.qloo.chips.map(qlooCall), ...publicChips.map(publicCall)];
+  if (publicChips.length > 0) all.sort((a, b) => a.seq - b.seq);
+  return all.map((c, index) => ({ ...c, index }));
+}
+
 export function buildLedger(state: RunState): Ledger {
+  const calls = ledgerCalls(state);
+  const callById = new Map(calls.map((c) => [c.id, c]));
   const chips = new Map<string, { chip: QlooChip; index: number }>();
-  state.qloo.chips.forEach((chip, index) => chips.set(chip.qlooCallId, { chip, index }));
+  for (const chip of state.qloo.chips) chips.set(chip.qlooCallId, { chip, index: callById.get(chip.qlooCallId)?.index ?? 0 });
 
   const evidenceByCall = new Map<string, EvidenceId[]>();
   for (const e of Object.values(state.evidence)) {
@@ -147,6 +235,8 @@ export function buildLedger(state: RunState): Ledger {
   return {
     state,
     chips,
+    calls,
+    callById,
     evidenceByCall,
     toolCalls: new Map(state.toolCalls.map((t) => [t.toolCallId, t])),
     refNames,
@@ -212,10 +302,11 @@ export function metricView(metric: Metric, window: TrendWindow | null): MetricVi
     derived: metric.badge === "DERIVED",
     stale,
     window: stale && w ? formatTrendWindow(w) : null,
+    period: metric.period ?? null,
   };
 }
 
-// Qloo calls ------------------------------------------------------------------------------------------
+// Qloo and public calls --------------------------------------------------------------------------------
 
 /** "cached 2h", "live 13 Oct, 09:13", "reused from #A1F3", "stale cache 3h". */
 export function cacheLabel(cache: CacheStatus, cacheAgeMs: number | null, at: string, originRunId: string | null): string {
@@ -233,40 +324,70 @@ export function cacheLabel(cache: CacheStatus, cacheAgeMs: number | null, at: st
   }
 }
 
-/** A Qloo call as a footnote cites it; ledger data fills in what the run did not stream. */
+/** The longest public reference printed whole; a longer one (a long ZIP list) is cut with "…". */
+const REFERENCE_MAX = 28;
+
+/**
+ * A request id as the trace prints it: a Qloo id as "ab12…cd34"; a public reference (a CIK, or "acs5
+ * 2023 zcta 37206,37207") whole when short, else cut at the end.
+ */
+export function shortReference(source: EvidenceSource | undefined, requestId: string | null): string {
+  if (source === undefined || source === "qloo" || requestId === null || requestId === "") return shortRequestId(requestId);
+  return requestId.length > REFERENCE_MAX ? `${requestId.slice(0, REFERENCE_MAX - 1)}…` : requestId;
+}
+
+/** The source of a request as a reader names it: "Qloo", "SEC EDGAR", "US Census Bureau". */
+export function sourceName(source: EvidenceSource | undefined): string {
+  return source === undefined || source === "qloo" ? "Qloo" : PUBLIC_SOURCE_LABEL[source];
+}
+
+/** The endpoint template of a concrete public path ("/api/xbrl/companyfacts/CIK….json" → "/api/xbrl/companyfacts"). */
+export function publicEndpointOf(path: string): SourceEndpoint | null {
+  if (path === "/files/company_tickers.json") return "/files/company_tickers.json";
+  if (path.startsWith("/api/xbrl/companyfacts")) return "/api/xbrl/companyfacts";
+  if (path === "/data/acs/acs5" || /^\/data\/\d{4}\/acs\/acs5$/.test(path)) return "/data/acs/acs5";
+  return null;
+}
+
+/** A call as a footnote cites it; ledger data (the bundle's provenance) fills in what the run did not stream. */
 export function requestRef(
   ledger: Ledger,
   qlooCallId: string,
-  fallback: { requestId?: string; path?: QlooPath; query?: Record<string, string>; cached?: boolean; fetchedAt?: string } = {},
+  fallback: { requestId?: string; request?: ProvenanceRequest; source?: EvidenceSource; cached?: boolean; fetchedAt?: string } = {},
 ): RequestRef {
-  const found = ledger.chips.get(qlooCallId);
+  const found = ledger.callById.get(qlooCallId);
   if (found) {
-    const { chip, index } = found;
     return {
       qlooCallId,
-      sourceIndex: index,
-      requestId: chip.requestId,
-      shortRequestId: shortRequestId(chip.requestId),
-      endpoint: chip.endpoint,
-      filterType: chip.filterType,
-      filterLabel: filterLabel(chip.filterType),
-      params: Object.entries(chip.paramsRedacted),
-      rows: chip.rows,
-      ms: chip.ms,
-      cache: chip.cache,
-      cacheLabel: cacheLabel(chip.cache, chip.cacheAgeMs, chip.ts, chip.originRunId),
+      source: found.source,
+      sourceIndex: found.index,
+      requestId: found.requestId,
+      shortRequestId: shortReference(found.source, found.requestId),
+      endpoint: found.endpoint,
+      filterType: found.filterType,
+      filterLabel: filterLabel(found.filterType),
+      params: Object.entries(found.paramsRedacted),
+      rows: found.rows,
+      ms: found.ms,
+      cache: found.cache,
+      cacheLabel: cacheLabel(found.cache, found.cacheAgeMs, found.ts, found.originRunId),
     };
   }
-  const filterType = fallback.query?.["filter.type"] ?? null;
+  const request = fallback.request;
+  const qloo = request && isQlooProvenanceRequest(request) ? request : null;
+  const source: EvidenceSource = request ? (qloo ? "qloo" : (request.source ?? "qloo")) : (fallback.source ?? "qloo");
+  const filterType = qloo?.query["filter.type"] ?? null;
+  const endpoint: SourceEndpoint | null = request ? (qloo ? qloo.path : publicEndpointOf(request.path)) : null;
   return {
     qlooCallId,
+    source,
     sourceIndex: null,
     requestId: fallback.requestId ?? null,
-    shortRequestId: shortRequestId(fallback.requestId ?? null),
-    endpoint: fallback.path ?? null,
+    shortRequestId: shortReference(source, fallback.requestId ?? null),
+    endpoint,
     filterType,
     filterLabel: filterLabel(filterType),
-    params: Object.entries(fallback.query ?? {}),
+    params: Object.entries(request?.query ?? {}),
     rows: null,
     ms: null,
     cache: null,
@@ -274,7 +395,7 @@ export function requestRef(
   };
 }
 
-/** The Qloo calls behind evidence bundles, in ledger order and without repeats. */
+/** The calls (Qloo, SEC, Census) behind evidence bundles, in ledger order and without repeats. */
 export function requestsForEvidence(ledger: Ledger, evidenceIds: readonly EvidenceId[]): RequestRef[] {
   const out: RequestRef[] = [];
   const seen = new Set<string>();
@@ -288,8 +409,8 @@ export function requestsForEvidence(ledger: Ledger, evidenceIds: readonly Eviden
       out.push(
         requestRef(ledger, callId, {
           requestId: e.requestIds[i],
-          path: request?.path,
-          query: request?.query,
+          ...(request ? { request } : {}),
+          source: e.source,
           cached: e.cached,
           fetchedAt: e.fetchedAt,
         }),
@@ -299,22 +420,35 @@ export function requestsForEvidence(ledger: Ledger, evidenceIds: readonly Eviden
   return out;
 }
 
-/** Subject refs for a set of requests: R# in their parameters, else in the arguments of the tool calls that made them. */
+/** Subject refs for a set of calls: R# in their parameters, else in the arguments of the tool calls that made them. */
 export function refsForCalls(ledger: Ledger, qlooCallIds: readonly string[]): string[] {
   const refs: string[] = [];
-  for (const id of qlooCallIds) refsIn(ledger.chips.get(id)?.chip.paramsRedacted, refs);
+  for (const id of qlooCallIds) refsIn(ledger.callById.get(id)?.paramsRedacted, refs);
   if (refs.length > 0) return refs;
   for (const id of qlooCallIds) {
-    const toolCallId = ledger.chips.get(id)?.chip.toolCallId;
+    const toolCallId = ledger.callById.get(id)?.toolCallId;
     const tool = toolCallId ? ledger.toolCalls.get(toolCallId) : undefined;
     if (tool) refsIn(tool.args, refs);
   }
   return refs;
 }
 
+/** "Qloo /v2/insights", "SEC EDGAR /api/xbrl/companyfacts", "US Census Bureau /data/acs/acs5 + Qloo /v2/tags". */
+function sourcesHead(requests: readonly RequestRef[]): string {
+  const bySource = new Map<string, SourceEndpoint[]>();
+  for (const r of requests) {
+    const name = sourceName(r.source);
+    const list = bySource.get(name) ?? [];
+    if (r.endpoint !== null && !list.includes(r.endpoint)) list.push(r.endpoint);
+    bySource.set(name, list);
+  }
+  return [...bySource].map(([name, endpoints]) => `${name} ${endpoints.length > 0 ? endpoints.join(" + ") : "request"}`).join(" + ");
+}
+
 /**
  * The sidenote head for a set of requests: "Qloo /v2/insights · brand ← R1 Juniper Cola · 20 rows", or
- * with `names: false` the margin's short form, "Qloo /v2/insights · brand ← R1 · 20 rows". `refs`
+ * with `names: false` the margin's short form, "Qloo /v2/insights · brand ← R1 · 20 rows". An SEC or
+ * Census request names its source: "SEC EDGAR /api/xbrl/companyfacts ← R1 Juniper Cola". `refs`
  * overrides the refs read from the requests (a metric names its own subjects).
  */
 export function requestHead(
@@ -324,17 +458,21 @@ export function requestHead(
   { names = true }: { names?: boolean } = {},
 ): string | null {
   if (requests.length === 0) return null;
-  const endpoints = [...new Set(requests.map((r) => r.endpoint).filter((p): p is QlooPath => p !== null))];
   const filters = [...new Set(requests.map((r) => r.filterLabel).filter((f): f is string => f !== null))];
   const subjects = (refs && refs.length > 0 ? [...refs] : refsForCalls(ledger, requests.map((r) => r.qlooCallId)))
     .slice(0, 3)
     .flatMap((r) => (names ? [refText(ledger, r)] : (shortRef(ledger, r) ?? [])));
   const rows = requests.reduce<number | null>((sum, r) => (r.rows === null ? sum : (sum ?? 0) + r.rows), null);
-  const parts = [`Qloo ${endpoints.length > 0 ? endpoints.join(" + ") : "request"}`];
+  const parts = [sourcesHead(requests)];
   const what = filters.length > 0 ? filters.slice(0, 3).join(", ") : null;
   if (what || subjects.length > 0) parts.push([what, subjects.length > 0 ? `← ${subjects.join(", ")}` : null].filter(Boolean).join(" "));
   if (rows !== null) parts.push(plural(rows, "row"));
   return parts.join(" · ");
+}
+
+/** "req ab12…cd34" for a Qloo request; "ref CIK0000000001" for an SEC or Census reference. */
+function traceId(request: RequestRef): string {
+  return `${request.source === undefined || request.source === "qloo" ? "req" : "ref"} ${request.shortRequestId}`;
 }
 
 /**
@@ -352,7 +490,7 @@ export function requestTrace(requests: readonly RequestRef[]): string {
     return "partly cached";
   })();
   const head = requests.length > 1 ? [`${requests.length} requests`] : [];
-  return [...head, `req ${first.shortRequestId}`, cache].filter((s) => s !== "").join(" · ");
+  return [...head, traceId(first), cache].filter((s) => s !== "").join(" · ");
 }
 
 /** The longest short trace: one mono line of the 300 px margin at 1440, so it is never cut with "…". */
@@ -365,7 +503,7 @@ export const SHORT_TRACE_MAX = 40;
 export function shortRequestTrace(requests: readonly RequestRef[]): string {
   const first = requests[0];
   if (!first) return "no request";
-  const id = `req ${first.shortRequestId}`;
+  const id = traceId(first);
   if (requests.length > 1) return `${plural(requests.length, "request")} · ${id}`;
   const line = [id, first.cacheLabel].filter((s) => s !== "").join(" · ");
   return line.length <= SHORT_TRACE_MAX ? line : id;

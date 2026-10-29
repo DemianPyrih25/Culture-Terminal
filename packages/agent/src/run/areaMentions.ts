@@ -12,8 +12,8 @@ import { curatedConcept } from "@ct/quant";
 /** How a second area the question names is kept in constraints.notes ("area also named: Lark Hill"). */
 export const AREA_ALSO_NAMED = "area also named: ";
 
-/** The jobs that read a neighbourhood from geo.area. */
-const AREA_JOBS: ReadonlySet<Job> = new Set<Job>(["site_selection", "area_profile", "tenant_mix"]);
+/** The jobs that read a neighbourhood from geo.area: taste_twins reads its source area there. */
+export const AREA_JOBS: ReadonlySet<Job> = new Set<Job>(["site_selection", "area_profile", "tenant_mix", "taste_twins"]);
 
 type AreaGeo = Pick<GeoApi, "matchNeighbourhood">;
 

@@ -1,5 +1,6 @@
-import type { GeoApi, LatLon, MetroId, Neighbourhood } from "@ct/contracts";
+import type { GeoApi, Intent, LatLon, MetroId, Neighbourhood } from "@ct/contracts";
 import { METRO_CENTRES } from "@ct/quant";
+import { compareCities, isGazetteerMetro } from "./markets";
 
 /**
  * The most areas a model is shown for one metro (AREAS in the run context, the GHOST's area names). A
@@ -25,4 +26,16 @@ export function listedAreas(geo: Pick<GeoApi, "neighbourhoods">, metro: MetroId,
   const anchor = named?.centroid ?? METRO_CENTRES[metro];
   const rank = (n: Neighbourhood): number => (n.id === named?.id ? -1 : squaredDistance(n.centroid, anchor));
   return [...all].sort((a, b) => rank(a) - rank(b)).slice(0, AREAS_MAX);
+}
+
+/**
+ * The map cities whose areas a run reads, primary first: the question's metro; for taste_twins also
+ * the target city (geo.target_metro); for city_compare the compared cities that are map cities. Their
+ * area lists reach the model (AREAS) and the CHECKER (names whose digits V3 allows).
+ */
+export function runAreaMetros(intent: Pick<Intent, "job" | "geo">): MetroId[] {
+  const { metro, target_metro: target } = intent.geo;
+  const compared = intent.job === "city_compare" ? compareCities(intent).filter(isGazetteerMetro) : [];
+  const twin = intent.job === "taste_twins" && target !== null ? [target] : [];
+  return [...new Set([...(metro === null ? [] : [metro]), ...twin, ...compared])];
 }

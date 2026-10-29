@@ -5,7 +5,7 @@ import type { Anthropic } from "./deps";
 import {
   AGE_BUCKET_LABEL,
   compileMnemonic,
-  DATA_NOTICE,
+  dataNoticeFor,
   DEFAULT_RUN_LIMITS,
   isId,
   isToolName,
@@ -14,6 +14,7 @@ import {
   parseToolInput,
   SkillId,
   wrapQlooData,
+  wrapToolData,
   type AgeBucket,
   type Badge,
   type DatasetId,
@@ -346,9 +347,9 @@ class DigestBuilder {
     this.rows.push({ ref, name, values });
   }
 
-  build(status: ModelDigest["status"] = "ok"): ModelDigest {
+  build(status: ModelDigest["status"] = "ok", tool: SkillId | null = null): ModelDigest {
     return {
-      _data_notice: DATA_NOTICE,
+      _data_notice: dataNoticeFor(tool ?? "block_dna"),
       status,
       evidence_ids: [this.#evidence],
       dataset_ids: [this.#dataset],
@@ -850,9 +851,12 @@ const SCRIPTS: Scripts = {
 
   block_dna(input, ctx) {
     const b = new DigestBuilder(ctx);
+    // A city fingerprint (kind "city") is read against the other map cities; an area against its city.
+    const areaKey = input.area.kind === "city" ? input.area.market : input.area.ref;
+    const against = input.area.kind === "city" ? "the other map cities" : input.area.metro;
     let fresh = 0;
     const tagRows = BLOCK_TAGS.map(([name, family]) => {
-      const delta = Math.round(-12 + 40 * unit(`block:${input.area.ref}:${name}`));
+      const delta = Math.round(-12 + 40 * unit(`block:${areaKey}:${name}`));
       return { name, family, delta, isNew: delta > 20 && family === "WHAT" };
     }).sort((x, y) => y.delta - x.delta);
     for (const r of tagRows.slice(0, input.include_brands ? 9 : 12)) {
@@ -864,14 +868,14 @@ const SCRIPTS: Scripts = {
         rank_delta: r.delta,
         area_rank: Math.max(1, cityRank - r.delta),
         city_rank: cityRank,
-        area_index: round2(0.7 + 1.1 * unit(`block-ix:${input.area.ref}:${r.name}`)),
-        venues_sampled: 4 + (fnv1a(`venues:${input.area.ref}:${r.name}`) % 30),
+        area_index: round2(0.7 + 1.1 * unit(`block-ix:${areaKey}:${r.name}`)),
+        venues_sampled: 4 + (fnv1a(`venues:${areaKey}:${r.name}`) % 30),
         new_vs_city: r.isNew ? "NEW" : "",
       });
     }
     const top = tagRows[0];
     if (top) b.metric(`Most over-indexed tag in the area: ${top.name}`, `+${top.delta} places`, "DERIVED");
-    b.metric(`Tags new to ${input.area.metro} in this area`, `${fresh}`, "DERIVED");
+    b.metric(`Tags new against ${against}`, `${fresh}`, "DERIVED");
     b.metric("Under-indexed tags", `${tagRows.filter((r) => r.delta < 0).length} of ${tagRows.length}`, "DERIVED");
     b.metric("Median rank delta against the city", `${medianOf(tagRows.map((r) => r.delta))} places`, "DERIVED");
     b.metric("Over-indexed WHAT tags", `${tagRows.filter((r) => r.family === "WHAT" && r.delta > 0).length}`, "DERIVED");
@@ -881,7 +885,7 @@ const SCRIPTS: Scripts = {
         b.row(e.ref, name, { family: "local brand", rank_delta: Math.round(10 + 20 * unit(`lb:${name}`)), popularity_pct: popularity(name) });
       }
     }
-    if (fresh >= 1) {
+    if (fresh >= 1 && input.area.kind !== "city") {
       b.finding("BLOCK_NEW_TAGS", "The area carries WHAT tags that are absent city-wide.", {
         tool: "rank_candidates",
         reason: "Rank tenant brands that carry those genres.",
@@ -973,6 +977,89 @@ const SCRIPTS: Scripts = {
     b.metric("Median best-fit sponsor FIT", `${ordinal(medianOf(input.categories.map((c) => pct(`slate:${seed}:${SPONSOR_BRANDS[c][0]}`))))} pct`, "DERIVED");
     return b.build();
   },
+
+  taste_twins(input, ctx) {
+    const b = new DigestBuilder(ctx);
+    const checked = input.target_areas.length > 0 ? input.target_areas.map((a) => a.replace(/_/g, " ")) : NEIGHBOURHOODS.slice(0, 8);
+    const rows = checked
+      .map((n) => ({ n, rho: round2(-0.2 + 1.0 * unit(`twin:${input.source.ref}:${input.target_metro}:${n}`)) }))
+      .sort((x, y) => y.rho - x.rho);
+    rows.forEach((r, i) => {
+      b.row(null, r.n, {
+        rank_among_checked: i + 1,
+        rho: r.rho,
+        shared_new_tags: 1 + (fnv1a(`twin-new:${input.source.ref}:${r.n}`) % 4),
+        areas_checked: rows.length,
+      });
+    });
+    const top = rows[0];
+    if (top) b.metric(`Closest-taste area in ${input.target_metro} (of the ${rows.length} checked)`, `${top.rho.toFixed(2)}`, "DERIVED");
+    b.metric("Areas checked", `${rows.length}`, "DERIVED");
+    b.notices.push(`Say "of the ${rows.length} areas checked": not every area of ${input.target_metro} was read.`);
+    const p75 = [...rows].map((r) => r.rho).sort((x, y) => x - y)[Math.floor(rows.length * 0.75)] ?? 1;
+    if (top && rows.length >= 3 && top.rho >= Math.max(p75, 0.3)) {
+      b.finding("TWIN_FOUND", `${top.n} has the closest taste mix among the areas checked.`, {
+        tool: "block_dna",
+        reason: `Profile ${top.n} against its city.`,
+      });
+    }
+    return b.build();
+  },
+
+  concept_vector(input, ctx) {
+    const b = new DigestBuilder(ctx);
+    const concept = input.concept_tags.join("+");
+    const anchor = 40 + Math.floor(20 * unit(`cnpt-anchor:${concept}`));
+    let kept = 0;
+    let vetoed = 0;
+    for (const e of named(ctx, input.analogs)) {
+      const score = Math.floor(100 * unit(`cnpt:${concept}:${e.name}`));
+      const verdict = score >= anchor ? "KEEP" : "VETO";
+      if (verdict === "KEEP") kept++;
+      else vetoed++;
+      b.row(e.ref, e.name, { verdict, margin_vs_anchor_in_call: score - anchor });
+    }
+    const adds = DOMAIN_POOL[input.type === "tv_show" || input.type === "movie" || input.type === "artist" || input.type === "podcast" ? input.type : "brand"]
+      .filter((n) => !named(ctx, input.analogs).some((e) => e.name === n))
+      .slice(0, 5);
+    for (const name of adds) {
+      const e = b.entity(name, input.type);
+      b.row(e.ref, name, { verdict: "ADD", rank_in_open_call: 1 + (fnv1a(`cnpt-add:${concept}:${name}`) % 20) });
+    }
+    if (kept + vetoed > 0) b.metric("AI guesses the data keeps", `${kept} of ${kept + vetoed}`, "DERIVED");
+    b.metric("Found in the data (not among the guesses)", `${adds.length}`, "DERIVED");
+    if (vetoed >= 1) {
+      b.finding("ANALOG_VETOED", "An expected analog sits below the concept's 50th result.", {
+        tool: "rank_candidates",
+        reason: "Score the names the data found instead.",
+      });
+    }
+    return b.build();
+  },
+
+  company_financials(input, ctx) {
+    const b = new DigestBuilder(ctx);
+    const brand = ctx.registry.entity(input.brand)?.name ?? input.brand;
+    // Every brand in this scenario is invented, so none is a listed company: the honest answer is UNAVAILABLE.
+    b.flag("NOT_A_LISTED_COMPANY");
+    b.metric(`${brand} revenue`, "not a listed company", "UNAVAILABLE");
+    b.notices.push(`${brand} is private or not mapped to an SEC filer; no figures are guessed.`);
+    return b.build("empty", "company_financials");
+  },
+
+  area_economics(input, ctx) {
+    const b = new DigestBuilder(ctx);
+    for (const area of input.areas) {
+      const name = area.replace(/_/g, " ");
+      const population = 4_000 + Math.floor(30_000 * unit(`econ-pop:${input.metro}:${area}`));
+      const income = 45_000 + Math.floor(60_000 * unit(`econ-inc:${input.metro}:${area}`));
+      b.row(null, name, { population, median_household_income_usd: income, median_age: round2(28 + 14 * unit(`econ-age:${area}`)) });
+      b.metric(`Median household income in ${name}`, `$${income.toLocaleString("en-US")} (approx.)`, "ESTIMATED");
+    }
+    b.flag("CENSUS_RESIDENTS_ONLY");
+    b.notices.push("ACS 5-year estimates describe residents, not customers or visitors.");
+    return b.build("ok", "area_economics");
+  },
 };
 
 export function scriptedDigest<K extends SkillId>(tool: K, input: ToolInput<K>, ctx: DigestContext): ModelDigest {
@@ -992,9 +1079,10 @@ const BENCH_INTENT_BASE: Omit<Intent, "mnemonic"> = {
     { text: PRIMARY_BRAND, entity_type: "brand", role: "primary", public_figure: false },
     { text: NAMED_PEER, entity_type: "brand", role: "peer", public_figure: false },
   ],
-  geo: { metro: null, area: null, unsupported_place: null, market: null },
-  constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
+  geo: { metro: null, area: null, unsupported_place: null, market: null, target_metro: null, cities: [] },
+  constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
   safety: { allowed: true, category: null, reframe: null },
+  read_as: { nearest: false, not_covered: [] },
   assumptions: ["US geography"],
 };
 export const BENCH_INTENT: Intent = { ...BENCH_INTENT_BASE, mnemonic: compileMnemonic(BENCH_INTENT_BASE) };
@@ -1152,7 +1240,7 @@ export function answerSkillCall(
   }
   if (meta.step_id !== null) plan?.run.add(meta.step_id);
   const digest = scriptedDigest(skill.data, parsed.input, ctx);
-  return { result: { type: "tool_result", tool_use_id: use.id, content: wrapQlooData(digest, { tool: name, step: meta.step_id }) }, ok: true };
+  return { result: { type: "tool_result", tool_use_id: use.id, content: wrapToolData(digest, { tool: name, step: meta.step_id }) }, ok: true };
 }
 
 /** Mirrors the agent loop: why an untriggered turn-2 call is not a planned step, or null when it is one. */
@@ -1203,5 +1291,15 @@ export function sampleInputs(): { [K in SkillId]: ToolInput<K> } {
       markets: [],
       ...meta,
     },
+    taste_twins: {
+      source: { kind: "nbhd", ref: "riverside_flats", metro: "nashville" },
+      target_metro: "austin",
+      target_areas: [],
+      concept_tags: ["T1"],
+      ...meta,
+    },
+    concept_vector: { concept_tags: ["T1"], type: "brand", analogs: ["R1", "R2"], ...meta },
+    company_financials: { brand: "R1", ...meta },
+    area_economics: { metro: "nashville", areas: ["riverside_flats", "old_mill"], ...meta },
   };
 }

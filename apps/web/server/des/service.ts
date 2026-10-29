@@ -136,9 +136,10 @@ export function desIntent(query: { name: string; type: DesType }, publicFigure: 
     pillar: "audience",
     job: "audience_discovery",
     mentions: [{ text: query.name, entity_type: query.type, role: "primary", public_figure: query.type === "person" && publicFigure }],
-    geo: { metro: null, area: null, unsupported_place: null, market: null },
-    constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
+    geo: { metro: null, area: null, unsupported_place: null, market: null, target_metro: null, cities: [] },
+    constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
     safety: { allowed: true, category: null, reframe: null },
+    read_as: { nearest: false, not_covered: [] },
     assumptions: ["US geography"],
     mnemonic: desMnemonic(query),
   };
@@ -442,6 +443,8 @@ export class DesService {
       ledger: run.ledger.forToolCall(toolCallId),
       geo,
       localities: null,
+      // A tearsheet reads taste data only: no SEC or Census lookups.
+      publicdata: null,
       registry: run.registry,
       emit: () => undefined,
       budget,

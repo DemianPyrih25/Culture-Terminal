@@ -1,10 +1,13 @@
-import type { DatasetEnvelope, Evidence } from "@ct/contracts";
+import { isPublicProvenanceRequest, PUBLIC_SOURCE_LABEL, type DatasetEnvelope, type Evidence } from "@ct/contracts";
 import { formatAge, formatUtc, timeRange } from "./format";
+import { evidenceSource } from "./publicData";
 
 /**
  * The source line under every exhibit (SPEC §7.2):
  * "Source: Qloo /v2/insights (urn:entity:brand) · req 9f2a… · fetched <ts> · cache 3h · Culture Terminal analysis".
- * Several endpoints are joined with " + ", and "+N" after the request id counts the other calls.
+ * Several endpoints are joined with " + ", and "+N" after the request id counts the other calls. SEC and
+ * Census evidence names its source, host and path and its reference in full (a CIK or an ACS query,
+ * never a key): "Source: SEC EDGAR data.sec.gov/api/xbrl/companyfacts/CIK0000000001.json · ref CIK0000000001 · …".
  */
 
 const ANALYSIS = "Culture Terminal analysis";
@@ -20,22 +23,33 @@ export function sourceLine(evidence: readonly Evidence[], now: number): string {
   const first = evidence[0];
   if (!first) return `Source: ${ANALYSIS}`;
 
-  // Endpoint → filter types, in first-seen order.
+  // Qloo endpoint → filter types, and public source → host and path, in first-seen order.
   const endpoints = new Map<string, Set<string>>();
+  const publicWhere = new Map<string, Set<string>>();
   for (const e of evidence) {
     for (const r of e.provenance.requests) {
+      if (isPublicProvenanceRequest(r)) {
+        const label = PUBLIC_SOURCE_LABEL[r.source];
+        publicWhere.set(label, (publicWhere.get(label) ?? new Set<string>()).add(`${r.host}${r.path}`));
+        continue;
+      }
       const types = endpoints.get(r.path) ?? new Set<string>();
       const filterType = r.query["filter.type"];
       if (filterType) types.add(filterType);
       endpoints.set(r.path, types);
     }
   }
-  const where = [...endpoints]
-    .map(([path, types]) => (types.size > 0 ? `${path} (${[...types].join(", ")})` : path))
-    .join(" + ");
+  const qloo = [...endpoints].map(([path, types]) => (types.size > 0 ? `${path} (${[...types].join(", ")})` : path)).join(" + ");
+  const where = [
+    ...(endpoints.size > 0 ? [`Qloo ${qloo}`] : []),
+    ...[...publicWhere].map(([label, paths]) => `${label} ${[...paths].join(" + ")}`),
+  ].join(" + ");
 
   const calls = new Set(evidence.flatMap((e) => e.qlooCallIds)).size;
-  const req = `req ${(first.requestIds[0] ?? "").slice(0, 4)}…${calls > 1 ? ` +${calls - 1}` : ""}`;
+  const more = calls > 1 ? ` +${calls - 1}` : "";
+  // A Qloo request id is shortened; a public reference (a CIK, an ACS query) is what a reader looks up, so it is kept whole.
+  const req =
+    evidenceSource(first) === "qloo" ? `req ${(first.requestIds[0] ?? "").slice(0, 4)}…${more}` : `ref ${first.requestIds[0] ?? ""}${more}`;
 
   const fetched = timeRange(evidence.map((e) => e.fetchedAt));
   const cachedRange = timeRange(evidence.filter((e) => e.cached).map((e) => e.fetchedAt));
@@ -44,5 +58,5 @@ export function sourceLine(evidence: readonly Evidence[], now: number): string {
     : "live";
 
   const fetchedAt = `fetched ${formatUtc(fetched?.from ?? first.fetchedAt)}`;
-  return [`Source: Qloo ${where}`, req, fetchedAt, cache, ANALYSIS].join(" · ");
+  return [`Source: ${where}`, req, fetchedAt, cache, ANALYSIS].join(" · ");
 }

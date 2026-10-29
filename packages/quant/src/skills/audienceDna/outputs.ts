@@ -218,7 +218,8 @@ export function distinctiveMetric(
     subjectRefs: [target.ref],
     value: measurable ? n : null,
     reason: gap,
-    display: `${n} of ${profile.total} facet tags, vs ${profile.peers} ${profile.peers === 1 ? "peer" : "peers"} of the same type`,
+    // "distinctive" names what the count is, so a sentence that quotes the display reads on its own.
+    display: `${n} of ${profile.total} facet tags distinctive, vs ${profile.peers} ${profile.peers === 1 ? "peer" : "peers"} of the same type`,
     unit: "count",
     badge: "DERIVED",
     formulaId: "dna.distinctive_tags",

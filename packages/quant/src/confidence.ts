@@ -17,6 +17,7 @@ export const CONFIDENCE_RULE_LABEL: Readonly<Record<ConfidenceRule, string>> = {
   quality_gate_drop: "Quality-gate drop",
   checker_warning: "CHECKER warning",
   insufficient_evidence: "Signal is insufficient_evidence (V7, an evidence digest or the ANALYST's call)",
+  read_as_nearest_job: "Question read as the nearest job (D41)",
 };
 
 /** What the run went through. Omitted counts are 0 and omitted booleans false. */
@@ -41,6 +42,8 @@ export interface ConfidenceInput {
   checkerWarnings?: number;
   /** The note's signal is insufficient_evidence: V7 forced it (fewer than three ok bundles, or Qloo disabled), the ANALYST chose it, or the note is an evidence digest. Counts once. */
   insufficientEvidence?: boolean;
+  /** CLERK read the question as the nearest job, so part of it is not covered (D41, READ_AS_NEAREST_JOB). Counts once. */
+  readAsNearestJob?: boolean;
 }
 
 function occurrences(value: number | undefined, field: keyof ConfidenceInput): number {
@@ -63,6 +66,7 @@ export function computeConfidence(input: ConfidenceInput): Confidence {
     quality_gate_drop: occurrences(input.qualityGateDrops, "qualityGateDrops"),
     checker_warning: occurrences(input.checkerWarnings, "checkerWarnings"),
     insufficient_evidence: input.insufficientEvidence ? 1 : 0,
+    read_as_nearest_job: input.readAsNearestJob ? 1 : 0,
   };
   const breakdown = ConfidenceRule.options
     .filter((rule) => counts[rule] > 0)

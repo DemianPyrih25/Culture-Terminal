@@ -3,6 +3,7 @@ import { createAnthropic, type AnthropicLike } from "@ct/agent";
 import type { GeoApi, Lane, Mode } from "@ct/contracts";
 import { getDb, listPublicFigureNames, type Db } from "@ct/db";
 import { createGeo } from "@ct/geo";
+import { createPgPublicStore, createPublicDataClient, publicDataOptionsFromEnv, type PublicDataClient } from "@ct/publicdata";
 import { createPgQlooStore, createQlooClient, qlooClientOptionsFromEnv, type QlooClient } from "@ct/qloo";
 import { judgeTokenFromEnv } from "./access";
 import { findAlreadyHave, type AnswerCache } from "./answer-cache";
@@ -42,6 +43,8 @@ interface Slots {
   bus?: EventBus;
   runs?: RunManager;
   qloo?: QlooClient;
+  /** SEC EDGAR and US Census (Part 9). */
+  publicdata?: PublicDataClient;
   /** Null once ANTHROPIC_API_KEY was found unset. */
   anthropic?: AnthropicLike | null;
   /** The mode last read from or written to kv. */
@@ -95,6 +98,28 @@ export function getQlooClient(): QlooClient {
 /** The Qloo client if one was created, without creating it: shutdown flushes only a client that exists. */
 export function peekQlooClient(): QlooClient | undefined {
   return slots().qloo;
+}
+
+/**
+ * The one SEC EDGAR and US Census client of the process (Part 9, PLAN §5.2): its cache (the shared
+ * public_cache table), limiters and call log are shared by every run. QLOO_MOCK=1 answers both from the
+ * invented mock transport. SEC_USER_AGENT unset leaves SEC not configured (its tool says the data is
+ * unavailable); CENSUS_API_KEY unset does the same for Census. Throws only on a malformed SEC_USER_AGENT;
+ * the caller decides what that turns off, and the next call tries again.
+ */
+export function getPublicDataClient(): PublicDataClient {
+  const s = slots();
+  return (s.publicdata ??= createPublicDataClient(
+    publicDataOptionsFromEnv(process.env, {
+      store: createPgPublicStore(getDatabase()),
+      logger: log.child({ component: "publicdata" }),
+    }),
+  ));
+}
+
+/** The public-data client if one was created, without creating it: shutdown flushes only a client that exists. */
+export function peekPublicDataClient(): PublicDataClient | undefined {
+  return slots().publicdata;
 }
 
 /** The Anthropic client, or null without ANTHROPIC_API_KEY: live runs are then refused, test runs still work. */
@@ -205,7 +230,7 @@ export function getRunManager(): RunManager {
     fakeMaxActive: fakeRunMaxActiveFromEnv(),
     hourlyCap: fakeRunHourlyCapFromEnv(),
     retentionMs: fakeRunRetentionMsFromEnv(),
-    agent: { qloo: getQlooClient, anthropic: getAnthropic, mode: laneMode },
+    agent: { qloo: getQlooClient, publicdata: getPublicDataClient, anthropic: getAnthropic, mode: laneMode },
     agentHourlyCap: agentRunHourlyCapFromEnv(),
     judgeHourlyCap: judgeRunHourlyCapFromEnv(),
     agentDailyCap: agentRunDailyCapFromEnv(),

@@ -60,7 +60,7 @@ const LOCALITIES: LocalityApi = { market: async (id) => (id === "austin" ? { ent
 const ENTITY = realityCase("rc01");
 const STORE = realityCase("rc10", "dtc_neighbourhood");
 const FILE: RealityCasesFile = { registered: "2026-01-15", caveats: ["An invented caveat."], scoring: ["An invented rule."], cases: [ENTITY, STORE] };
-const NO_PICKS: GhostAnswer["picks"] = { competitors: [], markets: [], neighbourhoods: [], tenants: [], partners: [] };
+const NO_PICKS: GhostAnswer["picks"] = { competitors: [], markets: [], neighbourhoods: [], tenants: [], partners: [], creators: [] };
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -120,7 +120,7 @@ describe("the Reality Check arm", () => {
     await client.flush();
 
     expect(ghost.calls.map((o) => [o.question, o.job, o.model])).toEqual([
-      [ghostQuestion(ENTITY, MARKETS), "audience_discovery", "claude-sonnet-5-5"],
+      [ghostQuestion(ENTITY, MARKETS), "brand_collab", "claude-sonnet-5-5"],
       [ghostQuestion(STORE, MARKETS), "site_selection", "claude-sonnet-5-5"],
     ]);
     // Only the store case names a metro, so only its GHOST message lists that metro's gazetteer areas.

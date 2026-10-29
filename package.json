@@ -32,6 +32,7 @@
     "@ct/agent": "workspace:*",
     "@ct/contracts": "workspace:*",
     "@ct/db": "workspace:*",
+    "@ct/publicdata": "workspace:*",
     "@ct/qloo": "workspace:*",
     "@ct/quant": "workspace:*",
     "@playwright/test": "1.63.0",

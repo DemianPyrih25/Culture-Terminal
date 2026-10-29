@@ -1,5 +1,5 @@
-// The pre-registered eval inputs (SPEC §6.6 and §6.7, D27): eval/questions.json, the 12 core and 4
-// adversarial questions both arms answer, and eval/reality_cases.json, the 12 public real-world
+// The pre-registered eval inputs (SPEC §6.6 and §6.7, D27): eval/questions.json, the 27 core, 4
+// adversarial and 3 off-list questions both arms answer, and eval/reality_cases.json, the 12 public real-world
 // choices the Reality Check scores. The schemas carry the registration rules (eval/README.md), so a
 // file that breaks one fails to load. The files hold names and public sources only, never Qloo
 // values or ids (D29).
@@ -21,9 +21,13 @@ const EVAL_DIR = new URL("../../eval/", import.meta.url);
 export const QUESTIONS_FILE = new URL("questions.json", EVAL_DIR);
 export const REALITY_CASES_FILE = new URL("reality_cases.json", EVAL_DIR);
 
-/** D27: the registered set sizes. */
-export const CORE_QUESTIONS = 12;
+/** D27: the registered set sizes. Part 9 grew the core set to cover all 13 jobs at least twice. */
+export const CORE_QUESTIONS = 27;
+/** D27: every job has at least this many core questions. */
+export const CORE_QUESTIONS_PER_JOB = 2;
 export const ADVERSARIAL_QUESTIONS = 4;
+/** D41: questions no job answers in full, each read as its nearest job. */
+export const OFFLIST_QUESTIONS = 3;
 export const REALITY_CASES = 12;
 
 const Text = z.string().trim().min(1);
@@ -80,15 +84,36 @@ const AdversarialQuestion = z.object({
   }),
 });
 
-export const EvalQuestion = z.discriminatedUnion("set", [CoreQuestion, AdversarialQuestion]);
+/**
+ * A business question no job answers in full (D41): CLERK reads it as the nearest job (`job`), sets
+ * read_as.nearest and lists what it cannot answer as not covered, and the run goes ahead, never refused.
+ */
+const OffListQuestion = z.object({
+  id: z.string().regex(/^o\d{2}$/),
+  set: z.literal("offlist"),
+  desk: Pillar,
+  /** The nearest job CLERK should read the question as. */
+  job: Job,
+  question: QuestionText,
+  expected: z.object({
+    handling: z.literal("nearest"),
+    /** What the data cannot answer, in plain words (rent, foot traffic, unit sales…), for reading the results. */
+    not_covered: z.array(Text).min(1),
+    note: Text,
+  }),
+});
+
+export const EvalQuestion = z.discriminatedUnion("set", [CoreQuestion, AdversarialQuestion, OffListQuestion]);
 export type EvalQuestion = z.infer<typeof EvalQuestion>;
 export type CoreQuestion = Extract<EvalQuestion, { set: "core" }>;
 export type AdversarialQuestion = Extract<EvalQuestion, { set: "adversarial" }>;
+export type OffListQuestion = Extract<EvalQuestion, { set: "offlist" }>;
 
 function questionProblems(questions: readonly EvalQuestion[]): string[] {
   const problems: string[] = [];
   const core = questions.filter((q): q is CoreQuestion => q.set === "core");
   const adversarial = questions.filter((q): q is AdversarialQuestion => q.set === "adversarial");
+  const offList = questions.filter((q): q is OffListQuestion => q.set === "offlist");
   for (const id of repeated(questions.map((q) => q.id))) problems.push(`id ${id} is used more than once`);
   for (const text of repeated(questions.map((q) => q.question.trim().toLowerCase()))) problems.push(`question "${text}" is registered more than once`);
   for (const code of repeated(core.flatMap((q) => (q.showcase ? [q.showcase] : [])))) problems.push(`showcase ${code} is registered more than once`);
@@ -101,9 +126,13 @@ function questionProblems(questions: readonly EvalQuestion[]): string[] {
   }
   if (core.length !== CORE_QUESTIONS) problems.push(`${core.length} core questions, expected ${CORE_QUESTIONS}`);
   if (adversarial.length !== ADVERSARIAL_QUESTIONS) problems.push(`${adversarial.length} adversarial questions, expected ${ADVERSARIAL_QUESTIONS}`);
-  const jobs = new Set(core.map((q) => q.job));
-  const missingJobs = Job.options.filter((j) => !jobs.has(j));
+  if (offList.length !== OFFLIST_QUESTIONS) problems.push(`${offList.length} off-list questions, expected ${OFFLIST_QUESTIONS}`);
+  const missingJobs = Job.options.filter((j) => !core.some((q) => q.job === j));
   if (missingJobs.length > 0) problems.push(`no core question for job ${missingJobs.join(", ")}`);
+  for (const job of Job.options) {
+    const n = core.filter((q) => q.job === job).length;
+    if (n > 0 && n < CORE_QUESTIONS_PER_JOB) problems.push(`job ${job} has ${n} core question(s), expected at least ${CORE_QUESTIONS_PER_JOB}`);
+  }
   const kinds = adversarial.map((q) => q.kind);
   const missingKinds = AdversarialKind.options.filter((k) => !kinds.includes(k));
   if (missingKinds.length > 0) problems.push(`no adversarial question of kind ${missingKinds.join(", ")}`);

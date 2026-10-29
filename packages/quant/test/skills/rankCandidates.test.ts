@@ -232,7 +232,7 @@ describe("rank_candidates: tenant fit (site vs city)", () => {
       ["R4", 0],
       ["R5", 0],
     ]);
-    expect(shifts[0]).toMatchObject({ display: "0.00 · site 1 of 3 · city 1 of 3, among the 3 ranked at both", n: 3 });
+    expect(shifts[0]).toMatchObject({ display: "no shift · site 1 of 3 · city 1 of 3, among the 3 ranked at both", n: 3 });
     expect(byFormula(run, "tenant.fit").map((m) => [m.subjectRefs[0], m.value])).toEqual([
       ["R3", 80],
       ["R4", 50],

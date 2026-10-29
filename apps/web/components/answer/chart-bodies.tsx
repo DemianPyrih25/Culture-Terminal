@@ -2,6 +2,7 @@ import type { ChartBody } from "../../lib/answer";
 import {
   BarList,
   ClimbLegend,
+  DataRows,
   DivergingPair,
   DivergingRows,
   MiniBarColumns,
@@ -11,6 +12,7 @@ import {
   RankTrackList,
   Scoreboard,
   SlateTable,
+  VerdictList,
   WinnerTable,
   type PlotTag,
 } from "../plots";
@@ -56,8 +58,8 @@ export function ChartBodyView({ body, label }: { body: ChartBody; label: string 
           label={label}
           baseline={null}
           columns={[
-            { label: "More here", tone: "accent", rows: body.more.map((r) => ({ label: r.label, value: r.fraction, display: r.display, tag: r.tag })) },
-            { label: "Less here", tone: "second", rows: body.less.map((r) => ({ label: r.label, value: r.fraction, display: r.display, tag: r.tag })) },
+            { label: body.heads?.[0] ?? "More here", tone: "accent", rows: body.more.map((r) => ({ label: r.label, value: r.fraction, display: r.display, tag: r.tag })) },
+            { label: body.heads?.[1] ?? "Less here", tone: "second", rows: body.less.map((r) => ({ label: r.label, value: r.fraction, display: r.display, tag: r.tag })) },
           ]}
         />
       );
@@ -100,6 +102,15 @@ export function ChartBodyView({ body, label }: { body: ChartBody; label: string 
       return <DivergingRows label={label} minDomain={body.max} rows={body.rows.map((r) => ({ label: r.label, value: r.value, display: r.display }))} />;
     case "ranks":
       return <RankTrackList label={label} rows={body.rows.map((r) => ({ label: r.label, sublabel: r.sublabel, rank: r.rank, of: r.of, tag: gem(r.gem) }))} />;
+    case "verdicts":
+      return (
+        <VerdictList
+          label={label}
+          groups={body.groups.map((g) => ({ verdict: g.verdict, title: g.title, items: g.rows.map((r) => ({ name: r.label, note: r.display, href: r.href })) }))}
+        />
+      );
+    case "rows":
+      return <DataRows label={label} columns={body.columns} rows={body.rows} />;
     case "map":
       return null;
   }

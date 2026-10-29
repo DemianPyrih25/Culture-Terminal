@@ -15,6 +15,7 @@
     "@ct/contracts": "workspace:*",
     "@ct/db": "workspace:*",
     "@ct/geo": "workspace:*",
+    "@ct/publicdata": "workspace:*",
     "@ct/qloo": "workspace:*",
     "@ct/quant": "workspace:*",
     "pino": "10.4.0",

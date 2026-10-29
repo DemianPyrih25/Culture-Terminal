@@ -3,9 +3,14 @@ import type { BriefFigure, BriefKeyFigure } from "../brief";
 import { METRO_LABEL } from "@ct/contracts";
 import { areaSupply, MIN_BUSY_AREA_VENUES, supplyUnknown, THIN_SUPPLY_LABEL } from "../../components/figures/lift-scale";
 import { bestLiftFigure, datasetOf, type ChartContext } from "./charts";
-import { ENTITY_NOUN } from "./copy";
+import { DOMAIN_COLUMN, ENTITY_NOUN } from "./copy";
+import { cityFingerprints } from "./charts";
+import { contrastColumns, fitText, isNeighbourhood, isScored, isTagContrast, isTwins, isVerdicts, rhoText, rhoWord, twinRows, verdictGroups } from "./job-shapes";
 import { ageLeanWord, genderLeanWord, peakAge, signed } from "./dna";
 import type { AnswerDatasets, AnswerKeyNumber, KeyNumberTag } from "./types";
+
+/** "ZIP 37206 (East Nashville)" reads "East Nashville" (the same rule as the answer's areaName). */
+const placeName = (name: string) => /\(([^)]+)\)\s*$/.exec(name)?.[1]?.trim() || name;
 
 /**
  * The answer's three key numbers per job (§2.7–2.10, G-W9): the value worded the way the design prints it
@@ -343,7 +348,12 @@ function placeArea(input: Input, take: (test: (k: BriefKeyFigure) => boolean) =>
   const over = take((k) => isOf(k, input.metrics, "block.rank_delta") && (numberOf(k, input.metrics) ?? 0) > 0);
   if (over) out.push(one(over.key, over.label, "Most over-represented", `${over.value} ranks vs ${city}`, over.footnote, { variant: "word" }));
   if (!tenant) {
-    const climber = take((k) => isOf(k, input.metrics, "tenant.rank_shift", "xdom.under_the_radar"));
+    // A climber has risen: a rank shift of zero or less is no "Top climber" (ANSWER_QUALITY §3).
+    const climber = take(
+      (k) =>
+        (isOf(k, input.metrics, "tenant.rank_shift") && (numberOf(k, input.metrics) ?? 0) > 0) ||
+        isOf(k, input.metrics, "xdom.under_the_radar"),
+    );
     if (climber) {
       const name = afterDot(climber.label) ?? climber.label;
       const gem = isOf(climber, input.metrics, "xdom.under_the_radar");
@@ -440,6 +450,157 @@ function audienceDiscovery(input: Input, take: (test: (k: BriefKeyFigure) => boo
   return out;
 }
 
+// Part 9 jobs ----------------------------------------------------------------------------------------------
+
+type Take = (test: (k: BriefKeyFigure) => boolean) => BriefKeyFigure | null;
+
+/** The first Ranked dataset among the report's figures that passes a test. */
+function findWhere(input: Input, test: (d: DatasetEnvelope | null) => boolean): { figure: BriefFigure; data: Extract<DatasetEnvelope, { kind: "Ranked" }> } | null {
+  for (const f of input.allFigures) {
+    const d = datasetOf(f, input.fetched);
+    if (d?.kind === "Ranked" && test(d)) return { figure: f, data: d };
+  }
+  return null;
+}
+
+/** The closest twin, what it shares and the next one: each match in words, with the sample it ranks. */
+function tasteTwins(input: Input, take: Take): Number_[] {
+  const found = findWhere(input, isTwins);
+  if (!found) return [];
+  const { rows, checked } = twinRows(found.data.payload);
+  // The twins' own match figures are what these cards print.
+  while (take((k) => isOf(k, input.metrics, "twin.rho")) !== null) continue;
+  const fn = found.figure.footnote;
+  const id = found.figure.datasetId;
+  const of = `of the ${checked} ${checked === 1 ? "area" : "areas"} that could be matched`;
+  const top = rows[0];
+  if (!top || top.rho === null) {
+    return [one(`twin:${id}`, "None found", "Closest twin", `No area could be matched ${of}: too few shared tastes to compare`, fn, { variant: "word" })];
+  }
+  if (top.rho <= 0) {
+    return [one(`twin:${id}`, "None found", "Closest twin", `No area is a match ${of}: the best scores ${rhoText(top.rho)} (1.00 = the same mix of tastes, 0 = unrelated)`, fn, { variant: "word" })];
+  }
+  const out: Number_[] = [
+    one(`twin:${id}`, placeName(top.label), "Closest twin", `Match ${rhoText(top.rho)}, ${rhoWord(top.rho)}, best ${of} (1.00 = the same mix of tastes)`, fn, { variant: "word" }),
+  ];
+  if (top.sharedNew !== null) {
+    take((k) => isOf(k, input.metrics, "twin.shared_new"));
+    out.push(one(`twin-new:${id}`, String(top.sharedNew), "New tastes they share", "tastes in both areas' top 20 that are missing from their own city's top 50", fn));
+  }
+  const next = rows[1];
+  if (next && next.rho !== null && next.rho > 0) {
+    out.push(one(`twin-next:${id}`, placeName(next.label), "Next closest", `Match ${rhoText(next.rho)}, ${rhoWord(next.rho)}`, fn, { variant: "word" }));
+  }
+  return out;
+}
+
+/** The best partners on one scale, then how many audience tags the brands share. */
+function brandCollab(input: Input): Number_[] {
+  const out: Number_[] = [];
+  const scored = findWhere(input, isScored);
+  if (scored) {
+    const fitAt = Math.max(0, scored.data.payload.columns.findIndex((c) => c.key === "fit" || c.unit === "pct"));
+    const rows = scored.data.payload.groups
+      .flatMap((g) => g.rows)
+      .filter((r) => r.ref === null || r.ref !== input.ctx.subjectRef)
+      .flatMap((r) => {
+        const fit = r.cells[fitAt]?.value ?? null;
+        return fit === null ? [] : [{ r, fit }];
+      })
+      .sort((a, b) => b.fit - a.fit);
+    rows.slice(0, 2).forEach((x, i) =>
+      out.push(
+        one(
+          `partner:${i}:${scored.figure.datasetId}`,
+          x.r.label,
+          i === 0 ? "Best-fit partner" : "Next best",
+          `Fit ${fitText(x.fit)}, #${i + 1} of the ${rows.length} brands scored on one scale`,
+          scored.figure.footnote,
+          { variant: "name", tag: x.r.flags.includes("UTR") ? "hidden-gem" : null },
+        ),
+      ),
+    );
+  }
+  const contrast = findWhere(input, isTagContrast);
+  if (contrast) {
+    const { shared, total } = contrastColumns(contrast.data.payload);
+    if (total > 0) {
+      out.push(one(`shared:${contrast.figure.datasetId}`, `${shared} of ${total}`, "Audience tags they share", "tags listed for either brand that both audiences carry", contrast.figure.footnote));
+    }
+  }
+  return out;
+}
+
+/** The top creator of each kind: ranks compare only within a kind. */
+function creatorFit(input: Input): Number_[] {
+  const out: Number_[] = [];
+  const hood = findWhere(input, isNeighbourhood);
+  if (hood) {
+    for (const g of hood.data.payload.groups) {
+      const rows = g.rows.filter((r) => r.rank !== null);
+      const top = rows[0];
+      if (!top) continue;
+      const noun = DOMAIN_COLUMN[top.type ?? g.key]?.label ?? g.label;
+      out.push(
+        one(`creator:${g.key}:${hood.figure.datasetId}`, top.label, `Top pick: ${noun}`, `#1 of the ${rows.length} checked in this group; ranks compare only within a group`, hood.figure.footnote, {
+          variant: "name",
+          tag: top.flags.includes("UTR") ? "hidden-gem" : null,
+        }),
+      );
+      if (out.length >= KEY_NUMBER_MAX) break;
+    }
+    return out;
+  }
+  const scored = findWhere(input, isScored);
+  const rows = scored ? scored.data.payload.groups.flatMap((g) => g.rows).filter((r) => r.rank !== null) : [];
+  const top = rows[0];
+  if (scored && top) out.push(one(`creator:${scored.figure.datasetId}`, top.label, "Best-fit creator", `#1 of the ${rows.length} scored on one scale`, scored.figure.footnote, { variant: "name" }));
+  return out;
+}
+
+/** How many AI guesses the data kept and dropped, and the top result no guess named. */
+function launchTest(input: Input): Number_[] {
+  const found = findWhere(input, isVerdicts);
+  if (!found) return [];
+  const { counts, body } = verdictGroups(found.data.payload);
+  const out: Number_[] = [];
+  const checked = counts.keep + counts.veto;
+  const fn = found.figure.footnote;
+  const id = found.figure.datasetId;
+  if (checked > 0) {
+    out.push(one(`kept:${id}`, `${counts.keep} of ${checked}`, "AI guesses the data backs", "scored at least as high as the concept's 50th result (its last, when fewer come back)", fn));
+    out.push(
+      one(`dropped:${id}`, String(counts.veto), "AI guesses dropped", counts.veto > 0 ? "scored below the concept's 50th result (its last, when fewer come back): the data does not back them" : "no guess scored below the concept's 50th result", fn),
+    );
+  } else {
+    out.push(one(`kept:${id}`, "None", "AI guesses checked", "no AI guess could be scored for this concept", fn, { variant: "word" }));
+  }
+  const add = body.type === "verdicts" ? body.groups.find((g) => g.verdict === "add")?.rows[0] : undefined;
+  if (add) out.push(one(`add:${id}`, add.label, "Found in the data", "a top result for the concept that no guess named", fn, { variant: "name" }));
+  return out;
+}
+
+/** Each compared city's strongest taste against the other map cities. */
+function cityCompare(input: Input): Number_[] {
+  const out: Number_[] = [];
+  for (const p of cityFingerprints(input.allFigures, input.fetched).slice(0, KEY_NUMBER_MAX)) {
+    const top = p.top[0];
+    const footnote = input.allFigures.find((f) => f.datasetId === p.datasetId)?.footnote ?? null;
+    if (!top) {
+      out.push(one(`city:${p.datasetId}`, "Nothing stands out", `${p.name} stands out for`, "no taste ranks clearly higher here than in the other cities we map", footnote, { variant: "word" }));
+      continue;
+    }
+    const places = Math.round(top.value);
+    out.push(
+      one(`city:${p.datasetId}`, top.label, `${p.name} stands out for`, `ranks ${places} ${places === 1 ? "place" : "places"} higher here than in the other cities we map`, footnote, {
+        variant: "word",
+        tag: top.isNew ? "new-here" : null,
+      }),
+    );
+  }
+  return out;
+}
+
 /** The answer's key numbers, at most three. */
 export function buildKeyNumbers(input: Input): AnswerKeyNumber[] {
   const left = input.figures.filter((k) => k.state === "ready");
@@ -474,6 +635,21 @@ export function buildKeyNumbers(input: Input): AnswerKeyNumber[] {
       break;
     case "audience_discovery":
       designed = audienceDiscovery(input, take);
+      break;
+    case "taste_twins":
+      designed = tasteTwins(input, take);
+      break;
+    case "brand_collab":
+      designed = brandCollab(input);
+      break;
+    case "creator_fit":
+      designed = creatorFit(input);
+      break;
+    case "launch_test":
+      designed = launchTest(input);
+      break;
+    case "city_compare":
+      designed = cityCompare(input);
       break;
     default:
       break;

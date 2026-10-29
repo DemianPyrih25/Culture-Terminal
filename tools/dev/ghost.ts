@@ -16,6 +16,7 @@ import {
   GHOST_EARLIER_MAX,
   ghostForRun,
   GhostError,
+  ghostMetroOf,
   ghostWorstCaseUsd,
   isPricedModel,
   type AnthropicLike,
@@ -413,7 +414,8 @@ export async function attachGhost(deps: GhostAttachDeps, options: GhostAttachOpt
         model,
         anthropic: (deps.createAnthropic ?? createAnthropic)(apiKey),
         search: (params) => tool.search(params),
-        metro: state.intent?.geo.metro ?? null,
+        // taste_twins: the twins are areas of the target city, so GHOST is shown that city's areas.
+        metro: state.intent ? ghostMetroOf(state.intent) : null,
         earlier,
         log: io.err,
         signal: deps.signal,

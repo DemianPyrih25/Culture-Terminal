@@ -19,6 +19,11 @@ const JOBS = [
   "sponsorship",
   "market_selection",
   "audience_discovery",
+  "taste_twins",
+  "brand_collab",
+  "creator_fit",
+  "launch_test",
+  "city_compare",
 ] as const;
 
 const ANSWERS = [...JOBS.map((job) => `/dev/brief?job=${job}`), "/dev/brief?job=brand_health&variant=notenough", "/dev/brief?sample=brand-health"];

@@ -103,6 +103,54 @@ export const FIXTURE_PREVIEW_NO_CITY: PreviewResponse = {
   estimate: { networkCalls: 8, cachedCalls: 0, seconds: 40, quotaShare: 0.0042 },
 };
 
+/** Compare cities with one city named: "AUSTIN VS <CITY> CITY" reads as "<CITY> VS <CITY> CITY". */
+export const FIXTURE_PREVIEW_ONE_CITY: PreviewResponse = {
+  ...FIXTURE_PREVIEW,
+  understood: {
+    pillar: "location",
+    job: "city_compare",
+    jobLabel: "Compare cities",
+    mnemonic: "<CITY> VS <CITY> CITY NATURAL-WINE BAR",
+    mentions: [],
+    metros: ["Austin"],
+    scope: "Two to four US cities",
+    lens: "Location lens · each city vs the US",
+  },
+  estimate: { networkCalls: 4, cachedCalls: 2, seconds: 45, quotaShare: 0.0021 },
+};
+
+/** An area's twin with no city to look in: "RIVERSIDE, AUSTIN TWIN <CITY>". */
+export const FIXTURE_PREVIEW_TWIN_NO_TARGET: PreviewResponse = {
+  ...FIXTURE_PREVIEW,
+  understood: {
+    pillar: "location",
+    job: "taste_twins",
+    jobLabel: "Find an area's twin",
+    mnemonic: "RIVERSIDE, AUSTIN TWIN <CITY>",
+    mentions: [],
+    metros: ["Austin"],
+    scope: "Riverside, Austin",
+    lens: "Location lens · each area vs its own city",
+  },
+  estimate: { networkCalls: 9, cachedCalls: 1, seconds: 50, quotaShare: 0.0047 },
+};
+
+/** Test a new product, but the question names no product: "<CONCEPT> LNCH". */
+export const FIXTURE_PREVIEW_NO_CONCEPT: PreviewResponse = {
+  ...FIXTURE_PREVIEW,
+  understood: {
+    pillar: "investment",
+    job: "launch_test",
+    jobLabel: "Test a new product",
+    mnemonic: "<CONCEPT> LNCH",
+    mentions: [],
+    metros: [],
+    scope: "US · the concept's audience",
+    lens: "Investment lens · vs the concept's 50th result",
+  },
+  estimate: { networkCalls: 3, cachedCalls: 0, seconds: 50, quotaShare: 0.0016 },
+};
+
 export const FIXTURE_REFUSAL: PreviewResponse = {
   token: `pv_${"1e".repeat(16)}`,
   expiresAt: "2026-07-06T12:10:00.000Z",
@@ -186,6 +234,12 @@ export const ASK_GALLERY: readonly AskGalleryEntry[] = [
     name: "Needs input: a city",
     draft: "Where to open a ramen counter?",
     state: { phase: { kind: "ready", question: "Where to open a ramen counter?", preview: FIXTURE_PREVIEW_NO_CITY, at }, run: idle },
+    focus: true,
+  },
+  {
+    name: "Needs input: cities to compare",
+    draft: "Is Austin right for a natural-wine bar?",
+    state: { phase: { kind: "ready", question: "Is Austin right for a natural-wine bar?", preview: FIXTURE_PREVIEW_ONE_CITY, at }, run: idle },
     focus: true,
   },
   {

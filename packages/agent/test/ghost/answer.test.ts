@@ -283,7 +283,14 @@ describe("tidyGhostAnswer", () => {
 
   it("empties every list the job does not fill, so its names are never looked up, diffed or counted", () => {
     const names = (prefix: string) => Array.from({ length: 5 }, (_, i) => `${prefix} ${i + 1}`);
-    const raw = answer({ competitors: names("Rival"), markets: ["Harbor City, QA"], neighbourhoods: ["Lantern Row"], tenants: names("Tenant"), partners: names("Partner") });
+    const raw = answer({
+      competitors: names("Rival"),
+      markets: ["Harbor City, QA"],
+      neighbourhoods: ["Lantern Row"],
+      tenants: names("Tenant"),
+      partners: names("Partner"),
+      creators: names("Creator"),
+    });
     for (const [job, lists] of Object.entries(GHOST_JOB_CATEGORIES)) {
       const tidy = tidyGhostAnswer(raw, job as Job);
       for (const [category, picks] of Object.entries(tidy.picks)) {
@@ -295,6 +302,6 @@ describe("tidyGhostAnswer", () => {
   it("stores the job's lists alone from what the model returned", async () => {
     const reply = answer({ competitors: ["Brand Beta"], tenants: ["Tenant 1"], partners: ["Partner 1"] });
     const { result } = await ghost(textMessage(JSON.stringify(reply)), { job: "brand_health" });
-    expect(result.answer.picks).toEqual({ competitors: ["Brand Beta"], markets: [], neighbourhoods: [], tenants: [], partners: [] });
+    expect(result.answer.picks).toEqual({ competitors: ["Brand Beta"], markets: [], neighbourhoods: [], tenants: [], partners: [], creators: [] });
   });
 });

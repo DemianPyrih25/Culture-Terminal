@@ -247,6 +247,7 @@ describe("assembleReport", () => {
         { path: "/v2/insights", filterType: "urn:demographics", calls: 1 },
         { path: "/v2/insights", filterType: "urn:entity:artist", calls: 1 },
       ],
+      publicEndpoints: [],
       ms: 95_433,
       usd: 0.21,
       tokens: { input: 12_000, output: 3_000, cacheRead: 8_000, cacheCreation: 2_000 },

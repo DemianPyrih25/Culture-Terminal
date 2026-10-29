@@ -45,6 +45,7 @@ export const FORMULA_IDS = [
   // S7 Block DNA and S8 Tenant fit
   "block.rank_delta",
   "block.new_tag",
+  "block.panel_rank",
   "tenant.rank_shift",
   "tenant.fit",
   "rank.shift",
@@ -54,6 +55,21 @@ export const FORMULA_IDS = [
   "slate.best_fit",
   "slate.under_the_radar",
   "slate.market_alignment",
+  // S11 Taste Twins
+  "twin.rho",
+  "twin.shared_new",
+  // S12 Concept Vector
+  "cnpt.s50",
+  "cnpt.verdict",
+  "cnpt.precision",
+  // S13 Company financials (SEC EDGAR)
+  "fin.revenue",
+  "fin.margin",
+  "fin.yoy",
+  // S14 Area economics (US Census ACS)
+  "econ.count",
+  "econ.median",
+  "econ.share",
   // Report-level (§6.4)
   "confidence.run",
   "confidence.metric",
@@ -80,6 +96,10 @@ const INDICES = "Relative affinity indices from −1 to 1, not population shares
 const HISTORICAL = "Historical window only (Qloo trending over one fixed past window), always badged STALE with the window.";
 const METRO = "Metro context is a Qloo locality taste signal, not residence, attendance or sales.";
 const NO_PRICE = "Not about price or value: Qloo has no pricing data.";
+const VENUE_GOERS = "Taste signals of venue-goers, not residents or census data.";
+const REPORTED = "As reported in the company's SEC filings (XBRL company facts), in US dollars; not advice.";
+const COMPANY_WIDE = "Company-level: a brand inside a larger company is not broken out.";
+const ACS = "US Census ACS 5-year survey estimates for residents, with sampling error; not customers, visitors or spending.";
 
 type FormulaBody = Omit<Formula, "id">;
 
@@ -381,6 +401,17 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
       "A tag is NEW when it is absent from the city's top 50 yet present in the area's top 20. A tag the city list holds, even unranked at its floor, is not NEW.",
     caveats: ["Taste signals of venue-goers, not residents or census data.", "Commercial concept fit only."],
   },
+  "block.panel_rank": {
+    name: "Map-city panel rank (city fingerprint)",
+    formula_tex: String.raw`\bar r(t) = \frac{1}{|P|} \sum_{c \in P} \mathrm{rank}_c(t), \quad \mathrm{rank}_{\text{panel}}(t) = \text{position of } t \text{ by } \bar r(t) \text{, top 50 only}`,
+    plain_english:
+      "The comparison a whole city is read against: the other map cities' top-50 tag lists, each tag placed by its average rank across them (a tag missing from a city's list counts as 51 there). Only the panel's top 50 get a rank, like any single list. A city's rank gain on a tag is the panel rank minus the city's own rank, so a positive gain means the city over-indexes on it compared with the other map cities. NEW means absent from every other map city's list.",
+    caveats: [
+      "The panel is the map cities Culture Terminal covers, not every US city.",
+      VENUE_GOERS,
+      "Read ranks, not raw scores: affinities are compressed.",
+    ],
+  },
   "tenant.rank_shift": {
     name: "Rank shift (site vs city)",
     formula_tex: String.raw`\Delta_j = \mathrm{pct}_{\text{site}, j} - \mathrm{pct}_{\text{city}, j}, \quad \text{both among the candidates both calls ranked}`,
@@ -413,9 +444,9 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
   },
   "xdom.under_the_radar": {
     name: "UNDER-THE-RADAR (cultural neighbourhood)",
-    formula_tex: String.raw`U_n = A_n - p_n, \quad \text{pick} = \arg\max_{n:\ A_n \ge \operatorname{median}(A),\ p_n < \operatorname{median}(p),\ U_n > 0} U_n`,
+    formula_tex: String.raw`U_n = A_n - p_n, \quad \text{pick} = \arg\max_{n:\ A_n \ge \operatorname{median}(A),\ p_n < \min(\operatorname{median}(p),\, 0.85),\ U_n > 0} U_n`,
     plain_english:
-      "Fit minus popularity: high when the audience's taste points strongly to something that is not yet widely popular. A domain's under-the-radar pick is its highest score among results with fit at or above the domain's median fit and popularity below its median popularity; a domain where no result clears that bar has no pick.",
+      "Fit minus popularity: high when the audience's taste points strongly to something that is not yet widely popular. A domain's under-the-radar pick is its highest score among results with fit at or above the domain's median fit, popularity below its median popularity and popularity below 0.85; a domain where no result clears that bar has no pick.",
     caveats: [
       NO_PRICE,
       "It subtracts a global popularity from a within-call percentile, so read it as an ordering inside one domain.",
@@ -446,9 +477,9 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
   },
   "slate.under_the_radar": {
     name: "UNDER-THE-RADAR fit (sponsor)",
-    formula_tex: String.raw`\mathrm{UTR}_j \iff A_j \ge \operatorname{median}(A) \ \wedge\ p_j < \operatorname{median}(p)`,
+    formula_tex: String.raw`\mathrm{UTR}_j \iff A_j \ge \operatorname{median}(A) \ \wedge\ p_j < \min(\operatorname{median}(p),\, 0.85)`,
     plain_english:
-      "A candidate is flagged under the radar when its fit is at or above the slate's median fit while its popularity is below the slate's median popularity.",
+      "A candidate is flagged under the radar when its fit is at or above the slate's median fit while its popularity is below the slate's median popularity and below 0.85. A better-known name is never flagged, however the slate's median falls.",
     caveats: [NO_PRICE, "Relative to this slate; a different shortlist moves both medians."],
   },
   "slate.market_alignment": {
@@ -458,11 +489,92 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
       "How much higher a sponsor candidate ranks when the seed's taste is read in metro m than nationally, among the same brands: S_m, the slate brands the metro call scored. Positive means the market leans toward that candidate. A metro that scored fewer than three slate brands gives no value.",
     caveats: [METRO, "Read within the brands the metro scored, often a few of the slate; a brand the metro dropped is not scored there."],
   },
+  "twin.rho": {
+    name: "Taste twin resemblance (Spearman rho)",
+    formula_tex: String.raw`\rho_a = \operatorname{Spearman}\big(\Delta_{\text{src}}(t),\ \Delta_a(t)\big)_{t \in U}, \quad \Delta_x(t) = \mathrm{rank}_{\text{city}(x)}(t) - \mathrm{rank}_x(t)`,
+    plain_english:
+      "How alike two areas in different cities are in the way each differs from its own city. For every tag in either area's comparison, take its rank gain over its city (a missing rank counts as 51) and correlate the two lists of gains by rank: 1 means the same tags over- and under-index in both areas, 0 means no relation, below 0 means opposite patterns. At least 8 tags are needed. The more tags the two area lists share, the more the value can be trusted.",
+    caveats: [
+      VENUE_GOERS,
+      "Ranks only the areas checked (named, picked by concept lift, or the largest), not every area of the target city.",
+      "Music tags (SOUND) are not compared.",
+      "Similar taste, not a forecast of sales, rents or footfall.",
+    ],
+  },
+  "twin.shared_new": {
+    name: "Shared NEW tags",
+    formula_tex: String.raw`\mathrm{SharedNew}_a = \big|\{t : t \text{ NEW in the source area} \wedge t \text{ NEW in } a\}\big|`,
+    plain_english:
+      "Tags that both areas hold in their top 20 while their own cities' top-50 lists do not: the most distinctive taste the two areas have in common.",
+    caveats: [VENUE_GOERS],
+  },
+  "cnpt.s50": {
+    name: "Concept anchor (s50)",
+    formula_tex: String.raw`s_{50} = \text{the 50th result of the open concept call, scored again inside the scoring call}`,
+    plain_english:
+      "The bar an analog has to clear: the entity that ranks 50th when Qloo is asked for the concept's tags alone. It is scored again in the same call as the analogs, so the comparison never crosses calls. With fewer than 50 results, the last scored result is the anchor.",
+    caveats: [WITHIN_CALL, "The anchor depends on the concept tags chosen; other tags give another anchor."],
+  },
+  "cnpt.verdict": {
+    name: "KEEP / VETO / ADD",
+    formula_tex: String.raw`\text{KEEP} \iff A_j \ge A_{s_{50}}, \quad \text{VETO} \iff A_j < A_{s_{50}}, \quad A = \text{affinity in the same scoring call}`,
+    plain_english:
+      "An analog is kept when the concept's taste scores it at least as high as the anchor (the concept's 50th result), and vetoed when it scores lower. An analog Qloo returns no score for, or one at the call's shared floor value, is not scored: never a VETO. ADD lists the concept's top results you did not name.",
+    caveats: [WITHIN_CALL, UNSCORED, "A VETO means the concept's taste points elsewhere, not that the analog is a weak business.", NOT_SALES],
+  },
+  "cnpt.precision": {
+    name: "Analog precision",
+    formula_tex: String.raw`\mathrm{Precision} = \frac{\#\text{KEEP}}{\#\text{KEEP} + \#\text{VETO}}`,
+    plain_english: "The share of your scored analogs that the concept's taste keeps. Analogs without a score do not count either way.",
+    caveats: ["A share of a few analogs moves in large steps; read it with the count (k of n)."],
+  },
+  "fin.revenue": {
+    name: "Reported revenue",
+    formula_tex: String.raw`R_p = \text{the first revenue line the company reports for period } p`,
+    plain_english:
+      "Revenue for one fiscal year (10-K) or one quarter (10-Q) as the company reported it, taking the first revenue line it reports for the period in this order: revenue from contracts with customers excluding assessed tax, revenues, net sales revenue, revenue from contracts with customers including assessed tax. When a later filing restates a period, the latest-filed value is used.",
+    caveats: [REPORTED, COMPANY_WIDE, "A company that changes its revenue line between years is compared as reported."],
+  },
+  "fin.margin": {
+    name: "Gross and operating margin",
+    formula_tex: String.raw`\mathrm{GM}_p = \frac{\mathrm{GrossProfit}_p}{R_p}, \quad \mathrm{OM}_p = \frac{\mathrm{OperatingIncomeLoss}_p}{R_p}`,
+    plain_english:
+      "Gross profit and operating income as a share of revenue for the same reported period. A company that does not report gross profit has no gross margin; it is shown as not reported, never as 0.",
+    caveats: [REPORTED, COMPANY_WIDE],
+  },
+  "fin.yoy": {
+    name: "Year-over-year revenue change",
+    formula_tex: String.raw`\mathrm{YoY}_p = \frac{R_p}{R_{p - 1\,\text{yr}}} - 1`,
+    plain_english:
+      "How much revenue changed against the same period a year earlier (a fiscal year against the one before, a quarter against the same quarter a year before), both as reported.",
+    caveats: [REPORTED, COMPANY_WIDE, "Acquisitions, disposals and currency moves are included as reported, not adjusted."],
+  },
+  "econ.count": {
+    name: "Area count (residents, households, workers)",
+    formula_tex: String.raw`N_A = \sum_{u \in A} N_u, \quad u = \text{the ZIP code tabulation areas or census tracts of area } A`,
+    plain_english:
+      "Population, households and workers of an area: the Census estimates of the ZIP areas or census tracts inside it, added up. Where an area is only part of a ZIP area, the whole ZIP area's figures are used, so they describe more than the area.",
+    caveats: [ACS, "Units whose estimate Census withheld are left out of the sum, and the answer says so."],
+  },
+  "econ.median": {
+    name: "Area median (approximate)",
+    formula_tex: String.raw`\tilde m_A = \frac{\sum_{u \in A} P_u\, m_u}{\sum_{u \in A} P_u}, \quad P_u = \text{population of unit } u`,
+    plain_english:
+      "Median age and median household income of an area made of several Census units: the population-weighted average of the units' medians. It approximates the area's true median, which Census does not publish for our areas, so it is badged approximate. An area of one unit shows that unit's published median.",
+    caveats: [ACS, "An average of medians is not the median of the combined area."],
+  },
+  "econ.share": {
+    name: "Commute mode share",
+    formula_tex: String.raw`\mathrm{share}_{A, k} = \frac{\sum_{u \in A} W_{u, k}}{\sum_{u \in A} W_u}, \quad W = \text{workers 16 and over}`,
+    plain_english:
+      "The share of an area's resident workers who usually drive alone, take public transit, walk, cycle or work from home.",
+    caveats: [ACS, "About how residents get to work, not about who visits the area."],
+  },
   "confidence.run": {
     name: "Run confidence",
-    formula_tex: String.raw`C = \max\!\big(0,\ 100 - 15\,n_{\text{dropped}} - 10\,n_{\text{fallback}} - 10\,[\text{coarse}] - 20\,[\text{stale momentum cited}] - 10\,n_{\text{thin}} - 5\,n_{\text{gate}} - 5\,n_{\text{warn}}\big)`,
+    formula_tex: String.raw`C = \max\!\big(0,\ 100 - 15\,n_{\text{dropped}} - 10\,n_{\text{fallback}} - 10\,[\text{coarse}] - 20\,[\text{stale momentum cited}] - 10\,n_{\text{thin}} - 5\,n_{\text{gate}} - 5\,n_{\text{warn}} - 5\,[\text{read as nearest job}]\big)`,
     plain_english:
-      "Starts at 100 and loses points for each weakness: 15 per dropped or unresolved secondary entity, 10 per code fallback, 10 for a coarse map, 20 when stale-only momentum is cited, 10 per thin result (fewer than 5 rows), 5 per quality-gate drop and 5 per CHECKER warning. HIGH is 75 or more, MED 50 to 74, LOW below 50. The breakdown shows on hover.",
+      "Starts at 100 and loses points for each weakness: 15 per dropped or unresolved secondary entity, 10 per code fallback, 10 for a coarse map, 20 when stale-only momentum is cited, 10 per thin result (fewer than 5 rows), 5 per quality-gate drop, 5 per CHECKER warning, and 5 when the question was read as the closest kind of question Culture Terminal answers. HIGH is 75 or more, MED 50 to 74, LOW below 50. The breakdown shows on hover.",
     caveats: [
       "Measures the completeness and quality of this run's evidence, not the probability that the conclusion is right.",
       "Computed by code from the run's flags; the model cannot change it.",

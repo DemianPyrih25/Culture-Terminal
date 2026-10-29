@@ -17,7 +17,7 @@ describe("RunEvent", () => {
   it("covers exactly the protocol's event types", () => {
     const unionTypes = RunEvent.options.map((o) => o.shape.type.value).sort();
     expect(unionTypes).toEqual([...RUN_EVENT_TYPES].sort());
-    expect(new Set(RUN_EVENT_TYPES).size).toBe(22);
+    expect(new Set(RUN_EVENT_TYPES).size).toBe(23);
   });
 
   it("has a fixture for every event type", () => {

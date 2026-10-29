@@ -65,6 +65,9 @@ const FINDING_KIND_WORDS: Readonly<Record<FindingKind, string>> = {
   POPULARITY_DOMINANCE: "popularity dominance",
   LOCATION_FALLBACK: "location fallback",
   WEAK_CATEGORY_FIT: "weak category fit",
+  TWIN_FOUND: "taste twin found",
+  ANALOG_VETOED: "analog vetoed",
+  TASTE_FINANCIALS_SPLIT: "taste and financials split",
 };
 
 /**

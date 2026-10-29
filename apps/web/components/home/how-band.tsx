@@ -3,7 +3,7 @@ import { Icon, type IconName } from "../ui/icons";
 
 /** The three promises under the question box (N01 how band). */
 export const HOW_ITEMS: readonly { icon: IconName; title: string; line: string }[] = [
-  { icon: "shield-check", title: "Every number checked", line: "Traced to its Qloo source before you see it." },
+  { icon: "shield-check", title: "Every number checked", line: "Traced to its source (Qloo, SEC filings or the Census) before you see it." },
   { icon: "bot", title: "Better than a guess", line: "Each answer shows what AI alone would have said." },
   { icon: "clock-4", title: "Ready in about a minute", line: "Watch each step while the answer is made." },
 ];

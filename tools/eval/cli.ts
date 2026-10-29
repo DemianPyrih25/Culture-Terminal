@@ -58,7 +58,7 @@ export const EVAL_USAGE = [
   "  grounded | ghost | both | reality | all   run those arms over the registered questions and cases (needs --yes)",
   "  summary            print the metrics of an eval directory (the latest, or --stamp's); no spend",
   "  --yes, -y          confirm the live LLM and Qloo spend",
-  "  --only IDS         only these questions and cases, e.g. q01,a02,rc03",
+  "  --only IDS         only these questions and cases, e.g. q01,a02,o01,rc03",
   "  --usd-cap N        the most the eval directory may spend in all, earlier sessions included (default 5)",
   "  --takes N          grounded takes per question, 1 to 3 (default 1); a second one measures top-5 stability",
   "  --out DIR          where eval directories live (default .private/eval; never a tracked path)",
@@ -133,7 +133,7 @@ export function parseEvalArgs(argv: readonly string[]): EvalArgs | null {
   if (only !== null) {
     if (only.length === 0) throw new UsageError("--only needs at least one id, e.g. q01,rc03");
     const bad = only.filter((id) => !QUESTION_ID.test(id) && !CASE_ID.test(id));
-    if (bad.length > 0) throw new UsageError(`--only takes question ids (q01, a01) and case ids (rc01), got ${bad.join(", ")}`);
+    if (bad.length > 0) throw new UsageError(`--only takes question ids (q01, a01, o01) and case ids (rc01), got ${bad.join(", ")}`);
   }
   const stamp = options.stamp?.trim() ?? null;
   if (stamp !== null && !/^[A-Za-z0-9_-]{1,64}$/.test(stamp)) throw new UsageError(`--stamp must be letters, digits, - and _, got "${options.stamp}"`);
@@ -511,7 +511,7 @@ async function runArms(deps: EvalCliDeps, io: CliIo, run: ArmsRun): Promise<numb
 
   const anthropic = (deps.createAnthropic ?? createAnthropic)(apiKey);
   const live: EvalArms = {
-    grounded: createGroundedArm({ qloo: qloo.client, anthropic, localities, runAgent: deps.runAgent, now }),
+    grounded: createGroundedArm({ qloo: qloo.client, publicdata: qloo.publicdata, anthropic, localities, runAgent: deps.runAgent, now }),
     ghost: createGhostArm(
       {
         api: deps.ghostApi,

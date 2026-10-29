@@ -157,6 +157,28 @@ describe("V2: tokens resolve", () => {
     expect(of(result.issues, "V3")).toEqual([]);
   });
 
+  it("rejects words beside a token that its display already prints (they would print twice)", () => {
+    // M5 prints "Rising": "is rising {{M5}}" reads "is rising Rising".
+    for (const text of ["Brand Alpha is rising {{M5}} in {{WINDOW}} [E3].", "Brand Alpha momentum is {{M5}} rising in {{WINDOW}} [E3]."]) {
+      const result = check(edit((d) => (d.arguments[0]!.our_read = text)));
+      const v2 = of(result.issues, "V2");
+      expect(v2).toEqual([expect.objectContaining({ action: "reject", path: "arguments[0].our_read", subjects: ["M5"] })]);
+      expect(v2[0]?.message).toContain('{{M5}} already prints "Rising", so the words "rising" beside it print twice');
+      expect(of(check(edit((d) => (d.arguments[0]!.our_read = text)), { attempt: 2 }).issues, "V2")[0]?.action).toBe("warn");
+    }
+    // M6 prints "not measured": a bracket around the token does not hide the repeat.
+    const bracketed = check(edit((d) => (d.arguments[0]!.our_read = "Brand Gamma's age index is not measured ({{M6}}) [E4].")));
+    expect(of(bracketed.issues, "V2")).toEqual([expect.objectContaining({ subjects: ["M6"] })]);
+    for (const text of [
+      "Brand Alpha's momentum reads {{M5}} in {{WINDOW}}; it ranks {{M2}} [E3].",
+      // Another clause or sentence may start with the same word.
+      "Brand Alpha's momentum is {{M5}} in {{WINDOW}}. Rising taste is not sales [E3].",
+      "Momentum was rising: {{M5}} in {{WINDOW}} [E3].",
+    ]) {
+      expect(of(check(edit((d) => (d.arguments[0]!.our_read = text))).issues, "V2")).toEqual([]);
+    }
+  });
+
   it("rejects a metric token set beside another entity's name", () => {
     // M2 is Brand Alpha's distinctiveness rank; "Beta" alone names Brand Beta.
     const draft = edit((d) => (d.arguments[0]!.qloo_fact = "Similarity with Brand Beta is {{M1}} [E1]. In the matrix Beta sits at {{M2}} [E1]."));
@@ -296,6 +318,24 @@ describe("V3: numbers outside tokens", () => {
       "Qloo age bucket: name the bucket it spans (≤24), or cite the {{M#}} token of the metric that measures it.";
     expect(result.issues[0]?.message).toBe(message);
     expect(repairMessage(result.issues)).toContain(`- V3 ${message}`);
+  });
+
+  it("tells the repair to write loose ages as Qloo's bucket labels", () => {
+    const draft = edit((d) => (d.arguments[1]!.our_read = "Its pockets are the early-to-mid 30s and up to 44."));
+    const result = check(draft);
+    const v3 = result.issues.filter((i) => i.rule === "V3");
+    expect(v3).toHaveLength(1);
+    expect(v3[0]?.message).toBe(
+      'arguments[1].our_read: numbers typed outside tokens: "30", "44"; "30", "44" read as ages: write each age as one of ' +
+        "Qloo's bucket labels (≤24, 25–29, 30–34, 35–44, 45–54, 55+) next to the {{M#}} token of the metric that measures " +
+        'that bucket, never "the 30s" or "up to 44".',
+    );
+  });
+
+  it("keeps the plain advice for a bucket-edge number with no age context", () => {
+    const draft = edit((d) => (d.arguments[1]!.our_read = "It ranks 30 places ahead."));
+    const v3 = check(draft).issues.filter((i) => i.rule === "V3");
+    expect(v3[0]?.message).toBe('arguments[1].our_read: numbers typed outside tokens: "30"; cite every number as a {{M#}} token.');
   });
 });
 

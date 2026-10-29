@@ -56,6 +56,20 @@ export const IntentGeo = z.strictObject({
     .describe(
       "When a place mention (one venue) is in a US city that is not the metro: that city's market id in snake case, e.g. portland, kansas_city, washington_dc or st_louis; null otherwise.",
     ),
+  /** taste_twins: the map city to look for twins in; `metro` and `area` are the source. */
+  target_metro: MetroId.nullable().describe(
+    "For taste_twins only: the supported metro to find the source area's twins in (metro and area are the source); null otherwise.",
+  ),
+  /**
+   * city_compare: the 2-4 cities to compare as market ids, primary first. A plain string list (the
+   * subset takes no patterns or counts): code parses each with MarketId, checks it against
+   * config/metros.json, dedupes it and requires 2-4, else asks for the cities instead of guessing.
+   */
+  cities: z
+    .array(z.string())
+    .describe(
+      "For city_compare only: the two to four US cities to compare as market ids in snake case, primary first, e.g. austin, nashville, denver; empty otherwise.",
+    ),
 });
 export type IntentGeo = z.infer<typeof IntentGeo>;
 
@@ -79,6 +93,12 @@ export const IntentConstraints = z.strictObject({
   notes: z
     .array(z.string())
     .describe("Other constraints in a few words each, e.g. 'eight secondary-market dates'. Empty if none."),
+  concept_description: z
+    .string()
+    .nullable()
+    .describe(
+      "For launch_test only: the product concept in one sentence as the question words it, e.g. 'a small premium hot-sauce brand'; null otherwise.",
+    ),
 });
 export type IntentConstraints = z.infer<typeof IntentConstraints>;
 
@@ -94,6 +114,20 @@ export const IntentSafety = z.strictObject({
 });
 export type IntentSafety = z.infer<typeof IntentSafety>;
 
+/**
+ * The nearest-job rule (D41): every business question is read as the nearest of the jobs, and what the
+ * data does not cover is said plainly (a READ_AS_NEAREST_JOB limitation and the "Read as" chip).
+ */
+export const IntentReadAs = z.strictObject({
+  nearest: z
+    .boolean()
+    .describe("True when the question asks for more than the job covers and is read as the nearest job; false when the job fits."),
+  not_covered: z
+    .array(z.string())
+    .describe("What the question asks that the data does not cover, a few words each, e.g. 'sales', 'rents', 'foot traffic'. Empty when nearest is false."),
+});
+export type IntentReadAs = z.infer<typeof IntentReadAs>;
+
 export const Intent = z.strictObject({
   pillar: Pillar.describe("The desk. Must match the job: JOB_PILLAR in code is authoritative."),
   job: Job,
@@ -101,6 +135,7 @@ export const Intent = z.strictObject({
   geo: IntentGeo,
   constraints: IntentConstraints,
   safety: IntentSafety,
+  read_as: IntentReadAs,
   assumptions: z.array(z.string()).describe("Defaults applied, e.g. 'US geography'. Empty if none."),
   mnemonic: z
     .string()
@@ -108,15 +143,21 @@ export const Intent = z.strictObject({
 });
 export type Intent = z.infer<typeof Intent>;
 
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
 /**
- * An Intent as run events store it. Intents recorded before Intent.geo carried `market` (D44) lack it;
- * they read as market null, so stored runs and pinned showcases still replay.
+ * An Intent as run events store it. Fields added after a run was recorded read as their empty values,
+ * so stored runs and pinned showcases still replay: `geo.market` (D44) as null; and from Part 9
+ * `geo.target_metro` as null, `geo.cities` as empty, `constraints.concept_description` as null and
+ * `read_as` as not read as a nearest job.
  */
 export const StoredIntent = z.preprocess((raw) => {
-  if (typeof raw !== "object" || raw === null || !("geo" in raw)) return raw;
-  const geo = (raw as { geo: unknown }).geo;
-  if (typeof geo !== "object" || geo === null || "market" in geo) return raw;
-  return { ...raw, geo: { ...geo, market: null } };
+  if (!isRecord(raw)) return raw;
+  const out: Record<string, unknown> = { ...raw };
+  if (isRecord(raw.geo)) out.geo = { market: null, target_metro: null, cities: [], ...raw.geo };
+  if (isRecord(raw.constraints)) out.constraints = { concept_description: null, ...raw.constraints };
+  if (!("read_as" in raw)) out.read_as = { nearest: false, not_covered: [] };
+  return out;
 }, Intent);
 
 /**
@@ -130,6 +171,7 @@ export function compileMnemonic(intent: Pick<Intent, "job" | "mentions" | "geo" 
   const city = intent.geo.metro ? up(intent.geo.metro) : intent.geo.unsupported_place ? up(intent.geo.unsupported_place) : "<CITY>";
   const area = intent.geo.area ? up(intent.geo.area) : "<AREA>";
   const mn = JOB_MNEMONIC[intent.job];
+  const concept = intent.constraints.concepts[0];
   switch (intent.job) {
     case "head_to_head": {
       const peer = intent.mentions.find((m) => m !== primary && m.role === "peer");
@@ -138,10 +180,19 @@ export function compileMnemonic(intent: Pick<Intent, "job" | "mentions" | "geo" 
     case "area_profile":
     case "tenant_mix":
       return `${area}, ${city} ${mn}`;
-    case "site_selection": {
-      const concept = intent.constraints.concepts[0];
+    case "site_selection":
       return `${concept ? up(concept) : "<CONCEPT>"} SITE ${city}`;
+    case "taste_twins": {
+      const target = intent.geo.target_metro ? up(intent.geo.target_metro) : "<CITY>";
+      return `${area}, ${city} ${mn} ${target}`;
     }
+    case "city_compare": {
+      const cities = intent.geo.cities.map(up).filter((c) => c !== "");
+      const list = cities.length >= 2 ? cities.join(" VS ") : "<CITY> VS <CITY>";
+      return `${list} ${mn}${concept ? ` ${up(concept)}` : ""}`;
+    }
+    case "launch_test":
+      return `${concept ? up(concept) : "<CONCEPT>"} ${mn}`;
     default:
       return `${named} ${mn}`;
   }

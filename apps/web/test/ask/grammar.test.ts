@@ -18,6 +18,13 @@ describe("parseCommand", () => {
     ["Comedian Vega MKTS", "market_selection", "marketing", "COMEDIAN VEGA MKTS"],
     ["Brand Gamma AUD", "audience_discovery", "audience", "BRAND GAMMA AUD"],
     ["  Brand   Gamma    AUD  ", "audience_discovery", "audience", "BRAND GAMMA AUD"],
+    ["Juniper Cola COLLAB", "brand_collab", "marketing", "JUNIPER COLA <BRAND> COLLAB"],
+    ["Juniper Cola CRTR", "creator_fit", "marketing", "JUNIPER COLA <BRAND> CRTR"],
+    ["small-batch hot sauce LNCH", "launch_test", "investment", "SMALL-BATCH HOT SAUCE LNCH"],
+    ["Riverside, Austin TWIN Denver", "taste_twins", "location", "RIVERSIDE, AUSTIN TWIN DENVER"],
+    ["Austin VS Denver CITY", "city_compare", "location", "AUSTIN VS DENVER CITY"],
+    ["Austin VS Denver VS Nashville CITY natural-wine bar", "city_compare", "location", "AUSTIN VS DENVER VS NASHVILLE CITY NATURAL-WINE BAR"],
+    ["KANSAS CITY VS Denver CITY", "city_compare", "location", "KANSAS_CITY VS DENVER CITY"],
   ])("compiles %s", (input, job, pillar, mnemonic) => {
     expect(parseCommand(input)).toMatchObject({ job, pillar, mnemonic });
   });
@@ -31,6 +38,9 @@ describe("parseCommand", () => {
     expect(parseCommand("ramen counter SITE Nashville")).toMatchObject({ concept: "ramen counter", city: "Nashville", area: null });
     expect(parseCommand("Juniper Cola <brand> HLTH")?.names).toEqual([{ text: "Juniper Cola", type: "brand" }]);
     expect(parseCommand("Comedian Vega MKTS")?.names).toEqual([{ text: "Comedian Vega", type: null }]);
+    expect(parseCommand("Riverside, Austin TWIN Denver")).toMatchObject({ names: [], area: "Riverside", city: "Austin", targetCity: "Denver" });
+    expect(parseCommand("Austin VS Denver CITY wine bar")).toMatchObject({ cities: ["Austin", "Denver"], concept: "wine bar", city: "Austin" });
+    expect(parseCommand("hot sauce LNCH")).toMatchObject({ concept: "hot sauce", names: [] });
   });
 
   it("prints what code compiles for the same reading (compileMnemonic)", () => {
@@ -38,9 +48,10 @@ describe("parseCommand", () => {
       pillar: "investment",
       job: "brand_health",
       mentions: [],
-      geo: { metro: null, area: null, unsupported_place: null, market: null },
-      constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [] },
+      geo: { metro: null, area: null, unsupported_place: null, market: null, target_metro: null, cities: [] },
+      constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
       safety: { allowed: true, category: null, reframe: null },
+      read_as: { nearest: false, not_covered: [] },
       assumptions: [],
       mnemonic: "",
       ...over,
@@ -51,17 +62,27 @@ describe("parseCommand", () => {
       compileMnemonic(intent({ job: "head_to_head", mentions: [brand("Brand Alpha", "primary"), brand("Brand Beta", "peer")] })),
     );
     expect(parseCommand("Riverside, Austin TEN")?.mnemonic).toBe(
-      compileMnemonic(intent({ job: "tenant_mix", geo: { metro: "austin", area: "Riverside", unsupported_place: null, market: null } })),
+      compileMnemonic(intent({ job: "tenant_mix", geo: { metro: "austin", area: "Riverside", unsupported_place: null, market: null, target_metro: null, cities: [] } })),
     );
     expect(parseCommand("juniper bar SITE Austin")?.mnemonic).toBe(
       compileMnemonic(
         intent({
           job: "site_selection",
-          geo: { metro: "austin", area: null, unsupported_place: null, market: null },
-          constraints: { concepts: ["juniper bar"], sponsor_categories: [], domains: [], ages: [], notes: [] },
+          geo: { metro: "austin", area: null, unsupported_place: null, market: null, target_metro: null, cities: [] },
+          constraints: { concepts: ["juniper bar"], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
         }),
       ),
     );
+    const geo = { metro: null, area: null, unsupported_place: null, market: null, target_metro: null, cities: [] };
+    const constraints = { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null };
+    expect(parseCommand("Riverside, Austin TWIN Denver")?.mnemonic).toBe(
+      compileMnemonic(intent({ job: "taste_twins", geo: { ...geo, metro: "austin", area: "Riverside", target_metro: "denver" } })),
+    );
+    expect(parseCommand("Austin VS Kansas City CITY wine bar")?.mnemonic).toBe(
+      compileMnemonic(intent({ job: "city_compare", geo: { ...geo, cities: ["austin", "kansas_city"] }, constraints: { ...constraints, concepts: ["wine bar"] } })),
+    );
+    expect(parseCommand("hot sauce LNCH")?.mnemonic).toBe(compileMnemonic(intent({ job: "launch_test", constraints: { ...constraints, concepts: ["hot sauce"] } })));
+    expect(parseCommand("Juniper Cola COLLAB")?.mnemonic).toBe(compileMnemonic(intent({ job: "brand_collab", mentions: [brand("Juniper Cola", "primary")] })));
   });
 
   it.each([
@@ -93,6 +114,12 @@ describe("parseCommand", () => {
     ["RIVERSIDE, <CITY> TEN"],
     ["<CONCEPT> SITE <CITY>"],
     ["RAMEN COUNTER SITE <CITY>"],
+    ["<CITY> VS <CITY> CITY"],
+    ["Austin VS <CITY> CITY"],
+    ["A VS B VS C VS D VS E CITY"],
+    ["Austin CITY"],
+    ["<CONCEPT> LNCH"],
+    ["RIVERSIDE, AUSTIN TWIN <CITY>"],
   ])("leaves %j to CLERK", (input) => {
     expect(parseCommand(input)).toBeNull();
   });

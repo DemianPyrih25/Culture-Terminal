@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: repoRoot,
   // Parallel agents run separate dev servers with their own NEXT_DIST_DIR (PLAN §10.1).
   distDir: process.env.NEXT_DIST_DIR ?? ".next",
-  transpilePackages: ["@ct/contracts", "@ct/qloo", "@ct/quant", "@ct/geo", "@ct/agent", "@ct/db"],
+  transpilePackages: ["@ct/contracts", "@ct/qloo", "@ct/publicdata", "@ct/quant", "@ct/geo", "@ct/agent", "@ct/db"],
   // /method reads the eval's aggregates at request time: ship the file when there is one.
   outputFileTracingIncludes: {
     "/method": ["./content/eval-summary.json"],

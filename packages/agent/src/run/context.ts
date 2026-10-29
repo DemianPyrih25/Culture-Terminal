@@ -21,9 +21,9 @@ import { MIN_OK_EVIDENCE } from "../checker";
 import { wrapQuestion } from "../clerk";
 import type { RunRegistry } from "../registry";
 import { isSkillAvailable, toolLabel } from "./catalogue";
-import { listedAreas } from "./areas";
+import { listedAreas, runAreaMetros } from "./areas";
 import { audienceSegmentsFor, audiencesBlock } from "./audiences";
-import { describeMarket, isGazetteerMetro, MARKET_CATALOGUE, MARKET_TIERS, marketTier, type RunMarket } from "./markets";
+import { compareCities, describeMarket, isGazetteerMetro, MARKET_CATALOGUE, MARKET_TIERS, marketTier, type RunMarket } from "./markets";
 import { describeChainedStep, describeDeferredStep, describeScanStep, type ScanPlan } from "./scan";
 
 /**
@@ -71,6 +71,8 @@ export interface RunContextInput {
   audiences?: readonly AudienceSegment[];
   unavailable: readonly SkillId[];
   qlooEnabled: boolean;
+  /** True when the server has a public-data client: company_financials and area_economics read SEC and Census. Defaults to false. */
+  publicData?: boolean;
   caseSummary: string | null;
   /** The raw question; wrapQuestion sanitises, caps and wraps it. */
   question: string;
@@ -85,21 +87,22 @@ export const escapeAngles = (s: string): string => s.replace(/</g, "&lt;").repla
 const safeJson = (value: unknown): string => JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
 
 /**
- * The line that closes turn 1 while fewer than MIN_OK_EVIDENCE bundles are ok, so the ANALYST knows
+ * The line that closes turn 1 while fewer than MIN_OK_EVIDENCE Qloo bundles are ok (SEC and Census
+ * bundles never count towards V7), so the ANALYST knows
  * that reporting now ends in insufficient_evidence (V7) before it chooses between follow-ups and
  * submit_report. When turn 3 comes next (`followups` false: a wrap-up notice went out or one
  * response is left), it only states the V7 outcome, since submit_report is the only call left. Null
  * at or above the minimum, and with Qloo disabled, where V7 forces the signal whatever the ANALYST does.
  */
 export function evidenceStatus(
-  evidence: readonly Pick<Evidence, "id" | "status">[],
+  evidence: readonly (Pick<Evidence, "id" | "status"> & Partial<Pick<Evidence, "source">>)[],
   qlooEnabled: boolean,
   followups: boolean,
 ): string | null {
   if (!qlooEnabled) return null;
-  const ok = evidence.filter((e) => e.status === "ok").map((e) => e.id);
+  const ok = evidence.filter((e) => e.status === "ok" && (e.source ?? "qloo") === "qloo").map((e) => e.id);
   if (ok.length >= MIN_OK_EVIDENCE) return null;
-  const held = ok.length === 0 ? "no evidence bundle is ok" : `${ok.length} evidence bundle${ok.length === 1 ? " is" : "s are"} ok (${ok.join(", ")})`;
+  const held = ok.length === 0 ? "no Qloo evidence bundle is ok" : `${ok.length} Qloo evidence bundle${ok.length === 1 ? " is" : "s are"} ok (${ok.join(", ")})`;
   if (!followups) {
     return (
       `EVIDENCE: ${held}. With fewer than ${MIN_OK_EVIDENCE} ok bundles the signal is forced to insufficient_evidence (V7); ` +
@@ -241,9 +244,10 @@ function budgetBlock(input: RunContextInput): string {
   const { limits } = input;
   const s = (ms: number) => `${Math.round(ms / 1000)} s`;
   if (!input.qlooEnabled) {
+    const publicTools = input.publicData === true ? " Only company_financials and area_economics still read SEC and Census data." : "";
     return [
       "BUDGET:",
-      "- Qloo: disabled for this run. Every tool answers with no data, so the note can only be insufficient_evidence.",
+      `- Qloo: disabled for this run. Every Qloo tool answers with no data, so the note can only be insufficient_evidence.${publicTools}`,
       `- Time: wrap-up notice at ${s(limits.softMs)}, hard stop at ${s(limits.hardMs)}.`,
       `- Model responses: at most ${limits.modelResponses}, nudges and the CHECKER repair included.`,
     ].join("\n");
@@ -254,7 +258,7 @@ function budgetBlock(input: RunContextInput): string {
   const chainedCalls = [...chained, ...deferred].reduce((n, c) => n + c.estimate, 0);
   return [
     "BUDGET:",
-    `- Qloo network calls: ${limits.qlooCalls} for the run (warning at ${limits.qlooWarnAt}); cached requests are free.`,
+    `- Qloo network calls: ${limits.qlooCalls} for the run (warning at ${limits.qlooWarnAt}); cached requests are free. SEC and Census reads cost none.`,
     `- Opening scan: about ${scanCalls + chainedCalls} network calls of that budget.`,
     `- Turn 2: up to ${limits.followupCalls} network calls and about ${s(limits.followupMs)}.`,
     `- Time: wrap-up notice at ${s(limits.softMs)}, hard stop at ${s(limits.hardMs)}.`,
@@ -274,14 +278,25 @@ function registryBlock(registry: RunRegistry): string {
 }
 
 /**
- * The question's metro's neighbourhoods, or none: a metro's full list runs to hundreds of tokens
- * (Austin's planning areas), so it is sent only to a run whose question names a gazetteer metro. A
+ * The neighbourhoods of each map city the question reads (runAreaMetros: its metro, a taste_twins
+ * target city, city_compare's map cities), one line each, or none: a metro's full list runs to hundreds
+ * of tokens (Austin's planning areas), so it is sent only to a run whose question names a gazetteer metro. A
  * metro with more than AREAS_MAX areas lists the area the question names first, then the areas nearest
  * it (nearest the city centre when it names none), up to AREAS_MAX; the LIFT digest names its top areas
  * by id, and every area id of the metro stays valid in a tool call.
  */
-function areasBlock(geo: GeoApi, metro: MetroId | null, areaText: string | null): string {
-  if (metro === null) return "AREAS: none (the question names no gazetteer metro, so no area tool applies)";
+function areasBlock(geo: GeoApi, intent: Intent): string {
+  const [first, ...others] = runAreaMetros(intent);
+  if (first === undefined) return "AREAS: none (the question names no gazetteer metro, so no area tool applies)";
+  const role = (metro: MetroId): string =>
+    intent.job === "taste_twins" ? (metro === intent.geo.target_metro ? ", the target city" : ", the source city") : "";
+  // The question's area belongs to its metro; another map city's list has no named area to lead with.
+  const lead = metroAreas(geo, first, first === intent.geo.metro ? intent.geo.area : null, role(first));
+  return [lead, ...others.map((m) => metroAreas(geo, m, null, role(m)))].join("\n");
+}
+
+/** One map city's AREAS line, its named area first when the list is cut. */
+function metroAreas(geo: GeoApi, metro: MetroId, areaText: string | null, role: string): string {
   const all = geo.neighbourhoods(metro);
   const named = areaText === null ? null : geo.matchNeighbourhood(metro, areaText);
   const listed = listedAreas(geo, metro, named);
@@ -297,7 +312,7 @@ function areasBlock(geo: GeoApi, metro: MetroId | null, areaText: string | null)
       ? `\nAREA NOT ON THE MAP: the question names "${escapeAngles(asked)}", which matches no ${metro} area id, so it has no lift, rank ` +
         "or competitor count of its own. Say so plainly near the top of the note, then answer with the areas you can measure; never present another area as the one the question names."
       : "";
-  return `AREAS (${metro})${more}: ${areas.length === 0 ? NONE : areas.join("; ")}${unmatched}`;
+  return `AREAS (${metro}${role})${more}: ${areas.length === 0 ? NONE : areas.join("; ")}${unmatched}`;
 }
 
 /**
@@ -309,13 +324,35 @@ function areasBlock(geo: GeoApi, metro: MetroId | null, areaText: string | null)
 function marketsBlock(input: RunContextInput): string {
   const metros: readonly string[] = input.geo.metros();
   const all = input.markets ?? MARKET_CATALOGUE.filter((m) => metros.includes(m.id));
-  const listed = input.intent.pillar === "location" ? all.filter((m) => isGazetteerMetro(m.id)) : all;
+  // city_compare reads cities beyond the map cities (a city fingerprint and share need only a market).
+  const mapOnly = input.intent.pillar === "location" && input.intent.job !== "city_compare";
+  const listed = mapOnly ? all.filter((m) => isGazetteerMetro(m.id)) : all;
   if (listed.length === 0) return `MARKETS: ${NONE}`;
   const groups = [...MARKET_TIERS, null].flatMap((tier) => {
     const of = listed.filter((m) => marketTier(m.id) === tier);
     return of.length === 0 ? [] : [`${tier ?? "other"}: ${of.map(describeMarket).join(", ")}`];
   });
-  return `MARKETS: ${groups.join("; ")}`;
+  const cities = input.intent.job === "city_compare" ? `\n${citiesLine(input.intent, listed)}` : "";
+  return `MARKETS: ${groups.join("; ")}${cities}`;
+}
+
+/**
+ * The cities a city_compare question compares, checked against config (compareCities) and the run's
+ * MARKETS. Fewer than two leaves nothing to compare side by side, and the line says so plainly
+ * rather than letting a comparison be guessed.
+ */
+function citiesLine(intent: Intent, markets: readonly RunMarket[]): string {
+  const usable = compareCities(intent).flatMap((id) => markets.find((m) => m.id === id) ?? []);
+  const asked = intent.geo.cities.map((c) => escapeAngles(c.trim())).filter((c) => c !== "");
+  if (usable.length >= 2) {
+    const dropped = asked.length > usable.length ? ` (${asked.length - usable.length} other named ${asked.length - usable.length === 1 ? "city is" : "cities are"} not on MARKETS and has no figures)` : "";
+    return `CITIES COMPARED: ${usable.map(describeMarket).join(", ")}${dropped}`;
+  }
+  const named = asked.length === 0 ? "none" : asked.join(", ");
+  return (
+    `CITIES COMPARED: fewer than two of the question's cities are on MARKETS (named: ${named}), so no side-by-side comparison can run; ` +
+    "say so plainly at the top of the note and name the cities that could be compared, never guess figures for the others."
+  );
 }
 
 function scanBlock(input: RunContextInput): string {
@@ -328,7 +365,7 @@ function scanBlock(input: RunContextInput): string {
   });
   for (const c of plan.chained) lines.push(`- ${describeChainedStep(c)}: runs once ${toolLabel(c.after)} returns, about ${c.estimate} network calls.`);
   for (const d of plan.deferred) {
-    lines.push(`- ${describeDeferredStep(d)}: runs once your wave-1 calls return, about ${d.estimate} network calls; with no such peer from them it reads the scan's own neighbours of that type, and is skipped without either.`);
+    lines.push(`- ${describeDeferredStep(d)}: runs once your wave-1 calls return, about ${d.estimate} network calls. Give it peers: resolve two or three same-type rivals your prior names in wave 1. With none it reads the scan's own neighbours of that type, which are taste neighbours, not rivals, and is skipped without either.`);
   }
   for (const s of plan.skipped) lines.push(`- ${toolLabel(s.tool)}: skipped, ${s.reason}.`);
   if (plan.unavailable.length > 0) lines.push(`- Not available in this build: ${plan.unavailable.map(toolLabel).join(", ")}.`);
@@ -352,7 +389,7 @@ export function buildRunContext(input: RunContextInput): string {
     registryBlock(input.registry),
     marketsBlock(input),
     audiencesBlock(audienceSegmentsFor(intent.pillar, input.audiences ?? []), NONE),
-    areasBlock(input.geo, intent.geo.metro, intent.geo.area),
+    areasBlock(input.geo, intent),
     scanBlock(input),
     `UNAVAILABLE TOOLS: ${unavailable}`,
     `CASE SUMMARY: ${input.caseSummary === null ? "none" : escapeAngles(input.caseSummary)}`,

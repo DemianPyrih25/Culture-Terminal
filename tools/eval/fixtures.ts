@@ -70,7 +70,7 @@ export function groundedRecord(questionId: string, overrides: Partial<GroundedRe
   };
 }
 
-export const NO_PICKS: GhostAnswer["picks"] = { competitors: [], markets: [], neighbourhoods: [], tenants: [], partners: [] };
+export const NO_PICKS: GhostAnswer["picks"] = { competitors: [], markets: [], neighbourhoods: [], tenants: [], partners: [], creators: [] };
 
 export function pick(name: string, overrides: Partial<ResolvedGhostPick> = {}): ResolvedGhostPick {
   return {

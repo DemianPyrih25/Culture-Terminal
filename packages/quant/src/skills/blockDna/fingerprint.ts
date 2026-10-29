@@ -1,5 +1,6 @@
 import type { BlockFamily, QlooEntity, QlooTagInsightRow } from "@ct/contracts";
 import { competitionRanks, detectFloor } from "../../stats";
+import { isNoiseTag } from "../../tagNoise";
 import { passesQualityGate } from "../peerSelection";
 
 /**
@@ -108,11 +109,16 @@ function rankRaw(raw: readonly RawRow[], rows: number, gateDropped: number): Ran
   return { items, ranks, unscored, gateDropped, rows };
 }
 
-/** A tag list; `families` keeps only the tags this list speaks for (WHO/VIBE/WHAT or SOUND). */
+/**
+ * A tag list; `families` keeps only the tags this list speaks for (WHO/VIBE/WHAT or SOUND). Noise
+ * tags (place names, and nationalities or generic words among music tags) are dropped before ranking
+ * by the shared filter (ANSWER_QUALITY §10), so they never take a rank, a bar or a NEW count.
+ */
 export function rankTagRows(rows: readonly QlooTagInsightRow[], families: readonly BlockFamily[]): RankedList {
   const raw: RawRow[] = rows.flatMap((r) => {
     const family = familyOf(r);
     if (family === null || !families.includes(family)) return [];
+    if (isNoiseTag({ name: r.name, tagId: r.tag_id, type: tagTypeOf(r) })) return [];
     return [
       {
         item: { id: r.tag_id, name: r.name, type: tagTypeOf(r), popularity: r.popularity ?? null, family },
@@ -208,4 +214,33 @@ export function familyBars(items: readonly Compared[], compared: boolean): Famil
 export function newTagCount(items: readonly Compared[]): { count: number; inTop: number } {
   const inTop = items.filter((c) => c.areaRank !== null && c.areaRank <= NEW_AREA_TOP);
   return { count: inTop.filter((c) => c.isNew).length, inTop: inTop.length };
+}
+
+/**
+ * Several lists pooled into one (FORMULAS block.panel_rank): each item placed by its average rank
+ * across the lists, a list that misses it or holds it at its floor counting `take + 1`. Only the top
+ * `take` positions get a rank, like any single list; the rest stay present but unranked, so they
+ * count as missing for a delta and are never NEW. Deterministic: ties share a competition rank.
+ */
+export function panelList(lists: readonly RankedList[], take: number): RankedList {
+  const items = new Map<string, ListItem>();
+  for (const list of lists) for (const [id, item] of list.items) if (!items.has(id)) items.set(id, item);
+  const ids = [...items.keys()].sort();
+  const ranks = new Map<string, number>();
+  const unscored = new Set<string>();
+  const missing = take + 1;
+  const means = ids.map((id) => lists.reduce((sum, l) => sum + (l.ranks.get(id) ?? missing), 0) / Math.max(1, lists.length));
+  const placed = competitionRanks(means, "asc");
+  ids.forEach((id, i) => {
+    const rank = placed[i] as number;
+    if ((means[i] as number) < missing && rank <= take) ranks.set(id, rank);
+    else unscored.add(id);
+  });
+  return {
+    items,
+    ranks,
+    unscored,
+    gateDropped: lists.reduce((s, l) => s + l.gateDropped, 0),
+    rows: items.size,
+  };
 }

@@ -5,7 +5,9 @@ import {
   Flag,
   makeId,
   Metric,
+  provenanceSource,
   ProvenanceRequest,
+  PublicCallMeta,
   QlooCallMeta,
   type DatasetId,
   type DatasetInput,
@@ -56,8 +58,11 @@ export type LedgerLookup = Pick<Ledger, "evidence" | "metric" | "dataset" | "fin
 
 export interface RunLedgerOptions {
   emit: Emit;
-  /** The provenance request of a Qloo call this run made; null when unknown, which refuses the bundle. */
-  provenanceOf: (qlooCallId: string) => ProvenanceRequest | null;
+  /**
+   * The provenance request of a Qloo or public-data call this run made (by its qlooCallId or
+   * publicCallId); null when unknown, which refuses the bundle.
+   */
+  provenanceOf: (callId: string) => ProvenanceRequest | null;
   /**
    * The tool call that findings added through the run ledger itself belong to (default: none).
    * Skills that run in parallel each get `forToolCall(ctx.toolCallId)` instead, so their findings
@@ -117,13 +122,24 @@ export function createRunLedger(options: RunLedgerOptions): RunLedger {
   const view = (toolCallId: () => string | null): Ledger => ({
     addEvidence(input: EvidenceInput): Evidence {
       const id = nextId("E", evidence);
-      const calls = validate(z.array(QlooCallMeta).min(1), input.calls, `${id} calls`);
-      const callIds = calls.map((c) => c.qlooCallId);
-      if (new Set(callIds).size !== callIds.length) throw new LedgerError(`${id} lists a Qloo call twice`);
+      const source = input.source ?? "qloo";
+      // One bundle, one source: a public bundle's calls are SEC or Census calls of that source, and its
+      // call ids and references fill qlooCallIds and requestIds (contracts Evidence).
+      const calls: { callId: string; requestId: string; cache: string; fetchedAt: string; stale: boolean }[] =
+        input.source === undefined || input.source === "qloo"
+          ? validate(z.array(QlooCallMeta).min(1), input.calls, `${id} calls`).map((c) => ({ ...c, callId: c.qlooCallId }))
+          : validate(z.array(PublicCallMeta).min(1), input.calls, `${id} calls`).map((c) => {
+              if (c.source !== source) throw new LedgerError(`${id} mixes ${source} and ${c.source} calls in one bundle`);
+              return { ...c, callId: c.publicCallId, requestId: c.reference };
+            });
+      const callIds = calls.map((c) => c.callId);
+      if (new Set(callIds).size !== callIds.length) throw new LedgerError(`${id} lists a call twice`);
       const requests = calls.map((c) => {
-        const request = provenanceOf(c.qlooCallId);
-        if (request === null) throw new LedgerError(`${id}: no provenance for Qloo call ${c.qlooCallId}`);
-        return validate(ProvenanceRequest, request, `${id} provenance of ${c.qlooCallId}`);
+        const request = provenanceOf(c.callId);
+        if (request === null) throw new LedgerError(`${id}: no provenance for ${source} call ${c.callId}`);
+        const parsed = validate(ProvenanceRequest, request, `${id} provenance of ${c.callId}`);
+        if (provenanceSource(parsed) !== source) throw new LedgerError(`${id}: call ${c.callId} is not a ${source} call`);
+        return parsed;
       });
       // A stale-on-error response is a data-quality fact of the bundle, whatever the skill reported.
       const flags = new Set<Flag>(validate(z.array(Flag), input.flags, `${id} flags`));
@@ -133,6 +149,7 @@ export function createRunLedger(options: RunLedgerOptions): RunLedger {
         {
           id,
           skill: input.skill,
+          source,
           purpose: input.purpose,
           status: input.status,
           qlooCallIds: callIds,

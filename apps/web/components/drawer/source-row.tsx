@@ -2,21 +2,23 @@
 
 import { useId, useState } from "react";
 import type { BriefSource, RequestRef } from "../../lib/brief";
-import { Button, copyText, cx, Icon } from "../ui";
-import { requestCurl, type CallQuery } from "./curl";
+import { Button, buttonClassName, copyText, cx, Icon } from "../ui";
+import { isMockReference, publicRequestLink, requestCurl, type CallQuery } from "./curl";
 import { freshnessText, requestPairs, sourceDescription, sourceLine } from "./source-copy";
 
 /**
- * C/SourceRow: one Qloo lookup. Its description and chevron toggle it; under them the endpoint line and
- * how fresh it is. Open, the request block (redacted parameters and the short request id), then "Copy id"
- * and "Copy as curl".
+ * C/SourceRow: one lookup. Its description and chevron toggle it; under them the endpoint line and how
+ * fresh it is. Open, the request block (redacted parameters and the short request id), then "Copy id"
+ * and "Copy as curl". An SEC EDGAR or US Census lookup (Part 9) shows its reference, and "Open at the
+ * source" and "Copy URL" with the public request URL instead of a curl: no key is ever shown.
  */
 
 /** What a row needs of a lookup: a Sources entry, or a footnote's request the run did not stream. */
 export type Lookup = Pick<
   BriefSource,
   "qlooCallId" | "endpoint" | "filterType" | "filterLabel" | "refs" | "params" | "rows" | "cache" | "cacheAgeMs" | "at" | "requestId" | "shortRequestId"
->;
+> &
+  Partial<Pick<BriefSource, "source" | "host">>;
 
 /** A footnote's request as a lookup: its Sources entry when the run streamed it. */
 export function lookupOf(request: RequestRef, sources: readonly BriefSource[]): Lookup | null {
@@ -25,6 +27,7 @@ export function lookupOf(request: RequestRef, sources: readonly BriefSource[]): 
   if (request.endpoint === null) return null;
   return {
     qlooCallId: request.qlooCallId,
+    ...(request.source ? { source: request.source } : {}),
     endpoint: request.endpoint,
     filterType: request.filterType,
     filterLabel: request.filterLabel,
@@ -54,6 +57,8 @@ export function SourceRow({ lookup, query, defaultOpen = false, names, onCopied 
   const [open, setOpen] = useState(defaultOpen);
   const id = useId();
   const curl = requestCurl(lookup, query);
+  const link = publicRequestLink(lookup, query);
+  const publicSource = lookup.source === "sec" || lookup.source === "census";
   const copy = (text: string) =>
     void copyText(text).then((ok) => onCopied?.(ok ? "Copied" : "Copy failed: select the text instead"));
   return (
@@ -86,8 +91,24 @@ export function SourceRow({ lookup, query, defaultOpen = false, names, onCopied 
         <div className={cx("flex flex-wrap items-center gap-2")}>
           {lookup.requestId ? (
             <Button variant="secondary" size="sm" icon="copy" onClick={() => copy(lookup.requestId ?? "")}>
-              Copy id
+              {publicSource ? "Copy reference" : "Copy id"}
             </Button>
+          ) : null}
+          {link ? (
+            <>
+              <a
+                href={link.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-public-url={link.url}
+                className={buttonClassName("secondary", "sm")}
+              >
+                Open at the source
+              </a>
+              <Button variant="secondary" size="sm" icon="copy" onClick={() => copy(link.url)} data-url-exact={link.exact}>
+                Copy URL
+              </Button>
+            </>
           ) : null}
           {curl ? (
             <Button variant="secondary" size="sm" icon="copy" onClick={() => copy(curl.command)} data-curl={curl.command} data-curl-exact={curl.exact}>
@@ -96,7 +117,19 @@ export function SourceRow({ lookup, query, defaultOpen = false, names, onCopied 
           ) : null}
         </div>
         {curl ? <p className="type-caption text-ink-2">The curl reads your own key from $QLOO_API_KEY.</p> : null}
+        {publicSource ? <p className="type-caption text-ink-2">{publicNote(lookup, link)}</p> : null}
       </div>
     </li>
   );
+}
+
+/** The line under an SEC or Census lookup: how to repeat it, and what a rebuilt or test link means. */
+export function publicNote(lookup: Pick<Lookup, "source" | "requestId">, link: { exact: boolean } | null): string {
+  if (isMockReference(lookup.requestId)) return "Test data: this lookup was answered with invented figures, not by the SEC or the Census.";
+  const how =
+    lookup.source === "sec"
+      ? "A public SEC EDGAR request: no key needed. Scripts must send a User-Agent naming you and a contact email."
+      : "A public US Census Data API request. The Census asks for a free API key: add &key= with your own to repeat it.";
+  if (!link) return `${how} The exact request was not recorded for this lookup.`;
+  return link.exact ? how : `${how} Some values were shortened in the trace, so the link is a sketch, not an exact replay.`;
 }

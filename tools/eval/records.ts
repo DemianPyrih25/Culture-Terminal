@@ -36,7 +36,7 @@ const Rate = z.number().min(0).max(1);
 const Count = z.int().nonnegative();
 
 /** A question id of eval/questions.json (q01, a01): safe in a file name. */
-export const QUESTION_ID = /^[qa]\d{2}$/;
+export const QUESTION_ID = /^[qao]\d{2}$/;
 /** A case id of eval/reality_cases.json (rc01). */
 export const CASE_ID = /^rc\d{2}$/;
 
@@ -55,7 +55,7 @@ export const GroundedRecord = z.object({
   model: z.string().nullable(),
   /** CLERK's job, or null when CLERK never read the question. */
   job: Job.nullable(),
-  /** CLERK's gazetteer metro, which resolves GHOST's neighbourhood picks; null when none. */
+  /** The gazetteer metro GHOST's neighbourhood picks resolve in (CLERK's metro; taste_twins' target city); null when none. */
   metro: MetroId.nullable(),
   /** For a refused run, the category the refusal applied (apps/web/server/preview.ts's rule); null otherwise. */
   refusalCategory: SafetyCategory.nullable(),
@@ -390,9 +390,9 @@ function readAll<T extends z.ZodType>(dir: string, pattern: RegExp, schema: T): 
  */
 export function loadRecords(dir: EvalDir): EvalRecordSet {
   return {
-    grounded: readAll(path.join(dir.root, "grounded"), /^[qa]\d{2}\.t\d+\.json$/, GroundedRecord),
-    ghost: readAll(path.join(dir.root, "ghost"), /^[qa]\d{2}\.json$/, GhostRecord),
-    diffs: readAll(path.join(dir.root, "diff"), /^[qa]\d{2}\.t\d+\.json$/, DiffRecord),
+    grounded: readAll(path.join(dir.root, "grounded"), /^[qao]\d{2}\.t\d+\.json$/, GroundedRecord),
+    ghost: readAll(path.join(dir.root, "ghost"), /^[qao]\d{2}\.json$/, GhostRecord),
+    diffs: readAll(path.join(dir.root, "diff"), /^[qao]\d{2}\.t\d+\.json$/, DiffRecord),
     reality: readAll(path.join(dir.root, "reality"), /^rc\d{2}\.json$/, RealityRecord),
     attempts: readAttempts(dir),
     tally: readSpend(dir.spend),

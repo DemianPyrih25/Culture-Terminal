@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { GHOST_HONESTY_LINE, type RunState } from "@ct/contracts";
+import { GHOST_HONESTY_LINE, isPublicProvenanceRequest, type RunState } from "@ct/contracts";
 import type { BriefModel, Footnote } from "../../lib/brief";
 import { CONFIDENCE_EXPLAINER, DrawerShell, Icon, Segmented, segmentedPanelId, segmentedTabId, useToast } from "../ui";
 import type { CallQuery } from "./curl";
@@ -70,13 +70,17 @@ export function writeHowParams(search: string, state: { tab: HowTab; footnote: n
   return text ? `?${text}` : "";
 }
 
-/** Each call's full query, from the provenance of the evidence bundle that used it (D30). */
+/**
+ * Each call's full query, from the provenance of the evidence bundle that used it (D30). An SEC or Census
+ * call (Part 9) also keeps its host, so the inspector can show its public URL.
+ */
 export function callQueries(evidence: RunState["evidence"] | undefined): Map<string, CallQuery> {
   const out = new Map<string, CallQuery>();
   for (const e of Object.values(evidence ?? {})) {
     e.qlooCallIds.forEach((id, i) => {
       const request = e.provenance.requests[i];
-      if (request && !out.has(id)) out.set(id, { path: request.path, query: request.query });
+      if (!request || out.has(id)) return;
+      out.set(id, isPublicProvenanceRequest(request) ? { path: request.path, query: request.query, host: request.host } : { path: request.path, query: request.query });
     });
   }
   return out;
@@ -235,11 +239,14 @@ export function HowWeKnowPanel({ model, tab, footnote, onFocus = () => undefined
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-/** "All 28 numbers checked against Qloo data", or "26 of 28 numbers checked". */
+/**
+ * "All 28 numbers checked against their sources", or "26 of 28 numbers checked". The sources are Qloo
+ * and, for public data, SEC EDGAR filings and US Census estimates.
+ */
 export function checkLine(model: BriefModel): { ok: boolean; text: string } {
   const { traced, total, state } = model.method.checker;
   if (state === "passed" && traced !== null && total !== null) {
-    return traced === total ? { ok: true, text: `All ${total} numbers checked against Qloo data` } : { ok: false, text: `${traced} of ${total} numbers checked` };
+    return traced === total ? { ok: true, text: `All ${total} numbers checked against their sources` } : { ok: false, text: `${traced} of ${total} numbers checked` };
   }
   if (state === "skipped") return { ok: false, text: "This partial answer was not checked" };
   if (traced !== null && total !== null) return { ok: false, text: `${traced} of ${total} numbers checked` };
@@ -249,6 +256,7 @@ export function checkLine(model: BriefModel): { ok: boolean; text: string } {
 function SummaryPanel({ model, ghost }: { model: BriefModel; ghost: boolean }) {
   const check = checkLine(model);
   const { saved, live } = freshnessCounts(model.sources.items);
+  const from = providers(model);
   const conviction = model.conviction;
   return (
     <>
@@ -261,6 +269,11 @@ function SummaryPanel({ model, ghost }: { model: BriefModel; ghost: boolean }) {
       <p className="type-body text-ink-2">
         {plural(numbersCount(model), "number")} · {plural(model.sources.items.length, "source")} · {plural(saved, "saved copy", "saved copies")}, {live} fetched live
       </p>
+      {from ? (
+        <p className="type-label text-ink-2" data-providers>
+          {from}
+        </p>
+      ) : null}
       {conviction.summary ? (
         <section aria-label="Confidence" className="flex flex-col gap-2 rounded-tile bg-sunken p-4">
           <h3 className="text-[15px] leading-6 font-semibold text-ink">{conviction.summary.bandLabel} confidence</h3>
@@ -282,6 +295,24 @@ function SummaryPanel({ model, ghost }: { model: BriefModel; ghost: boolean }) {
       {ghost ? <p className="type-label text-ink-2">{GHOST_HONESTY_LINE}</p> : null}
     </>
   );
+}
+
+const PROVIDER_NAME = { qloo: "Qloo", sec: "SEC EDGAR", census: "US Census Bureau" } as const;
+
+/**
+ * "From Qloo (18 lookups), SEC EDGAR (2) and US Census Bureau (1)." when public data was used; null when
+ * every lookup went to Qloo, which the line above already counts.
+ */
+export function providers(model: BriefModel): string | null {
+  const counts = new Map<keyof typeof PROVIDER_NAME, number>();
+  for (const s of model.sources.items) counts.set(s.source ?? "qloo", (counts.get(s.source ?? "qloo") ?? 0) + 1);
+  if (![...counts.keys()].some((k) => k !== "qloo")) return null;
+  const parts = (["qloo", "sec", "census"] as const).flatMap((k, i) => {
+    const n = counts.get(k);
+    return n ? [`${PROVIDER_NAME[k]} (${i === 0 ? plural(n, "lookup") : n})`] : [];
+  });
+  const list = parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0];
+  return `From ${list}.`;
 }
 
 /** The footnotes a reader can focus on: numbers first, then charts. */
@@ -353,17 +384,17 @@ function NumbersPanel({
           </ul>
         </section>
       ) : (
-        <p className="type-body text-ink-2">Our own code worked this out; no Qloo lookup stands behind it alone.</p>
+        <p className="type-body text-ink-2">Our own code worked this out; no single lookup stands behind it alone.</p>
       )}
     </>
   );
 }
 
 function SourcesPanel({ model, queries, onCopied }: { model: BriefModel; queries: ReadonlyMap<string, CallQuery>; onCopied: (message: string) => void }) {
-  if (model.sources.items.length === 0) return <p className="type-body text-ink-2">No Qloo lookups were made.</p>;
+  if (model.sources.items.length === 0) return <p className="type-body text-ink-2">No lookups were made.</p>;
   const names = refNames(model.sources.items);
   return (
-    <ul className="flex flex-col gap-2" aria-label="Qloo lookups">
+    <ul className="flex flex-col gap-2" aria-label="Lookups">
       {model.sources.items.map((s) => (
         <SourceRow key={s.qlooCallId} lookup={s} query={queries.get(s.qlooCallId)} names={names} onCopied={onCopied} />
       ))}
@@ -382,11 +413,13 @@ const STEP_WORD: Readonly<Record<string, string>> = {
   error: "Failed",
 };
 
+const hasPublic = (model: BriefModel) => model.sources.items.some((s) => s.source === "sec" || s.source === "census");
+
 function checkerText(model: BriefModel): string {
   const c = model.method.checker;
   switch (c.state) {
     case "passed":
-      return `Every number was traced to its Qloo lookup${c.adviceTerms !== null ? `, and no advice wording was found` : ""}.`;
+      return `Every number was traced to its lookup in Qloo${hasPublic(model) ? ", SEC EDGAR or the US Census" : ""}${c.adviceTerms !== null ? `, and no advice wording was found` : ""}.`;
     case "rejected":
       return "The check sent the draft back to be fixed.";
     case "skipped":
@@ -411,6 +444,11 @@ function MethodPanel({ model }: { model: BriefModel }) {
             {reading.jobLabel}
             {reading.subjects.length > 0 ? ` · ${reading.subjects.join(", ")}` : ""}
           </p>
+          {reading.readAs ? (
+            <p className="type-label text-ink" data-read-as>
+              {reading.readAs.line}
+            </p>
+          ) : null}
           {reading.assumptions.length > 0 ? (
             <ul className="flex list-disc flex-col gap-0.5 pl-5 type-label text-ink-2">
               {reading.assumptions.map((a) => (
@@ -433,7 +471,7 @@ function MethodPanel({ model }: { model: BriefModel }) {
                 </span>
                 <span className="shrink-0 type-label text-ink-2">
                   {STEP_WORD[step.status] ?? step.status}
-                  {step.actual > 0 ? ` · ${plural(step.actual, "lookup")}` : ""}
+                  {step.actual + (step.publicActual ?? 0) > 0 ? ` · ${plural(step.actual + (step.publicActual ?? 0), "lookup")}` : ""}
                 </span>
               </li>
             ))}

@@ -15,7 +15,7 @@ function gate(mentions: Mention[], options: { pins?: Record<string, string>; fau
   const client = mockQloo(options.faults ?? []);
   const registry = createEntityRegistry();
   const input: GateInput = {
-    intent: intentFor({ mentions, geo: { metro: options.metro ?? null, area: null, unsupported_place: null, market: options.market ?? null } }),
+    intent: intentFor({ mentions, geo: { metro: options.metro ?? null, area: null, unsupported_place: null, market: options.market ?? null, target_metro: null, cities: [] } }),
     qloo: client.standalone({ onCall: (r) => calls.push(r) }).forTool(null),
     registry,
     pins: options.pins ?? {},

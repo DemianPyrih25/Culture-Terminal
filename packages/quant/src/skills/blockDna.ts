@@ -1,50 +1,46 @@
 import {
   ANALYST_TOOLS,
   METRO_LABEL,
-  type BlockFamily,
   type CacheProbe,
-  type DigestRow,
   type EvidenceId,
-  type Flag,
   type LocalityApi,
   type NoValueReason,
-  type QlooCallMeta,
   type QlooEntity,
-  type QlooEntityInsightsResponse,
-  type QlooParams,
-  type QlooResult,
-  type QlooTagInsightsResponse,
   type SkillCtx,
   type SkillFor,
   type SkillResult,
-  type SkillStatus,
   type ToolInput,
 } from "@ct/contracts";
 import { SKILL_LIMITATIONS } from "../limitations";
-import { addSkillEvidence, attemptAllKeepingFailures, countUncached, type Attempt } from "./common";
-import { skillErrorResult, skillResult, type DigestTarget } from "./digest";
+import { attemptAllKeepingFailures, countUncached } from "./common";
+import { skillErrorResult, type DigestTarget } from "./digest";
 import { safeName } from "./format";
 import {
-  BRAND_POPULARITY_MAX,
-  BRAND_TAKE,
-  compareLists,
-  MUSIC_TAG_TYPE,
-  NEW_AREA_TOP,
-  rankBrandRows,
-  rankTagRows,
-  TAG_TAKE,
-  type RankedList,
-} from "./blockDna/fingerprint";
-import {
-  cityLocation,
-  distanceKm,
-  MAX_POINT_KM,
-  parsePoint,
-  pointAreaLocation,
-  resolveArea,
-  type BlockArea,
-  type LadderRung,
-} from "./blockDna/location";
+  addBundle,
+  BRAND,
+  brandParams,
+  brandRowsOf,
+  callFlags,
+  climbDown,
+  count,
+  familyCounts,
+  gapOf,
+  LIST_FAMILIES,
+  metasOf,
+  okValue,
+  rowsOf,
+  sideCalls,
+  sideRequests,
+  SOUND,
+  TAG,
+  tagParams,
+  tagSummary,
+  type Bundle,
+  type Ladder,
+} from "./blockDna/calls";
+import { estimateCityCalls, runCityFingerprint } from "./blockDna/city";
+import { BRAND_POPULARITY_MAX, BRAND_TAKE, compareLists, NEW_AREA_TOP, rankBrandRows, rankTagRows, TAG_TAKE } from "./blockDna/fingerprint";
+import { cityLocation, distanceKm, MAX_POINT_KM, parsePoint, pointAreaLocation, resolveArea, type BlockArea } from "./blockDna/location";
 import {
   addBlockDnaBars,
   addBrandMetrics,
@@ -54,6 +50,8 @@ import {
   addLocalBrandsTable,
   addNewTagsFinding,
   blockDigestRows,
+  cityBase,
+  finishBlockRun,
   localBrands,
   methodNotice,
   recordFallbacks,
@@ -62,7 +60,6 @@ import {
   type BlockRun,
   type BrandResult,
   type FamilyResult,
-  type LadderStep,
 } from "./blockDna/outputs";
 import { METRO_CENTRES, metroReachKm } from "./metros";
 
@@ -76,38 +73,10 @@ import { METRO_CENTRES, metroReachKm } from "./metros";
  */
 
 type BlockInput = ToolInput<"block_dna">;
+type NbhdOrPoint = Exclude<BlockInput["area"], { kind: "city" }>;
 
-const TAG = "urn:tag";
-const BRAND = "urn:entity:brand";
-/** A call with fewer rows than this is a thin result (§6.4). */
-const THIN_ROWS = 5;
-/** WHO, VIBE and WHAT share the unfiltered lists; SOUND has its own pair. */
-const LIST_FAMILIES: readonly BlockFamily[] = ["WHO", "VIBE", "WHAT"];
-const SOUND: readonly BlockFamily[] = ["SOUND"];
-/** Client errors no other rung can fix: the key or the rate limit, not the location. They end the ladder. */
-const LADDER_STOPPERS: ReadonlySet<string> = new Set(["qloo_auth", "qloo_rate_limited"]);
-
-/** A fingerprint call: the whole list, or the music list for SOUND. No radius: G8 found it ignored. */
-export function tagParams(location: QlooParams, music: boolean): QlooParams {
-  return { ...location, ...(music ? { "filter.tag.types": [MUSIC_TAG_TYPE] } : {}), take: TAG_TAKE };
-}
-
-/** A local-brand call (G9): brands only, so filter.location is never sent (§5.1). */
-export function brandParams(location: QlooParams): QlooParams {
-  return { ...location, "filter.popularity.max": BRAND_POPULARITY_MAX, take: BRAND_TAKE };
-}
-
-/** The calls one side (area or city) makes, as the cache probe sees them (with filter.type). */
-function sideRequests(location: QlooParams, brands: boolean): QlooParams[] {
-  return [
-    { "filter.type": TAG, ...tagParams(location, false) },
-    { "filter.type": TAG, ...tagParams(location, true) },
-    ...(brands ? [{ "filter.type": BRAND, ...brandParams(location) }] : []),
-  ];
-}
-
-/** Calls one side makes: the two tag lists, and the brand list when asked. */
-const sideCalls = (brands: boolean): number => 2 + (brands ? 1 : 0);
+// The request builders live in blockDna/calls.ts with the ladder; warm-metros and the tests import them from here.
+export { brandParams, tagParams } from "./blockDna/calls";
 
 /**
  * Network calls a block_dna input would cost now. The city side is probed on the metro's pinned
@@ -115,10 +84,12 @@ const sideCalls = (brands: boolean): number => 2 + (brands ? 1 : 0);
  * counts as uncached, and for a metro with no pin the run makes no city calls and no area brand call.
  * A point area's first rung is probed too. A neighbourhood's rungs come from the gazetteer, which
  * estimateCalls does not get, so its area calls count as network calls: an upper bound when they are
- * cached, and fallbacks down the ladder are not foreseen.
+ * cached, and fallbacks down the ladder are not foreseen. A whole city reads its own lists and the
+ * map-city panel's (estimateCityCalls).
  */
 export async function estimateBlockDnaCalls(input: BlockInput, probe: CacheProbe, localities: LocalityApi | null): Promise<number> {
   const { area } = input;
+  if (area.kind === "city") return estimateCityCalls(area.market, input.include_brands, probe, localities);
   // Without the gazetteer a far point may still lie in the map city (resolveArea decides), so only a
   // point beyond the metro's whole reach is known to cost nothing; a refused point is over-counted.
   if (area.kind === "point" && !(distanceKm(parsePoint(area.ref), METRO_CENTRES[area.metro]) <= metroReachKm(area.metro, MAX_POINT_KM))) return 0;
@@ -133,154 +104,16 @@ export async function estimateBlockDnaCalls(input: BlockInput, probe: CacheProbe
   return probed + (locality === undefined ? sideCalls(brands) : 0) + (areaLocation === null ? sideCalls(brands) : 0);
 }
 
-// Calls --------------------------------------------------------------------------------------------------
-
-type TagAttempt = Attempt<QlooResult<QlooTagInsightsResponse>>;
-type BrandAttempt = Attempt<QlooResult<QlooEntityInsightsResponse>>;
-type FormedRung = Extract<LadderRung, { params: QlooParams }>;
-
-interface Ladder {
-  /** The rung that returned ranked family tags, with its answer; null when none did. */
-  chosen: { rung: FormedRung; answer: QlooResult<QlooTagInsightsResponse> } | null;
-  /** Rungs that answered with no ranked family tags: the receipts of the fallback. */
-  empty: QlooCallMeta[];
-  /** An empty rung held family tags, all tied at the floor (G1): its receipts are NOT_SCORED. */
-  emptyUnscored: boolean;
-  steps: LadderStep[];
-  truncated: boolean;
-  failures: { method: string; code: string; error: unknown }[];
-}
-
-/**
- * Walks the ladder one rung at a time: a rung that cannot be formed, fails in the Qloo client or
- * answers with no ranked family tags steps down (tags all tied at the floor bear no relation to the
- * location, G1). Unformed rungs fold into the next step's reason, so one step down is one CODE
- * FALLBACK. The budget, the key and the rate limit stop the walk: another rung would fail the same
- * way, so they are not fallbacks.
- */
-async function climbDown(ctx: SkillCtx, area: BlockArea): Promise<Ladder> {
-  const out: Ladder = { chosen: null, empty: [], emptyUnscored: false, steps: [], truncated: false, failures: [] };
-  let from: LadderRung["method"] | null = null;
-  let reasons: string[] = [];
-  for (const rung of area.rungs) {
-    if (rung.params === null) {
-      from ??= rung.method;
-      reasons.push(rung.missing);
-      continue;
-    }
-    if (from !== null) out.steps.push({ from, to: rung.method, reason: reasons.join("; ") });
-    from = rung.method;
-    reasons = [];
-    const params = rung.params;
-    const [attempt] = await attemptAllKeepingFailures([() => ctx.qloo.insights(TAG, tagParams(params, false))], ctx.signal);
-    if (attempt === undefined || attempt.kind === "skipped") continue;
-    if (attempt.kind === "truncated") {
-      out.truncated = true;
-      return out;
-    }
-    if (attempt.kind === "failed") {
-      out.failures.push({ method: rung.method, code: attempt.code, error: attempt.error });
-      if (LADDER_STOPPERS.has(attempt.code)) return out;
-      reasons = [`the ${rung.method} call failed (${attempt.code})`];
-      continue;
-    }
-    const list = rankTagRows(attempt.value.data.results.tags, LIST_FAMILIES);
-    if (list.ranks.size > 0) {
-      out.chosen = { rung: { ...rung, params }, answer: attempt.value };
-      return out;
-    }
-    out.empty.push(attempt.value.meta);
-    const tied = list.unscored.size > 0;
-    if (tied) out.emptyUnscored = true;
-    reasons = [tied ? `${rung.method} returned no ranked taste tags (all tied at the floor)` : `${rung.method} returned no taste tags`];
-  }
-  return out;
-}
-
-const okValue = <T>(a: Attempt<T> | undefined): T | null => (a?.kind === "ok" ? a.value : null);
-
-/** Why a list is missing: refused by the budget, lost to a failed call, or answered with nothing to rank. */
-function gapOf(attempt: Attempt<unknown> | undefined, list: RankedList | null): NoValueReason | null {
-  if (attempt?.kind === "truncated") return "budget_truncated";
-  if (attempt?.kind === "failed") return "error";
-  return list === null || list.ranks.size === 0 ? "not_measured" : null;
-}
-
-function metasOf(attempts: readonly (Attempt<{ meta: QlooCallMeta }> | undefined)[]): QlooCallMeta[] {
-  return attempts.flatMap((a) => (a?.kind === "ok" ? [a.value.meta] : []));
-}
-
-// Evidence -----------------------------------------------------------------------------------------------
-
-interface Bundle {
-  purpose: string;
-  calls: QlooCallMeta[];
-  status: SkillStatus;
-  summary: string;
-  flags: Flag[];
-  qualityGateDrops?: number;
-}
-
-function addBundle(run: BlockRun, bundle: Bundle): EvidenceId | null {
-  for (const f of bundle.flags) run.flags.add(f);
-  const evidence = addSkillEvidence(run.ctx.ledger, { skill: "block_dna", ...bundle });
-  if (evidence === null) return null;
-  run.evidenceIds.push(evidence.id);
-  return evidence.id;
-}
-
-/** THIN_RESULT, NOT_SCORED, STALE_CACHE and BUDGET_TRUNCATED for one bundle's calls. */
-function callFlags(rows: readonly (number | null)[], lists: readonly (RankedList | null)[], calls: readonly QlooCallMeta[], truncated: boolean): Flag[] {
-  const flags: Flag[] = [];
-  if (rows.some((n) => n !== null && n < THIN_ROWS)) flags.push("THIN_RESULT");
-  if (lists.some((l) => l !== null && l.unscored.size > 0)) flags.push("NOT_SCORED");
-  if (calls.some((c) => c.stale)) flags.push("STALE_CACHE");
-  if (truncated) flags.push("BUDGET_TRUNCATED");
-  return flags;
-}
-
-const rowsOf = (a: TagAttempt | undefined): number | null => (a?.kind === "ok" ? a.value.data.results.tags.length : null);
-const brandRowsOf = (a: BrandAttempt | undefined): number | null => (a?.kind === "ok" ? a.value.data.results.entities.length : null);
-
-/** "1 music tag", "5 music tags": counts in evidence summaries a reader sees. */
-function count(n: number, noun: string): string {
-  return `${n} ${noun}${n === 1 ? "" : "s"}`;
-}
-
-function tagSummary(list: RankedList | null, gap: NoValueReason | null, noun: string): string {
-  if (list === null || gap === "budget_truncated" || gap === "error") return `${noun}s not measured (${gap ?? "not_measured"})`;
-  const unscored = list.unscored.size > 0 ? `, ${list.unscored.size} tied at the floor and not ranked` : "";
-  return `${count(list.ranks.size, noun)}${unscored}`;
-}
-
-function familyCounts(list: RankedList): string {
-  const counts = LIST_FAMILIES.map((f) => `${f} ${[...list.items.values()].filter((i) => i.family === f).length}`);
-  return counts.join(", ");
-}
+const addBlockBundle = (run: BlockRun, bundle: Bundle): EvidenceId | null => addBundle(run, "block_dna", bundle);
 
 // Run ----------------------------------------------------------------------------------------------------
 
-function finish(run: BlockRun, out: DigestTarget, status: SkillStatus, rows: readonly DigestRow[]): SkillResult {
-  return skillResult(
-    {
-      status,
-      evidenceIds: run.evidenceIds,
-      datasetIds: run.datasetIds,
-      metrics: run.metrics,
-      rows,
-      findings: run.findings,
-      flags: run.flags,
-      registered: run.registered,
-      notices: run.notices,
-    },
-    out,
-  );
-}
+const finish = finishBlockRun;
 
 /** The ladder's answered-but-empty rungs: receipts for the fallback, kept apart so they are not charged as thin results. */
-function recordLadder(run: BlockRun, area: BlockArea, ladder: Ladder): void {
+function recordLadder(run: BlockRun, area: Pick<BlockArea, "name">, ladder: Ladder): void {
   if (ladder.empty.length === 0) return;
-  addBundle(run, {
+  addBlockBundle(run, {
     purpose: `Location ladder for ${safeName(area.name)}: rungs that returned no ranked taste tags`,
     calls: ladder.empty,
     status: "empty",
@@ -316,6 +149,11 @@ function finishWithoutArea(run: BlockRun, out: DigestTarget, frame: BlockFrame, 
 }
 
 async function runBlockDna(input: BlockInput, ctx: SkillCtx): Promise<SkillResult> {
+  if (input.area.kind === "city") return runCityFingerprint({ ...input, area: input.area }, ctx);
+  return runAreaFingerprint({ ...input, area: input.area }, ctx);
+}
+
+async function runAreaFingerprint(input: BlockInput & { area: NbhdOrPoint }, ctx: SkillCtx): Promise<SkillResult> {
   const out: DigestTarget = { tool: "block_dna", step: input.step_id };
   const resolved = resolveArea(input.area, ctx.geo);
   if (!resolved.ok) return skillErrorResult(out, resolved.message);
@@ -343,10 +181,10 @@ async function runBlockDna(input: BlockInput, ctx: SkillCtx): Promise<SkillResul
     const last = ladder.failures.at(-1);
     // With nothing answered there is no evidence to keep: the error goes to the caller.
     if (last !== undefined && ladder.empty.length === 0 && !ladder.truncated) throw last.error;
-    return finishWithoutArea(run, out, { area, method: ladder.steps.at(-1)?.to ?? firstRung }, ladder);
+    return finishWithoutArea(run, out, { area, method: ladder.steps.at(-1)?.to ?? firstRung, base: cityBase(area.metro) }, ladder);
   }
   const { rung, answer } = ladder.chosen;
-  const frame: BlockFrame = { area, method: rung.method };
+  const frame: BlockFrame = { area, method: rung.method, base: cityBase(area.metro) };
   // Each step down reaches the trace before the follow-on calls go out.
   recordFallbacks(run, area, ladder.steps);
 
@@ -387,7 +225,7 @@ async function runBlockDna(input: BlockInput, ctx: SkillCtx): Promise<SkillResul
   // Evidence.
   recordLadder(run, area, ladder);
   const areaCalls = [answer.meta, ...metasOf([areaMusicA])];
-  const areaE = addBundle(run, {
+  const areaE = addBlockBundle(run, {
     purpose: `Tag fingerprint of ${safeName(area.name)} by ${rung.method}`,
     calls: areaCalls,
     status: areaMusicA?.kind === "ok" ? "ok" : "partial",
@@ -404,7 +242,7 @@ async function runBlockDna(input: BlockInput, ctx: SkillCtx): Promise<SkillResul
   const cityE =
     city === null
       ? null
-      : addBundle(run, {
+      : addBlockBundle(run, {
           purpose: `City tag fingerprint of ${cityName} (Qloo locality)`,
           calls: cityCalls,
           status: cityGap === null && cityMusicGap === null ? "ok" : cityCalls.length === 0 ? "empty" : "partial",
@@ -456,7 +294,7 @@ async function runBlockDna(input: BlockInput, ctx: SkillCtx): Promise<SkillResul
       areaBrandsA?.kind === "truncated" || cityBrandsA?.kind === "truncated",
     );
     if (gateDropped > 0) flags.push("QUALITY_GATE_DROPPED");
-    const brandE = addBundle(run, {
+    const brandE = addBlockBundle(run, {
       purpose: `Local brands of ${safeName(area.name)} against ${cityName} (popularity up to ${BRAND_POPULARITY_MAX})`,
       calls: brandCalls,
       status: areaGap === null && cityBrandGap === null ? "ok" : areaBrandsA?.kind === "ok" && areaGap === "not_measured" ? "empty" : "partial",

@@ -24,6 +24,11 @@ export const Job = z.enum([
   "sponsorship",
   "market_selection",
   "audience_discovery",
+  "taste_twins",
+  "brand_collab",
+  "creator_fit",
+  "launch_test",
+  "city_compare",
 ]);
 export type Job = z.infer<typeof Job>;
 
@@ -36,6 +41,11 @@ export const JOB_MNEMONIC = {
   sponsorship: "SPON",
   market_selection: "MKTS",
   audience_discovery: "AUD",
+  taste_twins: "TWIN",
+  brand_collab: "COLLAB",
+  creator_fit: "CRTR",
+  launch_test: "LNCH",
+  city_compare: "CITY",
 } as const satisfies Record<Job, string>;
 export type JobMnemonic = (typeof JOB_MNEMONIC)[Job];
 
@@ -48,12 +58,17 @@ export const JOB_PILLAR: Readonly<Record<Job, Pillar>> = {
   sponsorship: "marketing",
   market_selection: "marketing",
   audience_discovery: "audience",
+  taste_twins: "location",
+  brand_collab: "marketing",
+  creator_fit: "marketing",
+  launch_test: "investment",
+  city_compare: "location",
 };
 
 export const JOBS_BY_PILLAR: Readonly<Record<Pillar, readonly Job[]>> = {
-  investment: ["brand_health", "head_to_head"],
-  location: ["site_selection", "area_profile", "tenant_mix"],
-  marketing: ["sponsorship", "market_selection"],
+  investment: ["brand_health", "head_to_head", "launch_test"],
+  location: ["site_selection", "area_profile", "tenant_mix", "taste_twins", "city_compare"],
+  marketing: ["sponsorship", "market_selection", "brand_collab", "creator_fit"],
   audience: ["audience_discovery"],
 };
 
@@ -90,6 +105,12 @@ export const COMPARATOR_LABEL: Readonly<Record<Comparator, string>> = {
  * - THIN_RESULT: a call returned fewer than 5 rows (a §6.4 confidence penalty).
  * - SUPPLY_UNAVAILABLE: similar venues could not be counted (no verified category tag for the place
  *   type), so the competitor count is unknown, never 0.
+ * - READ_AS_NEAREST_JOB: the question was read as the nearest job (D41); the limitation names what the
+ *   data does not cover (sales, prices, rents, foot traffic …).
+ * - NOT_A_LISTED_COMPANY: the brand maps to no SEC-listed company in config/listed_companies.json
+ *   (private or not mapped), so no financial figures are shown and none are guessed.
+ * - CENSUS_RESIDENTS_ONLY: Census figures describe residents of the area, not its visitors or customers,
+ *   and are kept apart from taste signals.
  */
 export const Flag = z.enum([
   "TRENDING_HISTORICAL_WINDOW",
@@ -109,6 +130,9 @@ export const Flag = z.enum([
   "DROPPED_CANDIDATES",
   "NOT_SCORED",
   "THIN_RESULT",
+  "READ_AS_NEAREST_JOB",
+  "NOT_A_LISTED_COMPANY",
+  "CENSUS_RESIDENTS_ONLY",
 ]);
 export type Flag = z.infer<typeof Flag>;
 
@@ -128,6 +152,9 @@ export const FindingKind = z.enum([
   "POPULARITY_DOMINANCE",
   "LOCATION_FALLBACK",
   "WEAK_CATEGORY_FIT",
+  "TWIN_FOUND",
+  "ANALOG_VETOED",
+  "TASTE_FINANCIALS_SPLIT",
 ]);
 export type FindingKind = z.infer<typeof FindingKind>;
 
@@ -151,7 +178,10 @@ export type KitWorkflow = z.infer<typeof KitWorkflow>;
 
 // Tools (PLAN §4.3) -----------------------------------------------------------------------------------
 
-/** The 12 skill tools: each is backed by one QUANT skill and costs Qloo calls. */
+/**
+ * The 16 skill tools: each is backed by one QUANT skill. All but two cost Qloo calls; company_financials
+ * (SEC EDGAR) and area_economics (US Census ACS) read public data and cost 0 Qloo calls.
+ */
 export const SkillId = z.enum([
   "resolve_entities",
   "find_tags",
@@ -165,10 +195,14 @@ export const SkillId = z.enum([
   "block_dna",
   "cross_domain",
   "sponsor_slate",
+  "taste_twins",
+  "concept_vector",
+  "company_financials",
+  "area_economics",
 ]);
 export type SkillId = z.infer<typeof SkillId>;
 
-/** The 14 P0 ANALYST tools: the skill tools plus the two strict submit tools. */
+/** The 18 ANALYST tools: the 16 skill tools plus the two submit tools. */
 export const ToolName = z.enum(["submit_plan", ...SkillId.options, "submit_report"]);
 export type ToolName = z.infer<typeof ToolName>;
 
@@ -186,6 +220,10 @@ export const TOOL_MNEMONIC = {
   block_dna: "BLOCK",
   cross_domain: "XDOM",
   sponsor_slate: "SLATE",
+  taste_twins: "TWIN",
+  concept_vector: "CNPT",
+  company_financials: "FIN",
+  area_economics: "ECON",
   submit_report: "REPORT",
 } as const satisfies Record<ToolName, string>;
 export type ToolMnemonic = (typeof TOOL_MNEMONIC)[ToolName];
@@ -225,9 +263,20 @@ export type Lane = z.infer<typeof Lane>;
 export const Phase = z.enum(["scan", "wave1", "followup"]);
 export type Phase = z.infer<typeof Phase>;
 
-/** How a Qloo call was served. `reused` is a cache hit first fetched by another run (REUSED chip). */
+/**
+ * How a Qloo or public-data call was served. `reused` is a cache hit first fetched by another run
+ * (REUSED chip).
+ */
 export const CacheStatus = z.enum(["hit", "miss", "stale", "coalesced", "reused"]);
 export type CacheStatus = z.infer<typeof CacheStatus>;
+
+/** Where an evidence bundle's data came from: Qloo, or one of the public sources (SEC EDGAR, US Census). */
+export const EvidenceSource = z.enum(["qloo", "sec", "census"]);
+export type EvidenceSource = z.infer<typeof EvidenceSource>;
+
+/** The public data sources (PLAN §5.2). They cost no Qloo calls. */
+export const PublicSource = EvidenceSource.exclude(["qloo"]);
+export type PublicSource = z.infer<typeof PublicSource>;
 
 /** Outcome of one skill or tool call. */
 export const SkillStatus = z.enum(["ok", "partial", "empty", "error"]);
@@ -383,6 +432,9 @@ export type PositionAxis = z.infer<typeof PositionAxis>;
  * - unavailable: Qloo offers no data of this kind for the type; quality_gate: popularity < 0.01
  * - budget_truncated: the call was not made; insufficient_n / coarse: below the lift gates (D18)
  * - self: matrix diagonal; error: the call failed
+ * - not_listed: the brand maps to no SEC-listed company; not_reported: the filings carry no value for
+ *   the concept and period; suppressed: Census withheld or could not compute the estimate (ACS null or
+ *   a negative sentinel such as -666666666)
  */
 export const NoValueReason = z.enum([
   "not_scored",
@@ -396,10 +448,17 @@ export const NoValueReason = z.enum([
   "coarse",
   "self",
   "error",
+  "not_listed",
+  "not_reported",
+  "suppressed",
 ]);
 export type NoValueReason = z.infer<typeof NoValueReason>;
 
-/** How a metric's value reads. `affinity` is a raw per-query score: CHECKER V6 forbids comparing two across calls. */
+/**
+ * How a metric's value reads. `affinity` is a raw per-query score: CHECKER V6 forbids comparing two across
+ * calls. `usd` is a reported dollar amount (SEC), `years` an age such as a median age and `people` a head
+ * count such as a population (Census).
+ */
 export const MetricUnit = z.enum([
   "pct",
   "popularity",
@@ -413,6 +472,9 @@ export const MetricUnit = z.enum([
   "score",
   "ratio",
   "stat",
+  "usd",
+  "years",
+  "people",
 ]);
 export type MetricUnit = z.infer<typeof MetricUnit>;
 

@@ -117,7 +117,8 @@ describe("the Part 5 exhibits", () => {
     for (const job of Job.options) {
       for (const f of brief(job).model.evidence.figures) {
         expect(f.viz.length).toBeGreaterThan(0);
-        expect(f.source.text).toMatch(/^Source: Qloo \/v2\/(insights|trending)/);
+        // Taste figures cite Qloo; SEC and Census figures (Part 9) cite their own source.
+        expect(f.source.text).toMatch(/^Source: (Qloo \/(v2\/(insights|trending)|entities)|SEC EDGAR|US Census Bureau)/);
         expect(f.dataset?.kind).toBe(f.kind);
         expect(f.methodHref).toMatch(/^\/method#/);
       }
@@ -199,7 +200,8 @@ describe("the location of a location brief", () => {
       if (f.kind !== "figure") expect(f.short.text.length, f.short.text).toBeLessThanOrEqual(SHORT_NOTE_MAX);
       expect(f.short.trace.length, f.short.trace).toBeLessThanOrEqual(SHORT_TRACE_MAX);
       // A place is named, never printed as its gazetteer id.
-      expect(f.short.text).not.toMatch(/\b[a-z]+_[a-z_]+\b/);
+      // A source's URL path (SEC's /files/company_tickers.json) is a path, not a place id.
+      expect(f.short.text.replace(/\/\S+/g, "")).not.toMatch(/\b[a-z]+_[a-z_]+\b/);
     }
   });
 });

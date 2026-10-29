@@ -5,7 +5,14 @@ import {
   FINDING_SEVERITY,
   FINDING_SUGGESTION,
   METRO_OUTLIER_MIN_RANK_GAP,
+  TWIN_MIN_RHO,
+  analogVetoedFinding,
   blockNewTagsFinding,
+  isTasteFinancialsSplit,
+  rhoWords,
+  tasteFinancialsSplitFinding,
+  twinFoundFinding,
+  twinsOf,
   droppedCandidatesFinding,
   emptyResultFinding,
   fitPopularityRho,
@@ -108,6 +115,28 @@ function oneOfEach(): FindingDraft[] {
     ),
     locationFallbackFinding({ areaName: "Riverside", from: "POLYGON", to: "POINT" }),
     fired(weakCategoryFitFinding({ categoryLabel: "Outdoor retail", bestName: GAMMA, fitPct: 0.09, rank: 11, scored: 12 })),
+    fired(
+      twinFoundFinding({
+        sourceName: "Riverside",
+        targetCity: "Austin",
+        areas: [
+          { id: "a", name: "Lakeview", rho: 0.71 },
+          { id: "b", name: "Hillcrest", rho: 0.2 },
+          { id: "c", name: "Mill Town", rho: -0.1 },
+        ],
+      }),
+    ),
+    fired(analogVetoedFinding({ conceptLabel: "hot sauce", vetoed: [BETA], scored: 3, adds: [{ name: GAMMA, ref: "R7" }] })),
+    fired(
+      tasteFinancialsSplitFinding({
+        brandName: ALPHA,
+        companyName: "Alpha Holdings",
+        momentumDelta: -0.12,
+        momentumWindow: "the 2025-04-01..2025-09-30 trending window",
+        revenueYoy: 0.06,
+        revenuePeriod: "the fiscal year ended 2025-06-30",
+      }),
+    ),
   ];
 }
 
@@ -133,6 +162,9 @@ describe("policy tables", () => {
       DROPPED_CANDIDATES: null,
       NO_TREND_SIGNAL: null,
       LOCATION_FALLBACK: null,
+      TWIN_FOUND: "block_dna",
+      ANALOG_VETOED: "rank_candidates",
+      TASTE_FINANCIALS_SPLIT: null,
     });
   });
 });
@@ -156,7 +188,7 @@ describe("every finding kind", () => {
       // EMPTY_RESULT and DROPPED_CANDIDATES have no fixed tool; they carry the caller's.
       if (FINDING_SUGGESTION[kind] !== null) expect(d.suggestion.tool).toBe(FINDING_SUGGESTION[kind]);
     } else {
-      expect(["GENERATIONAL_SPLIT", "HIDDEN_POCKET", "DROPPED_CANDIDATES", "NO_TREND_SIGNAL", "LOCATION_FALLBACK"]).toContain(kind);
+      expect(["GENERATIONAL_SPLIT", "HIDDEN_POCKET", "DROPPED_CANDIDATES", "NO_TREND_SIGNAL", "LOCATION_FALLBACK", "TASTE_FINANCIALS_SPLIT"]).toContain(kind);
     }
   });
 });
@@ -431,6 +463,19 @@ describe("BLOCK_NEW_TAGS", () => {
     expect(what(["Omakase", "Omakase", "Tapas"])).toBeNull();
   });
 
+  it("reads a whole city against its panel, and follows up with concept_vector's open call, which needs no candidate refs", () => {
+    const d = fired(
+      blockNewTagsFinding({ areaName: "Riverton", family: "SOUND", newTags: songs(6), familyTags: 20, signalTags: refs(songs(2)), panel: "the other 12 map cities" }),
+    );
+    expect(d.text).toBe(
+      "Among its top music tags, Riverton has SOUND tags that are not among the top music tags of the other 12 map cities, led by Genre 1, Genre 2, Genre 3 and 3 more.",
+    );
+    expect(d.suggestion).toEqual({
+      tool: "concept_vector",
+      reason: "Name the artists Riverton's distinct taste points to: concept_vector on Genre 1 (T1), Genre 2 (T2), type artist, no analogs.",
+    });
+  });
+
   it("fires on SOUND at three new tags that are at least a quarter of its area top 20", () => {
     const d = fired(sound(songs(5), 20));
     expect(d.text).toBe(
@@ -614,5 +659,58 @@ describe("LOCATION_FALLBACK", () => {
   it("throws on a step that does not go down", () => {
     expect(() => locationFallbackFinding({ areaName: "Riverside", from: "POINT", to: "POLYGON" })).toThrow(RangeError);
     expect(() => locationFallbackFinding({ areaName: "Riverside", from: "QUERY", to: "QUERY" })).toThrow(RangeError);
+  });
+});
+
+describe("Part 9 finding rules", () => {
+  it("names a twin only in the top quarter of the checked areas and at least a moderate resemblance", () => {
+    const areas = [
+      { id: "a", name: "Lakeview", rho: 0.72 },
+      { id: "b", name: "Hillcrest", rho: 0.71 },
+      { id: "f", name: "Northgate", rho: 0.3 },
+      { id: "c", name: "Mill Town", rho: 0.1 },
+      { id: "d", name: "Old Port", rho: 0.05 },
+      { id: "e", name: "Bayside", rho: null },
+    ];
+    expect(twinsOf(areas).map((a) => a.id)).toEqual(["a", "b"]);
+    // Fewer than three measured areas: no twin is called, however high ρ is.
+    expect(twinsOf(areas.slice(0, 2))).toEqual([]);
+    // The top area always clears its own set's p75; the floor stops a weak one being called a twin.
+    expect(twinsOf([{ id: "a", name: "A", rho: TWIN_MIN_RHO - 0.01 }, { id: "b", name: "B", rho: 0 }, { id: "c", name: "C", rho: -0.2 }])).toEqual([]);
+    const d = twinFoundFinding({ sourceName: "Riverside", targetCity: "Austin", areas });
+    expect(d?.text).toContain("Of the 5 Austin areas checked");
+    expect(d?.suggestion).toEqual({ tool: "block_dna", reason: "Profile the Block DNA of Lakeview to see what its venue-goers favour." });
+  });
+
+  it("puts ρ in plain words with the thresholds in one place", () => {
+    expect(rhoWords(0.8)).toBe("strong resemblance");
+    expect(rhoWords(0.4)).toBe("moderate resemblance");
+    expect(rhoWords(0.15)).toBe("weak resemblance");
+    expect(rhoWords(0.02)).toBe("about no resemblance");
+    expect(rhoWords(-0.5)).toBe("opposite pattern");
+  });
+
+  it("vetoes only with a VETO and suggests ranking the concept's own picks", () => {
+    expect(analogVetoedFinding({ conceptLabel: "x", vetoed: [], scored: 2, adds: [] })).toBeNull();
+    const d = analogVetoedFinding({ conceptLabel: "hot sauce", vetoed: [BETA, GAMMA], scored: 4, adds: [] });
+    expect(d?.text).toBe("Brand Beta and Brand Gamma score below the 50th result for hot sauce in the same Qloo call (2 of 4 scored analogs): the concept's taste points elsewhere.");
+    expect(d?.suggestion).toBeNull();
+  });
+
+  it("splits taste and financials only on clear opposite moves, never as a cause", () => {
+    expect(isTasteFinancialsSplit(-0.1, 0.05)).toBe(true);
+    expect(isTasteFinancialsSplit(0.1, 0.05)).toBe(false);
+    expect(isTasteFinancialsSplit(-0.01, 0.05)).toBe(false);
+    expect(isTasteFinancialsSplit(-0.1, 0.01)).toBe(false);
+    const d = tasteFinancialsSplitFinding({
+      brandName: ALPHA,
+      companyName: "Alpha Holdings",
+      momentumDelta: 0.2,
+      momentumWindow: "the 2025-04-01..2025-09-30 trending window",
+      revenueYoy: -0.08,
+      revenuePeriod: "the fiscal year ended 2025-06-30",
+    });
+    expect(d?.text).toContain("neither explains the other");
+    expect(d?.text).not.toMatch(/\b(because|due to|drives|causes)\b/);
   });
 });

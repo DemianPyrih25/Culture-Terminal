@@ -1,21 +1,28 @@
 import {
   ANALYST_TOOLS,
   Domain,
+  isId,
   SponsorCategory,
   type AgeBucket,
+  type EntityRegistry,
   type GeoApi,
   type Intent,
   type Job,
   type MarketId,
+  type Metric,
+  type MetricId,
+  type MetroId,
+  type ModelDigest,
   type RegisteredEntity,
   type RegisteredTag,
   type SkillId,
   type ToolInput,
 } from "@ct/contracts";
+import { listedCompanyOf } from "@ct/quant";
 import { AREA_ALSO_NAMED } from "./areaMentions";
 import { isSkillAvailable, toolLabel } from "./catalogue";
 import { gazetteer } from "./gazetteer";
-import { askedTier, isGazetteerMetro, MARKET_CATALOGUE, marketTier, namedMarkets, type RunMarket } from "./markets";
+import { askedTier, compareCities, isGazetteerMetro, MARKET_CATALOGUE, marketTier, namedMarkets, type RunMarket } from "./markets";
 
 /**
  * The opening scan (PLAN §4.1 step C, SPEC §4.1): code runs the job's scan skills with default
@@ -34,20 +41,93 @@ export interface ScanContext {
   geo?: GeoApi;
   /** The run's MARKETS (runMarkets); defaults to the gazetteer metros. */
   markets?: readonly RunMarket[];
+  /**
+   * True when the run has a public-data client (SEC EDGAR, US Census): company_financials and
+   * area_economics join the scan only then. Defaults to false.
+   */
+  publicData?: boolean;
 }
 
 /** What a builder reads: the scan context with its gazetteer and markets settled. */
 type ScanInputs = ScanContext & { geo: GeoApi; markets: readonly RunMarket[] };
 
-/** A chained step's input from the tags its `after` step returned, or null when none fits. */
+/** A gazetteer area a scan step's rows name, in row order. */
+export interface ScanArea {
+  metro: MetroId;
+  id: string;
+}
+
+/**
+ * What a chained step reads from the step it follows: the tags (T#) and entities (R#) its rows and
+ * registrations name, and the gazetteer areas its rows name, each in row order.
+ */
+export interface ChainFeed {
+  tags: readonly RegisteredTag[];
+  entities: readonly RegisteredEntity[];
+  areas: readonly ScanArea[];
+}
+
+/** What chainFeed needs to read a step's digests back into registry records and gazetteer areas. */
+export interface ChainFeedSources {
+  registry: Pick<EntityRegistry, "entity" | "tag">;
+  ledger: { metric(id: MetricId): Pick<Metric, "subjectRefs"> | undefined };
+  geo: Pick<GeoApi, "neighbourhood" | "matchNeighbourhood">;
+  /** The map cities whose areas the run reads (runAreaMetros), primary first. */
+  metros: readonly MetroId[];
+}
+
+/**
+ * What a chained step reads from the digests of the step it follows, in row order: the tags (T#) its
+ * rows name; the entities (R#) its rows name, then those it registered; and the gazetteer areas its
+ * rows name, by the row's name in one of the run's map cities, else by a metric the row cites whose
+ * subject is an area id. A row matched by name keeps its own area, never a source area its metric also names.
+ */
+export function chainFeed(digests: readonly ModelDigest[], sources: ChainFeedSources): ChainFeed {
+  const tags: RegisteredTag[] = [];
+  const entities: RegisteredEntity[] = [];
+  const areas: ScanArea[] = [];
+  const addArea = (area: ScanArea | null) => {
+    if (area !== null && !areas.some((a) => a.metro === area.metro && a.id === area.id)) areas.push(area);
+  };
+  for (const digest of digests) {
+    for (const row of digest.top_rows) {
+      const tag = row.ref !== null && isId("T", row.ref) ? sources.registry.tag(row.ref) : null;
+      if (tag !== null && !tags.includes(tag)) tags.push(tag);
+      if (row.ref === null) addArea(rowArea(row, sources));
+    }
+    for (const ref of [...digest.top_rows.map((r) => r.ref), ...digest.registered.map((r) => r.ref)]) {
+      const entity = ref !== null && isId("R", ref) ? sources.registry.entity(ref) : null;
+      if (entity !== null && !entities.includes(entity)) entities.push(entity);
+    }
+  }
+  return { tags, entities, areas };
+}
+
+/** The gazetteer area a digest row names: by its name, else by an area id among its metrics' subjects. */
+function rowArea(row: ModelDigest["top_rows"][number], sources: ChainFeedSources): ScanArea | null {
+  for (const metro of sources.metros) {
+    const named = sources.geo.matchNeighbourhood(metro, row.name);
+    if (named !== null) return { metro, id: named.id };
+  }
+  const subjects = Object.values(row.values).flatMap((v) =>
+    typeof v === "string" && isId("M", v) ? (sources.ledger.metric(v)?.subjectRefs ?? []) : [],
+  );
+  for (const metro of sources.metros) {
+    const id = subjects.find((ref) => sources.geo.neighbourhood(metro, ref) !== null);
+    if (id !== undefined) return { metro, id };
+  }
+  return null;
+}
+
+/** A chained step's input from what its `after` step returned, or null when none fits. */
 interface ChainBuild<Id extends SkillId> {
-  /** The scan skill whose refs it needs. */
+  /** The scan skill whose refs it needs: a parallel step, or a chained step earlier in the table. */
   after: SkillId;
   /** Its typical cold cost in network calls: the input, and so the exact estimate, exists only later. */
   estimate: number;
   /** How the run context describes it, after the tool label. */
   describe: string;
-  input: (tags: readonly RegisteredTag[]) => ToolInput<Id> | null;
+  input: (feed: ChainFeed) => ToolInput<Id> | null;
 }
 
 /** A deferred step's input from the peers wave 1 resolved, or null when none fits. */
@@ -60,11 +140,13 @@ interface DeferBuild<Id extends SkillId> {
 }
 
 /**
- * A scan skill and how to build its default input. `build` runs it in parallel with the others;
- * `chain` runs it after them, from the tags one of them returned (geo_lift needs find_tags' refs), or
- * returns null when the question cannot feed it. Neither means the build cannot run it yet. `defer`
+ * A scan skill and how to build its default input. `build` runs it in parallel with the others, and
+ * `each` runs one parallel step per input it returns (city_compare's fingerprint per city); `chain`
+ * runs it after them, from what one of them returned (geo_lift needs find_tags' refs), and when it
+ * returns null or its step does not run, `build` stands in if there is one. None of them means the
+ * build cannot run it yet. `defer`
  * takes over when `build` finds no peer to compare: the step waits for the peers the ANALYST's wave-1
- * resolve_entities registers (director.md §5: the implied peers of "other comedians") and runs as
+ * resolve_entities registers (director.md §6: the implied peers of "other comedians") and runs as
  * part of the scan once wave 1 returns, before turn 1 closes, so its findings can still be followed
  * in turn 2 and its calls stay out of turn 2's allowance.
  */
@@ -72,6 +154,7 @@ type ScanEntry = {
   [Id in SkillId]: {
     tool: Id;
     build?: (ctx: ScanInputs) => ToolInput<Id> | null;
+    each?: (ctx: ScanInputs) => ToolInput<Id>[];
     chain?: (ctx: ScanInputs) => ChainBuild<Id> | null;
     defer?: (ctx: ScanInputs) => DeferBuild<Id> | null;
     why?: string;
@@ -284,7 +367,7 @@ function liftFromTags({ intent, geo }: ScanInputs): ChainBuild<"geo_lift"> | nul
     describe:
       `in ${metro} on the place tags find_tags returns, with supply` +
       (focus.length > 0 ? `, and the question's ${focus.length === 1 ? "area" : "areas"} ${focus.join(", ")} first` : ""),
-    input: (tags) => {
+    input: ({ tags }) => {
       const refs = (prefix: string) => tags.filter((t) => t.tagId.startsWith(prefix)).map((t) => t.ref);
       const genre = refs(GENRE_PLACE);
       const category = refs(CATEGORY_PLACE);
@@ -317,6 +400,286 @@ function neighbourhood(
   };
 }
 
+// The Part 9 jobs and the public-data joins ------------------------------------------------------------
+
+/** Twins area_economics reads after taste_twins: the best few, as the Twins exhibit ranks them. */
+const ECON_TWINS_MAX = 3;
+/** Areas site_selection's area_economics reads after geo_lift: the question's own, then the top lift areas. */
+const ECON_LIFT_MAX = 5;
+/** taste_twins concept tags (the tool's maximum). */
+const TWIN_TAGS_MAX = 3;
+/** A taste_twins call's cold cost: the source area's tags, at most 8 target areas, one concept call. */
+export const SCAN_TWINS_ESTIMATE = 10;
+/** concept_vector concept tags (the tool's maximum). */
+const CNPT_TAGS_MAX = 4;
+/** Candidates a chained one-scale scoring reads: the named ones of its type, then the discovered rows. */
+const SCORE_CANDIDATES_MAX = 12;
+/** Partners brand_collab's audience_dna reads beside the subject, best scored first. */
+const COLLAB_DNA_PARTNERS = 3;
+/** Cities city_compare reads (the job's maximum). */
+const CITIES_MAX = 4;
+/** cross_domain domains of the brand_collab scan: brands of any category (no category filter). */
+export const SCAN_COLLAB_DOMAINS: readonly Domain[] = ["brand"];
+/**
+ * cross_domain domains of the creator_fit scan: artists and podcasts. A person is no cross_domain
+ * domain (contracts Domain), so public figures other than artists are scored only when the question names them.
+ */
+export const SCAN_CREATOR_DOMAINS: readonly Domain[] = ["artist", "podcast"];
+
+/** Place genre and category tags among `tags`, genre first: what a concept heatmap ranks areas by. */
+function placeTagRefs(tags: readonly RegisteredTag[]): RegisteredTag["ref"][] {
+  const refs = (prefix: string) => tags.filter((t) => t.tagId.startsWith(prefix)).map((t) => t.ref);
+  return [...new Set([...refs(GENRE_PLACE), ...refs(CATEGORY_PLACE)])];
+}
+
+interface TwinSides {
+  source: { kind: "nbhd"; ref: string; metro: MetroId };
+  target: MetroId;
+}
+
+/** The source area of a taste_twins question (geo.area in geo.metro) and its target map city, when both hold. */
+function twinSides({ intent, geo }: ScanInputs): TwinSides | null {
+  const { metro, area, target_metro: target } = intent.geo;
+  if (metro === null || area === null || target === null || target === metro) return null;
+  const nbhd = geo.matchNeighbourhood(metro, area);
+  return nbhd === null ? null : { source: { kind: "nbhd", ref: nbhd.id, metro }, target };
+}
+
+/** taste_twins with code picking the target areas (the largest, labelled so), when the question names no concept. */
+function twinsByArea(ctx: ScanInputs): ToolInput<"taste_twins"> | null {
+  const sides = twinSides(ctx);
+  if (sides === null || ctx.intent.constraints.concepts.length > 0) return null;
+  return { source: sides.source, target_metro: sides.target, target_areas: [], concept_tags: [], ...NO_STEP };
+}
+
+/** taste_twins chained after find_tags: the concept's place tags pick the target areas by lift. */
+function twinsFromTags(ctx: ScanInputs): ChainBuild<"taste_twins"> | null {
+  const sides = twinSides(ctx);
+  if (sides === null || ctx.intent.constraints.concepts.length === 0) return null;
+  return {
+    after: "find_tags",
+    estimate: SCAN_TWINS_ESTIMATE,
+    describe: `from ${sides.source.ref} (${sides.source.metro}) into ${sides.target}, the target areas picked by the place tags find_tags returns`,
+    input: ({ tags }) => {
+      const concept = placeTagRefs(tags).slice(0, TWIN_TAGS_MAX);
+      return { source: sides.source, target_metro: sides.target, target_areas: [], concept_tags: concept, ...NO_STEP };
+    },
+  };
+}
+
+/** area_economics for the question's own areas in its map city (area_profile, tenant_mix, the twins' source). */
+function econNamed(ctx: ScanInputs): ToolInput<"area_economics"> | null {
+  const metro = ctx.intent.geo.metro;
+  if (ctx.publicData !== true || metro === null) return null;
+  const areas = namedAreaIds(ctx.intent, ctx.geo);
+  return areas.length === 0 ? null : { metro, areas, ...NO_STEP };
+}
+
+/** area_economics chained after taste_twins: the best twins in the target city. */
+function econTwins(ctx: ScanInputs): ChainBuild<"area_economics"> | null {
+  const sides = twinSides(ctx);
+  if (ctx.publicData !== true || sides === null) return null;
+  return {
+    after: "taste_twins",
+    estimate: 0,
+    describe: `for the top ${ECON_TWINS_MAX} twins taste_twins returns in ${sides.target} (US Census, 0 Qloo calls)`,
+    input: ({ areas }) => {
+      const twins = [...new Set(areas.filter((a) => a.metro === sides.target).map((a) => a.id))].slice(0, ECON_TWINS_MAX);
+      return twins.length === 0 ? null : { metro: sides.target, areas: twins, ...NO_STEP };
+    },
+  };
+}
+
+/** area_economics chained after site_selection's geo_lift: the question's areas, then the top lift areas. */
+function econLift(ctx: ScanInputs): ChainBuild<"area_economics"> | null {
+  const metro = ctx.intent.geo.metro;
+  if (ctx.publicData !== true || metro === null || ctx.intent.constraints.concepts.length === 0) return null;
+  const named = namedAreaIds(ctx.intent, ctx.geo);
+  return {
+    after: "geo_lift",
+    estimate: 0,
+    describe: `in ${metro} for the question's areas and the top areas geo_lift returns (US Census, 0 Qloo calls)`,
+    input: ({ areas }) => {
+      const ids = [...new Set([...named, ...areas.filter((a) => a.metro === metro).map((a) => a.id)])].slice(0, ECON_LIFT_MAX);
+      return ids.length === 0 ? null : { metro, areas: ids, ...NO_STEP };
+    },
+  };
+}
+
+/**
+ * company_financials for a primary brand config/listed_companies.json maps to a US-listed company (0 Qloo
+ * calls), by the skill's own lookup, so a private brand costs no step that could only answer UNAVAILABLE.
+ */
+function financials({ intent, primary, publicData }: ScanInputs): ToolInput<"company_financials"> | null {
+  if (publicData !== true || primary === null || primary.type !== "brand" || !namesPrimary(intent)) return null;
+  return listedCompanyOf(primary.name) === null ? null : { brand: primary.ref, ...NO_STEP };
+}
+
+/**
+ * True when CLERK marked a mention as the question's subject. Without one the gate stands in its first
+ * mention, which in a launch_test question is an analog the concept is compared with, not the company.
+ */
+const namesPrimary = (intent: Intent): boolean => intent.mentions.some((m) => m.role === "primary");
+
+const FIN_WHY = "needs a brand primary that maps to a US-listed company, and public data on this server";
+const ECON_WHY = "needs an area of a map city in the question, and public data on this server";
+
+/**
+ * One-scale scoring of what cross_domain discovered of one type, with the question's named entities
+ * of that type first, from the primary's taste (a none context with the primary as the signal).
+ * Scores compare within the type only.
+ */
+function scoreDiscovered(type: "brand" | "artist" | "podcast"): (ctx: ScanInputs) => ChainBuild<"rank_candidates"> | null {
+  return ({ primary, peers }) => {
+    if (primary === null) return null;
+    const named = peers.filter((p) => p.type === type && p.ref !== primary.ref);
+    const also = named.length > 0 ? ` with ${distinctRefs(named).join(", ")}` : "";
+    return {
+      after: "cross_domain",
+      estimate: 1,
+      describe: `on one scale from ${primary.ref}'s taste: the ${type} rows cross_domain returns${also}`,
+      input: ({ entities }) => {
+        const found = entities.filter((e) => e.type === type && e.ref !== primary.ref);
+        const candidates = distinctRefs([...named, ...found]).slice(0, SCORE_CANDIDATES_MAX);
+        if (candidates.length < 2) return null;
+        return { type, candidates, signal_entities: [primary.ref], signal_tags: [], contexts: [{ kind: "none" }], ...NO_STEP };
+      },
+    };
+  };
+}
+
+/** audience_dna chained after brand_collab's scoring: the subject beside its best-scored partners, mirrored against the first. */
+function collabDna({ primary }: ScanInputs): ChainBuild<"audience_dna"> | null {
+  if (primary === null) return null;
+  return {
+    after: "rank_candidates",
+    estimate: 1,
+    describe: `for ${primary.ref} and the top ${COLLAB_DNA_PARTNERS} partners rank_candidates scores, compare_with the first (shared and one-side tags)`,
+    input: ({ entities }) => {
+      const partners = distinctRefs(entities.filter((e) => e.type === "brand" && e.ref !== primary.ref)).slice(0, COLLAB_DNA_PARTNERS);
+      const first = partners[0];
+      return first === undefined ? null : { set: [primary.ref, ...partners], compare_with: first, ...NO_STEP };
+    },
+  };
+}
+
+/** cross_domain domains of brand_collab's shared neighbourhood: music, the cultural neighbourhood a pair's campaign can borrow from. */
+export const SCAN_COLLAB_SHARED_DOMAINS: readonly Domain[] = ["artist"];
+
+/**
+ * cross_domain chained after brand_collab's scoring (PLAN §4.1's fourth scan call): the subject and
+ * its best-scored partner as joint seeds, so the list is the cultural neighbourhood the pair shares.
+ * With no popularity cap, a list of mainstream names raises POPULARITY_DOMINANCE, the job's usual
+ * turn-2 lead (a capped re-run for less obvious partners or shared picks).
+ */
+function collabShared({ primary }: ScanInputs): ChainBuild<"cross_domain"> | null {
+  if (primary === null) return null;
+  return {
+    after: "rank_candidates",
+    estimate: SCAN_COLLAB_SHARED_DOMAINS.length,
+    describe: `for ${primary.ref} and the best partner rank_candidates scores as joint seeds over music: the cultural neighbourhood the pair shares`,
+    input: ({ entities }) => {
+      const [partner] = distinctRefs(entities.filter((e) => e.type === "brand" && e.ref !== primary.ref));
+      if (partner === undefined) return null;
+      return { seeds: [primary.ref, partner], seed_tags: [], domains: [...SCAN_COLLAB_SHARED_DOMAINS], popularity_max: SCAN_POPULARITY_MAX, ...NO_STEP };
+    },
+  };
+}
+
+/** find_tags for a product concept (launch_test): its concepts, else its one-sentence description, as brand tags. */
+function productTags({ intent }: ScanInputs): ToolInput<"find_tags"> | null {
+  const described = intent.constraints.concept_description?.trim() ?? "";
+  const texts = intent.constraints.concepts.length > 0 ? intent.constraints.concepts : described === "" ? [] : [described];
+  const concepts = [...new Set(texts.map((c) => c.trim().slice(0, 60).trim()).filter((c) => c.length > 0))].slice(0, 4);
+  return concepts.length === 0 ? null : { concepts: concepts.map((text) => ({ text, scope: "brand" as const })), ...NO_STEP };
+}
+
+/** concept_vector analogs (the tool's maximum). */
+const CNPT_ANALOGS_MAX = 8;
+
+/**
+ * concept_vector chained after launch_test's find_tags. With the brands the question names as
+ * analogs ("like Brand Gamma"), each is kept or vetoed in the scan, so ANALOG_VETOED can be followed
+ * in turn 2; with none, it is the open call alone (the ADD list), and the analogs your priors expect
+ * are scored as a turn-2 step, since the concept's tags exist only once this scan returns.
+ */
+function conceptVector({ intent, primary, peers }: ScanInputs): ChainBuild<"concept_vector"> {
+  // With no subject marked, the gate's stand-in primary is the first analog the question names.
+  const mentioned = namesPrimary(intent) || primary === null ? peers : [primary, ...peers];
+  const analogs = distinctRefs(mentioned.filter((p) => p.type === "brand")).slice(0, CNPT_ANALOGS_MAX);
+  const named = analogs.length > 0 ? `, the question's analogs ${analogs.join(", ")} kept or vetoed` : ", no analogs: the ADD list";
+  return {
+    after: "find_tags",
+    estimate: analogs.length > 0 ? 2 : 1,
+    describe: `on the taxonomy tags find_tags returns, type brand${named}`,
+    input: ({ tags }) => {
+      const concept = [...new Set(tags.filter((t) => t.signalCapable).map((t) => t.ref))].slice(0, CNPT_TAGS_MAX);
+      return concept.length === 0 ? null : { concept_tags: concept, type: "brand", analogs, ...NO_STEP };
+    },
+  };
+}
+
+/** The cities city_compare reads: CLERK's geo.cities checked against config (compareCities), among the run's MARKETS. */
+export function scanCities({ intent, markets }: Pick<ScanInputs, "intent" | "markets">): MarketId[] {
+  const usable = new Set<string>(markets.map((m) => m.id));
+  return compareCities(intent).filter((id) => usable.has(id)).slice(0, CITIES_MAX);
+}
+
+/** block_dna's city fingerprint (against the other map cities pooled) for each city compared, when two or more can be read. */
+function cityFingerprints(ctx: ScanInputs): ToolInput<"block_dna">[] {
+  const cities = scanCities(ctx);
+  if (cities.length < 2) return [];
+  return cities.map((market) => ({ area: { kind: "city" as const, market }, include_brands: false, ...NO_STEP }));
+}
+
+/** share_of_taste of the named entity and its same-type peers across the compared cities. */
+function shareAcrossCities(ctx: ScanInputs): ToolInput<"share_of_taste"> | null {
+  const set = sameTypeSet(ctx, SHARE_SET_MAX);
+  const cities = scanCities(ctx);
+  if (ctx.primary === null || set.length < 2 || cities.length < 2) return null;
+  return { type: ctx.primary.type, set, ages: [], audiences: [], genders: [], metros: cities, ...NO_STEP };
+}
+
+/** shareAcrossCities deferred to the peers wave 1 resolves, when the question named none of the primary's type. */
+function shareCitiesAfterWave1(ctx: ScanInputs): DeferBuild<"share_of_taste"> | null {
+  const { primary } = ctx;
+  const cities = scanCities(ctx);
+  if (primary === null || !SHAREABLE.includes(primary.type) || cities.length < 2) return null;
+  return {
+    estimate: cities.length,
+    describe: `for ${primary.ref} and the ${primary.type} peers your wave-1 resolve_entities registers, across ${cities.join(", ")}`,
+    input: (peers) => shareAcrossCities({ ...ctx, peers: [...ctx.peers, ...peers] }),
+  };
+}
+
+/**
+ * geo_lift for the question's concept in the `index`-th compared city, chained after find_tags, when
+ * that city is a map city (a market without a gazetteer has no neighbourhood map). Like site_selection's
+ * scan lift, it runs with supply, so its LATENT_DEMAND findings reach turn 2 and a pivot can profile the
+ * pocket; as a turn-2 planned step per city it would spend the follow-up allowance before any pivot.
+ * Lift is relative within each city: the cities are compared on their fingerprints, never on lift.
+ */
+function liftInCity(index: number): (ctx: ScanInputs) => ChainBuild<"geo_lift"> | null {
+  return (ctx) => {
+    const cities = scanCities(ctx);
+    const city = cities[index];
+    if (cities.length < 2 || city === undefined || !isGazetteerMetro(city) || ctx.intent.constraints.concepts.length === 0) return null;
+    return {
+      after: "find_tags",
+      estimate: SCAN_LIFT_ESTIMATE,
+      describe: `in ${city} (compared city ${index + 1}) on the place tags find_tags returns, with supply`,
+      input: ({ tags }) => {
+        const concept = placeTagRefs(tags).slice(0, LIFT_TAGS_MAX);
+        return concept.length === 0 ? null : { metro: city, concept_tags: concept, concept_entities: [], supply: true, ...NO_STEP };
+      },
+    };
+  };
+}
+
+const CITIES_WHY = "needs two to four cities from the MARKETS list in the question";
+const CITY_LIFT_WHY = "needs a concept in the question and a compared city that is one of the 13 map cities";
+const TWINS_WHY = "needs a source area from the AREAS list and another map city to look in";
+
 const LIFT_WHY = "needs a concept and a gazetteer metro (one of the 13 map cities) in the question";
 
 /**
@@ -333,27 +696,48 @@ const LIFT_WHY = "needs a concept and a gazetteer metro (one of the 13 map citie
  * own type there too; market_selection's market grid and audience_discovery's read by age wait for
  * the peers wave 1 resolves when the question names none (`defer`), else take the scan's own
  * neighbours of the primary's type, since those questions rarely name the comparison set: run as
- * turn-2 steps they would spend the follow-up allowance, and nothing they found could be followed. director.md §5 describes
+ * turn-2 steps they would spend the follow-up allowance, and nothing they found could be followed. director.md §6 describes
  * these scans, so wave 1 does not repeat them.
+ *
+ * Part 9 (PLAN §4.1, D40): taste_twins reads the question's area into the target city (code picks the
+ * areas, or the concept's place tags from find_tags do); brand_collab discovers partners, scores them
+ * on one scale from the subject, mirrors the best in audience_dna and reads the pair's shared music
+ * neighbourhood with cross_domain (chains after a chain);
+ * creator_fit discovers artists and podcasts and scores each kind on its own scale (a person is no
+ * cross_domain domain); launch_test reads the concept's open call, keeping or vetoing the analogs the
+ * question names; city_compare reads each city's fingerprint (`each`) and the named entity's share
+ * across them, and with a concept chains geo_lift (with supply) in each compared map city after
+ * find_tags, as site_selection does, so a LATENT_DEMAND pocket can be profiled in turn 2. company_financials (brand_health, head_to_head, launch_test) and area_economics (the
+ * location jobs with an area set) cost 0 Qloo calls and join only with a public-data client, for a
+ * listed brand or a known area, so no step runs that could only answer UNAVAILABLE.
  */
 export const SCAN_TABLE: Readonly<Record<Job, readonly ScanEntry[]>> = {
   brand_health: [
     { tool: "peer_landscape", build: peerMap(true), why: PEER_MAP_WHY },
     { tool: "audience_dna", build: dnaSet(false), why: PRIMARY_WHY },
     { tool: "destination_affinity", build: travelTaste, why: PRIMARY_WHY },
+    { tool: "company_financials", build: financials, why: FIN_WHY },
   ],
   head_to_head: [
     { tool: "peer_landscape", build: peerMap(false), why: PEER_MAP_WHY },
     { tool: "rank_candidates", build: pairRank, why: "needs a metro in the question and a peer of the primary's type" },
     { tool: "share_of_taste", build: shareSet(SCAN_AGES, SCAN_DUEL_MARKETS), why: SET_WHY },
     { tool: "audience_dna", build: dnaSet(true), why: PRIMARY_WHY },
+    { tool: "company_financials", build: financials, why: FIN_WHY },
   ],
   site_selection: [
     { tool: "find_tags", build: conceptTags, why: "needs a concept in the question" },
     { tool: "geo_lift", chain: liftFromTags, why: LIFT_WHY },
+    { tool: "area_economics", chain: econLift, why: ECON_WHY },
   ],
-  area_profile: [{ tool: "block_dna", build: blockArea, why: "needs a neighbourhood from the AREAS list in a gazetteer metro" }],
-  tenant_mix: [{ tool: "block_dna", build: blockArea, why: "needs a neighbourhood from the AREAS list in a gazetteer metro" }],
+  area_profile: [
+    { tool: "block_dna", build: blockArea, why: "needs a neighbourhood from the AREAS list in a gazetteer metro" },
+    { tool: "area_economics", build: econNamed, why: ECON_WHY },
+  ],
+  tenant_mix: [
+    { tool: "block_dna", build: blockArea, why: "needs a neighbourhood from the AREAS list in a gazetteer metro" },
+    { tool: "area_economics", build: econNamed, why: ECON_WHY },
+  ],
   sponsorship: [
     { tool: "sponsor_slate", build: slate, why: "needs an artist or person as the primary target" },
     { tool: "cross_domain", build: neighbourhood(["brand"], false), why: PRIMARY_WHY },
@@ -367,6 +751,34 @@ export const SCAN_TABLE: Readonly<Record<Job, readonly ScanEntry[]>> = {
     { tool: "audience_dna", build: dnaSet(false), why: PRIMARY_WHY },
     { tool: "share_of_taste", build: shareSet(SCAN_AGES, 0), defer: shareAfterWave1(SCAN_AGES, 0), why: SET_WHY },
   ],
+  taste_twins: [
+    { tool: "find_tags", build: conceptTags, why: "runs only when the question names a concept" },
+    { tool: "taste_twins", build: twinsByArea, chain: twinsFromTags, why: TWINS_WHY },
+    { tool: "area_economics", build: econNamed, why: ECON_WHY },
+    { tool: "area_economics", chain: econTwins, why: "needs twins from taste_twins, and public data on this server" },
+  ],
+  brand_collab: [
+    { tool: "cross_domain", build: neighbourhood(SCAN_COLLAB_DOMAINS, false), why: PRIMARY_WHY },
+    { tool: "rank_candidates", chain: scoreDiscovered("brand"), why: "needs a primary and two brands from cross_domain to score" },
+    { tool: "audience_dna", chain: collabDna, why: "needs a primary and a partner rank_candidates scored" },
+    { tool: "cross_domain", chain: collabShared, why: "needs a primary and a partner rank_candidates scored" },
+  ],
+  creator_fit: [
+    { tool: "cross_domain", build: neighbourhood(SCAN_CREATOR_DOMAINS, false), why: PRIMARY_WHY },
+    { tool: "rank_candidates", chain: scoreDiscovered("artist"), why: "needs a primary and two artists from cross_domain to score" },
+    { tool: "rank_candidates", chain: scoreDiscovered("podcast"), why: "needs a primary and two podcasts from cross_domain to score" },
+  ],
+  launch_test: [
+    { tool: "find_tags", build: productTags, why: "needs a concept or concept description in the question" },
+    { tool: "concept_vector", chain: conceptVector, why: "needs taxonomy tags from find_tags" },
+    { tool: "company_financials", build: financials, why: FIN_WHY },
+  ],
+  city_compare: [
+    { tool: "block_dna", each: cityFingerprints, why: CITIES_WHY },
+    { tool: "find_tags", build: conceptTags, why: "runs only when the question names a concept" },
+    ...Array.from({ length: CITIES_MAX }, (_, i): ScanEntry => ({ tool: "geo_lift", chain: liftInCity(i), why: CITY_LIFT_WHY })),
+    { tool: "share_of_taste", build: shareAcrossCities, defer: shareCitiesAfterWave1, why: "needs a brand or person primary and two cities from MARKETS" },
+  ],
 };
 
 export interface ScanStep {
@@ -377,7 +789,10 @@ export interface ScanStep {
   input: unknown;
 }
 
-/** A scan step that runs once the parallel steps are done, from the tags its `after` step returned. */
+/**
+ * A scan step that runs once the parallel steps are done, in table order, from what its `after` step
+ * returned (a parallel step, or a chained step before it).
+ */
 export interface ChainedScanStep {
   toolCallId: string;
   tool: SkillId;
@@ -386,8 +801,8 @@ export interface ChainedScanStep {
   estimate: number;
   /** How the run context describes the step, after the tool label. */
   describe: string;
-  /** The input parsed by the tool's own schema, or null when those tags cannot feed it. */
-  input: (tags: readonly RegisteredTag[]) => unknown;
+  /** The input parsed by the tool's own schema, or null when what the step returned cannot feed it. */
+  input: (feed: ChainFeed) => unknown;
 }
 
 /**
@@ -430,33 +845,46 @@ export function planScan(job: Job, ctx: ScanContext): ScanPlan {
   const why = (entry: ScanEntry) => entry.why ?? "its default arguments do not fit this question";
   const nextId = () => `scan-${plan.steps.length + plan.chained.length + plan.deferred.length + 1}`;
   for (const entry of SCAN_TABLE[job]) {
-    if (!isSkillAvailable(entry.tool) || (entry.build === undefined && entry.chain === undefined)) {
+    if (!isSkillAvailable(entry.tool) || (entry.build === undefined && entry.chain === undefined && entry.each === undefined)) {
       plan.unavailable.push(entry.tool);
       continue;
     }
+    const schema = ANALYST_TOOLS[entry.tool].input;
     if (entry.chain !== undefined) {
+      // A chain follows a parallel step or a chained step earlier in the table; when it cannot, `build` stands in.
       const chain = (entry.chain as (c: ScanInputs) => ChainBuild<SkillId> | null)(inputs);
-      if (chain === null || !plan.steps.some((s) => s.tool === chain.after)) {
+      const follows = chain !== null && [...plan.steps, ...plan.chained].some((s) => s.tool === chain.after);
+      if (chain !== null && follows) {
+        plan.chained.push({
+          toolCallId: nextId(),
+          tool: entry.tool,
+          after: chain.after,
+          estimate: chain.estimate,
+          describe: chain.describe,
+          input: (feed) => {
+            const raw = chain.input(feed);
+            const parsed = raw === null ? null : schema.safeParse(raw);
+            return parsed?.success ? parsed.data : null;
+          },
+        });
+        continue;
+      }
+      if (entry.build === undefined) {
         plan.skipped.push({ tool: entry.tool, reason: why(entry) });
         continue;
       }
-      const schema = ANALYST_TOOLS[entry.tool].input;
-      plan.chained.push({
-        toolCallId: nextId(),
-        tool: entry.tool,
-        after: chain.after,
-        estimate: chain.estimate,
-        describe: chain.describe,
-        input: (tags) => {
-          const raw = chain.input(tags);
-          const parsed = raw === null ? null : schema.safeParse(raw);
-          return parsed?.success ? parsed.data : null;
-        },
+    }
+    if (entry.each !== undefined) {
+      const built = (entry.each as (c: ScanInputs) => unknown[])(inputs).flatMap((raw) => {
+        const parsed = schema.safeParse(raw);
+        return parsed.success ? [parsed.data] : [];
       });
+      if (built.length === 0) plan.skipped.push({ tool: entry.tool, reason: why(entry) });
+      for (const input of built) plan.steps.push({ toolCallId: nextId(), tool: entry.tool, input });
       continue;
     }
     const raw = (entry.build as (c: ScanInputs) => unknown)(inputs);
-    const parsed = raw === null ? null : ANALYST_TOOLS[entry.tool].input.safeParse(raw);
+    const parsed = raw === null ? null : schema.safeParse(raw);
     if (parsed !== null && parsed.success) {
       plan.steps.push({ toolCallId: nextId(), tool: entry.tool, input: parsed.data });
       continue;
@@ -466,7 +894,6 @@ export function planScan(job: Job, ctx: ScanContext): ScanPlan {
       plan.skipped.push({ tool: entry.tool, reason: why(entry) });
       continue;
     }
-    const schema = ANALYST_TOOLS[entry.tool].input;
     plan.deferred.push({
       toolCallId: nextId(),
       tool: entry.tool,
@@ -527,10 +954,26 @@ export function describeScanStep(step: ScanStep): string {
     }
     case "block_dna": {
       const i = step.input as ToolInput<"block_dna">;
+      if (i.area.kind === "city") return `${label} city fingerprint of ${i.area.market} against the other map cities`;
       return `${label} for ${i.area.ref} (${i.area.metro})${i.include_brands ? " with local brands" : ""}`;
     }
     case "find_tags":
       return `${label} for ${(step.input as ToolInput<"find_tags">).concepts.length} concept(s)`;
+    case "taste_twins": {
+      const i = step.input as ToolInput<"taste_twins">;
+      const picked = i.target_areas.length > 0 ? `areas ${i.target_areas.join(", ")}` : "the 8 largest areas";
+      return `${label} from ${i.source.ref} (${i.source.metro}) into ${i.target_metro}, checking ${picked}`;
+    }
+    case "concept_vector": {
+      const i = step.input as ToolInput<"concept_vector">;
+      return `${label} on ${i.concept_tags.join(", ")} (${i.type})${i.analogs.length > 0 ? `, analogs ${i.analogs.join(", ")}` : ", no analogs"}`;
+    }
+    case "company_financials":
+      return `${label} for ${(step.input as ToolInput<"company_financials">).brand} (SEC EDGAR, 0 Qloo calls)`;
+    case "area_economics": {
+      const i = step.input as ToolInput<"area_economics">;
+      return `${label} for ${i.areas.join(", ")} (${i.metro}; US Census, 0 Qloo calls)`;
+    }
     default:
       return label;
   }

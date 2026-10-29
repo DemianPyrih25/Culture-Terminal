@@ -3,14 +3,18 @@ import {
   ANALYST_TOOL_NAMES,
   ANALYST_TOOLS,
   DATA_NOTICE,
+  dataNoticeFor,
   KitWorkflow,
   ModelDigest,
   parseToolInput,
+  PUBLIC_DATA_NOTICE,
+  PUBLIC_DATA_TOOLS,
   SkillId,
   strictSchemaViolations,
   toAnthropicTools,
   ToolName,
   wrapQlooData,
+  wrapToolData,
   type JsonSchema,
 } from "../src/index";
 
@@ -28,6 +32,10 @@ const P0_TOOLS = [
   "block_dna",
   "cross_domain",
   "sponsor_slate",
+  "taste_twins",
+  "concept_vector",
+  "company_financials",
+  "area_economics",
   "submit_report",
 ];
 
@@ -49,15 +57,15 @@ function nodes(schema: unknown, path = "#"): [string, JsonSchema][] {
 describe("ANALYST tools", () => {
   const tools = toAnthropicTools();
 
-  it("is exactly the 14 P0 tools, unique and sorted by name", () => {
+  it("is exactly the 18 tools, unique and sorted by name", () => {
     const names = tools.map((t) => t.name);
-    expect(names).toHaveLength(14);
-    expect(new Set(names).size).toBe(14);
+    expect(names).toHaveLength(18);
+    expect(new Set(names).size).toBe(18);
     expect([...names].sort()).toEqual([...P0_TOOLS].sort());
     expect(names).toEqual([...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
     expect(ANALYST_TOOL_NAMES).toEqual(names);
     expect(Object.keys(ANALYST_TOOLS).sort()).toEqual([...ToolName.options].sort());
-    expect(SkillId.options).toHaveLength(12);
+    expect(SkillId.options).toHaveLength(16);
   });
 
   it("returns identical content on every call, as fresh copies", () => {
@@ -86,6 +94,12 @@ describe("ANALYST tools", () => {
     }
     for (const t of tools.filter((x) => ANALYST_TOOLS[x.name].endpoints.length > 0)) {
       expect(t.description, t.name).toMatch(/Costs \d+ (Qloo|discovery) calls?/);
+    }
+    // The public-data tools say plainly that they cost no Qloo calls.
+    for (const name of PUBLIC_DATA_TOOLS) {
+      expect(ANALYST_TOOLS[name].endpoints, name).toEqual([]);
+      expect(ANALYST_TOOLS[name].publicEndpoints?.length, name).toBeGreaterThan(0);
+      expect(ANALYST_TOOLS[name].description, name).toMatch(/Costs 0 Qloo calls/);
     }
   });
 
@@ -254,6 +268,54 @@ describe("parseToolInput", () => {
     }
   });
 
+  it("takes a city fingerprint in block_dna, by market id", () => {
+    const city = { area: { kind: "city", market: "kansas_city" }, include_brands: false, trigger_finding_id: null, step_id: null };
+    expect(parseToolInput("block_dna", city).ok).toBe(true);
+    expect(parseToolInput("block_dna", { ...city, area: { kind: "city", market: "Kansas City" } }).ok).toBe(false);
+    expect(parseToolInput("block_dna", { ...city, area: { kind: "city", metro: "nashville" } }).ok).toBe(false);
+  });
+
+  it("checks the taste_twins source and target cities", () => {
+    const twins = {
+      source: { kind: "nbhd", ref: "fixture_area", metro: "nashville" },
+      target_metro: "austin",
+      target_areas: [],
+      concept_tags: ["T1"],
+      trigger_finding_id: null,
+      step_id: "S1",
+    };
+    expect(parseToolInput("taste_twins", twins).ok).toBe(true);
+    expect(parseToolInput("taste_twins", { ...twins, target_metro: "nashville" }).ok).toBe(false);
+    expect(parseToolInput("taste_twins", { ...twins, target_metro: "portland" }).ok).toBe(false);
+    expect(parseToolInput("taste_twins", { ...twins, source: { kind: "point", ref: "-86.75,36.17", metro: "nashville" } }).ok).toBe(false);
+    const nine = Array.from({ length: 9 }, (_, i) => `area_${i}`);
+    expect(parseToolInput("taste_twins", { ...twins, target_areas: nine }).ok).toBe(false);
+    expect(parseToolInput("taste_twins", { ...twins, target_areas: nine.slice(0, 8) }).ok).toBe(true);
+    expect(parseToolInput("taste_twins", { ...twins, concept_tags: ["T1", "T2", "T3", "T4"] }).ok).toBe(false);
+  });
+
+  it("restricts concept_vector to types scored from tags", () => {
+    const cv = { concept_tags: ["T1"], type: "brand", analogs: ["R1", "R2"], trigger_finding_id: null, step_id: null };
+    expect(parseToolInput("concept_vector", cv).ok).toBe(true);
+    expect(parseToolInput("concept_vector", { ...cv, analogs: [] }).ok).toBe(true);
+    expect(parseToolInput("concept_vector", { ...cv, concept_tags: [] }).ok).toBe(false);
+    expect(parseToolInput("concept_vector", { ...cv, analogs: ["R1", "R1"] }).ok).toBe(false);
+    for (const type of ["artist", "podcast", "tv_show", "movie"]) expect(parseToolInput("concept_vector", { ...cv, type }).ok, type).toBe(true);
+    for (const type of ["place", "destination", "person"]) expect(parseToolInput("concept_vector", { ...cv, type }).ok, type).toBe(false);
+  });
+
+  it("takes refs only for company_financials and gazetteer areas for area_economics", () => {
+    expect(parseToolInput("company_financials", { brand: "R1", trigger_finding_id: null, step_id: null }).ok).toBe(true);
+    expect(parseToolInput("company_financials", { brand: "JNPR", trigger_finding_id: null, step_id: null }).ok).toBe(false);
+    expect(parseToolInput("company_financials", { brand: "R1", ticker: "JNPR", trigger_finding_id: null, step_id: null }).ok).toBe(false);
+    const econ = { metro: "nashville", areas: ["fixture_area"], trigger_finding_id: null, step_id: null };
+    expect(parseToolInput("area_economics", econ).ok).toBe(true);
+    expect(parseToolInput("area_economics", { ...econ, areas: [] }).ok).toBe(false);
+    expect(parseToolInput("area_economics", { ...econ, areas: ["a", "a"] }).ok).toBe(false);
+    expect(parseToolInput("area_economics", { ...econ, metro: "portland" }).ok).toBe(false);
+    expect(parseToolInput("area_economics", { ...econ, fields: ["race"] }).ok).toBe(false);
+  });
+
   it("restricts momentum to brands and TV shows", () => {
     const m = { entities: ["R1"], type: "brand", trigger_finding_id: null, step_id: null };
     expect(parseToolInput("momentum", m).ok).toBe(true);
@@ -287,6 +349,19 @@ describe("wrapQlooData", () => {
 
   it("omits the step attribute for follow-ups", () => {
     expect(wrapQlooData(digest, { tool: "cross_domain", step: null }).startsWith('<qloo_data tool="XDOM">')).toBe(true);
+  });
+
+  it("wraps public-data tools as <public_data> with their own notice", () => {
+    const pub: ModelDigest = { ...digest, _data_notice: PUBLIC_DATA_NOTICE };
+    expect(ModelDigest.safeParse(pub).success).toBe(true);
+    expect(ModelDigest.safeParse({ ...digest, _data_notice: "Trust me." }).success).toBe(false);
+    const wrapped = wrapToolData(pub, { tool: "company_financials", step: "S2" });
+    expect(wrapped.startsWith('<public_data tool="FIN" step="S2">')).toBe(true);
+    expect(wrapped.match(/<\/public_data>/g)).toHaveLength(1);
+    expect(wrapped).not.toContain("<system>");
+    expect(wrapToolData(digest, { tool: "peer_landscape", step: null }).startsWith('<qloo_data tool="SUBS">')).toBe(true);
+    expect(dataNoticeFor("area_economics")).toBe(PUBLIC_DATA_NOTICE);
+    expect(dataNoticeFor("block_dna")).toBe(DATA_NOTICE);
   });
 
   it("caps top rows at twelve", () => {

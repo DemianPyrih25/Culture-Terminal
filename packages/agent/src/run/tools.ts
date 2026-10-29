@@ -1,6 +1,8 @@
 import {
+  isPublicDataTool,
+  publicDataErrorCode,
   SkillId,
-  wrapQlooData,
+  wrapToolData,
   type ErrorCode,
   type EventInputOf,
   type FindingId,
@@ -18,6 +20,7 @@ import {
   type ToolInput,
 } from "@ct/contracts";
 import { ensureMetrosIn } from "@ct/geo";
+import type { RunPublic } from "@ct/publicdata";
 import { qlooErrorCode, type RunQloo } from "@ct/qloo";
 import { normaliseName, SKILLS, skillErrorResult } from "@ct/quant";
 import type { RunLedger } from "../ledger";
@@ -30,9 +33,10 @@ import type { RunEvents } from "./meter";
 
 /**
  * One skill call end to end, for opening-scan steps and ANALYST tool calls alike: tool.start, the
- * skill against its own SkillCtx (Qloo calls and findings attributed to this tool call), tool.end,
- * and the wrapped digest the model reads. A skill that throws becomes an is_error result with a
- * short, escaped message; the trace keeps the error code, never a stack.
+ * skill against its own SkillCtx (Qloo and public-data calls and findings attributed to this tool
+ * call), tool.end, and the wrapped digest the model reads (`<public_data>` for the SEC and Census
+ * tools, `<qloo_data>` otherwise). A skill that throws becomes an is_error result with a short,
+ * escaped message; the trace keeps the error code, never a stack.
  */
 
 export interface SkillCall {
@@ -62,6 +66,11 @@ export interface SkillRunnerDeps {
   pillar: Pillar;
   events: RunEvents;
   qloo: RunQloo;
+  /**
+   * The run's SEC EDGAR and US Census scope (company_financials, area_economics); null when the server
+   * has no public-data client, and those skills then answer UNAVAILABLE with a plain reason. Absent: null.
+   */
+  publicdata?: RunPublic | null;
   ledger: RunLedger;
   registry: RunRegistry;
   geo: GeoApi;
@@ -73,7 +82,10 @@ export interface SkillRunnerDeps {
    */
   audiences: ReadonlySet<string>;
   budget: RunBudget;
-  /** False answers every call with an error digest and makes no Qloo call (V7 fail-closed path). */
+  /**
+   * False answers every Qloo tool with an error digest and makes no Qloo call (V7 fail-closed path).
+   * The public-data tools still run: they make no Qloo call.
+   */
   qlooEnabled: boolean;
   /**
    * Normalised names of the persons CLERK did not mark as public figures (gate privatePersonNames).
@@ -130,7 +142,8 @@ export class SkillsRan {
 /** Parsed tool input is plain JSON (zod output of the tool's JSON schema). */
 type ToolArgs = EventInputOf<"tool.start">["args"];
 
-export const QLOO_DISABLED_NOTICE = "Qloo is disabled for this run: no data is available from any tool.";
+export const QLOO_DISABLED_NOTICE =
+  "Qloo is disabled for this run: no data is available from any Qloo tool (company_financials and area_economics still read SEC and Census data).";
 const ERROR_MESSAGE_MAX = 200;
 
 function skillOf(id: SkillId): Skill<unknown> {
@@ -143,6 +156,8 @@ export async function estimateSkillCalls(
   tool: SkillId,
   input: unknown,
 ): Promise<number | null> {
+  // SEC and Census reads cost no Qloo call, whatever they fetch.
+  if (isPublicDataTool(tool)) return 0;
   try {
     // The metros the input names load their neighbourhood polygons first (createGeo loads them lazily).
     await ensureMetrosIn(deps.geo, input);
@@ -253,13 +268,14 @@ export async function runSkillCall(deps: SkillRunnerDeps, asked: SkillCall, sign
 
   let result: SkillResult;
   try {
-    if (!deps.qlooEnabled) {
+    if (!deps.qlooEnabled && !isPublicDataTool(call.tool)) {
       result = skillErrorResult({ tool: call.tool, step: call.stepId }, QLOO_DISABLED_NOTICE);
     } else {
       signal.throwIfAborted();
       const qloo = deps.qloo.forTool(toolCallId);
       const ctx: SkillCtx = {
         qloo: deadline === null ? qloo : deadline.qloo(qloo),
+        publicdata: deps.publicdata?.forTool(toolCallId) ?? null,
         ledger: deps.ledger.forToolCall(toolCallId),
         geo: deps.geo,
         localities: deps.localities,
@@ -276,7 +292,7 @@ export async function runSkillCall(deps: SkillRunnerDeps, asked: SkillCall, sign
       result = await skillOf(call.tool).run(call.input, ctx);
     }
   } catch (err) {
-    const code: ErrorCode = signal.aborted ? deps.abortCode() : (qlooErrorCode(err) ?? (stop.aborted ? "timeout" : "internal"));
+    const code: ErrorCode = signal.aborted ? deps.abortCode() : (qlooErrorCode(err) ?? publicErrorCode(err) ?? (stop.aborted ? "timeout" : "internal"));
     const message = shortError(err);
     events.emit({
       type: "tool.end",
@@ -292,7 +308,7 @@ export async function runSkillCall(deps: SkillRunnerDeps, asked: SkillCall, sign
       flags: [],
       error: { code, message },
     });
-    // The message can echo Qloo's error body, so it is escaped like any other untrusted text.
+    // The message can echo a Qloo, SEC or Census error body, so it is escaped like any other untrusted text.
     return { content: `TOOL_FAILED: ${call.tool} failed (${code}): ${escapeAngles(message)}`, isError: true, result: null };
   }
 
@@ -311,5 +327,17 @@ export async function runSkillCall(deps: SkillRunnerDeps, asked: SkillCall, sign
     flags: result.flags,
     error: null,
   });
-  return { content: wrapQlooData(result.forModel, { tool: call.tool, step: call.stepId }), isError: false, result };
+  return { content: wrapToolData(result.forModel, { tool: call.tool, step: call.stepId }), isError: false, result };
+}
+
+/**
+ * The trace code of a public-data error a skill let through (skills normally answer UNAVAILABLE
+ * themselves): a 429 after retries is rate limiting, anything else (not configured, not found, a
+ * network or 5xx failure, a bad request or response) is the source being unavailable. Null for any
+ * other error.
+ */
+export function publicErrorCode(err: unknown): ErrorCode | null {
+  const code = publicDataErrorCode(err);
+  if (code === null) return null;
+  return code === "rate_limited" ? "public_rate_limited" : "public_unavailable";
 }

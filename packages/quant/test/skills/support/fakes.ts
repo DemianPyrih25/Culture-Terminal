@@ -8,6 +8,8 @@ import {
   Finding,
   makeId,
   Metric,
+  PublicCallMeta,
+  QlooCallMeta,
   type CacheProbe,
   type DatasetInput,
   type EntityRegistry,
@@ -20,7 +22,6 @@ import {
   type Ledger,
   type MetricInput,
   type QlooApi,
-  type QlooCallMeta,
   type QlooEntity,
   type QlooParams,
   type QlooPath,
@@ -98,19 +99,39 @@ export class FakeLedger implements Ledger {
   readonly findings: Finding[] = [];
 
   addEvidence(input: EvidenceInput): Evidence {
-    const path: QlooPath = input.skill === "resolve_entities" ? "/search" : "/v2/insights";
-    const e = Evidence.parse({
+    const base = {
       id: makeId("E", this.evidences.length + 1),
       skill: input.skill,
       purpose: input.purpose,
       status: input.status,
-      qlooCallIds: input.calls.map((c) => c.qlooCallId),
-      requestIds: input.calls.map((c) => c.requestId),
       cached: input.calls.every((c) => c.cache !== "miss"),
       fetchedAt: input.calls[0]?.fetchedAt ?? FETCHED_AT,
-      provenance: { requests: input.calls.map(() => ({ method: "GET", path, query: {} })) },
       summary: input.summary,
       flags: [...input.flags],
+    };
+    // A public bundle: its calls must all be of the bundle's source, as the agent ledger refuses mixed bundles.
+    if (input.source !== undefined && input.source !== "qloo") {
+      const calls = input.calls.map((c) => PublicCallMeta.parse(c));
+      if (calls.some((c) => c.source !== input.source)) throw new Error("a public bundle mixes sources");
+      const e = Evidence.parse({
+        ...base,
+        source: input.source,
+        qlooCallIds: calls.map((c) => c.publicCallId),
+        requestIds: calls.map((c) => c.reference),
+        provenance: {
+          requests: calls.map((c) => ({ source: c.source, method: "GET", host: "invented.test", path: c.endpoint, query: {}, reference: c.reference })),
+        },
+      });
+      this.evidences.push(e);
+      return e;
+    }
+    const path: QlooPath = input.skill === "resolve_entities" ? "/search" : "/v2/insights";
+    const calls = input.calls.map((c) => QlooCallMeta.parse(c));
+    const e = Evidence.parse({
+      ...base,
+      qlooCallIds: calls.map((c) => c.qlooCallId),
+      requestIds: calls.map((c) => c.requestId),
+      provenance: { requests: calls.map(() => ({ method: "GET", path, query: {} })) },
     });
     this.evidences.push(e);
     return e;
@@ -221,6 +242,7 @@ export function fakeRun(qloo: QlooApi, registry = new FakeRegistry()): FakeRun {
   const events: EventInput[] = [];
   const ctx: SkillCtx = {
     qloo,
+    publicdata: null,
     ledger,
     geo,
     localities: null,

@@ -338,7 +338,8 @@ function liveDatasets(state: RunState) {
 function buildEvidence(ledger: Ledger, notes: FootnoteRegistry, live: LiveKeyFigure[] | null): BriefEvidence {
   const { state } = ledger;
   const report = state.report;
-  const total = state.qloo.chips.length;
+  // Every lookup: Qloo requests and SEC or Census requests (Part 9).
+  const total = ledger.calls.length;
 
   const job = report?.job ?? state.intent?.job;
   const readyFigure = (metric: Metric, label: string | null, comparator: Metric["comparator"]): BriefKeyFigure => {
@@ -477,7 +478,7 @@ function buildTerminal(state: RunState): BriefTerminal | null {
       const reframe = state.intent?.safety.reframe ?? null;
       const categoryLabel = category ? SAFETY_LABEL[category] : null;
       // An ANALYST refusal comes after the evidence was gathered: only CLERK refuses before any request.
-      const before = state.qloo.chips.length === 0 ? " before any data was requested" : "";
+      const before = state.qloo.chips.length + (state.publicCalls?.chips.length ?? 0) === 0 ? " before any data was requested" : "";
       return {
         kind: "refused",
         category,
@@ -563,8 +564,10 @@ export function buildBriefModel(state: RunState, now: number): BriefModel {
   const pillar = report?.pillar ?? state.intent?.pillar ?? null;
   const job = report?.job ?? state.intent?.job ?? null;
   const briefId = briefIdOf(state.runId);
-  const chipCount = state.qloo.chips.length;
-  const sourceCount = chipCount > 0 || !report ? chipCount : report.receipt.qlooNetwork + report.receipt.qlooCached + report.receipt.qlooReused;
+  const chipCount = ledger.calls.length;
+  const publicReceipt = (report?.receipt.publicEndpoints ?? []).reduce((n, e) => n + e.calls, 0);
+  const sourceCount =
+    chipCount > 0 || !report ? chipCount : report.receipt.qlooNetwork + report.receipt.qlooCached + report.receipt.qlooReused + publicReceipt;
   const minutes = report ? readMinutes({ answer, priors, evidence, risks }) : null;
   const liveBlock = buildLive(ledger, now);
   const header: BriefHeader = {
@@ -605,11 +608,13 @@ export function buildBriefModel(state: RunState, now: number): BriefModel {
   const snapshotIso = report?.dataFreshness.fetchedTo ?? state.createdAt;
   const snapshot = snapshotIso ? formatUtcDate(snapshotIso) : null;
   const cached = state.qloo.cached + state.qloo.reused;
+  const publicCount = chipCount > 0 || !report ? (state.publicCalls?.chips.length ?? 0) : publicReceipt;
   const statusLine: BriefStatusLine = {
     honesty: ["Analytics, not financial advice", "Group-level taste data", "No individuals", snapshot ? `Snapshot ${snapshot}` : null].filter(Boolean).join(" · "),
     snapshot,
     window: ledger.window ? `Trend window ${formatTrendWindow(ledger.window)}` : null,
-    requests: `Qloo ${sourceCount} req · ${cached} cached`,
+    // Public lookups cost no Qloo calls, so they are counted apart: "Qloo 18 req · 6 cached · public data 2 req".
+    requests: [`Qloo ${sourceCount - publicCount} req · ${cached} cached`, publicCount > 0 ? `public data ${publicCount} req` : null].filter(Boolean).join(" · "),
   };
 
   return {

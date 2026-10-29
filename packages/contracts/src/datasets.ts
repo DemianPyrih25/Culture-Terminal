@@ -359,7 +359,11 @@ export const RankedColumn = z.object({
 });
 export type RankedColumn = z.infer<typeof RankedColumn>;
 
-export const RowFlag = z.enum(["UTR", "NEW", "LOCAL", "TARGET", "GHOST_PICK"]);
+/**
+ * Row flags. KEEP, VETO and ADD are the concept-vector verdicts (S12): an analog the concept's taste
+ * keeps, one it vetoes (never a recommendation), and an open-call result the analogs missed.
+ */
+export const RowFlag = z.enum(["UTR", "NEW", "LOCAL", "TARGET", "GHOST_PICK", "KEEP", "VETO", "ADD"]);
 export type RowFlag = z.infer<typeof RowFlag>;
 
 export const RankedRow = z.object({
