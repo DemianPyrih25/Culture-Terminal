@@ -182,7 +182,8 @@ describe("warm-metros on mock Qloo", () => {
 
     // A store holding that one answer as an entry that expires (as one fetched before the D25 rule would be).
     const store = createMemoryQlooStore();
-    await store.putEntry({ ...entry, pinned: false, expiresAt: new Date(NOW().getTime() + 86_400_000) });
+    // The store checks expiry against the real clock, so the day of life counts from the later of the two clocks.
+    await store.putEntry({ ...entry, pinned: false, expiresAt: new Date(Math.max(NOW().getTime(), Date.now()) + 86_400_000) });
     const kv = memoryKv({ [MOCK_LOCALITIES_KV_KEY]: source.kv.values.get(MOCK_LOCALITIES_KV_KEY) });
     const plan = await warm(["--metro", "nashville"], { store, kv });
     expect(plan.text).toMatch(/nashville\s+Nashville\s+pinned\s+network\s+cached\s+network\s+network/);
