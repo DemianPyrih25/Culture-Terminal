@@ -67,7 +67,7 @@ test("the permalink is read-only and noindex (D31)", async ({ page }, testInfo) 
       const res = await page.request.get(`/api/runs/${runId}`);
       const body = (await res.json().catch(() => null)) as { state?: { ended?: unknown } } | null;
       return body?.state?.ended != null;
-    }, { message: "the test run's end was stored", timeout: 15_000 })
+    }, { message: "the test run's end was stored", timeout: process.env.CI ? 30_000 : 15_000 })
     .toBe(true);
   await open(page, `/r/${runId}`);
   await expectAnswer(page);

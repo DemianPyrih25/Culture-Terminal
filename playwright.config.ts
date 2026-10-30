@@ -49,12 +49,13 @@ export default defineConfig({
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: true,
   // One shared dev server compiles each route on its first request (the global setup asks for each once
-  // first): a few workers, not one per core.
-  workers: 4,
+  // first): a few workers, not one per core. The CI runner has two cores, so two there.
+  workers: process.env.CI ? 2 : 4,
   retries: 0,
   forbidOnly: true,
-  // Per test; the test run's own steps set theirs from FAKE_RUN_SECONDS.
-  timeout: 30_000,
+  // Per test; the test run's own steps set theirs from FAKE_RUN_SECONDS. Doubled in CI, where the dev
+  // server compiles heavy routes (/method, /dev/figures) several times slower than a workstation.
+  timeout: process.env.CI ? 60_000 : 30_000,
   expect: { timeout: 10_000 },
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
   // SMOKE_BASE_URL names a server already up: nothing is started.
@@ -76,7 +77,7 @@ export default defineConfig({
   use: {
     baseURL,
     browserName: "chromium",
-    navigationTimeout: 20_000,
+    navigationTimeout: process.env.CI ? 40_000 : 20_000,
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
