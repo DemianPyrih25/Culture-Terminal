@@ -146,7 +146,7 @@ describe.skipIf(!probe.ok)("GHOST attach against Postgres", () => {
     expect(spent.runs).toBe(1);
     expect(spent.usd).toBeGreaterThan(0);
     expect(spent.usd).toBeLessThan(0.02);
-    expect(out).toMatch(/run-agent spend now \$0\.\d+ over 1 run\(s\) of LLM_DEV_USD_CAP \$15\.00/);
+    expect(out).toMatch(/run-agent spend now \$0\.\d+ over 1 run\(s\) of LLM_DEV_USD_CAP \$45\.00/);
   });
 
   it("gives a follow-up's GHOST the earlier questions of its chain, never their answers", async () => {

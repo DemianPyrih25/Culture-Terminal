@@ -1,7 +1,7 @@
 // The question box as a state machine: preview answers (success, refusal, 429, 503, errors), what
 // follows a preview with no confirm step (open, run, show), the run body with the preview's token, and
 // the inline state's words. Invented entities only.
-import { compileMnemonic, JOB_PILLAR, METRO_LABEL, type Intent } from "@ct/contracts";
+import { compileMnemonic, EMPTY_CANDIDATES, JOB_PILLAR, METRO_LABEL, type Intent } from "@ct/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
   askNotice,
@@ -353,6 +353,7 @@ describe("readingGap", () => {
     read_as: { nearest: false, not_covered: [] },
     assumptions: [],
     mnemonic: "",
+    candidates: EMPTY_CANDIDATES,
   };
   /** The preview's reading of an intent, its mnemonic compiled by code as the server does. */
   const understood = (over: Partial<Intent>, match: "exact" | "not_found" = "exact"): Understood => {

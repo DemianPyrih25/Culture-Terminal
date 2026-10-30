@@ -159,6 +159,21 @@ type HeatAttempt = Attempt<QlooResult<QlooHeatmapResponse>>;
  * with a lift falls back to size), else the largest. The concept maps are recorded as evidence.
  */
 async function pickTargets(input: TwinsInput, ctx: SkillCtx, run: BlockRun, targetLoc: MarketLocality): Promise<Picked | { error: string }> {
+  const picked = await pickTargetsBy(input, ctx, run, targetLoc);
+  if ("error" in picked || picked.pick === "named") return picked;
+  // R3 (D49): the areas the question names or a local would check first lead the set, whatever the pick.
+  const metro = input.target_metro;
+  const first = ctx.candidates.areas
+    .filter((c) => c.metro === metro)
+    .map((c) => ctx.geo.neighbourhood(metro, c.id))
+    .filter((a): a is Neighbourhood => a !== null);
+  if (first.length === 0) return picked;
+  const ids = new Set(first.map((a) => a.id));
+  const areas = [...first.map((area) => ({ area, lift: picked.areas.find((x) => x.area.id === area.id)?.lift ?? null })), ...picked.areas.filter((x) => !ids.has(x.area.id))];
+  return { ...picked, areas: areas.slice(0, MAX_TARGET_AREAS) };
+}
+
+async function pickTargetsBy(input: TwinsInput, ctx: SkillCtx, run: BlockRun, targetLoc: MarketLocality): Promise<Picked | { error: string }> {
   const metro = input.target_metro;
   const city = METRO_LABEL[metro];
   const all = ctx.geo.neighbourhoods(metro);

@@ -1,4 +1,5 @@
-import { EntityType, JOB_MNEMONIC, JOB_PILLAR, type Job, type Pillar } from "@ct/contracts";
+import type { EntityType, Job, Pillar } from "@ct/contracts";
+import { ENTITY_TYPE_VALUES, JOB_MNEMONIC, JOB_PILLAR } from "@ct/contracts/values";
 
 /**
  * The command grammar (PLAN §8.2): mnemonics are accelerators for natural language, compiled here in
@@ -88,9 +89,9 @@ function nameWithType(raw: string, job: Job): CommandName | null {
   let type: EntityType | null = DEFAULT_TYPE[job] ?? null;
   let rest = raw;
   if (marker) {
-    const parsed = EntityType.safeParse((marker[1] ?? "").toLowerCase());
-    if (!parsed.success) return null;
-    type = parsed.data;
+    const named = (marker[1] ?? "").toLowerCase();
+    if (!(ENTITY_TYPE_VALUES as readonly string[]).includes(named)) return null;
+    type = named as EntityType;
     rest = raw.slice(0, marker.index);
   }
   const text = part(rest);

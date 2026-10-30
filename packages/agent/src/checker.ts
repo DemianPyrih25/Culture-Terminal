@@ -44,6 +44,17 @@ import {
   numeralValues,
   numeralViolations,
 } from "./report/numerals";
+import {
+  aboutLevelIssues,
+  categoryWinnerIssues,
+  disclosureIssues,
+  forceUntestedVerdicts,
+  hiddenPocketIssues,
+  namedAttributionIssues,
+  proxyIssues,
+  type Disclosure,
+  type QuestionNamed,
+} from "./report/honesty";
 import { phraseHits, type PhraseHit } from "./report/phrases";
 import { isQlooEvidence, metricPublicSource } from "./report/publicData";
 import { misattributedTokens, type SubjectEntity } from "./report/subjects";
@@ -59,13 +70,16 @@ import {
 } from "./tokens";
 
 /**
- * CHECKER (SPEC §6.2, D23): code-only validation of a submit_report draft, rules V1–V11. It takes
+ * CHECKER (SPEC §6.2, D23): code-only validation of a submit_report draft, rules V1–V13. It takes
  * the draft as the strict tool guarantees it (structure only) and enforces what strict mode strips:
  * id formats (V1) and lengths and counts (V9). V7, V8 and V11's period tokens are fixed by code, never rejected. A
  * rejection buys one repair turn; on the second attempt every rejection is downgraded to a warning
  * and the report is accepted (each warning costs confidence, §6.4). The verdict tag names the finding
  * in a few words and is judged with the headline (V4, V9, V10); on the second attempt code cuts or
  * drops it instead (forced), since the brief prints the signal label in its place, and it costs nothing.
+ * Part 11 (R2, R7, D48, D50): V12 keeps concept and area reads honest (report/honesty.ts), V13 keeps an
+ * about-level difference from leading the answer, V9 drops a thesis sentence that restates the disclosure,
+ * and V7 also forces insufficient_evidence when every call on the question's subject came back empty.
  */
 
 /** Below this many ok Qloo evidence bundles the signal is forced to insufficient_evidence (V7); SEC and Census bundles do not count. */
@@ -99,6 +113,17 @@ export interface CheckReportInput<D extends ReportDraftShape = ReportDraftShape>
   competitionAsked?: boolean;
   /** 2 for the draft submitted in the repair turn: rejections become warnings. Defaults to 1. */
   attempt?: 1 | 2;
+  /** The question's concept parts (questionConcepts): V12's messages name them. Defaults to none. */
+  concepts?: readonly string[];
+  /** What the top of the answer already discloses (V9 restated-disclosure rule). Absent: nothing. */
+  disclosure?: Disclosure;
+  /**
+   * The primary's name when it resolved but every call that used it came back empty or failed (V7
+   * extension, SUBJECT_NO_DATA): the signal is forced to insufficient_evidence. Absent or null: no such case.
+   */
+  subjectNoData?: string | null;
+  /** What the question named besides its subject (R3): V12 (e) rejects "named" for expected candidates. Absent: not judged. */
+  named?: QuestionNamed;
 }
 
 export interface CheckResult<D extends ReportDraftShape = ReportDraftShape> {
@@ -113,6 +138,8 @@ export interface CheckResult<D extends ReportDraftShape = ReportDraftShape> {
   reject: boolean;
   /** Investment-advice phrases found by V4, for the `validation` event. */
   adviceTerms: number;
+  /** True when the draft cites a metric read through a look-alike tag (V12a): the report gets category_level. */
+  proxyCited: boolean;
 }
 
 type Blocking = "reject" | "warn";
@@ -145,7 +172,7 @@ export function checkReport<D extends ReportDraftShape>(input: CheckReportInput<
   const bareCount = numerals.reduce((n, x) => n + x.bare.length, 0);
 
   const patched = structuredClone(draft) as ReportDraftShape;
-  const forced = forceSignal(patched, ledger, qlooEnabled);
+  const forced = forceSignal(patched, ledger, qlooEnabled, input.subjectNoData ?? null);
   // The verdict tag is judged (V4, V9, V10) while a repair can still rewrite it. On the last attempt
   // code cuts or drops it instead, and once V7 has dropped it there is nothing left to judge.
   const tagSettled = blocking === "warn" || forced !== null;
@@ -159,6 +186,14 @@ export function checkReport<D extends ReportDraftShape>(input: CheckReportInput<
   // Competition is judged in the claims, the exhibit titles (a title states what its map shows) and the tag.
   const uncounted = uncountedCompetition(draft, ledger, lookup, input.competitionAsked === true);
   const competitionFields = fields.filter((f) => f.role === "claim" || EXHIBIT_TITLE.test(f.path));
+  const honest = { concepts: input.concepts ?? [], ...(input.registry ? { registry: input.registry } : {}) };
+  const proxies = proxyIssues(draft, lookup, honest, blocking);
+  const honesty = [
+    ...proxies,
+    ...categoryWinnerIssues(draft, lookup, honest, blocking, !tagSettled),
+    ...hiddenPocketIssues(draft, ledger, blocking),
+    ...namedAttributionIssues(draft, input.named, blocking),
+  ];
 
   const issues: ValidationIssue[] = [
     ...schemaIssues(draft, blocking).filter((i) => !tagSettled || i.path !== TAG_PATH),
@@ -175,6 +210,10 @@ export function checkReport<D extends ReportDraftShape>(input: CheckReportInput<
     ...demographicIssues(tagSettled ? fields : [...fields, tag], unmeasured, blocking),
     ...competitionIssues(tagSettled ? competitionFields : [...competitionFields, tag], uncounted, gapOf(ledger), blocking),
     ...claimUnits(draft, fields).flatMap((u) => publicCausalIssues(u, lookup, blocking)),
+    ...honesty,
+    ...aboutLevelIssues(draft, lookup, blocking),
+    ...disclosureIssues(patched, input.disclosure, blocking),
+    ...forceUntestedVerdicts(patched, plan, lookup, ledger.evidence),
   ];
 
   if (forced) issues.push(forced);
@@ -192,6 +231,7 @@ export function checkReport<D extends ReportDraftShape>(input: CheckReportInput<
     patchedDraft: patched as D,
     reject: issues.some((i) => i.action === "reject"),
     adviceTerms: phrases.reduce((n, x) => n + x.hits.filter((h) => h.rule.advice).length, 0),
+    proxyCited: proxies.length > 0,
   };
 }
 
@@ -623,12 +663,15 @@ function affinityIssues(unit: ClaimUnit, ledger: LedgerLookup, blocking: Blockin
 
 // V7: forced signal ------------------------------------------------------------------------------------------
 
-function forceSignal(draft: ReportDraftShape, ledger: LedgerSnapshot, qlooEnabled: boolean): ValidationIssue | null {
+function forceSignal(draft: ReportDraftShape, ledger: LedgerSnapshot, qlooEnabled: boolean, subjectNoData: string | null): ValidationIssue | null {
   const ok = ledger.evidence.filter((e) => e.status === "ok" && isQlooEvidence(e)).length;
-  if ((qlooEnabled && ok >= MIN_OK_EVIDENCE) || draft.signal === "insufficient_evidence") return null;
-  const why = qlooEnabled
-    ? `only ${ok} Qloo evidence bundles are ok and ${MIN_OK_EVIDENCE} are needed`
-    : "Qloo is disabled for this run";
+  const noSubject = qlooEnabled && subjectNoData !== null;
+  if ((qlooEnabled && ok >= MIN_OK_EVIDENCE && !noSubject) || draft.signal === "insufficient_evidence") return null;
+  const why = !qlooEnabled
+    ? "Qloo is disabled for this run"
+    : noSubject && ok >= MIN_OK_EVIDENCE
+      ? `Qloo returned no data for ${subjectNoData}, the question's subject, and no look-alike stands in for it`
+      : `only ${ok} Qloo evidence bundles are ok and ${MIN_OK_EVIDENCE} are needed`;
   const from = draft.signal;
   draft.signal = "insufficient_evidence";
   // The tag named a finding the evidence does not carry; the brief prints the forced signal instead.

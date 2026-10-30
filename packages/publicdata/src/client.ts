@@ -3,6 +3,10 @@ import type {
   CacheStatus,
   CensusAcsData,
   CensusGeo,
+  OsmCountQuery,
+  OsmCounts,
+  OsmPlace,
+  OsmPlacesQuery,
   PublicCallMeta,
   PublicDataApi,
   PublicResult,
@@ -26,6 +30,21 @@ import {
 } from "./api";
 import { canServeStale, isSuccessStatus, type PublicCacheEntry, PublicResponseCache } from "./cache";
 import { namespaceFor, publicCacheKey, redactPublicParams } from "./canonical";
+import {
+  DEFAULT_OSM_DAILY_MAX,
+  DEFAULT_OSM_RPS,
+  OSM_CONCURRENCY,
+  OSM_MAX_ATTEMPTS,
+  OSM_MAX_RETRY_AFTER_MS,
+  OSM_RETRY_STATUSES,
+  OSM_RETRY_WAIT_MS,
+  osmCountsSpec,
+  osmDailyKvKey,
+  osmPlacesSpec,
+  type OverpassTarget,
+  overpassTarget,
+} from "./osm/client";
+import { OverpassRuntimeError } from "./osm/parse";
 import { acsData, assertAllowedVariables, canonicalGeo, censusReference, censusRequest, parseAcsRows, validateAcsTable } from "./census";
 import {
   normalizeTicker,
@@ -41,13 +60,15 @@ import {
 } from "./sec";
 
 /**
- * The public-data client: the only path to SEC EDGAR and US Census data, with the Qloo client's
- * guarantees. Per call: canonicalise → cache (L1, L2) → single-flight → limiter (per source) → fetch
+ * The public-data client: the only path to SEC EDGAR, US Census and OpenStreetMap (Overpass) data, with
+ * the Qloo client's guarantees. Per call: canonicalise → cache (L1, L2) → single-flight → limiter (per source) → fetch
  * with retries → classify → keep → log. Every call, network or cache, yields a PublicCallRecord (the
  * `public` event and provenance) and one public_calls row. Public calls never touch Qloo budgets.
  *
  * TTLs: the SEC ticker map and company facts 7 days; Census ACS pinned (a published vintage never
- * changes); a 4xx answer 1 day; 429, 5xx, an SEC 403 block and a Census key redirect are never stored.
+ * changes); OpenStreetMap counts and names 30 days; a 4xx answer 1 day; 429, 5xx, an SEC 403 block, a
+ * Census key redirect and an Overpass runtime error are never stored. OpenStreetMap has its own policy
+ * (osm/client.ts): one request at a time, 1 s apart, two attempts, and a daily request cap.
  */
 
 /** SEC ticker map and company facts. */
@@ -68,9 +89,11 @@ const VINTAGES_TRIED = 3;
 const MISSING_VINTAGE_MS = DAY_MS;
 
 /** How one kind of call is fetched, kept and read. */
-interface CallSpec<T> {
+export interface CallSpec<T> {
   request: PublicRequest;
   reference: string;
+  /** The reference read from the kept body when it depends on the answer (OpenStreetMap: its data date). */
+  referenceFrom?(kept: unknown): string;
   /** TTL of a 2xx answer; null pins it. */
   ttlMs: number | null;
   /** Checks a 2xx JSON body (null for an empty body) and returns what the cache keeps. Throws when malformed. */
@@ -118,13 +141,15 @@ type FetchResult = { kind: "ok"; response: PublicTransportResponse; json: unknow
 interface AttemptProgress {
   attempted: boolean;
   lastStatus: number | null;
+  /** The OpenStreetMap daily cap refused the request before it left: a stale copy may still answer. */
+  capped: boolean;
 }
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const newCallId = (): string => `pc_${randomBytes(8).toString("hex")}`;
 const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
-const SOURCE_NAME = { sec: "SEC EDGAR", census: "the Census Data API" } as const;
+const SOURCE_NAME = { sec: "SEC EDGAR", census: "the Census Data API", osm: "the Overpass API (OpenStreetMap)" } as const;
 
 /** Failures worth a retry's wait or a stale answer: network trouble, 429, 5xx, an SEC 403 block. */
 const isTransient = (err: unknown): boolean =>
@@ -155,7 +180,13 @@ class PublicDataClientImpl implements PublicDataClient {
   private readonly sleep: Sleep;
   private readonly random: () => number;
   private readonly secUserAgent: string | null;
-  private readonly limiters: Record<"sec" | "census", RequestLimiter>;
+  private readonly osmUserAgent: string | null;
+  private readonly osmTarget: OverpassTarget;
+  private readonly osmDailyMax: number;
+  private readonly osmQueryOptions: { long: boolean };
+  /** Requests counted in this process when the store has no shared counter (or it failed). */
+  private readonly localDailyCounts = new Map<string, number>();
+  private readonly limiters: Record<"sec" | "census" | "osm", RequestLimiter>;
   private readonly cache: PublicResponseCache;
   private readonly flights = new Map<string, Promise<Outcome>>();
   private readonly pending = new Set<Promise<unknown>>();
@@ -171,14 +202,21 @@ class PublicDataClientImpl implements PublicDataClient {
     this.sleep = options.sleep ?? realSleep;
     this.random = options.random ?? Math.random;
     this.secUserAgent = options.secUserAgent?.trim() || null;
+    this.osmUserAgent = options.osmUserAgent?.trim() || null;
+    this.osmTarget = overpassTarget(options.osmOverpassUrl);
+    const dailyMax = options.osmDailyMax ?? DEFAULT_OSM_DAILY_MAX;
+    if (!Number.isInteger(dailyMax) || dailyMax < 0) throw new RangeError(`osmDailyMax must be a whole number ≥ 0, got ${dailyMax}`);
+    this.osmDailyMax = dailyMax;
+    this.osmQueryOptions = { long: options.osmLongQueries === true };
     const mock = options.env === "mock";
     // A transport made by createPublicHttpTransport says whether it holds a Census key; others are trusted.
     const censusKeyed = (options.transport as { censusKeyed?: unknown }).censusKeyed !== false;
-    this.configured = Object.freeze({ sec: mock || this.secUserAgent !== null, census: mock || censusKeyed });
-    const limiter = (rps: number) => new RequestLimiter({ rps, concurrency: SOURCE_CONCURRENCY, now: this.now, sleep: this.sleep });
+    this.configured = Object.freeze({ sec: mock || this.secUserAgent !== null, census: mock || censusKeyed, osm: mock || this.osmUserAgent !== null });
+    const limiter = (rps: number, concurrency = SOURCE_CONCURRENCY) => new RequestLimiter({ rps, concurrency, now: this.now, sleep: this.sleep });
     this.limiters = {
       sec: limiter(options.rps?.sec ?? DEFAULT_SEC_RPS),
       census: limiter(options.rps?.census ?? DEFAULT_CENSUS_RPS),
+      osm: limiter(options.rps?.osm ?? DEFAULT_OSM_RPS, OSM_CONCURRENCY),
     };
     this.cache = new PublicResponseCache({ store: this.store, now: this.now, logger: this.logger, track: (w) => this.track(w) });
   }
@@ -211,10 +249,14 @@ class PublicDataClientImpl implements PublicDataClient {
       secTicker: async (ticker) => this.secTicker(scope, toolCallId, ticker),
       secCompanyFacts: async (cik) => this.call(scope, toolCallId, this.factsSpec(padCik(cik))),
       censusAcs: async (geo) => this.censusAcs(scope, toolCallId, geo),
+      osmCounts: async (q: OsmCountQuery): Promise<PublicResult<OsmCounts>> =>
+        this.call(scope, toolCallId, osmCountsSpec(this.osmTarget, q, this.osmQueryOptions)),
+      osmPlaces: async (q: OsmPlacesQuery): Promise<PublicResult<OsmPlace[]>> =>
+        this.call(scope, toolCallId, osmPlacesSpec(this.osmTarget, q, this.osmQueryOptions)),
     };
   }
 
-  // The three reads ------------------------------------------------------------------------------------
+  // The reads ------------------------------------------------------------------------------------------
 
   private secTicker(scope: ScopeState, toolCallId: string | null, ticker: string): Promise<PublicResult<SecCompany | null>> {
     const wanted = normalizeTicker(ticker);
@@ -318,6 +360,9 @@ class PublicDataClientImpl implements PublicDataClient {
     if (request.source === "sec" && this.env !== "mock" && this.secUserAgent === null) {
       throw new PublicDataError("not_configured", "SEC_USER_AGENT is not set: SEC EDGAR requires a User-Agent naming the product and a contact email", { source: "sec" });
     }
+    if (request.source === "osm" && this.env !== "mock" && this.osmUserAgent === null) {
+      throw new PublicDataError("not_configured", "OSM_USER_AGENT is not set: the Overpass API usage policy asks for a User-Agent naming the product and a contact", { source: "osm" });
+    }
     const key = publicCacheKey(request, namespaceFor(this.env));
     const publicCallId = newCallId();
     const started = this.now();
@@ -362,7 +407,7 @@ class PublicDataClientImpl implements PublicDataClient {
   }
 
   private async fetchFresh<T>(scope: ScopeState, key: string, spec: CallSpec<T>, expired: PublicCacheEntry | null): Promise<Outcome> {
-    const progress: AttemptProgress = { attempted: false, lastStatus: null };
+    const progress: AttemptProgress = { attempted: false, lastStatus: null, capped: false };
     try {
       const result = await this.fetchWithRetry(spec.request, scope.signal, progress);
       if (result.kind === "client_error") {
@@ -380,13 +425,13 @@ class PublicDataClientImpl implements PublicDataClient {
           { source: spec.request.source, status: result.response.status, cause: err },
         );
       }
-      const entry = this.entryFrom(key, spec, result.response.status, encoder.encode(JSON.stringify(kept)), spec.ttlMs, scope.runId);
+      const entry = this.entryFrom(key, spec, result.response.status, encoder.encode(JSON.stringify(kept)), spec.ttlMs, scope.runId, kept);
       this.cache.store(entry);
       return { kind: "network", entry, httpStatus: result.response.status };
     } catch (err) {
       if (err instanceof FlightFailure) throw err;
       const aborted = scope.signal?.aborted === true;
-      if (!aborted && progress.attempted && isTransient(err) && expired !== null && canServeStale(expired, this.now())) {
+      if (!aborted && (progress.attempted || progress.capped) && isTransient(err) && expired !== null && canServeStale(expired, this.now())) {
         this.logger.warn({ source: spec.request.source, path: spec.request.path, err: errorText(err) }, "public data network failed; serving a stale cached answer");
         return { kind: "stale", entry: expired, httpStatus: progress.lastStatus };
       }
@@ -397,9 +442,19 @@ class PublicDataClientImpl implements PublicDataClient {
   private async fetchWithRetry(request: PublicRequest, signal: AbortSignal | undefined, progress: AttemptProgress): Promise<FetchResult> {
     let lastError: PublicDataError | null = null;
     const limiter = this.limiters[request.source];
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const osm = request.source === "osm";
+    const attempts = osm ? OSM_MAX_ATTEMPTS : MAX_ATTEMPTS;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
       signal?.throwIfAborted();
       let response: PublicTransportResponse | null = null;
+      if (osm && this.env !== "mock") {
+        try {
+          await this.countOsmRequest();
+        } catch (err) {
+          progress.capped = !progress.attempted;
+          throw err;
+        }
+      }
       try {
         response = await limiter.run(() => {
           progress.attempted = true;
@@ -414,6 +469,12 @@ class PublicDataClientImpl implements PublicDataClient {
         }
         // An oversized or refused request comes back the same: a retry would only add load.
         if (err instanceof PublicDataError && err.code !== "unavailable") throw err;
+        // Overpass: no answer after a 45 s wait is not worth a second one (a stale copy may answer).
+        if (osm) {
+          throw err instanceof PublicDataError
+            ? err
+            : new PublicDataError("unavailable", `request to ${SOURCE_NAME.osm} failed (${errorText(err).slice(0, 120)})`, { source: "osm", cause: err });
+        }
         lastError =
           err instanceof PublicDataError
             ? err
@@ -437,9 +498,41 @@ class PublicDataClientImpl implements PublicDataClient {
             break;
         }
       }
-      if (attempt < MAX_ATTEMPTS) await this.sleep(this.backoffMs(attempt - 1), signal);
+      if (attempt < attempts) {
+        const wait = osm ? osmRetryWaitMs(response) : this.backoffMs(attempt - 1);
+        // Overpass asked for a longer pause than a run can afford: fail now (a stale copy may answer).
+        if (wait === null) break;
+        await this.sleep(wait, signal);
+      }
     }
     throw lastError ?? new PublicDataError("unavailable", `${SOURCE_NAME[request.source]} did not answer`, { source: request.source });
+  }
+
+  /**
+   * Counts one Overpass network request toward OSM_DAILY_MAX (whole deploy, UTC day) and refuses it past
+   * the cap. The shared kv counter is used when the store has one; if it fails the process counts alone.
+   */
+  private async countOsmRequest(): Promise<void> {
+    const key = osmDailyKvKey(this.now());
+    let n: number;
+    try {
+      if (this.store.incrementCounter === undefined) throw new Error("no shared counter");
+      n = await this.store.incrementCounter(key, 1);
+    } catch (err) {
+      if (this.store.incrementCounter !== undefined) {
+        this.logger.warn({ err: errorText(err) }, "OpenStreetMap daily counter not reachable; counting in this process");
+      }
+      n = (this.localDailyCounts.get(key) ?? 0) + 1;
+      this.localDailyCounts.set(key, n);
+      if (this.localDailyCounts.size > 3) this.localDailyCounts.delete(this.localDailyCounts.keys().next().value as string);
+    }
+    if (n > this.osmDailyMax) {
+      throw new PublicDataError(
+        "rate_limited",
+        `the OpenStreetMap request cap for today (${this.osmDailyMax} Overpass requests) is reached; it resets at 00:00 UTC`,
+        { source: "osm" },
+      );
+    }
   }
 
   /** 300·2^n ms · U(0.8, 1.2), capped at 8 s. */
@@ -447,7 +540,15 @@ class PublicDataClientImpl implements PublicDataClient {
     return Math.min(MAX_BACKOFF_MS, Math.round(BASE_BACKOFF_MS * 2 ** retry * (0.8 + 0.4 * this.random())));
   }
 
-  private entryFrom<T>(key: string, spec: CallSpec<T>, status: number, body: Uint8Array, ttlMs: number | null, runId: string | null): PublicCacheEntry {
+  private entryFrom<T>(
+    key: string,
+    spec: CallSpec<T>,
+    status: number,
+    body: Uint8Array,
+    ttlMs: number | null,
+    runId: string | null,
+    kept?: unknown,
+  ): PublicCacheEntry {
     const fetchedAt = this.now();
     return {
       key,
@@ -456,7 +557,7 @@ class PublicDataClientImpl implements PublicDataClient {
       query: { ...spec.request.query },
       status,
       body,
-      reference: this.referenceFor(key, spec),
+      reference: this.referenceFor(key, spec, kept),
       fetchedAt,
       expiresAt: ttlMs === null ? null : fetchedAt + ttlMs,
       pinned: ttlMs === null,
@@ -465,8 +566,9 @@ class PublicDataClientImpl implements PublicDataClient {
   }
 
   /** The call's reference; synthetic answers carry `mock-<hash>` so they never pass for a real filing or table. */
-  private referenceFor<T>(key: string, spec: CallSpec<T>): string {
-    return this.env === "mock" ? `mock-${key.slice(0, 16)}` : spec.reference;
+  private referenceFor<T>(key: string, spec: CallSpec<T>, kept?: unknown): string {
+    if (this.env === "mock") return `mock-${key.slice(0, 16)}`;
+    return kept !== undefined && spec.referenceFrom ? spec.referenceFrom(kept) : spec.reference;
   }
 
   // Delivery and logging ------------------------------------------------------------------------------------
@@ -501,7 +603,8 @@ class PublicDataClientImpl implements PublicDataClient {
       host: spec.request.host,
       path: spec.request.path,
       query: { ...spec.request.query },
-      paramsRedacted: redactPublicParams(spec.request.query),
+      paramsRedacted: traceParams(spec.request),
+      ...requestBody(spec.request),
       cache,
       stale: outcome.kind === "stale",
       ms: Math.max(0, now - started),
@@ -563,7 +666,8 @@ class PublicDataClientImpl implements PublicDataClient {
       host: spec.request.host,
       path: spec.request.path,
       query: { ...spec.request.query },
-      paramsRedacted: redactPublicParams(spec.request.query),
+      paramsRedacted: traceParams(spec.request),
+      ...requestBody(spec.request),
       cache,
       stale: false,
       ms: Math.max(0, this.now() - started),
@@ -624,14 +728,66 @@ class PublicDataClientImpl implements PublicDataClient {
   }
 }
 
+/** The trace and call-log params: the shortened query, or a POST's trace summary. */
+function traceParams(request: PublicRequest): Record<string, string> {
+  return request.method === "POST" && request.trace !== undefined ? { ...request.trace } : redactPublicParams(request.query);
+}
+
+/** method and body for a call record (absent for GET, so SEC and Census records keep their shape). */
+function requestBody(request: PublicRequest): { method?: "POST"; body?: string } {
+  return request.method === "POST" ? { method: "POST", ...(request.body === undefined ? {} : { body: request.body }) } : {};
+}
+
+/** Wait before the OpenStreetMap retry: Retry-After when given (null past 10 s: not worth a run's time), else 5 s. */
+function osmRetryWaitMs(response: PublicTransportResponse | null): number | null {
+  const after = response?.retryAfterS;
+  if (after === undefined || after === null || !Number.isFinite(after) || after < 0) return OSM_RETRY_WAIT_MS;
+  const ms = Math.ceil(after * 1000);
+  return ms > OSM_MAX_RETRY_AFTER_MS ? null : Math.max(ms, 1_000);
+}
+
+/**
+ * Overpass: 429 (too many requests from this address) and 502/503/504 (the instance is at capacity) get
+ * one retry and are never stored; a 200 whose body carries a runtime-error remark is a failure (partial
+ * data), never stored and never retried; another 4xx is a query the server rejects, stored a day.
+ */
+function classifyOsm(response: PublicTransportResponse, attempt: number): Verdict {
+  const { status } = response;
+  const name = SOURCE_NAME.osm;
+  if (status >= 200 && status < 300) {
+    let json: unknown;
+    try {
+      json = JSON.parse(response.body) as unknown;
+    } catch (err) {
+      return { kind: "fatal", error: new PublicDataError("invalid_response", `${name} answered HTTP ${status} with a body that is not JSON`, { source: "osm", status, cause: err }) };
+    }
+    const remark = (json as { remark?: unknown } | null)?.remark;
+    if (typeof remark === "string" && /error/i.test(remark)) {
+      const why = new OverpassRuntimeError(remark.replace(/\s+/g, " ").slice(0, 160));
+      return { kind: "fatal", error: new PublicDataError("unavailable", `${name} could not finish the query (${why.message})`, { source: "osm", status, cause: why }) };
+    }
+    return { kind: "ok", json };
+  }
+  if (status === 429) {
+    return { kind: "retry", error: new PublicDataError("rate_limited", `${name} rate-limited the request (HTTP 429) after ${attempt} attempt(s)`, { source: "osm", status }) };
+  }
+  if (OSM_RETRY_STATUSES.has(status)) {
+    return { kind: "retry", error: new PublicDataError("unavailable", `${name} is busy (HTTP ${status}) after ${attempt} attempt(s)`, { source: "osm", status }) };
+  }
+  if (status >= 400 && status < 500) return { kind: "client_error" };
+  return { kind: "fatal", error: new PublicDataError("unavailable", `${name} answered HTTP ${status}`, { source: "osm", status }) };
+}
+
 /**
  * Status classes. SEC: 403 is its block for an undeclared User-Agent or too many requests (retried,
  * never stored); 404 an unknown CIK (stored a day). Census: a redirect or 401/403 means the key is
  * missing or invalid (never stored); 204 an empty answer. 429 and 5xx are retried and never stored.
+ * OpenStreetMap: classifyOsm.
  */
 function classify(request: PublicRequest, response: PublicTransportResponse, attempt: number): Verdict {
   const { status } = response;
   const source = request.source;
+  if (source === "osm") return classifyOsm(response, attempt);
   if (status >= 200 && status < 300) {
     if (response.body.trim() === "") {
       if (source === "census") return { kind: "ok", json: null };
@@ -673,7 +829,7 @@ function classify(request: PublicRequest, response: PublicTransportResponse, att
 }
 
 /** The error for a stored or fresh 4xx other than the not-found cases each spec names. */
-function httpFailure(source: "sec" | "census", status: number, detail: string | null, what: string): PublicDataError {
+function httpFailure(source: "sec" | "census" | "osm", status: number, detail: string | null, what: string): PublicDataError {
   const reason = detail === null ? "" : `: ${detail}`;
   if (status === 404) return new PublicDataError("not_found", `${SOURCE_NAME[source]} has no ${what} (HTTP 404)`, { source, status });
   return new PublicDataError("bad_request", `${SOURCE_NAME[source]} rejected the request for ${what} (HTTP ${status})${reason}`, { source, status });

@@ -1,4 +1,5 @@
-import type { Neighbourhood, NoValueReason, QlooHeatmapCell, WhiteSpaceQuadrant } from "@ct/contracts";
+import type { AreaStanding, Neighbourhood, NoValueReason, QlooHeatmapCell, WhiteSpaceQuadrant } from "@ct/contracts";
+import { areaStanding } from "../../formulas";
 import { geometricMean, median, withinCallPercentiles } from "../../stats";
 
 /**
@@ -213,6 +214,12 @@ export interface AreaLift {
   reason: NoValueReason | null;
   /** Percentile of the lift among the areas with one (Demand_pct); null with fewer than three such areas. */
   demandPct: number | null;
+  /** R7: mean concept percentile u over the area's covered cells (how popular the concept already is there); null when none. */
+  raw: number | null;
+  /** R7: percentile of `raw` among the areas with one; null with fewer than three such areas. */
+  rawPct: number | null;
+  /** R7: popular, hidden (stands out for its size) or both (areaStanding); null otherwise. */
+  standing: AreaStanding | null;
 }
 
 /**
@@ -234,11 +241,13 @@ export function rollUp(args: {
   const prec = precisionFactor(grid.precision);
   const covered = new Map<string, number>();
   const lifts = new Map<string, number[]>();
+  const heat = new Map<string, number>();
   for (const cell of grid.cells) {
     if (cell.u === null) continue;
     const id = areaOf(cell.geohash);
     if (id === null) continue;
     covered.set(id, (covered.get(id) ?? 0) + 1);
+    heat.set(id, (heat.get(id) ?? 0) + cell.u);
     if (cell.lift !== null) lifts.set(id, [...(lifts.get(id) ?? []), cell.lift]);
   }
 
@@ -259,15 +268,28 @@ export function rollUp(args: {
       conf: lift === null ? null : Math.min(1, n / FULL_CONFIDENCE_CELLS) * prec,
       reason: lift === null ? (reason ?? "insufficient_n") : null,
       demandPct: null,
+      raw: has === 0 || grid.precision <= NO_CLAIM_PRECISION ? null : (heat.get(a.id) ?? 0) / has,
+      rawPct: null,
+      standing: null,
     };
   });
 
   const eligible = rows.filter((r) => r.lift !== null);
-  if (eligible.length < MIN_RANKED_AREAS) return rows;
-  const pct = withinCallPercentiles(eligible.map((r) => r.lift), null).pct;
-  eligible.forEach((r, i) => {
-    r.demandPct = pct[i] ?? null;
-  });
+  if (eligible.length >= MIN_RANKED_AREAS) {
+    const pct = withinCallPercentiles(eligible.map((r) => r.lift), null).pct;
+    eligible.forEach((r, i) => {
+      r.demandPct = pct[i] ?? null;
+    });
+  }
+  // R7: how popular the concept already is in each area, ranked among the areas the maps cover.
+  const popular = rows.filter((r) => r.raw !== null);
+  if (popular.length >= MIN_RANKED_AREAS) {
+    const pct = withinCallPercentiles(popular.map((r) => r.raw), null).pct;
+    popular.forEach((r, i) => {
+      r.rawPct = pct[i] ?? null;
+    });
+  }
+  for (const r of rows) r.standing = areaStanding(r.rawPct, r.demandPct);
   return rows;
 }
 

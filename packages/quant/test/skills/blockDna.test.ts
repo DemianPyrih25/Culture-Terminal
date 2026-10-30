@@ -483,10 +483,11 @@ describe("block_dna: the happy path", () => {
     ]);
     const deltas = byKey("block.rank_delta").map((m) => [m.value, m.display, m.badge, m.unit]);
     expect(deltas).toEqual([
+      // "+2 of 50" is about level (V13), never a gain.
       [45, "+45 · new here", "DERIVED", "delta"],
       [6, "+6", "DERIVED", "delta"],
       [-47, "−47 · outside the top 50 here", "DERIVED", "delta"],
-      [2, "+2", "DERIVED", "delta"],
+      [2, "+2 · about level", "DERIVED", "delta"],
       [-42, "−42 · outside the top 50 here", "DERIVED", "delta"],
       [49, "+49 · new here", "DERIVED", "delta"],
       [48, "+48 · new here", "DERIVED", "delta"],

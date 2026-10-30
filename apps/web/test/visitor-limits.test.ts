@@ -13,6 +13,8 @@ interface Start {
   ipHash: string | null;
   lane: "public" | "judge";
   at: number;
+  /** False for a run that never left the queue (started_at null). */
+  started?: boolean;
 }
 
 const store = { now: 0, starts: [] as Start[] };
@@ -23,7 +25,8 @@ function matching(options: CountRunsSinceOptions): Start[] {
       s.hash.startsWith(options.hashPrefix) &&
       s.at > store.now - options.sinceMs &&
       (options.ipHash === undefined || s.ipHash === options.ipHash) &&
-      (options.lane === undefined || s.lane === options.lane),
+      (options.lane === undefined || s.lane === options.lane) &&
+      (options.startedOnly !== true || s.started !== false),
   );
 }
 
@@ -46,6 +49,8 @@ const { laneSlots } = await import("../server/run-manager");
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const db = {} as Parameters<typeof visitorWait>[0];
+/** The window arithmetic below was written against small limits; D24's defaults are checked on their own. */
+const SMALL = { maxActive: 1, perHour: 3, perDay: 8 };
 
 /** A public live run the visitor starts now. */
 const start = (ipHash: string | null, over: Partial<Start> = {}) =>
@@ -57,41 +62,44 @@ beforeEach(() => {
 });
 
 describe("visitorWait", () => {
-  it("allows SPEC §10.4's 3 starts an hour, then says when the oldest leaves the hour", async () => {
-    expect(DEFAULT_VISITOR_LIMITS).toEqual({ maxActive: 1, perHour: 3, perDay: 8 });
+  it("defaults to D24: 2 at once, 10 an hour, 30 a day", () => {
+    expect(DEFAULT_VISITOR_LIMITS).toEqual({ maxActive: 2, perHour: 10, perDay: 30 });
+  });
+
+  it("allows 3 starts an hour, then says when the oldest leaves the hour", async () => {
     for (let i = 0; i < 3; i++) {
-      expect(await visitorWait(db, "visitor-a")).toBeNull();
+      expect(await visitorWait(db, "visitor-a", SMALL)).toBeNull();
       start("visitor-a");
       store.now += 10 * MIN;
     }
     // 30 min after the first start: it leaves the hour in 30 min.
-    expect(await visitorWait(db, "visitor-a")).toEqual({ window: "hour", retryAfterS: 30 * 60 });
+    expect(await visitorWait(db, "visitor-a", SMALL)).toEqual({ window: "hour", retryAfterS: 30 * 60 });
     // Another visitor is counted apart.
-    expect(await visitorWait(db, "visitor-b")).toBeNull();
+    expect(await visitorWait(db, "visitor-b", SMALL)).toBeNull();
     store.now += 30 * MIN;
-    expect(await visitorWait(db, "visitor-a")).toBeNull();
+    expect(await visitorWait(db, "visitor-a", SMALL)).toBeNull();
   });
 
   it("allows 8 starts a day, then says when the oldest leaves the day", async () => {
     for (let i = 0; i < 8; i++) {
-      expect(await visitorWait(db, "visitor-a")).toBeNull();
+      expect(await visitorWait(db, "visitor-a", SMALL)).toBeNull();
       start("visitor-a");
       store.now += 2 * 60 * MIN;
     }
-    expect(await visitorWait(db, "visitor-a")).toEqual({ window: "day", retryAfterS: 8 * 3600 });
+    expect(await visitorWait(db, "visitor-a", SMALL)).toEqual({ window: "day", retryAfterS: 8 * 3600 });
     store.now += 8 * HOUR;
-    expect(await visitorWait(db, "visitor-a")).toBeNull();
+    expect(await visitorWait(db, "visitor-a", SMALL)).toBeNull();
   });
 
   it("says the longer wait when both windows are full: a day that frees a start soon still waits for the hour", async () => {
     // 8 starts in the day, the oldest 23.9 h ago, 3 of them in the last 5 minutes.
     for (const agoMin of [23.9 * 60, 20 * 60, 15 * 60, 10 * 60, 5 * 60, 5, 3, 1]) start("visitor-a", { at: store.now - agoMin * MIN });
     // The day frees a start in 6 min; the hour, when the 5-minute-old start leaves it, in 55.
-    const wait = await visitorWait(db, "visitor-a");
+    const wait = await visitorWait(db, "visitor-a", SMALL);
     expect(wait).toEqual({ window: "hour", retryAfterS: 55 * 60 });
     // Waiting that long is enough: both windows have room again.
     store.now += (wait?.retryAfterS ?? 0) * 1000;
-    expect(await visitorWait(db, "visitor-a")).toBeNull();
+    expect(await visitorWait(db, "visitor-a", SMALL)).toBeNull();
     // A day that holds longer than the hour is still the day's: with 5 a day, the 5th newest (10 h old) frees one in 14 h.
     store.now -= (wait?.retryAfterS ?? 0) * 1000;
     expect(await visitorWait(db, "visitor-a", { maxActive: 1, perHour: 3, perDay: 5 })).toEqual({ window: "day", retryAfterS: 14 * 3600 });
@@ -101,7 +109,7 @@ describe("visitorWait", () => {
     // Four starts in the hour against a limit of 3 (a limit lowered meanwhile): the 3rd newest, 40 min
     // old, frees one when it leaves the hour in 20 min; the oldest leaving (in 10 min) frees none.
     for (const agoMin of [50, 40, 20, 5]) start("visitor-a", { at: store.now - agoMin * MIN });
-    expect(await visitorWait(db, "visitor-a")).toEqual({ window: "hour", retryAfterS: 20 * 60 });
+    expect(await visitorWait(db, "visitor-a", SMALL)).toEqual({ window: "hour", retryAfterS: 20 * 60 });
     expect(await visitorWait(db, "visitor-a", { maxActive: 1, perHour: 10, perDay: 0 })).toEqual({ window: "day", retryAfterS: 24 * 3600 });
   });
 
@@ -113,9 +121,18 @@ describe("visitorWait", () => {
     start(null);
     start("visitor-a");
     start("visitor-a");
-    expect(await visitorWait(db, "visitor-a")).toBeNull();
+    expect(await visitorWait(db, "visitor-a", SMALL)).toBeNull();
     start("visitor-a");
-    expect(await visitorWait(db, "visitor-a")).toMatchObject({ window: "hour" });
+    expect(await visitorWait(db, "visitor-a", SMALL)).toMatchObject({ window: "hour" });
+  });
+
+  it("counts no run that never left the queue (queue timeout, cancel or shutdown while queued)", async () => {
+    for (let i = 0; i < 5; i++) start("visitor-a", { started: false });
+    start("visitor-a");
+    start("visitor-a");
+    expect(await visitorWait(db, "visitor-a", SMALL)).toBeNull();
+    start("visitor-a");
+    expect(await visitorWait(db, "visitor-a", SMALL)).toMatchObject({ window: "hour" });
   });
 
   it("keeps a hash only past the day window, never shorter", () => {
@@ -125,14 +142,17 @@ describe("visitorWait", () => {
 
 describe("visitorWaitMessage", () => {
   it("names the limit reached and the wait in words, never 'tomorrow' for a short one", () => {
-    expect(visitorWaitMessage({ window: "hour", retryAfterS: 55 * 60 })).toBe(
+    expect(visitorWaitMessage({ window: "hour", retryAfterS: 55 * 60 }, SMALL)).toBe(
       "You have started 3 live questions in the last hour. Try again in 55 minutes; answers you already have still open.",
     );
-    expect(visitorWaitMessage({ window: "day", retryAfterS: 360 })).toBe(
+    expect(visitorWaitMessage({ window: "day", retryAfterS: 360 }, SMALL)).toBe(
       "You have started 8 live questions in the last day. Try again in 6 minutes; answers you already have still open.",
     );
     expect(visitorWaitMessage({ window: "day", retryAfterS: 14 * 3600 - 30 }, { maxActive: 1, perHour: 1, perDay: 1 })).toBe(
       "You have started 1 live question in the last day. Try again in about 14 hours; answers you already have still open.",
+    );
+    expect(visitorWaitMessage({ window: "hour", retryAfterS: 60 })).toBe(
+      "You have started 10 live questions in the last hour. Try again in 1 minute; answers you already have still open.",
     );
   });
 

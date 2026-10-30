@@ -1,4 +1,5 @@
-import { AGE_BUCKET_LABEL, METRO_LABEL, type IntentReadAs, type RunState, type ToolCallState } from "@ct/contracts";
+import type { IntentReadAs, RunState, ToolCallState } from "@ct/contracts";
+import { AGE_BUCKET_LABEL, METRO_LABEL } from "@ct/contracts/values";
 import { DESK_LABEL, filterLabel, JOB_LABEL, MATCH_LABEL, plural, TOOL_LABEL } from "./format";
 import { cacheLabel, refText, refsForCalls, shortReference, type Ledger } from "./ledger";
 import { stoppedEarly, uncheckedDigest } from "./live";
@@ -227,6 +228,23 @@ export function checkerLine(state: RunState): CheckerLine {
   };
 }
 
+/** "$0.012" under a dollar (a fraction of a cent reads "under $0.01"), "$1.20" above. */
+function usdText(usd: number): string {
+  if (usd <= 0) return "$0";
+  if (usd < 0.01) return "under $0.01";
+  return `$${usd < 1 ? usd.toFixed(3).replace(/0$/, "") : usd.toFixed(2)}`;
+}
+
+/**
+ * The receipt's context line (R4, R5): "Context: AI $0.012 · web $0.041 (3 searches)", from the report's
+ * receipt; null when the run had no side calls (runs stored before Part 11, or both turned off).
+ */
+export function contextReceiptLine(state: Pick<RunState, "report">): string | null {
+  const c = state.report?.receipt.context;
+  if (!c) return null;
+  return `Context: AI ${usdText(c.aiUsd)} · web ${usdText(c.webUsd)} (${plural(c.webSearches, "search", "searches")})`;
+}
+
 export function buildMethod(state: RunState): BriefMethod {
   const steps = methodSteps(state);
   const publicCalls = state.publicCalls ?? { network: 0, cached: 0, reused: 0, chips: [] };
@@ -243,6 +261,7 @@ export function buildMethod(state: RunState): BriefMethod {
       clerk: state.report?.receipt.models.clerk ?? null,
       analyst: state.report?.receipt.models.analyst ?? state.model,
     },
+    context: contextReceiptLine(state),
     requests: {
       total,
       network: state.qloo.network + publicCalls.network,

@@ -20,6 +20,7 @@ import {
   type FindingDraft,
 } from "../findings";
 import type { FormulaId } from "../formulas";
+import { buildTasteMap, TASTE_MAP_DRAW_MIN_K } from "../mds";
 import type { SubsStats } from "../subs";
 import { addSkillMetric } from "./common";
 import { displayRanks, fixed2, rankText, safeFullName, safeName } from "./format";
@@ -486,6 +487,50 @@ export function addSubstitutionMap(
       targetIndex: TARGET,
       annotations,
     }),
+  });
+  run.datasetIds.push(dataset.id);
+}
+
+/** The Category Taste Map's formulas: the projection, then the similarity and hub it draws. */
+export const TASTE_MAP_FORMULA_IDS: readonly FormulaId[] = ["taste_map_mds", "subs.similarity", "subs.hub"];
+
+/**
+ * The "Category Taste Map" TasteMap dataset, drawn from the Substitution Map's own matrix: no extra
+ * Qloo call. Only a complete map with at least TASTE_MAP_DRAW_MIN_K members gets one: a pair the
+ * budget or a failed call left out is unknown, not "no relationship", and would bend the map. A
+ * member dropped from a scoring response is left out for the same reason and listed as omitted.
+ */
+export function addTasteMap(
+  run: SubsRun,
+  members: MapMembers,
+  matrix: ScoredMatrix,
+  stats: SubsStats,
+  evidenceIds: readonly EvidenceId[],
+): void {
+  if (!isComplete(matrix)) return;
+  const dropped = new Set(matrix.droppedMembers);
+  const placed = members.entities.map((_, i) => i).filter((i) => !dropped.has(i));
+  if (placed.length < TASTE_MAP_DRAW_MIN_K) return;
+  const label = (i: number) => safeFullName(members.entities[i]!.name);
+  const built = buildTasteMap({
+    source: "substitution_map",
+    members: placed.map((i) => ({
+      key: members.entities[i]!.ref,
+      label: label(i),
+      ref: members.entities[i]!.ref,
+      hub: stats.hub[i] ?? null,
+      target: i === TARGET,
+    })),
+    sim: placed.map((i) => placed.map((j) => (i === j ? null : (matrix.cells[i]![j]!.value ?? null)))),
+    omitted: [...dropped].map((i) => ({ label: label(i), ref: members.entities[i]!.ref, reason: "dropped" as const })),
+  });
+  if (!built.ok || built.payload.k < TASTE_MAP_DRAW_MIN_K) return;
+  const dataset = run.ctx.ledger.addDataset({
+    kind: "TasteMap",
+    title: `Category Taste Map · ${nameOf(members, TARGET)}`,
+    evidenceIds: [...evidenceIds],
+    formulaIds: [...TASTE_MAP_FORMULA_IDS],
+    payload: built.payload,
   });
   run.datasetIds.push(dataset.id);
 }

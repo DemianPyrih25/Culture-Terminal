@@ -42,6 +42,15 @@ describe("scanBundleText", () => {
     expect(scanBundleText(FILE, `["X-Api-Key","Content-Type"]`)).toEqual([]);
   });
 
+  it("flags a UUID-shaped id (a possible Qloo entity id) but not the nil UUID or a doc link (R8)", () => {
+    // Invented id, built at runtime so this test file holds no UUID literal.
+    const id = ["0a1b2c3d", "0000", "4000", "8000", "00000000aaaa"].join("-");
+    expect(scanBundleText(FILE, `{"signal.interests.entities":"${id}"}`)).toMatchObject([{ rule: "bundle-entity-id" }]);
+    expect(scanBundleText(FILE, `q=${id.toUpperCase()}`)).toHaveLength(1);
+    expect(scanBundleText(FILE, `x="${["0", "0", "0", "0"].map((_, i) => "0".repeat([8, 4, 4, 4][i] ?? 4)).join("-")}-000000000000"`)).toEqual([]);
+    expect(scanBundleText(FILE, `![diagram](https://example.com/assets/12/${id})`)).toEqual([]);
+  });
+
   it("passes ordinary minified code", () => {
     const code = `(()=>{"use strict";let e=document.querySelector("#a");e&&(e.textContent="Culture Terminal")})();`;
     expect(scanBundleText(FILE, code)).toEqual([]);

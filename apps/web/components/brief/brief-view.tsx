@@ -76,10 +76,11 @@ interface PageProps {
   elapsedMs: number;
   connectionLost?: boolean;
   replay?: WorkingReplay | null;
+  unlisted?: boolean;
 }
 
 /** The working view until the report arrives; then the answer, with its How we know drawer. */
-function RunPage({ runId, model, state, mode, links, fallbackQuestion, elapsedMs, connectionLost, replay }: PageProps) {
+function RunPage({ runId, model, state, mode, links, fallbackQuestion, elapsedMs, connectionLost, replay, unlisted }: PageProps) {
   // While the answer is made: its key numbers and main chart so far, worded as the answer will word them.
   const answer = useMemo(
     () => (state.report === null ? buildAnswerModel(model, { resolves: state.resolves, ghost: state.ghost, report: null, metrics: state.metrics }, { fallbackQuestion }) : null),
@@ -88,7 +89,7 @@ function RunPage({ runId, model, state, mode, links, fallbackQuestion, elapsedMs
 
   // The report is in: the answer, with its How we know drawer.
   if (state.report !== null || answer === null) {
-    return <PermalinkAnswer model={model} state={state} runId={runId} mode={mode} links={links} fallbackQuestion={fallbackQuestion} />;
+    return <PermalinkAnswer model={model} state={state} runId={runId} mode={mode} links={links} fallbackQuestion={fallbackQuestion} unlisted={unlisted} />;
   }
 
   const chart: ReactNode = answer.charts.main ? <DraftChartCard chart={answer.charts.main} draft={state.draft} /> : null;
@@ -109,7 +110,7 @@ function RunPage({ runId, model, state, mode, links, fallbackQuestion, elapsedMs
   );
 }
 
-function StaticBrief({ runId, initialState, serverNow, links, fallbackQuestion = null }: BriefViewProps) {
+function StaticBrief({ runId, initialState, serverNow, links, fallbackQuestion = null, unlisted = false }: BriefViewProps) {
   const model = useMemo(() => buildBriefModel(initialState, serverNow), [initialState, serverNow]);
   return (
     <RunPage
@@ -119,12 +120,13 @@ function StaticBrief({ runId, initialState, serverNow, links, fallbackQuestion =
       mode="static"
       links={links}
       fallbackQuestion={fallbackQuestion}
+      unlisted={unlisted}
       elapsedMs={initialState.ended?.elapsedMs ?? 0}
     />
   );
 }
 
-function LiveBrief({ runId, initialState, serverNow, events, links, fallbackQuestion = null }: BriefViewProps) {
+function LiveBrief({ runId, initialState, serverNow, events, links, fallbackQuestion = null, unlisted = false }: BriefViewProps) {
   const client = useMemo(() => streamOptions(events), [events]);
   const handle = useRunState(runId, { client });
   const state = handOver(handle.state, initialState);
@@ -139,13 +141,14 @@ function LiveBrief({ runId, initialState, serverNow, events, links, fallbackQues
       mode="live"
       links={links}
       fallbackQuestion={fallbackQuestion}
+      unlisted={unlisted}
       elapsedMs={model.live?.progress.elapsedMs ?? state.ended?.elapsedMs ?? 0}
       connectionLost={lost}
     />
   );
 }
 
-function ReplayBrief({ runId, initialState, serverNow, events, links, fallbackQuestion = null }: BriefViewProps) {
+function ReplayBrief({ runId, initialState, serverNow, events, links, fallbackQuestion = null, unlisted = false }: BriefViewProps) {
   const [speed, setSpeed] = useState<ShownSpeed>(REPLAY_SPEEDS_SHOWN[1]);
   const client = useMemo(() => streamOptions(events), [events]);
   const handle = useRunState(runId, { replay: { speed }, client });
@@ -174,6 +177,7 @@ function ReplayBrief({ runId, initialState, serverNow, events, links, fallbackQu
       mode="replay"
       links={links}
       fallbackQuestion={initialState.question ?? fallbackQuestion}
+      unlisted={unlisted}
       elapsedMs={controls?.positionMs ?? 0}
       replay={replay}
     />

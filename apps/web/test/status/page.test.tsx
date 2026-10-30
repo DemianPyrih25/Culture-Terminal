@@ -86,6 +86,23 @@ describe("/status", () => {
     expect(html).toContain('data-status="empty"');
   });
 
+  it("shows the run queue's depth when the reading carries it, and no row when it does not (D24)", async () => {
+    expect(await render()).not.toContain("data-queue=");
+    const withQueue = (queue: { waiting: number | null; max: number; waitS: number }) => {
+      const base = statusReport();
+      return { ...base, runs: { ...base.runs, queue } } as ReturnType<typeof statusReport>;
+    };
+    const waiting = await render(withQueue({ waiting: 2, max: 12, waitS: 120 }));
+    expect(waiting).toContain('data-queue="2"');
+    expect(waiting).toContain("Waiting for a slot");
+    expect(waiting).toContain("of 12 waiting · each for up to 120 s");
+    expect(waiting).toContain('aria-label="Runs waiting for a slot"');
+    expect(await render(withQueue({ waiting: null, max: 12, waitS: 120 }))).toContain('data-queue="unread"');
+    const off = await render(withQueue({ waiting: 0, max: 0, waitS: 120 }));
+    expect(off).toContain('data-queue="off"');
+    expect(off).toContain("Queue off");
+  });
+
   it("says what stops live analysis and marks tripped breakers", async () => {
     const base = statusReport();
     const message = "Live analysis is paused: this month's Qloo quota is at its floor.";
@@ -213,5 +230,27 @@ describe("/status", () => {
     const html = await render(report);
     for (const canary of Object.values(extra)) expect(html).not.toContain(canary);
     expect(html).toContain("never shown");
+  });
+});
+
+describe("shared use today (Part 11)", () => {
+  it("shows brand screens, the context calls' spend and searches, and OpenStreetMap requests against the cap", async () => {
+    const html = await render(
+      statusReport({ today: { screens: 4, context: { aiUsd: 0.03, webUsd: 0.12, webSearches: 9 }, osm: { configured: true, requests: 40, dailyMax: 2000 } } }),
+    );
+    expect(html).toContain('id="today"');
+    expect(html).toContain("Brand screens");
+    expect(html).toContain("screens today");
+    expect(html).toContain("9 searches");
+    expect(html).toContain("OpenStreetMap requests");
+    expect(html).toContain("of 2,000");
+  });
+
+  it("says when OpenStreetMap is not configured, and leaves the section out for an older reading", async () => {
+    const off = await render(statusReport({ today: { screens: null, context: { aiUsd: null, webUsd: null, webSearches: null }, osm: { configured: false, requests: null, dailyMax: 2000 } } }));
+    expect(off).toContain("Not configured: place counts need OSM_USER_AGENT.");
+    expect(off).toContain("Not read");
+    const old = await render(statusReport());
+    expect(old).not.toContain('id="today"');
   });
 });

@@ -59,6 +59,8 @@ describe.skipIf(!available)("lanes and breakers against Postgres", () => {
       agentHourlyCap: 10_000,
       judgeHourlyCap: 10_000,
       llmDailyUsdCap: 10_000,
+      // Small per-visitor limits keep these tests short; D24's defaults (2 / 10 / 30) are tested in visitor-limits.test.ts.
+      visitorLimits: { maxActive: 1, perHour: 3, perDay: 8 },
       ...options,
     });
     managers.push(runs);

@@ -116,12 +116,13 @@ describe("the slugs of config/showcases.json", () => {
     expect(entries[2]?.steps.map((s) => s.from)).toEqual(["S2", null, null]);
   });
 
-  it("reads the repo's config: seven showcases, the chain and the trust example, every slug distinct", () => {
+  it("reads the repo's config: thirteen showcases, the chain and the trust example, every slug distinct", () => {
     const entries = showcaseEntries(loadShowcaseConfig());
-    expect(entries.map((e) => e.code)).toEqual(["S1", "S2", "S3", "S4", "S5", "S6", "S7", "CHAIN", "TRUST"]);
-    expect(entries.map((e) => e.order)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    const codes = Array.from({ length: 13 }, (_, i) => `S${i + 1}`);
+    expect(entries.map((e) => e.code)).toEqual([...codes, "CHAIN", "TRUST"]);
+    expect(entries.map((e) => e.order)).toEqual(Array.from({ length: 15 }, (_, i) => i + 1));
     expect(new Set(entries.map((e) => e.slug)).size).toBe(entries.length);
-    expect(plannedRuns(entries)).toBe(7 + 3 + 1);
+    expect(plannedRuns(entries)).toBe(13 + 3 + 1);
   });
 });
 

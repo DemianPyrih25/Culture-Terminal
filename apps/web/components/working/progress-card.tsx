@@ -168,6 +168,45 @@ export function ProgressCard({
 }
 
 /**
+ * ProgressCard · queued (§8.1 Queued, D24): every live slot is busy, so the question waits its turn. Its
+ * place and the longest it may still wait, never a guess of when it starts. The progress card takes
+ * this slot as soon as the run starts.
+ */
+export function QueuedCard({ position, waitLeftS, editHref }: { position: number; waitLeftS: number; editHref: string | null }) {
+  return (
+    <Card padding="lg" aria-label="Queued" data-progress-card="queued" className="flex flex-col gap-7 max-md:gap-5">
+      <div className="flex flex-col gap-1 md:flex-row md:items-end md:justify-between md:gap-6">
+        <h2 className="type-title-l text-ink max-md:type-title-l-sm" data-status-title>
+          Queued · position {position}
+        </h2>
+        <p className="type-label text-ink-2 tabular-nums md:pb-1" data-time>
+          up to {waitLeftS} s wait
+        </p>
+      </div>
+      <ProgressTrack fraction={0} />
+      <div className="flex flex-col gap-3">
+        <p className="flex items-start gap-2 type-body text-ink" data-queue-note>
+          <span className="flex h-6 shrink-0 items-center">
+            <Icon name="clock-4" size={16} className="text-ink-2" />
+          </span>
+          Every live slot is busy right now. Your question starts on its own when one frees up, and nothing is spent while it waits.
+        </p>
+        {editHref ? (
+          <div className="flex">
+            <ButtonLink href={editHref} variant="quiet" icon="pencil" trailing={null} className="-ml-3">
+              Edit question
+            </ButtonLink>
+          </div>
+        ) : null}
+      </div>
+      <p role="status" aria-live="polite" className="sr-only">
+        Queued, position {position}
+      </p>
+    </Card>
+  );
+}
+
+/**
  * ProgressCard · not found (N16 4): the name is not in Qloo's data. The steps stacked, step 1 done, step
  * 2 says so, and "Edit question" under it.
  */

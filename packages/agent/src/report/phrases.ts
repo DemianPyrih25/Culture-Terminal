@@ -24,9 +24,9 @@ export const PHRASE_RULES: readonly PhraseRule[] = [
   { id: "price_target", re: /\bprice\s+targets?\b/i, advice: true, hint: "no price targets" },
   {
     id: "valuation",
-    re: /\b(?:undervalued|overvalued|underpriced|overpriced)\b/i,
+    re: /\b(?:undervalued|overvalued|underpriced|overpriced|cheaper)\b|\bcosts?\s+less\b/i,
     advice: true,
-    hint: "no valuation or pricing claims; there is no price data (UNDER-THE-RADAR is fit minus popularity)",
+    hint: "no valuation, pricing or cost claims; there is no price or fee data (UNDER-THE-RADAR is fit minus popularity, not a lower cost)",
   },
   {
     id: "certainty",

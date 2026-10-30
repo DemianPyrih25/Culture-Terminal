@@ -34,6 +34,9 @@ import {
   suggestedPopularityCap,
   tasteIslandFinding,
   weakCategoryFitFinding,
+  oversuppliedFinding,
+  undersuppliedFinding,
+  lowStreetActivityFinding,
   type FindingDraft,
   type PopularityDominanceResult,
 } from "../src/findings";
@@ -149,8 +152,45 @@ function oneOfEach(): FindingDraft[] {
         otherCategories: ["telecom", "travel"],
       }),
     ),
+    fired(
+      oversuppliedFinding({
+        cityLabel: "Nashville",
+        candidates: [{ area: "Area North", typeLabel: "Cafes", count: 12, index: 1.8, cityPerKm2: 2 }],
+      }),
+    ),
+    fired(
+      undersuppliedFinding({
+        cityLabel: "Nashville",
+        candidates: [{ area: "Area South", typeLabel: "Cafes", count: 1, index: 0.3, cityPerKm2: 2 }],
+      }),
+    ),
+    fired(
+      lowStreetActivityFinding({
+        cityLabel: "Nashville",
+        areas: [{ area: "Area East", activityPerKm2: 1 }],
+        cityActivityPerKm2: 10,
+      }),
+    ),
   ];
 }
+
+describe("supply findings (R6)", () => {
+  it("fire only past the SUPPLY thresholds", () => {
+    const c = { area: "A", typeLabel: "Cafes", cityPerKm2: 2 };
+    expect(oversuppliedFinding({ cityLabel: "X", candidates: [{ ...c, count: 4, index: 3 }] })).toBeNull();
+    expect(oversuppliedFinding({ cityLabel: "X", candidates: [{ ...c, count: 5, index: 1.49 }] })).toBeNull();
+    expect(oversuppliedFinding({ cityLabel: "X", candidates: [{ ...c, count: 5, index: 1.5 }] })?.kind).toBe("OVERSUPPLIED");
+    expect(undersuppliedFinding({ cityLabel: "X", candidates: [{ ...c, count: 0, index: 0.5 }] })?.kind).toBe("UNDERSUPPLIED");
+    expect(undersuppliedFinding({ cityLabel: "X", candidates: [{ ...c, count: 0, index: 0, cityPerKm2: 0 }] })).toBeNull();
+    // Read against the area's street activity: 2× the city's density on a street 2× as busy is the same share.
+    expect(oversuppliedFinding({ cityLabel: "X", candidates: [{ ...c, count: 9, index: 2, activityIndex: 2 }] })).toBeNull();
+    expect(oversuppliedFinding({ cityLabel: "X", candidates: [{ ...c, count: 9, index: 2.5, activityIndex: 2 }] })?.kind).toBe("OVERSUPPLIED");
+    expect(undersuppliedFinding({ cityLabel: "X", candidates: [{ ...c, count: 1, index: 0.4, activityIndex: 0.45 }] })).toBeNull();
+    expect(undersuppliedFinding({ cityLabel: "X", candidates: [{ ...c, count: 1, index: 0.3, activityIndex: 0.45 }] })?.kind).toBe("UNDERSUPPLIED");
+    expect(lowStreetActivityFinding({ cityLabel: "X", areas: [{ area: "A", activityPerKm2: 3 }], cityActivityPerKm2: 10 })).toBeNull();
+    expect(lowStreetActivityFinding({ cityLabel: "X", areas: [{ area: "A", activityPerKm2: 1 }], cityActivityPerKm2: null })).toBeNull();
+  });
+});
 
 describe("policy tables", () => {
   it("map every finding kind to a suggestion and a severity", () => {
@@ -178,6 +218,9 @@ describe("policy tables", () => {
       ANALOG_VETOED: "rank_candidates",
       TASTE_FINANCIALS_SPLIT: null,
       PARTNERS_ONE_CATEGORY: "sponsor_slate",
+      OVERSUPPLIED: "block_dna",
+      UNDERSUPPLIED: "block_dna",
+      LOW_STREET_ACTIVITY: null,
     });
   });
 });
@@ -201,7 +244,7 @@ describe("every finding kind", () => {
       // EMPTY_RESULT and DROPPED_CANDIDATES have no fixed tool; they carry the caller's.
       if (FINDING_SUGGESTION[kind] !== null) expect(d.suggestion.tool).toBe(FINDING_SUGGESTION[kind]);
     } else {
-      expect(["GENERATIONAL_SPLIT", "HIDDEN_POCKET", "DROPPED_CANDIDATES", "NO_TREND_SIGNAL", "LOCATION_FALLBACK", "TASTE_FINANCIALS_SPLIT"]).toContain(kind);
+      expect(["GENERATIONAL_SPLIT", "HIDDEN_POCKET", "DROPPED_CANDIDATES", "NO_TREND_SIGNAL", "LOCATION_FALLBACK", "TASTE_FINANCIALS_SPLIT", "LOW_STREET_ACTIVITY"]).toContain(kind);
     }
   });
 });

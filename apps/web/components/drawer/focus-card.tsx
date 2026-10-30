@@ -24,13 +24,13 @@ export interface FocusView {
 
 const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
-const SOURCE_WORDS = { qloo: "Qloo", sec: "SEC EDGAR filings", census: "US Census estimates" } as const;
-const LOOKUP_WORDS = { qloo: "Qloo", sec: "SEC EDGAR", census: "US Census" } as const;
+const SOURCE_WORDS = { qloo: "Qloo", sec: "SEC EDGAR filings", census: "US Census estimates", osm: "OpenStreetMap (© OpenStreetMap contributors)" } as const;
+const LOOKUP_WORDS = { qloo: "Qloo", sec: "SEC EDGAR", census: "US Census", osm: "OpenStreetMap" } as const;
 
 /** "Qloo", "SEC EDGAR filings", "Qloo and US Census estimates": the sources behind a note's lookups. */
 function sourcesOf(note: Footnote): (keyof typeof SOURCE_WORDS)[] {
   const found = new Set(note.requests.map((r) => r.source ?? "qloo"));
-  const order = (["qloo", "sec", "census"] as const).filter((k) => found.has(k));
+  const order = (["qloo", "sec", "census", "osm"] as const).filter((k) => found.has(k));
   return order.length > 0 ? order : ["qloo"];
 }
 
@@ -47,6 +47,9 @@ export function focusView(note: Footnote, copy: NumberCopy | null = null, figure
   if (m?.period) rows.push({ key: "Period", value: m.period });
   const means = copy?.means ?? (m?.unavailable ? (isKnownAbsence(m.reason) ? capitalize(m.reasonLabel ?? m.text) : `Not measured: ${m.reasonLabel ?? "no value"}`) : m?.window ? `From ${m.window} only` : null);
   if (means) rows.push({ key: "Means", value: means });
+  // R1 and V13: a small difference is not a lead, and a thin sample holds the confidence down.
+  if (m?.aboutLevel) rows.push({ key: "Size", value: "About level: a small difference, never a lead or a win" });
+  if (m?.thin) rows.push({ key: "Sample", value: "Rests on a small sample, so the answer's confidence stays at most medium" });
   const lookupSource = sources.length === 1 ? `${LOOKUP_WORDS[sources[0] ?? "qloo"]} ` : "";
   rows.push({ key: "Built from", value: lookups === 0 ? "Our own code" : `${lookups} ${lookupSource}${lookups === 1 ? "lookup" : "lookups"}` });
   const formula = note.computed?.formulaId ?? m?.formulaId ?? null;

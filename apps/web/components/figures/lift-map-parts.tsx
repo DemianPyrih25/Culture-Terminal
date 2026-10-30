@@ -9,7 +9,25 @@ import type { LiftLabel, LiftMode } from "./lift-scale";
  */
 
 /** A numbered pin centred on (x, y) in px. */
-export function MapPinMark({ label, x, y }: { label: Pick<LiftLabel, "rank" | "fewRivals" | "id" | "named">; x: number; y: number }) {
+export function MapPinMark({ label, x, y }: { label: Pick<LiftLabel, "rank" | "fewRivals" | "id" | "named" | "popular" | "hidden">; x: number; y: number }) {
+  // R7: a hidden pocket the numbered pins do not mark: a second-colour pin.
+  if (label.hidden && label.rank === undefined && !label.named) {
+    return (
+      <span className="absolute" style={{ left: x, top: y }} data-pin="" data-hidden-pin={label.id}>
+        <span className="absolute -top-3 -left-3 size-6 rounded-full border-2 border-surface bg-second shadow-xs" />
+      </span>
+    );
+  }
+  // R7: an area where the concept is already popular: an outlined ink ring with a dot.
+  if (label.popular) {
+    return (
+      <span className="absolute" style={{ left: x, top: y }} data-pin="" data-popular-pin={label.id}>
+        <span className="absolute -top-3.5 -left-3.5 flex size-7 items-center justify-center rounded-full border-[2.5px] border-ink bg-surface shadow-xs">
+          <span className="size-2 rounded-full bg-ink" />
+        </span>
+      </span>
+    );
+  }
   // An area the question names that is not among the numbered pins: the accent pin with a map-pin.
   if (label.named && label.rank === undefined) {
     return (
@@ -61,6 +79,10 @@ export const MAP_LEGEND_TEXT: Readonly<Record<LiftMode, string>> = {
   RAW: "More interest",
   BASE: "More interest in a typical area",
 };
+
+/** R7: what the two kinds of pin mean, under the map card's list and in the figure caption. */
+export const PIN_KEY_TEXT =
+  "Numbered pins: most extra interest for an area's size. Orange pins and \"hidden pocket\" flags: high extra interest but little interest overall, so small or early. Ringed pins: where it's already popular, with the most interest overall.";
 
 /** The ramp legend: a surface pill (r12, shadow-xs) with four 16 x 8 swatches and the words. */
 export function MapLegend({ mode, className }: { mode: LiftMode; className?: string }) {

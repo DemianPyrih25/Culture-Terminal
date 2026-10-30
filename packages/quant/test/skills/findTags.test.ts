@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { SKILL_LIMITATIONS } from "../../src/limitations";
 import { findTagsSkill, pickTags, planConcept, tagSearchParams, TAG_SEARCH_TAKE } from "../../src/skills/findTags";
 import { curatedConcept, curatedConcepts, HEATMAP_BASELINE } from "../../src/skills/findTags/curated";
-import { conceptWords, nameMatches, normaliseConcept, tagNameFromUrn, tagTypeOf, tagUse } from "../../src/skills/findTags/tags";
+import { conceptWords, definingWordsLeft, nameMatches, normaliseConcept, tagNameFromUrn, tagTypeOf, tagUse } from "../../src/skills/findTags/tags";
 import { BudgetError, fakeProbe, fakeRun, FakeRegistry, FETCHED_AT } from "./support/fakes";
 
 // find_tags runs over a fixture concept map in the pre-Part-8 shape, so the research and unverified
@@ -534,5 +534,20 @@ describe("find_tags: digest, estimate and limitations", () => {
 
   it("returns its fixed method limitation", () => {
     expect(findTagsSkill.limitations(["BUDGET_TRUNCATED"])).toEqual([...SKILL_LIMITATIONS.find_tags]);
+  });
+});
+
+describe("R2: tags that leave a defining word uncovered read the broader category", () => {
+  it("lets a tag add a generic product word, and nothing else", () => {
+    const query = conceptWords("non-alcoholic kelp tonic");
+    expect(nameMatches(query, conceptWords("Non-Alcoholic Drink"))).toBe(true);
+    expect(nameMatches(query, conceptWords("Non-Carbonated Drink"))).toBe(false);
+    expect(nameMatches(query, conceptWords("Drinks"))).toBe(false);
+  });
+
+  it("names the defining words no kept tag covers, never a qualifier such as premium", () => {
+    expect(definingWordsLeft("non-alcoholic kelp tonic", ["Tonic", "Kelp"])).toEqual(["non", "alcoholic"]);
+    expect(definingWordsLeft("non-alcoholic kelp tonic", ["Non-Alcoholic Drink", "Tonic", "Kelp"])).toEqual([]);
+    expect(definingWordsLeft("premium small-batch kelp tonic", ["Kelp Tonic"])).toEqual([]);
   });
 });

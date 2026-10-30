@@ -153,6 +153,30 @@ export const SAFE_USE: readonly SafeUseRule[] = [
       "One Qloo client per process with a rate limiter, a shared cache, a cap per answer and a daily cap on fresh requests. No bulk downloads, and Home fetches nothing on its own.",
     where: "@ct/qloo · limiter · quota",
   },
+  {
+    id: "ids-server-only",
+    source: "ours",
+    rule: "Keep Qloo entity ids on our server.",
+    enforced:
+      "The server keeps the ids it needs in its database. Pages, live updates, saved answers and share cards carry readable names instead, and every number still opens its request: the endpoint, the parameters as names and the request id. A guard fails the build if an id appears in the browser code.",
+    where: "scrubEntityIds · stream and page loaders · pnpm guard --bundle",
+  },
+  {
+    id: "web-untrusted",
+    source: "ours",
+    rule: "Treat web pages as untrusted data.",
+    enforced:
+      "The \"From the web\" block shows only sentences tied to a search result, each with its link, escaped as text. Page text never reaches the analysis, a candidate list or a number, and sentences that read like instructions are dropped.",
+    where: "side context · web block",
+  },
+  {
+    id: "ai-no-numbers",
+    source: "ours",
+    rule: "Keep model knowledge apart and free of numbers.",
+    enforced:
+      "\"What AI knows (not verified)\" sits apart from the measured answer and is labelled not verified. Code drops any item that states a number, and the block never changes the verdict, a number or the confidence.",
+    where: "side context · no-number rule",
+  },
 ];
 
 // 02 Refusals ----------------------------------------------------------------------------------------------
@@ -289,6 +313,10 @@ export const DATA_HANDLING: readonly { term: string; text: string }[] = [
   {
     term: "Never in git",
     text: "No Qloo values or ids live in the repository. They are resolved at run time and kept in the app's database; a guard scans the tree and its whole history for them.",
+  },
+  {
+    term: "OpenStreetMap",
+    text: "Place counts come from OpenStreetMap through the public Overpass API, © OpenStreetMap contributors, under the Open Database License (ODbL) 1.0. Every count names its data date and the credit, and is labelled a floor: volunteers map it, so places can be missing.",
   },
   {
     term: "Your answers",

@@ -38,6 +38,7 @@ import {
   addOutsideFinding,
   addSubsMetrics,
   addSubstitutionMap,
+  addTasteMap,
   discoveryNeighbourQualifies,
   findOutsideNeighbour,
   subsDigestRows,
@@ -122,6 +123,40 @@ function usableNamed(input: PeerInput, registry: EntityRegistry): { peers: Regis
     notices.push(`k=${input.k} leaves room for ${slots} peers; left out: ${cut.map((e) => e.ref).join(", ")}.`);
   }
   return { peers, notices };
+}
+
+/**
+ * R3 peer rule (D49): the brands the question names come first (up to k−1), then the brands a specialist
+ * would expect (up to min(3, open slots − 2), so discovery keeps at least two slots), then discovery, then
+ * the outside-category pick. Only exact-resolved candidates of the run are added, and only with discovery
+ * on (without it the ANALYST chose the peers itself).
+ */
+export function withCandidatePeers(
+  named: { peers: RegisteredEntity[]; notices: string[] },
+  input: Pick<PeerInput, "k" | "discover">,
+  ctx: Pick<SkillCtx, "candidates" | "registry">,
+  target: RegisteredEntity,
+): { peers: RegisteredEntity[]; notices: string[] } {
+  if (!input.discover) return named;
+  const slots = input.k - 1;
+  const peers = [...named.peers];
+  const have = new Set([target.entityId, ...peers.map((p) => p.entityId)]);
+  const brands = (source: "user_named" | "obvious") =>
+    ctx.candidates.entities
+      .filter((c) => c.source === source)
+      .map((c) => ctx.registry.entity(c.ref))
+      .filter((e): e is RegisteredEntity => e !== null && e.type === "brand" && !have.has(e.entityId));
+  for (const e of brands("user_named")) {
+    if (peers.length >= slots) break;
+    peers.push(e);
+    have.add(e.entityId);
+  }
+  const room = Math.min(3, Math.max(0, slots - peers.length - 2));
+  for (const e of brands("obvious").slice(0, room)) {
+    peers.push(e);
+    have.add(e.entityId);
+  }
+  return { peers, notices: named.notices };
 }
 
 interface Discovery {
@@ -334,7 +369,7 @@ async function runPeerLandscape(input: PeerInput, ctx: SkillCtx): Promise<SkillR
     );
   }
 
-  const named = usableNamed(input, ctx.registry);
+  const named = withCandidatePeers(usableNamed(input, ctx.registry), input, ctx, target);
   if (!input.discover && named.peers.length < MIN_MEMBERS - 1) {
     return skillErrorResult(
       out,
@@ -423,6 +458,7 @@ async function runPeerLandscape(input: PeerInput, ctx: SkillCtx): Promise<SkillR
     addOutsideFinding(run, members, neighbour, metric === null ? [] : [metric.id]);
   }
   addSubstitutionMap(run, members, scoring.matrix, stats, run.evidenceIds);
+  addTasteMap(run, members, scoring.matrix, stats, run.evidenceIds);
 
   const rows = subsDigestRows(members, { matrix: scoring.matrix, metrics }, outsideMapRow(neighbour));
   return finish(run, out, partial ? "partial" : "ok", rows);

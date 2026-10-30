@@ -1,6 +1,6 @@
 "use client";
 
-import { QUESTION_MAX_CHARS } from "@ct/contracts";
+import { QUESTION_MAX_CHARS } from "@ct/contracts/values";
 import { useImperativeHandle, useLayoutEffect, useRef, type FormEvent, type KeyboardEvent, type Ref, type RefObject } from "react";
 import { Button } from "../ui/button";
 import { cx } from "../ui/cx";

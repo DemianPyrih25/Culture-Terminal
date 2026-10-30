@@ -2,7 +2,7 @@ import { PUBLIC_DATA_TOOLS, PUBLIC_NOT_CONFIGURED_REASON, type Flag, type Public
 
 /**
  * Public sources that are not configured on this server (D7 of the Part 9 close-out): SEC EDGAR without
- * SEC_USER_AGENT, the Census Data API without CENSUS_API_KEY. Code never plans or runs a tool whose
+ * SEC_USER_AGENT, the Census Data API without CENSUS_API_KEY, OpenStreetMap without OSM_USER_AGENT. Code never plans or runs a tool whose
  * source is not configured. The opening scan skips it, the report carries the source's limitation, and an
  * ANALYST call to it is refused before it runs, each with PUBLIC_NOT_CONFIGURED_REASON verbatim.
  */
@@ -13,12 +13,14 @@ export type PublicDataTool = (typeof PUBLIC_DATA_TOOLS)[number];
 export const PUBLIC_TOOL_SOURCE: Readonly<Record<PublicDataTool, PublicSource>> = {
   company_financials: "sec",
   area_economics: "census",
+  local_supply: "osm",
 };
 
 /** The limitation flag of a source that is not configured. */
 export const NOT_CONFIGURED_FLAG: Readonly<Record<PublicSource, Flag>> = {
   sec: "SEC_NOT_CONFIGURED",
   census: "CENSUS_NOT_CONFIGURED",
+  osm: "OSM_NOT_CONFIGURED",
 };
 
 /** Which public sources this server can read: PublicDataClient.configured. Absent sources count as configured. */

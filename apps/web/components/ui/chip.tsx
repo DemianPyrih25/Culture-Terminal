@@ -19,10 +19,13 @@ export function chipClassName(on = false, className?: string): string {
   return cx(BASE, on ? ON : OFF, className);
 }
 
-function ChipContent({ variant, children }: { variant: ChipVariant; children: ReactNode }) {
+/** A chip whose words wrap onto more lines instead of being cut (long next moves; ANSWER_QUALITY §11). */
+const WRAP = "h-auto min-h-9 py-1.5 whitespace-normal text-left";
+
+function ChipContent({ variant, wrap = false, children }: { variant: ChipVariant; wrap?: boolean; children: ReactNode }) {
   return (
     <>
-      <span className="truncate">{children}</span>
+      <span className={wrap ? "min-w-0 [overflow-wrap:anywhere]" : "truncate"}>{children}</span>
       {variant === "go" ? <Icon name="arrow-right" size={14} className="shrink-0" /> : null}
     </>
   );
@@ -53,14 +56,18 @@ export function Chip({ variant = "fill", on, children, className, type, ref, ...
 
 export type ChipLinkProps = Omit<ComponentProps<typeof Link>, "children"> & {
   variant?: Exclude<ChipVariant, "filter">;
+  /** Let long words wrap instead of cutting them with an ellipsis. */
+  wrap?: boolean;
   children: ReactNode;
 };
 
 /** A chip that is a link (next/link), e.g. a next move that asks a follow-up. Defaults to go. */
-export function ChipLink({ variant = "go", children, className, ...rest }: ChipLinkProps) {
+export function ChipLink({ variant = "go", wrap = false, children, className, ...rest }: ChipLinkProps) {
   return (
-    <Link className={chipClassName(false, className)} {...rest}>
-      <ChipContent variant={variant}>{children}</ChipContent>
+    <Link className={chipClassName(false, cx(wrap && WRAP, className))} {...rest}>
+      <ChipContent variant={variant} wrap={wrap}>
+        {children}
+      </ChipContent>
     </Link>
   );
 }

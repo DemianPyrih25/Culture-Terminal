@@ -103,10 +103,12 @@ export interface MenuItem {
   onSelect?: () => void;
 }
 
+const NAV_ICON = { answers: "file-text", following: "list-checks", screener: "table-2", how: "circle-question-mark" } as const satisfies Record<NavKey, IconName>;
+
 const ROW =
   "flex h-12 w-full items-center gap-3 rounded-control px-3 text-left text-[15px] leading-6 font-medium text-ink transition-colors hover:bg-sunken";
 
-/** The phone menu: a right sheet with Your answers, How it works, New question and the page's extras. */
+/** The phone menu: a right sheet with Your answers, Following, Screener, How it works, New question and the page's extras. */
 export function MenuSheetButton({ active, items = [] }: { active?: NavKey | null; items?: readonly MenuItem[] }) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
@@ -126,7 +128,7 @@ export function MenuSheetButton({ active, items = [] }: { active?: NavKey | null
                   aria-current={item.key === active ? "page" : undefined}
                   className={cx(ROW, item.key === active && "font-semibold")}
                 >
-                  <Icon name={item.key === "answers" ? "file-text" : "circle-question-mark"} size={18} className="text-ink-2" />
+                  <Icon name={NAV_ICON[item.key]} size={18} className="text-ink-2" />
                   {item.label}
                 </Link>
               </li>

@@ -78,6 +78,12 @@ function census(options: { fail?: string } = {}): PublicDataApi & { asked: Censu
   const asked: CensusGeo[] = [];
   return {
     asked,
+    osmCounts: async () => {
+      throw new Error("unused");
+    },
+    osmPlaces: async () => {
+      throw new Error("unused");
+    },
     secTicker: async () => {
       throw new Error("unused");
     },
@@ -177,7 +183,7 @@ describe("area_economics", () => {
       [6000, "ESTIMATED", null],
     ]);
     expect(pop.map((m) => m.display)).toEqual(["4,000 residents", "2,000 residents (whole ZIP)", "6,000 residents (whole ZIPs)"]);
-    expect(pop[2]?.label).toContain("ZIP areas (whole ZIPs)");
+    expect(pop[2]?.label).toContain("ZIP areas touching Nashville (approximate: whole ZIP areas, not the city itself)");
 
     const table = run.ledger.datasets[0];
     if (table?.kind !== "Ranked") throw new Error("expected the economics table");

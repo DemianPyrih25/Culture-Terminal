@@ -6,5 +6,5 @@ export type { FocusView, NumberCopy } from "./focus-card";
 export { SourceRow, lookupOf } from "./source-row";
 export type { Lookup, SourceRowProps } from "./source-row";
 export { ageText, freshnessCounts, freshnessText, namesText, paramValue, refName, refNames, requestPairs, sourceDescription, sourceLine } from "./source-copy";
-export { API_KEY_PLACEHOLDER, QLOO_BASE_URL, curlCommand, hasShortenedParams, publicParams, requestCurl, requestUrl } from "./curl";
-export type { CallQuery } from "./curl";
+export { OVERPASS_TURBO_URL, QLOO_BASE_URL, QLOO_IDS_LINE, hasShortenedParams, overpassLink, publicParams, publicRequestLink, requestCopy } from "./request-copy";
+export type { CallQuery } from "./request-copy";

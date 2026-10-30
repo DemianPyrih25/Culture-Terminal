@@ -1,6 +1,6 @@
 import type { GeoLiftPayload } from "@ct/contracts";
 import { geohashBounds, mercatorY, type Bounds } from "./geohash";
-import { cellFills, flagName, flagSize, flagValue, focusBounds, overlayBoxes, pinRadius, placeChips, rgbHex, type LiftLabel, type LiftMode } from "./lift-scale";
+import { cellFills, flagName, flagSize, flagText, focusBounds, overlayBoxes, pinRadius, placeChips, rgbHex, type LiftLabel, type LiftMode, type MapPlace } from "./lift-scale";
 import { px } from "./scale";
 
 /**
@@ -34,6 +34,7 @@ export function LiftSchematic({
   height,
   label,
   hidden = false,
+  places = [],
 }: {
   data: GeoLiftPayload;
   mode: LiftMode;
@@ -42,6 +43,8 @@ export function LiftSchematic({
   height: number;
   label: string;
   hidden?: boolean;
+  /** Similar places from OpenStreetMap (R6), when the layer is on. */
+  places?: readonly MapPlace[];
 }) {
   const { project } = schematicProjection(data, width, height);
   const fills = cellFills(data, mode);
@@ -93,10 +96,23 @@ export function LiftSchematic({
         const at = project(p.lat, p.lon);
         return <circle key={`s-${i}`} cx={px(at.x)} cy={px(at.y)} r={2.25} className="fill-ink-3 stroke-surface" strokeWidth={1} data-supply="true" />;
       })}
+      {places.map((p, i) => {
+        const at = project(p.lat, p.lon);
+        return <rect key={`o-${i}`} x={px(at.x - 3)} y={px(at.y - 3)} width={6} height={6} rx={1} className="fill-second stroke-surface" strokeWidth={1} data-osm-place="true" />;
+      })}
       {pins.map((m) => (
         <g key={`m-${m.label.id}`} data-marker={m.label.id} data-pin={m.label.rank ?? ""}>
           {m.label.fewRivals ? <circle cx={px(m.x)} cy={px(m.y)} r={19} fill="#ffffff" fillOpacity={0.6} className="stroke-second" strokeWidth={2} /> : null}
-          <circle cx={px(m.x)} cy={px(m.y)} r={14} className={m.label.named && m.label.rank === undefined ? "fill-accent" : "fill-ink"} data-named-pin={m.label.named ? m.label.id : undefined} />
+          {m.label.hidden && m.label.rank === undefined && !m.label.named ? (
+            <circle cx={px(m.x)} cy={px(m.y)} r={11} className="fill-second stroke-surface" strokeWidth={2} data-hidden-pin={m.label.id} />
+          ) : m.label.popular ? (
+            <>
+              <circle cx={px(m.x)} cy={px(m.y)} r={13} className="fill-surface stroke-ink" strokeWidth={2.5} data-popular-pin={m.label.id} />
+              <circle cx={px(m.x)} cy={px(m.y)} r={4} className="fill-ink" />
+            </>
+          ) : (
+            <circle cx={px(m.x)} cy={px(m.y)} r={14} className={m.label.named && m.label.rank === undefined ? "fill-accent" : "fill-ink"} data-named-pin={m.label.named ? m.label.id : undefined} />
+          )}
           <text x={px(m.x)} y={px(m.y + 4.5)} textAnchor="middle" fontSize={13} fontWeight={600} className="fill-white">
             {m.label.rank ?? ""}
           </text>
@@ -113,7 +129,7 @@ export function LiftSchematic({
               {flagName(m.label.name)}
             </text>
             <text x={px(at.x + 10)} y={px(at.y + 36)} fontSize={12} className="fill-ink-2">
-              {flagValue(m.label.lift)}
+              {flagText(m.label)}
             </text>
           </g>
         );

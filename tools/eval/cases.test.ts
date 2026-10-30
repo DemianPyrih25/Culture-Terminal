@@ -36,6 +36,8 @@ const METROS_JSON = new URL("../../config/metros.json", import.meta.url);
 const showcases = () => Showcases.parse(JSON.parse(readFileSync(SHOWCASES_JSON, "utf8"))).showcases;
 
 const pad = (n: number): string => String(n).padStart(2, "0");
+/** The showcases registered with the eval (S1 to S7); S8 to S13 came in Part 11, after registration. */
+const EVAL_SHOWCASES = 7;
 
 // Twenty-seven core questions covering every job twice (brand_health three times), one adversarial
 // question of each kind, then three off-list questions read as their nearest job.
@@ -152,8 +154,8 @@ describe("eval/questions.json", () => {
     }
   });
 
-  it("asks every showcase question of config/showcases.json verbatim, with its desk and job, first", () => {
-    const all = showcases();
+  it("asks every registered showcase question (S1 to S7) of config/showcases.json verbatim, with its desk and job, first", () => {
+    const all = showcases().slice(0, EVAL_SHOWCASES);
     expect(all.length).toBeGreaterThan(0);
     const asked = core.slice(0, all.length).map((q) => ({ code: q.showcase, desk: q.desk, job: q.job, question: q.question }));
     expect(asked).toEqual(all.map((s) => ({ code: s.code, desk: s.desk, job: s.expected.job, question: s.question })));

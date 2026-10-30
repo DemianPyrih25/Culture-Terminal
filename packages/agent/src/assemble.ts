@@ -6,8 +6,10 @@ import {
   JOB_PILLAR,
   makeId,
   Report,
+  REPORT_LIMITS,
   verdictTagWords,
   vizFor,
+  type AiContextBlock,
   type ArgumentId,
   type Badge,
   type Confidence,
@@ -24,12 +26,14 @@ import {
   type Mode,
   type Pillar,
   type ReportDraftShape,
+  type Signal,
   type ReportExhibit,
   type SkillId,
   type Strength,
   type SubmitPlanInputShape,
   type TrendWindow,
   type ValidationIssue,
+  type WebContextBlock,
 } from "@ct/contracts";
 import {
   argumentStrength,
@@ -43,6 +47,7 @@ import {
 } from "@ct/quant";
 import { MIN_OK_EVIDENCE, type CheckResult } from "./checker";
 import { indexSnapshot, type LedgerLookup, type LedgerSnapshot } from "./ledger";
+import { auditReport } from "./report/audit";
 import { formatUtcDate, timeRange } from "./report/format";
 import { pickKpis } from "./report/kpis";
 import { POSITION_JOBS } from "./report/position";
@@ -125,6 +130,20 @@ export interface ReportContext {
    * limitation first. Absent: none.
    */
   conceptSubstitutes?: readonly ConceptSubstitute[];
+  /**
+   * Flag limitations with their own text, raised outside any skill: EXPECTED_CANDIDATE_MISSING naming the
+   * names, NOT_SEPARATELY_REPORTED naming the parent company, SUBJECT_NO_DATA naming the subject. They
+   * follow the concept and nearest-job lines; their flags never repeat with the generic text. Absent: none.
+   */
+  flagLimitations?: readonly Limitation[];
+  /** Plain limitation lines the run adds (no flag): "No OpenStreetMap tag for …". Absent: none. */
+  runLimitations?: readonly string[];
+  /** The "What AI knows (not verified)" block (R4); absent or null for none (runs stored before Part 11). */
+  aiContext?: AiContextBlock | null;
+  /** The "From the web" block (R5); absent or null for none. */
+  webContext?: WebContextBlock | null;
+  /** What the side context calls cost (the receipt's context line); absent or null when none ran. */
+  sideCost?: { aiUsd: number; webUsd: number; webSearches: number } | null;
 }
 
 export type { ConceptSubstitute } from "./report/concept";
@@ -147,6 +166,9 @@ export const SCORECARD_CAPTION =
   "What the AI expected before it saw any data, each expectation checked against the figures cited for it.";
 export const POSITION_CAPTION =
   "Where the subject stands against its peers on five axes, each with its peer rank and exhibit; no total is given.";
+
+export const TASTE_MAP_CAPTION =
+  "Nearby points share audience taste, drawn from the Substitution Map's similarities; positions are relative, not sales or switching.";
 
 /** Exhibits code places itself, ahead of the draft's: the Scorecard, then the Taste Position card. */
 const isLeadKind = (kind: DatasetEnvelope["kind"]): boolean => kind === "Scorecard" || kind === "Position";
@@ -174,12 +196,21 @@ interface ConfidenceCounts {
   insufficientEvidence: boolean;
   /** The question was read as its nearest job (D41): −5, once. */
   readAsNearestJob: boolean;
-  /** Part of the question's concept was never tested (D2): −30, once. */
+  /** Part of the question's concept was never tested (D2): capped at 70. */
   conceptPartlyTagged: boolean;
+  /** The note's final signal (R1): mixed caps at 70, weak at 45. */
+  signal: Signal;
+  /** The headline, thesis or a decided hypothesis rests on a thin sample (Metric.thin): capped at 70. */
+  thinSample: boolean;
+  /** The concept was read only at category level (R2, D48): capped at 60. */
+  categoryLevel: boolean;
 }
 
 const scoreConfidence = (c: ConfidenceCounts): Confidence =>
   computeConfidence({
+    signal: c.signal,
+    thinSample: c.thinSample,
+    categoryLevel: c.categoryLevel,
     droppedEntities: c.droppedEntities,
     codeFallbacks: c.codeFallbacks,
     coarseGeohash: c.coarseGeohash,
@@ -314,6 +345,12 @@ export function assembleReport(input: AssembleInput): Report {
     seen.add(dataset.id);
     return [{ dataset, title: e.title, caption: e.caption }];
   });
+  // A Category Taste Map the draft did not place goes last, while the draft leaves room under the exhibit limit.
+  for (const dataset of ledger.datasets) {
+    if (dataset.kind !== "TasteMap" || seen.has(dataset.id) || draftExhibits.length >= REPORT_LIMITS.exhibitsMax) continue;
+    seen.add(dataset.id);
+    draftExhibits.push({ dataset, title: dataset.title, caption: TASTE_MAP_CAPTION });
+  }
 
   const cited = draftCitedMetrics(draft).filter((id) => lookup.metric(id) !== undefined);
   const warnings = acceptedWarnings(check.issues);
@@ -324,9 +361,14 @@ export function assembleReport(input: AssembleInput): Report {
     // Keyed on the final signal: the patched draft carries V7 (which also fires when Qloo is
     // disabled), and an ANALYST that chose insufficient_evidence itself gets the same LOW band.
     insufficientEvidence: run.counts.insufficientEvidence || draft.signal === "insufficient_evidence",
+    signal: draft.signal,
+    thinSample: metricsOf(headlineMetrics(draft)).some((m) => m.thin === true),
+    // A category-level read anywhere in what the note cites, the run's own category-level flag, or a
+    // look-alike tag still cited after the repair turn (V12a) keeps the note at most medium-low (R2).
+    categoryLevel: run.counts.categoryLevel || check.proxyCited || metricsOf(cited).some((m) => m.conceptRead === "category" || m.conceptRead === "proxy"),
   });
 
-  return Report.parse({
+  return run.finish({
     ...run.header,
     incomplete: false,
     verdict: {
@@ -368,14 +410,21 @@ export function buildIncompleteReport(input: IncompleteInput): Report {
   const { ledger } = input;
   const run = runFacts(input);
   // A digest's signal is always insufficient_evidence, however many bundles came back ok.
-  const confidence = scoreConfidence({ ...run.counts, staleMomentumCited: false, checkerWarnings: 0, insufficientEvidence: true });
+  const confidence = scoreConfidence({
+    ...run.counts,
+    staleMomentumCited: false,
+    checkerWarnings: 0,
+    insufficientEvidence: true,
+    signal: "insufficient_evidence",
+    thinSample: false,
+  });
   const thesis = withConceptDisclosure(
     `The run stopped before the AI finished writing its answer${input.reason ? ` (${input.reason})` : ""}. ` +
       "The exhibits show every result our code computed; no interpretation is offered.",
     input.conceptSubstitutes ?? [],
   );
 
-  return Report.parse({
+  return run.finish({
     ...run.header,
     incomplete: true,
     verdict: {
@@ -408,6 +457,19 @@ export function buildIncompleteReport(input: IncompleteInput): Report {
     warnings: [],
     receipt: run.receipt({ traced: 0, total: 0 }),
   });
+}
+
+/**
+ * The metrics behind the note's lead (R1 thin_sample): what the headline and thesis cite by token, and the
+ * metrics of every hypothesis it confirmed or refuted.
+ */
+function headlineMetrics(draft: ReportDraftShape): MetricId[] {
+  const decided = draft.hypothesis_verdicts.filter((v) => v.verdict === "confirmed" || v.verdict === "refuted");
+  return citedIds(
+    "M",
+    decided.flatMap((v) => v.metric_ids),
+    [draft.headline, draft.thesis, ...decided.map((v) => v.note)],
+  );
 }
 
 /**
@@ -491,6 +553,7 @@ function runFacts(ctx: ReportContext) {
       insufficientEvidence: ledger.evidence.filter((e) => e.status === "ok" && isQlooEvidence(e)).length < MIN_OK_EVIDENCE,
       readAsNearestJob: readAs !== null,
       conceptPartlyTagged: ctx.conceptPartlyTagged === true,
+      categoryLevel: flags.includes("CATEGORY_LEVEL_READ") || (ctx.runFlags ?? []).includes("CATEGORY_LEVEL_READ"),
     },
     disclaimers: [...FIXED_DISCLAIMERS, dataLine, ...publicDisclaimers(ledger.metrics, lookup)],
     /**
@@ -498,17 +561,27 @@ function runFacts(ctx: ReportContext) {
      * nearest-job one (D41), then the other flags, the desk, skill and open-question lines.
      */
     limitations: (extraFlags: readonly Flag[], openQuestions: readonly string[]) => {
+      // A flag with its own text (the names, the parent company, the subject) is never repeated generically.
+      const own = ctx.flagLimitations ?? [];
+      const ownFlags = new Set(own.flatMap((l) => (l.source === "flag" ? [l.flag] : [])));
       const built = limitationsFor({
-        flags: [...flags, ...(ctx.runFlags ?? []), ...extraFlags].filter((f) => f !== "READ_AS_NEAREST_JOB" && f !== "CONCEPT_NOT_IN_DATA"),
+        flags: [...flags, ...(ctx.runFlags ?? []), ...extraFlags].filter((f) => f !== "READ_AS_NEAREST_JOB" && f !== "CONCEPT_NOT_IN_DATA" && !ownFlags.has(f)),
         pillar,
         openQuestions,
-        skillLimitations,
+        skillLimitations: [...skillLimitations, ...(ctx.runLimitations ?? [])],
         window,
         asOf: ctx.createdAt,
         ran,
       });
       const concept = conceptLimitation(ctx.conceptSubstitutes ?? []);
-      return [...(concept === null ? [] : [concept]), ...(readAs === null ? [] : [readAsLimitation(ctx.job, readAs.notCovered)]), ...built];
+      const seen = new Set<string>();
+      const unique = own.filter((l) => !seen.has(l.text) && seen.add(l.text));
+      return [
+        ...(concept === null ? [] : [concept]),
+        ...(readAs === null ? [] : [readAsLimitation(ctx.job, readAs.notCovered)]),
+        ...unique,
+        ...built,
+      ];
     },
     /**
      * The Scorecard dataset first (absent only without hypotheses), then the Taste Position card on the
@@ -541,7 +614,20 @@ function runFacts(ctx: ReportContext) {
         numbersTraced,
         models: ctx.models,
         economy: ctx.mode === "economy",
+        context: ctx.sideCost ?? null,
       }),
+    /**
+     * The Report: parsed, with the context blocks (R4, R5) beside the measured answer, then the answer-quality
+     * audit of the finished report (ANSWER_QUALITY automated checks; empty on a clean run).
+     */
+    finish: (body: Record<string, unknown>): Report => {
+      const report = Report.parse({
+        ...body,
+        ...(ctx.aiContext !== undefined ? { aiContext: ctx.aiContext } : {}),
+        ...(ctx.webContext !== undefined ? { webContext: ctx.webContext } : {}),
+      });
+      return { ...report, audit: auditReport(report, ledger) };
+    },
   };
 }
 

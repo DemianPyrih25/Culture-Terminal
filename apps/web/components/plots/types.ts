@@ -7,8 +7,14 @@ import type { TagPreset, TagTone } from "../ui/tag";
  * never read datasets, so the same rows also feed their Table views.
  */
 
-/** A tag beside a value: one of the design's presets ("hidden-gem") or free words with a tone. */
-export type PlotTag = TagPreset | { tone: TagTone; label: string };
+/** One tag: one of the design's presets ("hidden-gem") or free words with a tone. */
+export type PlotTagOne = TagPreset | { tone: TagTone; label: string };
+
+/**
+ * A tag beside a value, or several in a row: a row can be a hidden gem and a name the question gave
+ * ("You named", R3), or a market the AI says the subject already operates in (R4).
+ */
+export type PlotTag = PlotTagOne | readonly PlotTagOne[];
 
 /** Bar colours: the subject (accent), the comparison or "less" side (second), everything else (muted). */
 export type PlotTone = "accent" | "second" | "muted";

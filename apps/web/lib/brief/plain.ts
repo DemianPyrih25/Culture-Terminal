@@ -1,4 +1,5 @@
 import type { Metric } from "@ct/contracts";
+import { ABOUT_LEVEL_WORDS } from "@ct/contracts/values";
 
 /**
  * Plain words for the analyst shorthand that reaches a reader (ANSWER_QUALITY §1, Q1): QUANT's metric
@@ -28,12 +29,27 @@ export function plainPiece(piece: string): string {
   return piece;
 }
 
-/** A metric's display in plain words: "+42 · NEW" → "+42 · new here". */
-export function plainDisplay(metric: Pick<Metric, "display">): string {
-  return metric.display
+/**
+ * "about average" for an index or a lift inside the about-level band, "about level" for any other small
+ * difference or rank gain (ABOUT_LEVEL_WORDS, R1/V13): a value with `level: "about_level"` never reads as a
+ * lead, a win or a gain ("+1 of 50" is about level).
+ */
+export function aboutLevelWord(metric: Pick<Metric, "unit">): string {
+  return metric.unit === "index" || metric.unit === "lift" ? ABOUT_LEVEL_WORDS.index : ABOUT_LEVEL_WORDS.difference;
+}
+
+/** Whether a metric sits inside the about-level band (absent on runs stored before Part 11). */
+export const isAboutLevel = (metric: Pick<Metric, "level">) => metric.level === "about_level";
+
+/** A metric's display in plain words: "+42 · NEW" → "+42 · new here"; an about-level value adds "· about level". */
+export function plainDisplay(metric: Pick<Metric, "display"> & Partial<Pick<Metric, "level" | "unit">>): string {
+  const text = metric.display
     .split(" · ")
     .map((p) => plainPiece(p.trim()))
     .join(" · ");
+  if (metric.level !== "about_level") return text;
+  const word = aboutLevelWord({ unit: metric.unit ?? "delta" });
+  return text.includes(word) ? text : `${text} · ${word}`;
 }
 
 /** Word rewrites shared by metric labels and prose. Order matters: the longer phrases first. */

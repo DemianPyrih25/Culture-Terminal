@@ -2,7 +2,7 @@
 // build context and off the network (D29). Checked against the real files, so a loosened pattern
 // fails here before anything is staged.
 import { spawnSync } from "node:child_process";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
@@ -95,5 +95,18 @@ describe("docker-compose.yml", () => {
   it("reads short-syntax port lists", () => {
     const yaml = ["services:", "  a:", "    ports:", '      - "5433:5432"', "      - 127.0.0.1:8080:80 # web", "    volumes:", "      - x:/y"];
     expect(composePorts(yaml.join("\n"))).toEqual(["5433:5432", "127.0.0.1:8080:80"]);
+  });
+});
+
+describe("Dockerfile", () => {
+  it("copies every workspace manifest before the frozen install, so the image builds every package", () => {
+    const dockerfile = read("Dockerfile");
+    const manifests = ["apps", "packages"].flatMap((dir) =>
+      readdirSync(path.join(root, dir), { withFileTypes: true })
+        .filter((e) => e.isDirectory() && existsSync(path.join(root, dir, e.name, "package.json")))
+        .map((e) => `${dir}/${e.name}/package.json`),
+    );
+    expect(manifests.length).toBeGreaterThan(5);
+    for (const manifest of manifests) expect(dockerfile, manifest).toContain(`COPY ${manifest} ${path.posix.dirname(manifest)}/`);
   });
 });

@@ -2,6 +2,7 @@ import type {
   Badge,
   CacheProbe,
   Comparator,
+  ConceptMatch,
   EntityRegistry,
   Evidence,
   EvidenceId,
@@ -16,6 +17,7 @@ import type {
   QlooSearchEntity,
   RegisteredEntity,
 } from "@ct/contracts";
+import { weakerConceptMatch } from "@ct/contracts";
 import { metricConfidence } from "../badges";
 import type { FormulaId } from "../formulas";
 
@@ -129,6 +131,12 @@ export interface MetricSpec {
   comparator: Comparator | null;
   /** The period or vintage of an SEC or Census figure, as {{PERIOD:M#}} renders it (V11). */
   period?: string | null;
+  /** R1: the value rests on a thin sample (THIN_SAMPLE). Written only when true. */
+  thin?: boolean;
+  /** R2: the weakest concept match among the concept tags the call used (conceptReadOf). */
+  conceptRead?: ConceptMatch;
+  /** V13: a difference inside the about-level band (ABOUT_LEVEL). Written only when true. */
+  aboutLevel?: boolean;
 }
 
 /** Adds a metric with the UNAVAILABLE invariants and per-metric confidence filled in (§6.4). */
@@ -151,7 +159,25 @@ export function addSkillMetric(ledger: Ledger, spec: MetricSpec): Metric {
     comparator: spec.comparator,
     window: null,
     ...(spec.period === undefined ? {} : { period: spec.period }),
+    ...(spec.thin === true && present ? { thin: true } : {}),
+    ...(spec.conceptRead === undefined ? {} : { conceptRead: spec.conceptRead }),
+    ...(spec.aboutLevel === true && present ? { level: "about_level" as const } : {}),
   });
+}
+
+/**
+ * The weakest concept match among the tags a call sent (R2, D48): `proxy` < `category` < `exact`, read from
+ * the registry by tag id or tag ref; undefined when none of them is a concept tag. Every skill that sends
+ * concept tags puts this on its metrics, so the CHECKER (V12) and confidence (category_level) see what the
+ * value really measures.
+ */
+export function conceptReadOf(tags: readonly string[], registry: EntityRegistry): ConceptMatch | undefined {
+  let read: ConceptMatch | undefined;
+  for (const t of tags) {
+    const tag = registry.byTagId(t) ?? registry.tags().find((x) => x.ref === t) ?? null;
+    read = weakerConceptMatch(read, tag?.conceptMatch);
+  }
+  return read;
 }
 
 // Registry ---------------------------------------------------------------------------------------------
@@ -180,4 +206,26 @@ export function insightTags(tags: QlooEntity["tags"]): EntityTagRef[] {
   return (tags ?? []).flatMap((t) =>
     t.id !== undefined && t.name !== undefined ? [{ tagId: t.id, name: t.name, type: t.type ?? "" }] : [],
   );
+}
+
+/**
+ * R3 (D49): marks every dataset row that names a registered entity (an `R#` ref) with where the entity came
+ * from (`source`: user_named or obvious; absent = found by the data), so every exhibit shows the "You named"
+ * and "Expected" chips without each skill copying the registry. Rows that already carry a source keep it;
+ * objects whose schema has no `source` field drop it on validation. Returns a new value.
+ */
+export function stampCandidateSources<T>(value: T, registry: Pick<EntityRegistry, "entity">): T {
+  const walk = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(walk);
+    if (typeof v !== "object" || v === null) return v;
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) out[k] = walk(x);
+    const ref = out.ref;
+    if (typeof ref === "string" && /^R\d+$/.test(ref) && out.source === undefined) {
+      const candidate = registry.entity(ref as `R${number}`)?.candidate;
+      if (candidate === "user_named" || candidate === "obvious") out.source = candidate;
+    }
+    return out;
+  };
+  return walk(value) as T;
 }

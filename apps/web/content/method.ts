@@ -1,13 +1,6 @@
-import {
-  type Badge,
-  type ConfidenceRule,
-  REPORT_LIMITS,
-  type RunLimits,
-  type ScorecardVerdict,
-  type SkillId,
-  type ValidationRule,
-} from "@ct/contracts";
-import { MIN_BUSY_AREA_VENUES, MIN_SUPPLY_VENUES, THIN_SUPPLY_LABEL, type FormulaId } from "@ct/quant";
+import type { Badge, ConfidenceRule, RunLimits, ScorecardVerdict, SkillId, ValidationRule } from "@ct/contracts";
+import { REPORT_LIMITS } from "@ct/contracts/values";
+import { isFormulaId, MIN_BUSY_AREA_VENUES, MIN_SUPPLY_VENUES, THIN_SUPPLY_LABEL, type FormulaId } from "@ct/quant";
 
 /**
  * The copy of /method (A11 · Method & sources). The numbers in it come from the code: the page passes
@@ -36,7 +29,7 @@ export const METHOD_PAGE = {
   lede: "How an answer is made, how each number is checked, and what we refuse. Generated from the code every answer runs on.",
 } as const;
 
-export type MethodSectionId = "steps" | "marks" | "checker" | "conviction" | "formulas" | "eval";
+export type MethodSectionId = "steps" | "marks" | "checker" | "conviction" | "context" | "supply" | "formulas" | "eval";
 
 /** Outline label, section title and the note on the right of its head. `eval` is the anchor SPEC §6.7 names. */
 export const METHOD_SECTIONS: Readonly<Record<MethodSectionId, { title: string; aside: string }>> = {
@@ -44,11 +37,13 @@ export const METHOD_SECTIONS: Readonly<Record<MethodSectionId, { title: string; 
   marks: { title: "Evidence marks", aside: "How to read an answer" },
   checker: { title: "Checker rules", aside: "Code, not a model" },
   conviction: { title: "Confidence", aside: "Computed, not chosen" },
+  context: { title: "AI and web context", aside: "Shown apart, never measured" },
+  supply: { title: "OpenStreetMap places", aside: "Counts are a floor" },
   formulas: { title: "Formulas", aside: "Every number has one" },
   eval: { title: "Evaluation", aside: "With and without Qloo" },
 };
 
-export const METHOD_SECTION_ORDER: readonly MethodSectionId[] = ["steps", "marks", "checker", "conviction", "formulas", "eval"];
+export const METHOD_SECTION_ORDER: readonly MethodSectionId[] = ["steps", "marks", "checker", "conviction", "context", "supply", "formulas", "eval"];
 
 // 01 The seven steps ------------------------------------------------------------------------------------
 
@@ -192,7 +187,7 @@ export function checkerRules(f: MethodFacts): Readonly<Record<ValidationRule, Ru
     V2: { title: "Tokens resolve", text: "Every number token and evidence token resolves to the run's ledger.", action: "Rejects" },
     V3: {
       title: "No bare numbers",
-      text: "No decimals or percentages outside tokens. Whole numbers above ten count too, except years, age labels, ZIPs written as ZIPs and digits inside names.",
+      text: "No decimals or percentages outside tokens. Whole numbers above ten count too, in digits or spelled out (\"forty\"), except years, age labels, ZIPs written as ZIPs and digits inside names.",
       action: "Rejects; warns on the repair",
     },
     V4: {
@@ -214,8 +209,10 @@ export function checkerRules(f: MethodFacts): Readonly<Record<ValidationRule, Ru
     V8: { title: "History names its window", text: "A historical metric appears with its trending window in the same argument.", action: "Added by code" },
     V9: {
       title: "Lengths and counts",
-      text: `A headline of at most ${r.headline} characters, ${r.argumentsMin} to ${r.argumentsMax} arguments, parts of at most ${r.part} characters, at most ${r.hypothesisVerdictsMax} priors and ${r.bearCaseMax} bear-case points.`,
-      action: "Rejects",
+      text:
+        `A headline of at most ${r.headline} characters, ${r.argumentsMin} to ${r.argumentsMax} arguments, parts of at most ${r.part} characters, at most ${r.hypothesisVerdictsMax} priors and ${r.bearCaseMax} bear-case points. ` +
+        "The thesis does not repeat the note at the top of the answer (a concept read at category level, a question read as its nearest job).",
+      action: "Rejects; a repeated note that survives is dropped by code",
     },
     V10: {
       title: "Claims are measured",
@@ -234,6 +231,20 @@ export function checkerRules(f: MethodFacts): Readonly<Record<ValidationRule, Ru
         "No sentence ties a financial or Census figure to a taste metric as cause and effect: they are read side by side, never one explaining the other.",
       action: "Period added by code; a causal link rejects, then warns on the repair",
     },
+    V12: {
+      title: "Concepts and areas read honestly",
+      text:
+        "A number that rests on a look-alike tag standing in for a concept the data lacks is never cited. " +
+        "A read of the concept's broader category is called a category read, with no winner, keep or veto. " +
+        "A hidden pocket (an area that stands out for its size, not where the crowd is) is never called the best. " +
+        "A prior judged only on category reads, on thin samples, or by a tool that never returned data stays inconclusive.",
+      action: "Rejects; on the repair warns and caps confidence, or forces the prior to inconclusive",
+    },
+    V13: {
+      title: "Small differences never lead",
+      text: "A difference inside the about-level band (a near-even index, a percentile gap under five points, a rank gain of a place or two) cannot lead the headline, the finding or the thesis. It reads about level, never a lead or a win.",
+      action: "Rejects; warns on the repair",
+    },
   };
 }
 
@@ -245,7 +256,12 @@ export const CHECKER_NOTE = {
 // 04 Conviction --------------------------------------------------------------------------------------------
 
 export const CONVICTION_COPY = {
-  intro: "Confidence starts at 100 and loses points only by written rules. Code computes it from the run's flags; the model never sets it.",
+  intro:
+    "Confidence starts at 100 and loses points only by written rules. Some rules also cap it: a mixed or weak signal, a headline on a small sample, or a concept read only at category level can never score high, however clean the rest is. Code computes it from the run's flags; the model never sets it.",
+  capsHeading: "Caps",
+  capsCaption: "Confidence caps: the highest score a rule allows",
+  capsIntro: "The score is the lower of 100 minus the penalties and the lowest cap that applies. The answer names the cap that sets its band, e.g. \"Medium: the signal is mixed\".",
+  atMost: (cap: number) => `at most ${cap}`,
   start: "Start",
   caption: "Confidence penalties",
   bandsHeading: "Bands",
@@ -285,6 +301,14 @@ export interface FormulaGroup {
   formulas: readonly FormulaId[];
 }
 
+/** The Part 11 formula ids (R6 OpenStreetMap supply, R7 area popularity). */
+type Part11FormulaId = "osm.count" | "osm.density" | "osm.density_index" | "osm.activity_density" | "lift.area_popularity";
+
+/** The Part 11 ids the formula registry holds, in the order given: a group never lists an id the code lacks. */
+function part11(...ids: Part11FormulaId[]): FormulaId[] {
+  return ids.filter((id): id is Part11FormulaId & FormulaId => isFormulaId(id));
+}
+
 /** The groups in FORMULA_IDS order: shared primitives, the skills S0–S10, then the report. */
 export const FORMULA_GROUPS: readonly FormulaGroup[] = [
   { id: "shared", title: "Shared primitives", skill: null, owner: "Every skill", formulas: ["pct.within_call", "quality_gate", "popularity"] },
@@ -305,7 +329,7 @@ export const FORMULA_GROUPS: readonly FormulaGroup[] = [
   { id: "dna", title: "Audience DNA", skill: "audience_dna", formulas: ["dna.age_index", "dna.gender_index", "dna.youth_index", "dna.distinctive_tags"] },
   { id: "mom", title: "Momentum", skill: "momentum", formulas: ["mom.delta_26w", "mom.mann_kendall", "mom.label", "mom.freshness"] },
   { id: "trvl", title: "Travel taste", skill: "destination_affinity", formulas: ["trvl.quadrant", "trvl.hidden_pocket"] },
-  { id: "lift", title: "Lift map and white space", skill: "geo_lift", formulas: ["lift.cell", "lift.area", "lift.confidence", "lift.white_space"] },
+  { id: "lift", title: "Lift map and white space", skill: "geo_lift", formulas: ["lift.cell", "lift.area", "lift.confidence", "lift.white_space", ...part11("lift.area_popularity")] },
   { id: "block", title: "Block DNA", skill: "block_dna", formulas: ["block.rank_delta", "block.new_tag", "block.panel_rank", "block.concept_rank"] },
   { id: "tenant", title: "Tenant fit", skill: "rank_candidates", formulas: ["tenant.rank_shift", "tenant.fit", "rank.shift"] },
   { id: "xdom", title: "Cultural neighbourhood", skill: "cross_domain", formulas: ["xdom.under_the_radar", "xdom.edge", "xdom.partners_one_category"] },
@@ -324,6 +348,27 @@ export const FORMULA_GROUPS: readonly FormulaGroup[] = [
     skill: "area_economics",
     formulas: ["econ.count", "econ.median", "econ.share"],
   },
+  {
+    id: "osm",
+    title: "Places nearby (OpenStreetMap)",
+    skill: "local_supply",
+    where: "Chained after the lift map, the twin search or a city comparison, and run for tenant and area questions, when OpenStreetMap is configured",
+    formulas: part11("osm.count", "osm.density", "osm.density_index", "osm.activity_density"),
+  },
+  {
+    id: "screen",
+    title: "Brand screener",
+    skill: null,
+    owner: "The screener (/screener), in code with no model",
+    formulas: ["screen.universe", "screen.under_the_radar"],
+  },
+  {
+    id: "tastemap",
+    title: "Category Taste Map",
+    skill: null,
+    owner: "From a note's substitution map, or the screener's taste map calls",
+    formulas: ["taste_map_mds"],
+  },
   { id: "report", title: "Report level", skill: null, owner: "The report assembler", formulas: ["confidence.run", "confidence.metric"] },
 ];
 
@@ -338,7 +383,7 @@ export interface FormulaMeta {
 
 const RULE = "A rule: it decides, it produces no number";
 
-export const FORMULA_META: Readonly<Record<FormulaId, FormulaMeta>> = {
+const CORE_FORMULA_META: Readonly<Record<Exclude<FormulaId, Part11FormulaId>, FormulaMeta>> = {
   "pct.within_call": { inputs: ["Qloo affinity of each candidate scored in one call"], badge: "DERIVED" },
   quality_gate: { inputs: ["Qloo popularity of each result"], badge: null, noBadge: RULE },
   popularity: { inputs: ["Qloo popularity from search or entity lookup"], badge: "MEASURED" },
@@ -417,6 +462,19 @@ export const FORMULA_META: Readonly<Record<FormulaId, FormulaMeta>> = {
   "econ.count": { inputs: ["US Census ACS 5-year estimates for each ZIP area or census tract in the area"], badge: "DERIVED" },
   "econ.median": { inputs: ["Each unit's published median", "Each unit's population"], badge: "ESTIMATED" },
   "econ.share": { inputs: ["Resident workers by usual commute mode, ACS 5-year"], badge: "DERIVED" },
+  "screen.universe": {
+    inputs: ["The category tag or the seed brand", "Qloo's brand results for it, in their order"],
+    badge: null,
+    noBadge: "A rule: it sets which brands are screened, it produces no number",
+  },
+  "screen.under_the_radar": {
+    inputs: ["FIT: each brand's within-call percentile from the screen's scoring call", "Each brand's Qloo popularity", "The screened set's median of each"],
+    badge: "DERIVED",
+  },
+  taste_map_mds: {
+    inputs: ["Pairwise Qloo similarities of up to 14 entities, one call per row", "The largest scored distance, for any pair left unscored"],
+    badge: "ESTIMATED",
+  },
   "confidence.run": {
     inputs: ["Counts the run collected: dropped names, code fallbacks, thin results, quality-gate drops and checker warnings", "The coarse-map, stale-momentum and insufficient-evidence flags"],
     badge: null,
@@ -428,6 +486,20 @@ export const FORMULA_META: Readonly<Record<FormulaId, FormulaMeta>> = {
     noBadge: "A score about a number, not a measurement",
   },
 };
+
+const PART11_FORMULA_META: Readonly<Record<Part11FormulaId, FormulaMeta>> = {
+  "osm.count": { inputs: ["OpenStreetMap elements with the place type's tags inside the area outline or the market circle (Overpass API)"], badge: "MEASURED" },
+  "osm.density": { inputs: ["The count", "The area's size in km² from the gazetteer, or the circle's"], badge: "DERIVED" },
+  "osm.density_index": { inputs: ["The area's density", "The same density over the metro's counties (an approximate area)"], badge: "DERIVED" },
+  "osm.activity_density": { inputs: ["Shops plus food and drink places in the area (OpenStreetMap)", "The area's size in km²"], badge: "DERIVED" },
+  "lift.area_popularity": { inputs: ["The concept's raw Qloo heatmap affinity in the area's cells", "The same for every other area on the map"], badge: "DERIVED" },
+};
+
+/** Each formula's inputs and badge; a Part 11 entry is listed once the formula registry holds it. */
+export const FORMULA_META: Readonly<Record<FormulaId, FormulaMeta>> = Object.fromEntries([
+  ...Object.entries(CORE_FORMULA_META),
+  ...Object.entries(PART11_FORMULA_META).filter(([id]) => isFormulaId(id)),
+]) as Readonly<Record<FormulaId, FormulaMeta>>;
 
 // 06 Evaluation --------------------------------------------------------------------------------------------
 
@@ -478,4 +550,42 @@ export const METHOD_SOURCES = {
     { key: "Cache", value: "Shared; the age of every saved copy is shown" },
     { key: "Models", value: `Clerk ${f.clerkModel} · Analyst ${f.analystModel}` },
   ],
+} as const;
+
+// AI and web context (R4, R5, D45) ----------------------------------------------------------------------------
+
+export const CONTEXT_COPY = {
+  intro:
+    "Beside the measured answer, two blocks add context. They sit under the answer, apart from it, with dashed borders, and they never change the verdict, a number or the confidence.",
+  aiHeading: "What AI knows (not verified)",
+  ai: [
+    "One small model call recalls widely reported facts about the subject and place: deals and ownership, where it already operates, local operators, brand-safety risks.",
+    "It may state no number: code drops any item with a digit, a percent or currency sign, or a number word, and says how many it dropped. The model's knowledge can be out of date or wrong, so the block is labelled not verified.",
+    "Only one thing from it reaches the analysis: the market ids where the subject is said to operate already, checked against our market list, so market tables can mark them \"Already there\". The ranking stays the data's.",
+  ],
+  webHeading: "From the web",
+  web: [
+    "One small model call runs up to three web searches and writes short sentences, each tied to a search result. Code keeps only sentences with a citation, shows each with its link, publisher, published date (or \"date unknown\") and the date it was retrieved, and drops any sentence whose numbers are not in the cited passage.",
+    "Page text is untrusted data. It is shown escaped, with its link, and never reaches the analysis, a candidate list or a number. Sentences that read like instructions are dropped.",
+  ],
+  offHeading: "When they are off",
+  off: "Either block can be turned off on a server; web search is off in economy mode. A block that is off, empty, timed out or failed says so in one line. With Qloo off, the measured answer stays \"not enough data\" whatever the blocks say.",
+  note: "Neither block is a source for a number in the answer.",
+  noteTrace: "aiContext · webContext",
+} as const;
+
+// OpenStreetMap places (R6, D46) --------------------------------------------------------------------------------
+
+export const SUPPLY_COPY = {
+  intro:
+    "For place questions, code counts the real places already there from OpenStreetMap through the public Overpass API: competitors of the place type in each area (or around a city's centre), counts per km², each area against its city, and street activity (shops plus food and drink places).",
+  points: [
+    "Each count is a floor, not a census: OpenStreetMap is mapped by volunteers, dense US cities well, suburbs less so.",
+    "\"More than the city\" and \"less than the city\" compare an area's density with the metro's counties. Inside 0.8 to 1.25 times the city's level an area reads \"about the city's level\", never more or less. The city's area is approximate.",
+    "What an area has too much or too little of comes from counting every storefront type against the city: at 1.5 times the city's level with at least five places it has more; at half or less it has less.",
+    "Only place types whose tags are documented and widely used in OpenStreetMap are counted. A concept with no reliable tag is not counted, and the answer says so.",
+    "Reads are cached 30 days and cost no Qloo call. Every figure carries the data's date and the credit \"© OpenStreetMap contributors\" under the Open Database License (ODbL).",
+  ],
+  note: "Map data from OpenStreetMap, © OpenStreetMap contributors, available under the Open Database License (ODbL) 1.0, via the Overpass API.",
+  noteTrace: "local_supply · osm.count",
 } as const;

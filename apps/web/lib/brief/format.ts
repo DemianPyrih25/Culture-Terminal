@@ -238,6 +238,14 @@ export function convictionRuleLabel(rule: ConfidenceRule, count: number, window:
       return "Answered as the closest question we cover";
     case "concept_partly_tagged":
       return "Part of the concept was not tested";
+    case "signal_mixed":
+      return "The signal is mixed, so confidence stays at most medium";
+    case "signal_weak":
+      return "The signal is weak, so confidence is low";
+    case "thin_sample":
+      return "The headline rests on a small sample";
+    case "category_level":
+      return "Only the concept's broader category was read";
   }
 }
 
@@ -338,6 +346,7 @@ export const TOOL_LABEL: Readonly<Record<ToolName, string>> = {
   concept_vector: "Concept check",
   company_financials: "Company filings",
   area_economics: "Area census",
+  local_supply: "Places nearby",
   submit_report: "Report",
 };
 
@@ -360,6 +369,7 @@ export const TOOL_DATA_LABEL: Readonly<Record<ToolName, string>> = {
   concept_vector: "concept data",
   company_financials: "filing data",
   area_economics: "census data",
+  local_supply: "OpenStreetMap counts",
   submit_report: "the report",
 };
 
@@ -426,6 +436,9 @@ export const METRIC_SHORT_LABEL: Readonly<Record<string, string>> = {
   "subs.distinctiveness": "Distinctiveness",
   "subs.near_substitutes": "Near substitutes",
   "subs.taste_island": "Taste island",
+  taste_map_mds: "Taste map",
+  "screen.universe": "Screened brands",
+  "screen.under_the_radar": "Under the radar",
   "share.pct": "Share of taste",
   "share.youth_tilt": "Youth tilt",
   "share.metros_won": "Metros won",
@@ -479,6 +492,11 @@ export const METRIC_SHORT_LABEL: Readonly<Record<string, string>> = {
   "econ.median": "Census median",
   "econ.share": "Census share",
   "fin.margin": "Margin",
+  "osm.count": "Places counted",
+  "osm.density": "Places per km²",
+  "osm.density_index": "Against the city",
+  "osm.activity_density": "Street activity",
+  "lift.area_popularity": "Already popular",
   "confidence.run": "Conviction",
   "confidence.metric": "Metric confidence",
 };

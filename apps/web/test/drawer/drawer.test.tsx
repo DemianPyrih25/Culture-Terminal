@@ -1,13 +1,12 @@
 // The How we know drawer (N06): its four tabs on the finished sample run, the focus card and the lookups
-// behind a number, the words for each lookup, the URL state, and "Copy as curl" (never a key). The sample
+// behind a number, the words for each lookup, the URL state, and "Copy request" (names for Qloo entity ids,
+// the request id, never a key or a replayable Qloo URL: R8). The sample
 // run is invented (D29).
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
-  API_KEY_PLACEHOLDER,
   callQueries,
   checkLine,
-  curlCommand,
   freshnessText,
   hasShortenedParams,
   HowWeKnowPanel,
@@ -18,9 +17,10 @@ import {
   readHowParams,
   refName,
   refNames,
-  requestCurl,
+  QLOO_BASE_URL,
+  QLOO_IDS_LINE,
+  requestCopy,
   requestPairs,
-  requestUrl,
   sourceDescription,
   sourceLine,
   SourceRow,
@@ -184,15 +184,17 @@ describe("a lookup's words", () => {
     expect(html).toMatch(/<dt class="[^"]*whitespace-nowrap/);
   });
 
-  it("opens to the request block, Copy id and Copy as curl", () => {
+  it("opens to the request block, Copy id and Copy request, with the ids line instead of a curl", () => {
     const source = model.sources.items[1];
     if (!source) throw new Error("no source");
     const html = renderToStaticMarkup(<SourceRow lookup={source} query={queries.get(source.qlooCallId)} defaultOpen />);
     expect(html).toContain('aria-expanded="true"');
     expect(text(html)).toContain("request id");
     expect(text(html)).toContain("Copy id");
-    expect(text(html)).toContain("Copy as curl");
-    expect(text(html)).toContain("$QLOO_API_KEY");
+    expect(text(html)).toContain("Copy request");
+    expect(text(html)).toContain(QLOO_IDS_LINE);
+    expect(text(html)).not.toContain("curl");
+    expect(text(html)).not.toContain("QLOO_API_KEY");
   });
 
   it("stands in for a footnote's request the run did not stream", () => {
@@ -208,20 +210,16 @@ describe("a lookup's words", () => {
   });
 });
 
-describe("copy as curl", () => {
-  it("builds the URL with its query and the key as the shell placeholder", () => {
-    const curl = curlCommand("/v2/insights", [
-      ["filter.type", "urn:entity:brand"],
-      ["signal.interests.entities", "brand-alpha,brand-beta"],
-      ["take", "6"],
-    ]);
-    expect(curl).toBe(
-      `curl 'https://hackathon.api.qloo.com/v2/insights?filter.type=urn%3Aentity%3Abrand&signal.interests.entities=brand-alpha%2Cbrand-beta&take=6' -H "x-api-key: ${API_KEY_PLACEHOLDER}"`,
+describe("copy request (R8)", () => {
+  it("copies the endpoint, the parameters with names where entity ids were, and the request id", () => {
+    const copy = requestCopy(
+      { endpoint: "/v2/insights", params: [["filter.type", "urn:entity:brand"]], requestId: "req-invented-0001" },
+      { path: "/v2/insights", query: { "filter.type": "urn:entity:brand", "signal.interests.entities": "«Brand Alpha»,«Brand Beta»", take: "6" } },
     );
-  });
-
-  it("keeps a quote inside a value from ending the shell string", () => {
-    expect(requestUrl("/search", [["query", "Juniper's Cola"]])).toBe("https://hackathon.api.qloo.com/search?query=Juniper%27s%20Cola");
+    expect(copy).toEqual({
+      text: [`GET ${QLOO_BASE_URL}/v2/insights`, "filter.type=urn:entity:brand", "signal.interests.entities=«Brand Alpha»,«Brand Beta»", "take=6", "request id: req-invented-0001"].join("\n"),
+      exact: true,
+    });
   });
 
   it("never carries a credential, even one smuggled into the parameters", () => {
@@ -232,24 +230,26 @@ describe("copy as curl", () => {
       ["access_token", "invented-key-value-0003"],
     ];
     expect(publicParams(params)).toEqual([["take", "5"]]);
-    expect(curlCommand("/search", params)).not.toContain("invented-key-value");
+    expect(requestCopy({ endpoint: "/search", params, requestId: null }, null)?.text).not.toContain("invented-key-value");
+    expect(requestCopy({ endpoint: "/search", params, requestId: null }, { path: "/search", query: Object.fromEntries(params) })?.text).not.toContain("invented-key-value");
   });
 
-  it("replays a call's full query from its evidence provenance, not the shortened trace parameters", () => {
+  it("copies a call's full query from its evidence provenance, not the shortened trace parameters", () => {
     const shortened = model.sources.items.filter((s) => hasShortenedParams(s.params));
     expect(shortened.length).toBeGreaterThan(0);
     for (const source of shortened) {
       const html = renderToStaticMarkup(<SourceRow lookup={source} query={queries.get(source.qlooCallId)} />);
       const full = queries.get(source.qlooCallId);
       if (!full) throw new Error(`no full query for ${source.qlooCallId}`);
-      expect(html).toContain('data-curl-exact="true"');
-      expect(decode(/data-curl="([^"]*)"/.exec(html)?.[1] ?? "")).toBe(curlCommand(full.path, Object.entries(full.query)));
+      expect(html).toContain('data-request-exact="true"');
+      expect(decode(/data-request-copy="([^"]*)"/.exec(html)?.[1] ?? "")).toBe(requestCopy(source, full)?.text);
     }
   });
 
-  it("falls back to the redacted parameters, and flags a shortened one", () => {
-    expect(requestCurl({ endpoint: "/search", params: [["query", "x"]] }, undefined)).toEqual({ command: curlCommand("/search", [["query", "x"]]), exact: true });
-    expect(requestCurl({ endpoint: "/v2/insights", params: [["filter.location", "POLYGON (12 pts)"]] }, null)?.exact).toBe(false);
-    expect(requestCurl({ endpoint: null, params: [] }, null)).toBeNull();
+  it("falls back to the redacted parameters, flags a shortened one, and gives none for a public lookup", () => {
+    expect(requestCopy({ endpoint: "/search", params: [["query", "x"]] }, undefined)).toEqual({ text: `GET ${QLOO_BASE_URL}/search\nquery=x`, exact: true });
+    expect(requestCopy({ endpoint: "/v2/insights", params: [["filter.location", "POLYGON (12 pts)"]] }, null)?.exact).toBe(false);
+    expect(requestCopy({ endpoint: null, params: [] }, null)).toBeNull();
+    expect(requestCopy({ endpoint: "/data/acs/acs5", params: [], source: "census" }, null)).toBeNull();
   });
 });

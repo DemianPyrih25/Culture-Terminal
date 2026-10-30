@@ -1,10 +1,13 @@
-import { METRO_LABEL, type BarsPayload, type GeoLiftPayload } from "@ct/contracts";
+import type { BarsPayload, GeoLiftPayload } from "@ct/contracts";
+import { AREA_STANDING_LABEL, METRO_LABEL } from "@ct/contracts/values";
 import { FigureFrame, figureLabel, type FigureMeta } from "./figure-frame";
 import { FigureTable, type TableCell, type TableRow } from "./figure-table";
 import { reasonLabel } from "./format";
 import { outlinesUrl } from "./lift-outlines";
-import { areaSupply, formatLift, mapPins, namedAreas, supplyUnknown, THIN_SUPPLY_LABEL, type LiftMode } from "./lift-scale";
+import { areaSupply, formatLift, mapPins, namedAreas, popularPins, supplyUnknown, THIN_SUPPLY_LABEL, type LiftMode } from "./lift-scale";
 import { LiftMapView } from "./lift-map-view";
+import { PIN_KEY_TEXT } from "./lift-map-parts";
+import { hasStanding } from "./lift-standing";
 
 /**
  * LiftMap (kind GeoLift: S6). Where a concept's taste over-indexes against the pinned baseline: geohash
@@ -36,13 +39,14 @@ export function LiftMap(props: LiftMapProps) {
   const label = figureLabel(props);
   const width = props.width ?? 760;
   const height = props.height ?? 400;
+  const pins = mapPins(data, props.maxLabels ?? 3);
   return (
     <FigureFrame
       meta={props}
       plot={
         <LiftMapView
           data={data}
-          labels={mapPins(data, props.maxLabels ?? 3)}
+          labels={[...pins, ...popularPins(data, pins)]}
           label={label}
           initialMode={props.initialMode ?? (data.coarse ? "RAW" : "LIFT")}
           width={width}
@@ -60,7 +64,8 @@ export function LiftMap(props: LiftMapProps) {
 /** The fixed caption with the boundary source, which the licence asks to show. */
 export function liftCaption(data: GeoLiftPayload): string {
   const caption = data.caption.trim().replace(/\.$/, "");
-  return `${caption}. Boundaries: ${data.boundarySource}.`;
+  const pins = (data.popular?.length ?? 0) > 0 && !data.coarse ? ` ${PIN_KEY_TEXT}` : "";
+  return `${caption}.${pins} Boundaries: ${data.boundarySource}.`;
 }
 
 const QUADRANT_TEXT: Readonly<Record<NonNullable<GeoLiftPayload["neighbourhoods"][number]["quadrant"]>, string>> = {
@@ -87,6 +92,9 @@ export function liftTableSpec(data: GeoLiftPayload, caption: string) {
   const pct = (v: number | null, reason: string): TableCell =>
     v === null ? { kind: "missing", reason } : { kind: "value", text: v.toFixed(2) };
   const named = new Map(namedAreas(data).map((a) => [a.id, a]));
+  // R7: each area's rank by all interest and its standing, beside its lift (absent on maps stored before Part 11).
+  const standing = hasStanding(data) && !data.coarse;
+  const byRaw = data.neighbourhoods.filter((n) => typeof n.raw === "number").sort((a, b) => (b.raw ?? 0) - (a.raw ?? 0));
   const ordered = [...data.neighbourhoods.filter((n) => named.has(n.id)), ...data.neighbourhoods.filter((n) => !named.has(n.id))];
   const rows: TableRow[] = ordered.map((n) => {
     const why = reasonLabel(n.reason);
@@ -99,6 +107,10 @@ export function liftTableSpec(data: GeoLiftPayload, caption: string) {
       pct(n.demandPct, n.lift === null ? why : reasonLabel("not_measured")),
     ];
     if (supply) cells.push(...supplyCells(areaSupply(n, data), n, mine === undefined ? "Unknown" : unknownWhy));
+    if (standing) {
+      const at = byRaw.indexOf(n);
+      cells.push(at < 0 ? { kind: "missing", reason: "no reading" } : `#${at + 1} of ${byRaw.length}`, n.standing ? AREA_STANDING_LABEL[n.standing] : "");
+    }
     return { key: n.id, cells };
   });
   const gated = data.cells.filter((c) => c.gated).length;
@@ -112,6 +124,7 @@ export function liftTableSpec(data: GeoLiftPayload, caption: string) {
       "",
       "",
       ...(supply ? ["", data.supply && !unknown ? `${data.supply.points.length}${data.supply.capped ? " (capped)" : ""}` : unknownWhy, "", ""] : []),
+      ...(standing ? ["", ""] : []),
     ],
   });
   return {
@@ -130,6 +143,7 @@ export function liftTableSpec(data: GeoLiftPayload, caption: string) {
             { label: "Quadrant" },
           ]
         : []),
+      ...(standing ? [{ label: "Rank by all interest", numeric: true }, { label: "Standing" }] : []),
     ],
     rows,
   };

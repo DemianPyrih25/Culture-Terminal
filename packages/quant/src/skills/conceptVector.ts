@@ -23,7 +23,8 @@ import {
 } from "@ct/contracts";
 import { analogVetoedFinding, emptyResultFinding } from "../findings";
 import { SKILL_LIMITATIONS } from "../limitations";
-import { addSkillEvidence, addSkillMetric, attemptAllKeepingFailures, countUncached, insightTags, registerEntity, type Attempt } from "./common";
+import { THIN_SAMPLE } from "../formulas";
+import { addSkillEvidence, addSkillMetric, attemptAllKeepingFailures, conceptReadOf, countUncached, insightTags, registerEntity, type Attempt } from "./common";
 import { skillErrorResult, type DigestTarget } from "./digest";
 import { addFindingDraft, finishBlockRun, type BlockRun } from "./blockDna/outputs";
 import { safeFullName, safeName } from "./format";
@@ -66,6 +67,8 @@ function resolve(input: ConceptInput, registry: EntityRegistry): Resolved {
     const tag = registry.tag(ref);
     if (tag === null) notices.push(`${ref} is not in the registry; left out.`);
     else if (!isTaxonomyTag(tag.tagId)) notices.push(`${ref} (${safeName(tag.name)}) is a descriptive tag, which gives no taste signal; left out.`);
+    else if (tag.conceptMatch === "proxy")
+      notices.push(`${ref} (${safeName(tag.name)}) is a look-alike tag for the question's concept, which the data does not hold; left out (no verdict comes from a look-alike).`);
     else tags.push(tag);
   }
   const analogs: RegisteredEntity[] = [];
@@ -127,9 +130,20 @@ function verdictText(verdict: AnalogVerdict["verdict"], anchor: string): string 
 async function runConceptVector(input: ConceptInput, ctx: SkillCtx): Promise<SkillResult> {
   const out: DigestTarget = { tool: "concept_vector", step: input.step_id };
   const { tags, analogs, notices } = resolve(input, ctx.registry);
-  if (tags.length === 0) return skillErrorResult(out, [...notices, "No taxonomy concept tag is left to signal with; look one up with find_tags."].join(" "));
+  if (tags.length === 0) {
+    const proxyOnly = input.concept_tags.some((ref) => ctx.registry.tag(ref)?.conceptMatch === "proxy");
+    const why = proxyOnly
+      ? "The concept is not in the data: the only tags given are look-alikes, so nothing was tested and no keep or veto is given. Use its broader category (a category-level read) or say the concept is not in the data."
+      : "No taxonomy concept tag is left to signal with; look one up with find_tags.";
+    return skillErrorResult(out, [...notices, why].join(" "));
+  }
   const filterType = entityTypeUrn(input.type);
   const label = tags.map((t) => safeName(t.name)).join(" + ");
+  // R2 (D48): concept tags that are only the concept's broader category give a category-level read: the
+  // analogs are scored against the category, with no keep, veto or ADD list.
+  const conceptRead = conceptReadOf(tags.map((t) => t.ref), ctx.registry);
+  const categoryLevel = conceptRead === "category";
+  const conceptName = ctx.concepts.length > 0 ? ctx.concepts.map((c) => safeName(c)).join(" + ") : label;
   const noun = input.type.replace("_", " ");
 
   const [openA] = (await attemptAllKeepingFailures([() => ctx.qloo.insights(filterType, openParams(tags))], ctx.signal)) as [EntityAttempt | undefined];
@@ -219,7 +233,7 @@ async function runConceptVector(input: ConceptInput, ctx: SkillCtx): Promise<Ski
 
   // ADD: the concept's own picks, registered so a follow-up can rank them.
   const analogIds = new Set(analogs.map((a) => a.entityId));
-  const adds = addsOf(open, analogIds).map((row) => {
+  const adds = (categoryLevel ? [] : addsOf(open, analogIds)).map((row) => {
     const reg = registerEntity(ctx.registry, draftOf(row.entity, input.type));
     if (reg.isNew) run.registered.push(reg.entity);
     return { row, entity: reg.entity };
@@ -236,13 +250,21 @@ async function runConceptVector(input: ConceptInput, ctx: SkillCtx): Promise<Ski
       subjectRefs: [a.ref, ...tags.map((t) => t.ref)],
       value: v.margin,
       reason: truncated ? "budget_truncated" : "not_scored",
-      display: v.verdict === "NOT_SCORED" ? "" : v.verdict === "KEEP" ? `KEEP: at or above ${anchor}` : `VETO: below ${anchor}`,
+      display:
+        v.verdict === "NOT_SCORED"
+          ? ""
+          : categoryLevel
+            ? `${v.verdict === "KEEP" ? "at or above" : "below"} ${anchor} of the category (category-level read)`
+            : v.verdict === "KEEP"
+              ? `KEEP: at or above ${anchor}`
+              : `VETO: below ${anchor}`,
       unit: "delta",
       badge: "DERIVED",
       formulaId: "cnpt.verdict",
       evidenceIds: verdictEvidence,
       n: null,
       comparator: "WITHIN_CALL",
+      conceptRead,
     });
     run.metrics.push(m);
     verdictMetrics.set(a.entityId, m);
@@ -257,19 +279,27 @@ async function runConceptVector(input: ConceptInput, ctx: SkillCtx): Promise<Ski
           subjectRefs: tags.map((t) => t.ref),
           value: precision,
           reason: truncated ? "budget_truncated" : "not_scored",
-          display: precision === null ? "" : `${keep} of ${keep + veto} ${noun} analogs kept (${Math.round(precision * 100)}%)`,
+          display:
+            precision === null
+              ? ""
+              : categoryLevel
+                ? `${keep} of ${keep + veto} ${noun} analogs at or above the category's anchor (${Math.round(precision * 100)}%, category-level read)`
+                : `${keep} of ${keep + veto} ${noun} analogs kept (${Math.round(precision * 100)}%)`,
           unit: "pct",
           badge: "DERIVED",
           formulaId: "cnpt.precision",
           evidenceIds: verdictEvidence,
           n: keep + veto,
           comparator: "WITHIN_CALL",
+          conceptRead,
+          thin: keep + veto < THIN_SAMPLE.conceptAnalogs,
         });
   if (precisionMetric !== null) run.metrics.push(precisionMetric);
 
   // Finding.
   const vetoed = analogs.filter((_, i) => verdicts[i]?.verdict === "VETO");
-  const draft = analogVetoedFinding({
+  // A category-level read vetoes nothing (R2): no ANALOG_VETOED.
+  const draft = categoryLevel ? null : analogVetoedFinding({
     conceptLabel: label,
     anchor,
     vetoed: vetoed.map((a) => safeName(a.name)),
@@ -297,12 +327,17 @@ async function runConceptVector(input: ConceptInput, ctx: SkillCtx): Promise<Ski
       key: `analog-${i + 1}`,
       rank: null,
       label: safeFullName(a.name),
-      sublabel: v.verdict === "NOT_SCORED" ? `not scored: ${v.why ?? "no score"}` : verdictText(v.verdict, anchor),
+      sublabel:
+        v.verdict === "NOT_SCORED"
+          ? `not scored: ${v.why ?? "no score"}`
+          : categoryLevel
+            ? `${v.verdict === "KEEP" ? "at or above" : "below"} the category's ${anchor.replace(/^the /u, "")} (category-level read)`
+            : verdictText(v.verdict, anchor),
       ref: a.ref,
       tagRef: null,
       type: input.type,
       cells: [rankCell(a.entityId), popCell(a.popularity)],
-      flags: v.verdict === "KEEP" ? ["KEEP"] : v.verdict === "VETO" ? ["VETO"] : [],
+      flags: categoryLevel ? (v.verdict === "NOT_SCORED" ? [] : ["CATEGORY"]) : v.verdict === "KEEP" ? ["KEEP"] : v.verdict === "VETO" ? ["VETO"] : [],
       explain: [],
     };
   });
@@ -333,24 +368,34 @@ async function runConceptVector(input: ConceptInput, ctx: SkillCtx): Promise<Ski
           ...(analogRows.length > 0 ? [{ key: "analogs", label: "Your analogs", rows: analogRows }] : []),
           ...(addRows.length > 0 ? [{ key: "adds", label: "What Qloo adds for the concept", rows: addRows }] : []),
         ],
-        caption:
-          `KEEP: the concept's taste scores the analog at least as high as ${anchor.replace(/^the /u, "its ")}, in the same Qloo call; VETO: lower. ` +
-          "A VETO means the concept's taste points elsewhere, not that the analog is a weak business. Not scored is never a VETO. " +
-          "Taste signals, not sales.",
+        caption: categoryLevel
+          ? `Category-level read: analogs scored against '${label}', since the data has no tag for '${conceptName}'. No keep or veto is given. Taste signals, not sales.`
+          : `KEEP: the concept's taste scores the analog at least as high as ${anchor.replace(/^the /u, "its ")}, in the same Qloo call; VETO: lower. ` +
+            "A VETO means the concept's taste points elsewhere, not that the analog is a weak business. Not scored is never a VETO. " +
+            "Taste signals, not sales.",
       },
     });
     run.datasetIds.push(dataset.id);
   }
 
   // Notices.
-  if (analogs.length === 0) run.notices.push("No analogs were given, so only the ADD list is returned.");
+  if (categoryLevel) {
+    run.flags.add("CATEGORY_LEVEL_READ");
+    run.notices.unshift(
+      `Category-level read: '${label}' is the broader category, since the data has no tag for '${conceptName}'. Describe the category's fit only: no winner, keep or veto for the concept itself.`,
+    );
+  }
+  if (analogs.length === 0) run.notices.push(categoryLevel ? "No analogs were given; a category-level read has no ADD list." : "No analogs were given, so only the ADD list is returned.");
   run.notices.push(`Anchor: the ${noun} ranked #${open.anchor.rank} for the concept; it is scored again beside the analogs, so no score is compared across calls.`);
 
   const rows: DigestRow[] = [
     ...analogs.map((a, i) => ({
       ref: a.ref,
       name: safeName(a.name),
-      values: { verdict: verdicts[i]?.verdict ?? "NOT_SCORED", metric: verdictMetrics.get(a.entityId)?.id ?? null },
+      values: {
+        verdict: categoryLevel ? (verdicts[i]?.verdict === "NOT_SCORED" ? "NOT_SCORED" : "CATEGORY") : (verdicts[i]?.verdict ?? "NOT_SCORED"),
+        metric: verdictMetrics.get(a.entityId)?.id ?? null,
+      },
     })),
     ...adds.map((a) => ({ ref: a.entity.ref, name: safeName(a.entity.name), values: { verdict: "ADD", concept_rank: a.row.rank } })),
   ];

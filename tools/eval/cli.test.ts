@@ -6,7 +6,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { AgentRunOptions, AgentRunResult, AnthropicLike } from "@ct/agent";
-import { DEFAULT_RUN_LIMITS, type Intent } from "@ct/contracts";
+import { DEFAULT_RUN_LIMITS, EMPTY_CANDIDATES, type Intent } from "@ct/contracts";
 import { createMemoryQlooStore, qlooEventFrom } from "@ct/qloo";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseEvalSummary } from "../../apps/web/components/method/eval-summary";
@@ -50,6 +50,7 @@ function intentFor(q: string): Intent {
     constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
     safety: refused ? { allowed: false, category: "private_individual", reframe: null } : { allowed: true, category: null, reframe: null },
     read_as: { nearest: false, not_covered: [] },
+    candidates: EMPTY_CANDIDATES,
     assumptions: [],
     mnemonic: "BRAND ALPHA <BRAND> HLTH",
   };

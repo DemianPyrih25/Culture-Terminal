@@ -48,7 +48,8 @@ describe("fake run script", () => {
     const seen = new Set<RunEventType>(events.map((e) => e.type));
     // The brand-health sample's scan runs every scan skill that applies and walks no location ladder, so it has
     // no CODE FALLBACK. Its brand is invented and not a listed company, so no SEC or Census call (`public`) is made.
-    const notInFakeRun: RunEventType[] = ["needs_input", "ghost", "error", "fallback", "public"];
+    // run.queued comes from the run manager's queue (D24), never from the run's own script.
+    const notInFakeRun: RunEventType[] = ["needs_input", "ghost", "error", "fallback", "public", "run.queued"];
     for (const type of RUN_EVENT_TYPES) {
       if (!notInFakeRun.includes(type)) expect(seen, type).toContain(type);
     }
@@ -104,8 +105,20 @@ describe("fake run script: the brand-health sample replayed as a test run", () =
   const sampleReport = sample.find((e) => e.type === "report.final");
   if (sampleReport?.type !== "report.final") throw new Error("the brand-health sample has no report.final");
 
-  it("replays the sample's events in order, adding none", () => {
-    expect(script.steps.map((s) => s.input.type)).toEqual(sample.slice(0, -1).map((e) => e.type));
+  it("replays the sample's events in order, adding only the invented side context a sample without it lacks", () => {
+    const sampleHasContext = sample.some((e) => e.type === "context.ai" || e.type === "context.web");
+    const types = script.steps.map((s) => s.input.type);
+    const replayed = sampleHasContext ? types : types.filter((t) => t !== "context.ai" && t !== "context.web");
+    expect(replayed).toEqual(sample.slice(0, -1).map((e) => e.type));
+    if (!sampleHasContext) {
+      // Right after the plan, and carried by the finished brief at no cost, naming no model.
+      const plan = types.indexOf("plan");
+      expect(types.slice(plan + 1, plan + 3)).toEqual(["context.ai", "context.web"]);
+      expect(script.report.aiContext?.status).toBe("ok");
+      expect(script.report.webContext?.items.every((item) => /^https:\/\/[a-z.]*example\.(com|org)\//.test(item.url))).toBe(true);
+      expect(script.report.receipt.context).toEqual({ aiUsd: 0, webUsd: 0, webSearches: 0 });
+      expect(script.report.aiContext?.items.some((item) => /\p{Nd}/u.test(item.text))).toBe(false);
+    }
   });
 
   it("replays a sample whose opening scan ran every scan skill of its job that applies", () => {

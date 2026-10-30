@@ -8,7 +8,7 @@ import { LiftSchematic } from "./lift-map-schematic";
 import { cx } from "../ui/cx";
 import { Segmented } from "../ui/segmented";
 import { MODE_TEXT, MapLegend } from "./lift-map-parts";
-import { LIFT_MODES, LIFT_MODE_KEY, precisionBadge, type LiftLabel, type LiftMode } from "./lift-scale";
+import { LIFT_MODES, LIFT_MODE_KEY, precisionBadge, type LiftLabel, type LiftMode, type MapPlace } from "./lift-scale";
 
 /**
  * The interactive part of a LiftMap: the "Extra interest | All interest" switch (LIFT and RAW; keys 1/2/3
@@ -39,6 +39,8 @@ export interface LiftMapViewProps {
   controls?: boolean;
   /** Fill the parent's height instead of keeping the layout box's aspect ratio (the map card). */
   fill?: boolean;
+  /** Similar places from OpenStreetMap (R6) on their own layer; empty or omitted draws none. */
+  places?: readonly MapPlace[];
   className?: string;
 }
 
@@ -81,6 +83,7 @@ export function LiftMapView({
   onModeChange,
   controls = true,
   fill = false,
+  places = [],
   className,
 }: LiftMapViewProps) {
   const [ownMode, setOwnMode] = useState<LiftMode>(initialMode);
@@ -181,7 +184,7 @@ export function LiftMapView({
         className={cx("@container relative w-full overflow-hidden bg-sunken", fill ? "h-full min-h-[280px]" : "rounded-tile")}
         style={fill ? undefined : { aspectRatio: `${width} / ${height}`, maxHeight: height }}
       >
-        <LiftSchematic data={data} mode={mode} labels={labels} width={dims.w} height={dims.h} label={label} hidden={ready} />
+        <LiftSchematic data={data} mode={mode} labels={labels} width={dims.w} height={dims.h} label={label} hidden={ready} places={places} />
         {Canvas ? (
           <Canvas
             data={data}
@@ -189,6 +192,7 @@ export function LiftMapView({
             labels={labels}
             label={label}
             outlinesUrl={outlinesUrl}
+            places={places}
             reducedMotion={reducedMotion}
             onReady={() => setReady(true)}
             onError={() => {

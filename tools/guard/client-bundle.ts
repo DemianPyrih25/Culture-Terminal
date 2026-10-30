@@ -1,5 +1,6 @@
 // Secrets in the client bundle (PLAN §10.2, §10.3). Everything under .next/static is public, so
-// a server-only variable name there means server code was bundled for the browser.
+// a server-only variable name there means server code was bundled for the browser, and a UUID-shaped
+// id there may be a Qloo entity id, which stays on the server (R8, D51).
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { isBinary, scanWithRules, type Finding, type TextRule } from "./finding";
@@ -16,7 +17,15 @@ export const SERVER_ONLY_ENV = [
   "JUDGE_CODE",
   "SEC_USER_AGENT",
   "CENSUS_API_KEY",
+  "OSM_USER_AGENT",
 ] as const;
+
+/**
+ * UUID-shaped ids that are never Qloo entity ids: the nil and max UUIDs libraries carry as constants.
+ * Anything else UUID-shaped in the client bundle is treated as a possible entity id (R8, D51).
+ */
+const uuidOf = (digit: string): string => [8, 4, 4, 4, 12].map((n) => digit.repeat(n)).join("-");
+const NON_ENTITY_UUIDS: ReadonlySet<string> = new Set([uuidOf("0"), uuidOf("f")]);
 
 const RULES: readonly TextRule[] = [
   {
@@ -41,6 +50,14 @@ const RULES: readonly TextRule[] = [
     pattern: /x-api-key["'`]?[ \t]*[:=,][ \t]*["'`]?([A-Za-z0-9_-]{12,})/gi,
     message: "X-Api-Key header with a literal value in the client bundle",
     accept: (m) => /\d/.test(m[1] ?? ""),
+  },
+  {
+    id: "bundle-entity-id",
+    // R8 (D51): Qloo entity ids stay on the server, so none may be compiled into a page. A UUID inside a
+    // URL path (a library's doc image link, ".../assets/<uuid>") is a link, not data.
+    pattern: /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi,
+    message: "UUID-shaped id (a Qloo entity id?) in the client bundle",
+    accept: (m, text) => !NON_ENTITY_UUIDS.has(m[0].toLowerCase()) && text[m.index - 1] !== "/",
   },
 ];
 

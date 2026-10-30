@@ -494,7 +494,7 @@ describe("audience_dna: two subjects", () => {
     expect(bars.payload.mode).toBe("diverging");
     expect(bars.payload.display).toBeUndefined();
     expect(bars.payload.baseline).toBe(0);
-    expect(run.ledger.metrics.find((m) => m.key === "dna.youth_index")?.display).toBe("0.00");
+    expect(run.ledger.metrics.find((m) => m.key === "dna.youth_index")?.display).toBe("0.00 · about average");
     expect(result.forModel.notices).toEqual(["Brand Bare carries no tags in Qloo, so its facets are not measured."]);
     expect(run.ledger.datasets.map((d) => d.kind)).toEqual(["Bars"]);
     expect(run.ledger.evidences.map((e) => e.status)).toEqual(["ok", "empty"]);

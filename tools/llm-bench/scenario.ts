@@ -7,6 +7,7 @@ import {
   compileMnemonic,
   dataNoticeFor,
   DEFAULT_RUN_LIMITS,
+  EMPTY_CANDIDATES,
   isId,
   isToolName,
   makeId,
@@ -1060,6 +1061,21 @@ const SCRIPTS: Scripts = {
     b.notices.push("ACS 5-year estimates describe residents, not customers or visitors.");
     return b.build("ok", "area_economics");
   },
+
+  local_supply(input, ctx) {
+    const b = new DigestBuilder(ctx);
+    const where = input.market === null ? input.areas.map((a) => a.replace(/_/g, " ")) : [input.market.replace(/_/g, " ")];
+    for (const name of where) {
+      const activity = 20 + Math.floor(400 * unit(`osm-act:${input.metro ?? input.market}:${name}`));
+      const row: Record<string, number> = { street_activity: activity };
+      for (const type of input.place_types) row[type] = Math.floor(30 * unit(`osm-${type}:${name}`));
+      b.row(null, name, row);
+      b.metric(`Shops and food places mapped in ${name}`, `at least ${activity}`, "MEASURED");
+    }
+    b.flag("OSM_SUPPLY_FLOOR");
+    b.notices.push("OpenStreetMap counts are floors: volunteer mapping misses some places.");
+    return b.build("ok", "local_supply");
+  },
 };
 
 export function scriptedDigest<K extends SkillId>(tool: K, input: ToolInput<K>, ctx: DigestContext): ModelDigest {
@@ -1083,6 +1099,7 @@ const BENCH_INTENT_BASE: Omit<Intent, "mnemonic"> = {
   constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
   safety: { allowed: true, category: null, reframe: null },
   read_as: { nearest: false, not_covered: [] },
+  candidates: EMPTY_CANDIDATES,
   assumptions: ["US geography"],
 };
 export const BENCH_INTENT: Intent = { ...BENCH_INTENT_BASE, mnemonic: compileMnemonic(BENCH_INTENT_BASE) };
@@ -1301,5 +1318,6 @@ export function sampleInputs(): { [K in SkillId]: ToolInput<K> } {
     concept_vector: { concept_tags: ["T1"], type: "brand", analogs: ["R1", "R2"], ...meta },
     company_financials: { brand: "R1", ...meta },
     area_economics: { metro: "nashville", areas: ["riverside_flats", "old_mill"], ...meta },
+    local_supply: { metro: "nashville", areas: ["riverside_flats"], market: null, place_types: ["cafe"], mix: false, list_places: false, ...meta },
   };
 }

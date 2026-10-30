@@ -12,6 +12,7 @@ import type {
   SkillCtx,
   ValueCell,
 } from "@ct/contracts";
+import { isAboutLevelIndex } from "../../formulas";
 import type { FindingDraft } from "../../findings";
 import { addSkillMetric } from "../common";
 import { displayRanks, fixed2, rankText, safeFullName, safeName, safeText } from "../format";
@@ -111,7 +112,7 @@ function youthMetric(
     subjectRefs: who.refs,
     value: y,
     reason,
-    display: y === null ? "" : `${signed2(y)}${ranked}`,
+    display: y === null ? "" : `${signed2(y)}${isAboutLevelIndex(y) ? " · about average" : ""}${ranked}`,
     unit: "index",
     badge: "DERIVED",
     formulaId: "dna.youth_index",
@@ -119,6 +120,7 @@ function youthMetric(
     // Y averages four age indices; a peer average rests on that many blocks.
     n: who.averaged ?? 4,
     comparator: "BASELINE",
+    aboutLevel: isAboutLevelIndex(y),
   });
 }
 
@@ -157,13 +159,14 @@ function profileMetrics(
         subjectRefs: who.refs,
         value,
         reason,
-        display: signed2(value),
+        display: `${signed2(value)}${isAboutLevelIndex(value) ? " · about average" : ""}`,
         unit: "index",
         badge,
         formulaId: key,
         evidenceIds,
         n: who.averaged ?? kindN,
         comparator: "BASELINE",
+        aboutLevel: isAboutLevelIndex(value),
       }),
     );
   const age = AGE_BARS.map(([bucket, label]) => index("dna.age_index", `age index ${label}`, indices.age[bucket], AGE_BARS.length));

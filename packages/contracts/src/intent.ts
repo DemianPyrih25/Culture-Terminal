@@ -128,6 +128,54 @@ export const IntentReadAs = z.strictObject({
 });
 export type IntentReadAs = z.infer<typeof IntentReadAs>;
 
+/**
+ * R3 (D49): the candidates a specialist would check and the asker would expect to see, and the ones the
+ * question names besides the mentions. The gate resolves obvious entities exactly (never a look-alike) and
+ * lists the misses in one EXPECTED_CANDIDATE_MISSING limitation; areas resolve through the gazetteer and
+ * markets through config/metros.json. Plain string lists: the structured-output subset takes no patterns or
+ * counts, so normalizeIntent caps and dedupes them.
+ */
+export const IntentCandidates = z.strictObject({
+  named_areas: z
+    .array(z.string())
+    .describe("Neighbourhoods the question names as options or comparisons besides geo.area, as written. Empty if none."),
+  named_markets: z
+    .array(z.string())
+    .describe(
+      "US cities the question names as candidate markets (market_selection, sponsorship tour stops, launch_test), as market ids in snake case, e.g. austin, washington_dc. Empty if none.",
+    ),
+  obvious_entities: z
+    .array(z.strictObject({ text: z.string(), entity_type: EntityType }))
+    .describe(
+      "Up to six well-known names a specialist would check first for this job and the asker would expect to see: direct competitors (brand_health, head_to_head), likely sponsors (sponsorship), likely partners (brand_collab), well-known creators (creator_fit), real analogs (launch_test). Never the primary or a name already in mentions. Empty when unsure.",
+    ),
+  obvious_areas: z
+    .array(z.string())
+    .describe(
+      "Up to four neighbourhoods a local would check first for this job, in the question's map city (taste_twins: the target city), as commonly named. Empty when unsure or no map city.",
+    ),
+  obvious_markets: z
+    .array(z.string())
+    .describe(
+      "Up to four market ids a specialist would check first (market_selection, launch_test, sponsorship). Empty when unsure.",
+    ),
+});
+export type IntentCandidates = z.infer<typeof IntentCandidates>;
+
+/** At most this many obvious candidates of each kind survive normalizeIntent (R3). */
+export const MAX_OBVIOUS = { entities: 6, areas: 4, markets: 4 } as const;
+/** At most this many named areas or named markets survive normalizeIntent. */
+export const MAX_NAMED_CANDIDATES = 8;
+
+/** No candidates: what a stored intent from before Part 11 reads as. */
+export const EMPTY_CANDIDATES: IntentCandidates = {
+  named_areas: [],
+  named_markets: [],
+  obvious_entities: [],
+  obvious_areas: [],
+  obvious_markets: [],
+};
+
 export const Intent = z.strictObject({
   pillar: Pillar.describe("The desk. Must match the job: JOB_PILLAR in code is authoritative."),
   job: Job,
@@ -136,6 +184,7 @@ export const Intent = z.strictObject({
   constraints: IntentConstraints,
   safety: IntentSafety,
   read_as: IntentReadAs,
+  candidates: IntentCandidates,
   assumptions: z.array(z.string()).describe("Defaults applied, e.g. 'US geography'. Empty if none."),
   mnemonic: z
     .string()
@@ -149,7 +198,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "obj
  * An Intent as run events store it. Fields added after a run was recorded read as their empty values,
  * so stored runs and pinned showcases still replay: `geo.market` (D44) as null; and from Part 9
  * `geo.target_metro` as null, `geo.cities` as empty, `constraints.concept_description` as null and
- * `read_as` as not read as a nearest job.
+ * `read_as` as not read as a nearest job; and from Part 11 `candidates` as all-empty lists.
  */
 export const StoredIntent = z.preprocess((raw) => {
   if (!isRecord(raw)) return raw;
@@ -157,6 +206,8 @@ export const StoredIntent = z.preprocess((raw) => {
   if (isRecord(raw.geo)) out.geo = { market: null, target_metro: null, cities: [], ...raw.geo };
   if (isRecord(raw.constraints)) out.constraints = { concept_description: null, ...raw.constraints };
   if (!("read_as" in raw)) out.read_as = { nearest: false, not_covered: [] };
+  if (!("candidates" in raw)) out.candidates = EMPTY_CANDIDATES;
+  else if (isRecord(raw.candidates)) out.candidates = { ...EMPTY_CANDIDATES, ...raw.candidates };
   return out;
 }, Intent);
 
@@ -198,13 +249,87 @@ export function compileMnemonic(intent: Pick<Intent, "job" | "mentions" | "geo" 
   }
 }
 
+/** A name folded for comparison: NFKC, lower case, punctuation and repeated spaces removed. */
+export function candidateKey(text: string): string {
+  return text
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+/** Trimmed, non-empty, unique by candidateKey and not in `taken`, in order, at most `max`. */
+function capNames(names: readonly string[], max: number, taken: ReadonlySet<string> = new Set()): string[] {
+  const seen = new Set(taken);
+  const out: string[] = [];
+  for (const raw of names) {
+    const text = raw.trim();
+    const key = candidateKey(text);
+    if (key === "" || seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/** Well-formed market ids only (config/metros.json membership is checked by the agent), unique, at most `max`. */
+function capMarkets(ids: readonly string[], max: number, taken: ReadonlySet<string> = new Set()): string[] {
+  const out: string[] = [];
+  for (const raw of ids) {
+    const id = raw.trim().toLowerCase();
+    if (!MarketId.safeParse(id).success || taken.has(id) || out.includes(id)) continue;
+    out.push(id);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
 /**
- * Code-side normalisation after CLERK: the pillar follows the job and the mnemonic is recompiled. A
- * financial_advice question (buy or sell a stock) is never read as the nearest job (D9 of the Part 9
- * close-out): its fixed not-advice reframe already states what is not covered, so read_as is cleared and
- * no read_as_nearest_job penalty applies.
+ * R3 caps: obvious entities at most MAX_OBVIOUS.entities, never a mention (the primary included) by folded
+ * name; obvious areas at most MAX_OBVIOUS.areas and never a named area or geo.area; obvious markets at most
+ * MAX_OBVIOUS.markets and never a named market; named lists at most MAX_NAMED_CANDIDATES. Market ids must be
+ * well formed; the agent drops the ones config/metros.json does not list.
+ */
+export function normalizeCandidates(intent: Pick<Intent, "mentions" | "geo" | "candidates">): IntentCandidates {
+  const c = intent.candidates;
+  const mentionKeys = new Set(intent.mentions.map((m) => candidateKey(m.text)));
+  const seenEntities = new Set(mentionKeys);
+  const obviousEntities: IntentCandidates["obvious_entities"] = [];
+  for (const e of c.obvious_entities) {
+    const text = e.text.trim();
+    const key = candidateKey(text);
+    if (key === "" || seenEntities.has(key)) continue;
+    seenEntities.add(key);
+    obviousEntities.push({ text, entity_type: e.entity_type });
+    if (obviousEntities.length >= MAX_OBVIOUS.entities) break;
+  }
+  const areaTaken = new Set(intent.geo.area === null ? [] : [candidateKey(intent.geo.area)]);
+  const namedAreas = capNames(c.named_areas, MAX_NAMED_CANDIDATES, areaTaken);
+  for (const a of namedAreas) areaTaken.add(candidateKey(a));
+  const namedMarkets = capMarkets(c.named_markets, MAX_NAMED_CANDIDATES);
+  return {
+    named_areas: namedAreas,
+    named_markets: namedMarkets,
+    obvious_entities: obviousEntities,
+    obvious_areas: capNames(c.obvious_areas, MAX_OBVIOUS.areas, areaTaken),
+    obvious_markets: capMarkets(c.obvious_markets, MAX_OBVIOUS.markets, new Set([...namedMarkets, ...intent.geo.cities])),
+  };
+}
+
+/**
+ * Code-side normalisation after CLERK: the pillar follows the job, the mnemonic is recompiled and the R3
+ * candidates are capped and deduped (normalizeCandidates). A financial_advice question (buy or sell a
+ * stock) is never read as the nearest job (D9 of the Part 9 close-out): its fixed not-advice reframe already
+ * states what is not covered, so read_as is cleared and no read_as_nearest_job penalty applies.
  */
 export function normalizeIntent(intent: Intent): Intent {
   const readAs = intent.safety.category === "financial_advice" ? { nearest: false, not_covered: [] } : intent.read_as;
-  return { ...intent, pillar: JOB_PILLAR[intent.job], read_as: readAs, mnemonic: compileMnemonic(intent) };
+  return {
+    ...intent,
+    pillar: JOB_PILLAR[intent.job],
+    read_as: readAs,
+    candidates: normalizeCandidates(intent),
+    mnemonic: compileMnemonic(intent),
+  };
 }

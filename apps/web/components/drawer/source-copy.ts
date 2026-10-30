@@ -2,8 +2,9 @@ import type { BriefSource } from "../../lib/brief";
 
 /**
  * The words of a lookup in the How we know drawer: what it fetched, its endpoint line, how fresh it is,
- * and its request pairs. A lookup is a Qloo request, or (Part 9) an SEC EDGAR or US Census request,
- * which names its host and reference instead of a filter and a request id. Pure.
+ * and its request pairs. A lookup is a Qloo request, or a public one (Part 9: SEC EDGAR or US Census; R6:
+ * OpenStreetMap via the Overpass API), which names its host and reference instead of a filter and a
+ * request id. Qloo parameters carry names where entity ids were (R8): the ids stay on the server. Pure.
  */
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
@@ -44,6 +45,8 @@ export function sourceDescription(source: Pick<BriefSource, "endpoint" | "filter
       return `Reported financials${names ? ` for ${names}'s company` : ""} (SEC EDGAR filings)`;
     case "/data/acs/acs5":
       return `Resident estimates${forNames} (US Census ACS 5-year)`;
+    case "/api/interpreter":
+      return "Places counted in OpenStreetMap (Overpass API)";
     case "/search": {
       const type = typeWord(param("types")?.split(",")[0] ?? null);
       return type ? `${sentence(type)} names matched in Qloo` : "Names matched in Qloo";
@@ -65,11 +68,18 @@ export function sourceDescription(source: Pick<BriefSource, "endpoint" | "filter
   }
 }
 
-/** "/v2/insights · brand · 46 rows"; an SEC or Census lookup "data.sec.gov/api/xbrl/companyfacts · SEC EDGAR". */
+const PUBLIC_NAME = { sec: "SEC EDGAR", census: "US Census Bureau", osm: "OpenStreetMap" } as const;
+
+/** A public lookup: SEC EDGAR, US Census or OpenStreetMap. */
+export const isPublicLookup = (source: BriefSource["source"]): source is keyof typeof PUBLIC_NAME =>
+  source === "sec" || source === "census" || source === "osm";
+
+/**
+ * "/v2/insights · brand · 46 rows"; a public lookup "data.sec.gov/api/xbrl/companyfacts · SEC EDGAR",
+ * "overpass-api.de/api/interpreter · OpenStreetMap".
+ */
 export function sourceLine(source: Pick<BriefSource, "endpoint" | "filterLabel" | "rows" | "source" | "host">): string {
-  if (source.source === "sec" || source.source === "census") {
-    return [`${source.host ?? ""}${source.endpoint}`, source.source === "sec" ? "SEC EDGAR" : "US Census Bureau"].join(" · ");
-  }
+  if (isPublicLookup(source.source)) return [`${source.host ?? ""}${source.endpoint}`, PUBLIC_NAME[source.source]].join(" · ");
   return [source.endpoint, source.filterLabel, source.rows === null ? null : `${source.rows} ${source.rows === 1 ? "row" : "rows"}`].filter(Boolean).join(" · ");
 }
 
@@ -125,15 +135,16 @@ export function paramValue(value: string, names: ReadonlyMap<string, string> = n
 }
 
 /**
- * The request block's pairs: the redacted parameters (refs named), then the short request id, or for an
- * SEC or Census lookup its reference (a CIK, or the Census dataset, vintage and geography). Never a key.
+ * The request block's pairs: the redacted parameters (refs named, entity ids already names), then the
+ * short request id, or for a public lookup its reference (a CIK, the Census dataset, vintage and
+ * geography, or "osm-<data date>"). Never a key.
  */
 export function requestPairs(
   source: Pick<BriefSource, "params" | "shortRequestId" | "requestId" | "source">,
   names?: ReadonlyMap<string, string>,
 ): [string, string][] {
   const pairs: [string, string][] = source.params.filter(([k]) => !/api[-_]?key|authorization|secret|token|password|^key$/i.test(k)).map(([k, v]) => [k, paramValue(v, names)]);
-  const publicSource = source.source === "sec" || source.source === "census";
+  const publicSource = isPublicLookup(source.source);
   if (source.requestId) pairs.push([publicSource ? "reference" : "request id", publicSource ? source.requestId : source.shortRequestId]);
   return pairs;
 }

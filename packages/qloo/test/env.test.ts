@@ -19,6 +19,7 @@ describe("qlooClientOptionsFromEnv", () => {
       tagCap: 200,
       rps: 1.5,
       dailyFreshCap: 1900,
+      judgingEndDate: "2026-11-16",
     });
     expect(o.transport).not.toBe(mockTransport);
     expect(o.store).toBe(deps.store);

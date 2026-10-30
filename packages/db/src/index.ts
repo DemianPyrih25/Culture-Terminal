@@ -10,3 +10,6 @@ export * from "./repos/qloo";
 export * from "./repos/public";
 export * from "./repos/ledger";
 export * from "./repos/showcases";
+export * from "./repos/follows";
+export * from "./repos/contextCache";
+export * from "./repos/featureUses";

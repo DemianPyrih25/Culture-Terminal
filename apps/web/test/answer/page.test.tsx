@@ -44,6 +44,12 @@ describe("the answer page", () => {
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
+  it("offers Follow in the page head, before Share (§2.4)", () => {
+    const head = brand.slice(0, at(brand, 'data-verdict="answer"'));
+    expect(head).toContain('data-following="false"');
+    expect(at(head, ">Follow<")).toBeLessThan(at(head, ">Share<"));
+  });
+
   it("says the verdict with its period, the confidence, the advice line and the check", () => {
     const verdict = text(slice(brand, 'data-verdict="answer"', "Next steps"));
     expect(verdict).toContain("Taste island.");

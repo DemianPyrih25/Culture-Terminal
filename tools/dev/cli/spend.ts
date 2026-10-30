@@ -8,8 +8,8 @@ import { fileURLToPath } from "node:url";
 
 export const SPEND_FILE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../.private/run-agent/spend.json");
 
-/** .env.example's development bucket. */
-export const DEFAULT_DEV_USD_CAP = 15;
+/** D43's development bucket: $45 of the $200 in total, cumulative over every CLI run. */
+export const DEFAULT_DEV_USD_CAP = 45;
 
 export interface SpendTally {
   usd: number;

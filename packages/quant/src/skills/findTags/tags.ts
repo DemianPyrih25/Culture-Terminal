@@ -84,6 +84,30 @@ export function conceptWords(text: string): Set<string> {
 export function nameMatches(query: ReadonlySet<string>, name: ReadonlySet<string>): boolean {
   if (query.size === 0 || name.size === 0) return false;
   const [small, large] = query.size <= name.size ? [query, name] : [name, query];
-  for (const w of small) if (!large.has(w)) return false;
-  return true;
+  if ([...small].every((w) => large.has(w))) return true;
+  // A tag that only adds a generic product word ("Non-Alcoholic Drink" for "non-alcoholic craft beer").
+  const specific = new Set([...name].filter((w) => !GENERIC_NAME_WORDS.has(w)));
+  return specific.size > 0 && specific.size < name.size && [...specific].every((w) => query.has(w));
+}
+
+/** Generic product words a tag name may add without changing what it names (nameMatches). */
+export const GENERIC_NAME_WORDS: ReadonlySet<string> = new Set(["drink", "beverage", "product", "good"]);
+
+/**
+ * Words that qualify a concept without defining it ("premium hot sauce" is still hot sauce): a part whose kept
+ * tags leave only these uncovered is read exactly, with KEEP and VETO on the tested part (definingWordsLeft).
+ */
+export const NON_DEFINING_WORDS: ReadonlySet<string> = new Set([
+  "premium", "luxury", "small", "batch", "artisanal", "artisan", "boutique", "independent", "indie", "local", "new", "modern",
+  "upscale", "high", "end", "budget", "affordable", "specialty", "speciality", "gourmet", "quality", "little", "style", "look",
+  "inspired", "themed", "brand", "company", "concept", "line",
+]);
+
+/**
+ * The defining words of a concept part that none of its kept tags covers: "non" and "alcoholic" when only
+ * "Beer" and "Craft" were kept for "non-alcoholic craft beer". Empty: the tags read the part itself.
+ */
+export function definingWordsLeft(part: string, tagNames: readonly string[]): string[] {
+  const covered = new Set(tagNames.flatMap((n) => [...conceptWords(n)]));
+  return [...conceptWords(part)].filter((w) => !covered.has(w) && !NON_DEFINING_WORDS.has(w));
 }

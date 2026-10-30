@@ -1,4 +1,5 @@
-import { FIXED_DISCLAIMERS, isVerdictTag, VIZ_COMPAT, type Metric, type Report, type RunState, type SkillId } from "@ct/contracts";
+import type { Metric, Report, RunState, SkillId } from "@ct/contracts";
+import { FIXED_DISCLAIMERS, isVerdictTag, VIZ_COMPAT } from "@ct/contracts/values";
 import { withoutNoiseTags } from "../tag-noise";
 import { figureLegend, figureSource, methodHrefFor } from "./figures";
 import { FootnoteRegistry, inlineText } from "./footnotes";
@@ -180,6 +181,13 @@ function buildAnswer(state: RunState, notes: FootnoteRegistry): BriefAnswer {
   };
 }
 
+/** "−10" for a penalty; a cap line (R1) "at most 70", or "−8 · at most 70" when it is the cap that binds. */
+export function convictionPointsText(points: number, cap?: number): string {
+  const pts = points < 0 ? `−${Math.abs(points)}` : `${points}`;
+  if (cap === undefined) return pts;
+  return points < 0 ? `${pts} · at most ${cap}` : `at most ${cap}`;
+}
+
 function buildConviction(ledger: Ledger): BriefConviction {
   const { state } = ledger;
   const report = state.report;
@@ -192,7 +200,7 @@ function buildConviction(ledger: Ledger): BriefConviction {
       summary: null,
       scale: SCALE,
       ticks: TICKS,
-      ruleNote: "Starts at 100 once every number is traced, minus fixed penalties. The model cannot set it.",
+      ruleNote: "Starts at 100 once every number is traced, minus fixed penalties, and capped by signal strength and sample. The model cannot set it.",
       why: null,
       coverage: null,
     };
@@ -206,7 +214,7 @@ function buildConviction(ledger: Ledger): BriefConviction {
     summary,
     scale: SCALE,
     ticks: TICKS,
-    ruleNote: "Computed: starts at 100, minus fixed penalties. The model cannot set it.",
+    ruleNote: "Computed: starts at 100, minus fixed penalties, and capped by signal strength and sample. The model cannot set it.",
     why: {
       label: `Why ${summary.score}`,
       lines: breakdown.map((b) => ({
@@ -214,7 +222,8 @@ function buildConviction(ledger: Ledger): BriefConviction {
         label: convictionRuleLabel(b.rule, b.count, ledger.window),
         count: b.count,
         points: b.points,
-        pointsText: b.points < 0 ? `−${Math.abs(b.points)}` : `${b.points}`,
+        ...(b.cap !== undefined ? { cap: b.cap } : {}),
+        pointsText: convictionPointsText(b.points, b.cap),
       })),
       total: {
         text: `= ${summary.score}`,

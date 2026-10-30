@@ -1,6 +1,6 @@
 import type { BarsPayload, DatasetEnvelope, GeoLiftNeighbourhood, GeoLiftPayload, Job, Metric, RankedPayload, SlatePayload } from "@ct/contracts";
 import type { BriefFigure, BriefKeyFigure } from "../brief";
-import { METRO_LABEL } from "@ct/contracts";
+import { METRO_LABEL } from "@ct/contracts/values";
 import { areaSupply, MIN_BUSY_AREA_VENUES, supplyUnknown, THIN_SUPPLY_LABEL } from "../../components/figures/lift-scale";
 import { bestLiftFigure, datasetOf, type ChartContext } from "./charts";
 import { DOMAIN_COLUMN, ENTITY_NOUN } from "./copy";
@@ -104,7 +104,7 @@ function subjectBands(payload: BarsPayload, ctx: ChartContext, groupKey: string)
 
 function ageLean(k: BriefKeyFigure, input: Input): Number_ | null {
   const v = numberOf(k, input.metrics);
-  const word = ageLeanWord(v);
+  const word = ageLeanWord(v, metricOf(k, input.metrics)?.level === "about_level");
   if (word === null || v === null) return null;
   return one(k.key, word, "Age lean", `${signed(v)} vs the average audience`, k.footnote, { variant: "word" });
 }
@@ -425,7 +425,7 @@ function audienceDiscovery(input: Input, take: (test: (k: BriefKeyFigure) => boo
   const gender = take((k) => isOf(k, input.metrics, "dna.gender_index", "dna.female_index"));
   if (gender) {
     const v = numberOf(gender, input.metrics);
-    const word = genderLeanWord(v);
+    const word = genderLeanWord(v, metricOf(gender, input.metrics)?.level === "about_level");
     if (word && v !== null) out.push(one(gender.key, word, "Gender lean", `${signed(v)} vs the average audience`, gender.footnote, { variant: "word" }));
   }
   const bands = dna ? subjectBands(dna.data.payload, input.ctx, "AGE") : [];

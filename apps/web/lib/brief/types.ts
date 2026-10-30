@@ -85,6 +85,10 @@ export interface MetricView {
   window: string | null;
   /** The reporting period or vintage of an SEC or Census number ("FY2024", "ACS 2019–2023"); null or absent otherwise. */
   period?: string | null;
+  /** Inside the about-level band (R1, V13): printed "about level" / "about average", never as a lead. */
+  aboutLevel?: boolean;
+  /** Rests on a thin sample (R1): the focus card says so. */
+  thin?: boolean;
 }
 
 /**
@@ -262,7 +266,9 @@ export interface ConvictionLine {
   label: string;
   count: number;
   points: number;
-  /** "−10". */
+  /** The ceiling a cap rule sets (R1, CONFIDENCE_CAP); absent for a penalty. */
+  cap?: number;
+  /** "−10", or for a cap "at most 70". */
   pointsText: string;
 }
 
@@ -589,6 +595,8 @@ export interface BriefMethod {
   checker: CheckerLine;
   models: { clerk: string | null; analyst: string | null };
   requests: { total: number; network: number; cached: number; reused: number };
+  /** "Context: AI $0.012 · web $0.041 (3 searches)" (R4, R5); null without side calls. */
+  context?: string | null;
 }
 
 /**

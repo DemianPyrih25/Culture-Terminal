@@ -7,7 +7,7 @@ import {
   type ReportDraft,
   type ReportDraftShape,
 } from "@ct/contracts";
-import { argumentStrength, metricConfidence } from "@ct/quant";
+import { argumentStrength, buildTasteMap, metricConfidence } from "@ct/quant";
 import { describe, expect, it } from "vitest";
 import {
   acceptedWarnings,
@@ -16,6 +16,7 @@ import {
   ReportAssemblyError,
   reportTag,
   SCORECARD_CAPTION,
+  TASTE_MAP_CAPTION,
   type ReportContext,
 } from "../../src/assemble";
 import { checkReport } from "../../src/checker";
@@ -72,6 +73,42 @@ describe("assembleReport", () => {
     expect(report.exhibits[1]).toMatchObject({ title: "Substitution Map", caption: "Brand Beta is the nearest peer {{M1}}." });
   });
 
+  it("places a Category Taste Map the draft did not cite last, after the Scorecard, and never twice", () => {
+    const run = (cite: boolean) => {
+      const fx = brandHealthLedger();
+      const sim = [
+        [null, 0.7, 0.4, 0.3],
+        [0.7, null, 0.5, 0.2],
+        [0.4, 0.5, null, 0.6],
+        [0.3, 0.2, 0.6, null],
+      ];
+      const built = buildTasteMap({
+        source: "substitution_map",
+        members: ["R1", "R2", "R3", "R4"].map((ref, i) => ({ key: ref, label: `Brand ${ref}`, ref: ref as "R1", hub: null, target: i === 0 })),
+        sim,
+      });
+      if (!built.ok) throw new Error(built.message);
+      const map = fx.ledger.addDataset({ kind: "TasteMap", title: "Category Taste Map · Brand Alpha", evidenceIds: ["E1"], formulaIds: ["taste_map_mds"], payload: built.payload });
+      const draft = validDraft();
+      if (cite) draft.exhibits.unshift({ dataset_id: map.id, title: "Brand Alpha sits apart", caption: "Nearby points share taste." });
+      recordScorecard(fx.ledger, plan(), draft);
+      const ledger = fx.ledger.snapshot();
+      const check = checkReport({ draft, plan: plan(), ledger, qlooEnabled: true, registry: brandHealthRegistry(), attempt: 1 });
+      return { map, report: assembleReport({ ...context(ledger), check }) };
+    };
+    const placed = run(false);
+    expect(placed.report.exhibits.map((e) => [e.kind, e.viz])).toEqual([
+      ["Scorecard", "ScorecardTable"],
+      ["Matrix", VIZ_COMPAT.Matrix],
+      ["Momentum", VIZ_COMPAT.Momentum],
+      ["TasteMap", VIZ_COMPAT.TasteMap],
+    ]);
+    expect(placed.report.exhibits[3]).toMatchObject({ datasetId: placed.map.id, title: "Category Taste Map · Brand Alpha", caption: TASTE_MAP_CAPTION });
+    const cited = run(true);
+    expect(cited.report.exhibits.map((e) => e.kind)).toEqual(["Scorecard", "TasteMap", "Matrix", "Momentum"]);
+    expect(cited.report.exhibits[1]?.title).toBe("Brand Alpha sits apart");
+  });
+
   it("writes the source line and badges of each exhibit", () => {
     const { report } = assemble();
     const [, matrix, momentum] = report.exhibits;
@@ -91,7 +128,8 @@ describe("assembleReport", () => {
     const expected = 100 - CONFIDENCE_PENALTY.dropped_entity - CONFIDENCE_PENALTY.stale_momentum - CONFIDENCE_PENALTY.thin_result;
     expect(clean.score).toBe(expected);
     expect(clean.band).toBe("MED");
-    expect(clean.breakdown.map((b) => b.rule)).toEqual(["dropped_entity", "stale_momentum", "thin_result"]);
+    // The fixture's signal is mixed: its cap (70, R1) is listed but takes nothing off a score already below it.
+    expect(clean.breakdown.map((b) => b.rule)).toEqual(["dropped_entity", "stale_momentum", "thin_result", "signal_mixed"]);
 
     const draft = validDraft();
     draft.thesis = "Brand Alpha sits next to Brand Beta at 0.62 {{M1}} [E1].";
@@ -104,6 +142,7 @@ describe("assembleReport", () => {
       expect.objectContaining({ rule: "code_fallback", count: 2 }),
       expect.objectContaining({ rule: "thin_result", count: 1 }),
       expect.objectContaining({ rule: "checker_warning", count: 1 }),
+      expect.objectContaining({ rule: "signal_mixed", count: 1, cap: 70 }),
     ]);
   });
 

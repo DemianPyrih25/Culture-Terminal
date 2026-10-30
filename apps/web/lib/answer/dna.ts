@@ -6,6 +6,12 @@
 
 export const LEAN_THRESHOLD = 0.05;
 
+/**
+ * The about-level band of a youth tilt or a gender index (ABOUT_LEVEL.youthTilt and audienceIndex in
+ * @ct/quant formulas.ts, R1/V13): inside ±0.1 an audience reads "about average", never "leans".
+ */
+export const ABOUT_LEVEL_LEAN = 0.1;
+
 /** "+0.31", "−0.12" (a true minus sign), "0.00". */
 export function signed(value: number, digits = 2): string {
   const text = Math.abs(value).toFixed(digits);
@@ -14,19 +20,17 @@ export function signed(value: number, digits = 2): string {
 }
 
 /** Age lean from a youth index: positive leans younger. */
-export function ageLeanWord(youth: number | null): string | null {
+export function ageLeanWord(youth: number | null, aboutLevel = false): string | null {
   if (youth === null || !Number.isFinite(youth)) return null;
-  if (youth > LEAN_THRESHOLD) return "Leans younger";
-  if (youth < -LEAN_THRESHOLD) return "Leans older";
-  return "Even on age";
+  if (aboutLevel || Math.abs(youth) < ABOUT_LEVEL_LEAN) return "About average on age";
+  return youth > 0 ? "Leans younger" : "Leans older";
 }
 
 /** Gender lean from an index for women vs the average audience: positive leans female. */
-export function genderLeanWord(female: number | null): string | null {
+export function genderLeanWord(female: number | null, aboutLevel = false): string | null {
   if (female === null || !Number.isFinite(female)) return null;
-  if (female > LEAN_THRESHOLD) return "Leans female";
-  if (female < -LEAN_THRESHOLD) return "Leans male";
-  return "Even gender mix";
+  if (aboutLevel || Math.abs(female) < ABOUT_LEVEL_LEAN) return "About average on gender";
+  return female > 0 ? "Leans female" : "Leans male";
 }
 
 export interface AgeBand {

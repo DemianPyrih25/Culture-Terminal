@@ -16,8 +16,8 @@ import type {
   SlopePayload,
   SponsorCategory,
 } from "@ct/contracts";
+import { THIN_SAMPLE, type FormulaId } from "../../formulas";
 import { droppedCandidatesFinding, emptyResultFinding, weakCategoryFitFinding, type FindingDraft } from "../../findings";
-import type { FormulaId } from "../../formulas";
 import { addSkillMetric, registerEntity, type EntityDraft } from "../common";
 import { fixed2, rankText, safeFullName, safeName } from "../format";
 import { SPONSOR_CATEGORIES } from "./categories";
@@ -164,6 +164,7 @@ export function addSlateMetrics(run: SlateRun, state: SlateState): SlateMetrics 
         evidenceIds,
         n: slate.scored,
         comparator: "WITHIN_CALL",
+        thin: slate.scored < THIN_SAMPLE.rankedRows,
       }),
     );
   };

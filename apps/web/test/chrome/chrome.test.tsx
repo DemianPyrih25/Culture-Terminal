@@ -11,15 +11,19 @@ import { SiteShell } from "../../components/chrome/site-shell";
 const html = renderToStaticMarkup;
 
 describe("header", () => {
-  it("links the wordmark home and lists Your answers and How it works", () => {
+  it("links the wordmark home and lists Your answers, Following, Screener and How it works", () => {
     const out = html(<Header variant="home" />);
     expect(out).toMatch(/<a[^>]*href="\/"[^>]*>.*Culture Terminal<\/span><\/a>/);
     expect(out).toContain('aria-label="Main"');
     expect(SITE_NAV.map((n) => [n.label, n.href])).toEqual([
       ["Your answers", "/briefs"],
+      ["Following", "/following"],
+      ["Screener", "/screener"],
       ["How it works", "/how-it-works"],
     ]);
     expect(out).toContain('href="/briefs"');
+    expect(out).toContain('href="/following"');
+    expect(out).toContain('href="/screener"');
     expect(out).toContain('href="/how-it-works"');
     expect(out).not.toContain("New question");
     expect(out).not.toMatch(/examples/i);

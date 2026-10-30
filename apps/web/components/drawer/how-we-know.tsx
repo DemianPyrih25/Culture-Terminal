@@ -1,10 +1,11 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { GHOST_HONESTY_LINE, isPublicProvenanceRequest, type RunState } from "@ct/contracts";
+import type { RunState } from "@ct/contracts";
+import { GHOST_HONESTY_LINE, isPublicProvenanceRequest } from "@ct/contracts/values";
 import type { BriefModel, Footnote } from "../../lib/brief";
 import { CONFIDENCE_EXPLAINER, DrawerShell, Icon, Segmented, segmentedPanelId, segmentedTabId, useToast } from "../ui";
-import type { CallQuery } from "./curl";
+import type { CallQuery } from "./request-copy";
 import { FocusCard, focusView, type NumberCopy } from "./focus-card";
 import { freshnessCounts, refNames } from "./source-copy";
 import { lookupOf, SourceRow } from "./source-row";
@@ -71,8 +72,9 @@ export function writeHowParams(search: string, state: { tab: HowTab; footnote: n
 }
 
 /**
- * Each call's full query, from the provenance of the evidence bundle that used it (D30). An SEC or Census
- * call (Part 9) also keeps its host, so the inspector can show its public URL.
+ * Each call's full query, from the provenance of the evidence bundle that used it (D30). An SEC, Census or
+ * OpenStreetMap call also keeps its host (and an OpenStreetMap call its Overpass query), so the inspector
+ * can show its public URL or its query.
  */
 export function callQueries(evidence: RunState["evidence"] | undefined): Map<string, CallQuery> {
   const out = new Map<string, CallQuery>();
@@ -80,7 +82,12 @@ export function callQueries(evidence: RunState["evidence"] | undefined): Map<str
     e.qlooCallIds.forEach((id, i) => {
       const request = e.provenance.requests[i];
       if (!request || out.has(id)) return;
-      out.set(id, isPublicProvenanceRequest(request) ? { path: request.path, query: request.query, host: request.host } : { path: request.path, query: request.query });
+      out.set(
+        id,
+        isPublicProvenanceRequest(request)
+          ? { path: request.path, query: request.query, host: request.host, method: request.method, ...(request.body ? { body: request.body } : {}) }
+          : { path: request.path, query: request.query },
+      );
     });
   }
   return out;
@@ -88,7 +95,7 @@ export function callQueries(evidence: RunState["evidence"] | undefined): Map<str
 
 export interface HowWeKnowProviderProps {
   model: BriefModel;
-  /** The run's evidence bundles, for exact curls. */
+  /** The run's evidence bundles, for exact request copies and public links. */
   evidence?: RunState["evidence"];
   /** The run has a GHOST answer: the Summary says how it was made. */
   ghost?: boolean;
@@ -297,7 +304,7 @@ function SummaryPanel({ model, ghost }: { model: BriefModel; ghost: boolean }) {
   );
 }
 
-const PROVIDER_NAME = { qloo: "Qloo", sec: "SEC EDGAR", census: "US Census Bureau" } as const;
+const PROVIDER_NAME = { qloo: "Qloo", sec: "SEC EDGAR", census: "US Census Bureau", osm: "OpenStreetMap" } as const;
 
 /**
  * "From Qloo (18 lookups), SEC EDGAR (2) and US Census Bureau (1)." when public data was used; null when
@@ -307,7 +314,7 @@ export function providers(model: BriefModel): string | null {
   const counts = new Map<keyof typeof PROVIDER_NAME, number>();
   for (const s of model.sources.items) counts.set(s.source ?? "qloo", (counts.get(s.source ?? "qloo") ?? 0) + 1);
   if (![...counts.keys()].some((k) => k !== "qloo")) return null;
-  const parts = (["qloo", "sec", "census"] as const).flatMap((k, i) => {
+  const parts = (["qloo", "sec", "census", "osm"] as const).flatMap((k, i) => {
     const n = counts.get(k);
     return n ? [`${PROVIDER_NAME[k]} (${i === 0 ? plural(n, "lookup") : n})`] : [];
   });
@@ -413,13 +420,13 @@ const STEP_WORD: Readonly<Record<string, string>> = {
   error: "Failed",
 };
 
-const hasPublic = (model: BriefModel) => model.sources.items.some((s) => s.source === "sec" || s.source === "census");
+const hasPublic = (model: BriefModel) => model.sources.items.some((s) => s.source === "sec" || s.source === "census" || s.source === "osm");
 
 function checkerText(model: BriefModel): string {
   const c = model.method.checker;
   switch (c.state) {
     case "passed":
-      return `Every number was traced to its lookup in Qloo${hasPublic(model) ? ", SEC EDGAR or the US Census" : ""}${c.adviceTerms !== null ? `, and no advice wording was found` : ""}.`;
+      return `Every number was traced to its lookup in Qloo${hasPublic(model) ? " or a public source (SEC EDGAR, the US Census, OpenStreetMap)" : ""}${c.adviceTerms !== null ? `, and no advice wording was found` : ""}.`;
     case "rejected":
       return "The check sent the draft back to be fixed.";
     case "skipped":
@@ -500,6 +507,11 @@ function MethodPanel({ model }: { model: BriefModel }) {
         <h3 className="text-[13px] leading-[18px] font-semibold text-ink-2">The check</h3>
         <p className="type-body text-ink">{checkerText(model)}</p>
       </section>
+      {method.context ? (
+        <p className="type-label text-ink-2" data-context-receipt="true">
+          {method.context}. The AI and web blocks are shown apart and never change the measured answer.
+        </p>
+      ) : null}
       <p className="type-label text-ink-2">
         Numbers are computed by our code, never typed by the AI.{" "}
         <a href="/method" className="font-medium text-accent hover:underline hover:underline-offset-4">

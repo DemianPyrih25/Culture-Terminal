@@ -1,6 +1,6 @@
 import type { Emit, EventInput, EventInputOf, TokenUsage } from "@ct/contracts";
 import type { PublicCallRecord } from "@ct/publicdata";
-import type { QlooCallRecord } from "@ct/qloo";
+import { scrubEntityIds, type QlooCallRecord } from "@ct/qloo";
 import { addTokenUsage, emptyTokenUsage } from "../pricing";
 import { QLOO_CALL_BUCKET, type ReceiptPublicCall, type ReceiptQlooCall } from "../report/receipt";
 
@@ -10,6 +10,9 @@ import { QLOO_CALL_BUCKET, type ReceiptPublicCall, type ReceiptQlooCall } from "
  * counts are all derived, so they cannot disagree.
  */
 
+/** The events that carry Qloo request parameters or provenance, where entity ids live (R8). */
+const SCRUBBED_EVENTS: ReadonlySet<EventInput["type"]> = new Set(["qloo", "evidence"]);
+
 /**
  * The caller's emit, made safe for the run: an exception from persistence or publishing never
  * breaks the run (events are observability, like the loop's observers), and nothing is emitted
@@ -18,14 +21,26 @@ import { QLOO_CALL_BUCKET, type ReceiptPublicCall, type ReceiptQlooCall } from "
 export class RunEvents {
   #closed = false;
   #fallbacks = 0;
+  #nameOf: ((id: string) => string | null) | null = null;
 
   constructor(private readonly sink: Emit) {}
+
+  /**
+   * R8 (D51): Qloo entity ids stay on the server. From here on the `qloo` and `evidence` events reach the
+   * sink with every entity id replaced by the entity's name (or «entity»), so stored events and the
+   * browser never carry one; the request id still identifies each call.
+   */
+  scrubWith(nameOf: (id: string) => string | null): void {
+    this.#nameOf = nameOf;
+  }
 
   readonly emit: Emit = (event: EventInput): void => {
     if (this.#closed) return;
     if (event.type === "fallback") this.#fallbacks += 1;
     try {
-      this.sink(event);
+      const nameOf = this.#nameOf;
+      const out = nameOf !== null && SCRUBBED_EVENTS.has(event.type) ? (scrubEntityIds(event, nameOf) as EventInput) : event;
+      this.sink(out);
     } catch {
       // The run manager owns delivery; a failed write must not fail the analysis.
     }

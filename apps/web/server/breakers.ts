@@ -49,7 +49,7 @@ export function laneModeOf(value: LaneMode): { mode: Mode; message: string | nul
   return typeof value === "string" ? { mode: value, message: null } : { mode: value.mode, message: value.message ?? null };
 }
 
-/** The daily LLM budget (SPEC §4.2: Sonnet until $1.00, economy until $1.40, 40% held for judges). */
+/** The daily LLM budget (D24: Sonnet until $6 × lane share, economy until $8 × lane share, 40% held for judges). */
 export interface SpendPolicy {
   /** LLM_DAILY_USD_CAP: the most today's spend may reach with a judge run. */
   dailyCapUsd: number;
@@ -59,7 +59,7 @@ export interface SpendPolicy {
   judgeShare: number;
 }
 
-export const DEFAULT_SPEND_POLICY: SpendPolicy = { dailyCapUsd: 1.4, economyAtUsd: 1, judgeShare: 0.4 };
+export const DEFAULT_SPEND_POLICY: SpendPolicy = { dailyCapUsd: 8, economyAtUsd: 6, judgeShare: 0.4 };
 
 /** The daily LLM budget from LLM_DAILY_USD_CAP, LLM_ECONOMY_USD and LLM_JUDGE_SHARE. */
 export function spendPolicyFromEnv(env: NodeJS.ProcessEnv = process.env): SpendPolicy {
@@ -95,7 +95,7 @@ export function laneBudget(lane: Lane, policy: SpendPolicy): LaneBudget {
 export interface QlooUsage {
   /** Whether the daily fresh-call cap applies (prod): the Qloo client enforces it only there. */
   dailyCapEnforced: boolean;
-  /** QLOO_DAILY_FRESH_CAP, split between the lanes by LANE_SHARE. */
+  /** Today's prod fresh-call cap (the client's, recomputed each UTC day during judging), split by LANE_SHARE. */
   dailyCap: number;
   /** Today's (UTC) fresh calls per lane and in all. */
   fresh: Readonly<Record<Lane | "all", number>>;
@@ -114,7 +114,7 @@ export interface QlooUsageSources {
   /** The process-wide client; throws when it cannot be configured. */
   client: () => QlooClient;
   db: () => Queryable;
-  /** QLOO_DAILY_FRESH_CAP. */
+  /** QLOO_DAILY_FRESH_CAP: used only when the client cannot say today's cap. */
   dailyCap: number;
 }
 
@@ -141,7 +141,7 @@ export function qlooUsageReader(sources: QlooUsageSources): (now: number) => Pro
     const [publicLane = 0, judgeLane = 0, all = 0] = counts;
     return {
       dailyCapEnforced: enforced,
-      dailyCap: sources.dailyCap,
+      dailyCap: client.dailyFreshCap?.() ?? sources.dailyCap,
       fresh: { public: publicLane, judge: judgeLane, all },
       monthRemaining: quota.monthRemaining,
       monthFloor: client.monthFloor,

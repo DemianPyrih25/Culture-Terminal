@@ -26,6 +26,7 @@ import { readAllEvents } from "./event-store";
 import { todayLlmUsd } from "./llm-spend";
 import { log } from "./log";
 import { getPreviewService, PREVIEW_TOKEN } from "./preview";
+import { publicEventStream, publicJson, publicRunState, runNameIndex } from "./public-view";
 import { listBriefs, parseRunListQuery } from "./run-list";
 import {
   isActiveStatus,
@@ -338,11 +339,16 @@ export async function streamRun(request: Request, runId: string): Promise<Respon
   }
   return sseResponse(
     (signal) =>
-      runEventStream(
-        { db, bus, isLive: (id) => runs.isLive(id), finalizeOrphan: (id) => runs.finalizeOrphan(id) },
+      // R8: entity ids never reach the browser; each event is scrubbed as it leaves (public-view.ts).
+      publicEventStream(
+        db,
         runId,
-        cursor,
-        signal,
+        runEventStream(
+          { db, bus, isLive: (id) => runs.isLive(id), finalizeOrphan: (id) => runs.finalizeOrphan(id) },
+          runId,
+          cursor,
+          signal,
+        ),
       ),
     request.signal,
     { onError: (err) => log.error({ err, runId }, "stream failed") },
@@ -356,7 +362,9 @@ export async function runSnapshot(runId: string): Promise<Response> {
   try {
     const run = await getRun(db, runId);
     if (!run) return notFound();
-    const state = reduceRunEvents(runId, await readAllEvents(db, runId));
+    const [events, names] = await Promise.all([readAllEvents(db, runId), runNameIndex(db, runId)]);
+    // R8: the state a browser (and the /run and /r pages) reads names entities; their ids stay here.
+    const state = publicRunState(reduceRunEvents(runId, events), names.nameOf);
     return json({
       run: {
         id: run.id,
@@ -385,9 +393,11 @@ const DATASET_ID = /^D[1-9]\d{0,3}$/;
 export async function runDataset(runId: string, datasetId: string): Promise<Response> {
   if (!isRunId(runId) || !DATASET_ID.test(datasetId)) return notFound();
   try {
-    const envelope = await getDatasetEnvelope(getDatabase(), runId, datasetId);
+    const db = getDatabase();
+    const envelope = await getDatasetEnvelope(db, runId, datasetId);
     if (envelope === null) return json({ error: "Dataset not found." }, 404);
-    return json(envelope, 200, { "Cache-Control": "private, max-age=3600" });
+    // R8: datasets carry names, not ids; scrubbed anyway so no stored payload can leak one.
+    return json(publicJson(envelope, (await runNameIndex(db, runId)).nameOf), 200, { "Cache-Control": "private, max-age=3600" });
   } catch (err) {
     return failure(err, "run dataset");
   }

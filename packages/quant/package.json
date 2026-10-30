@@ -13,11 +13,11 @@
   },
   "dependencies": {
     "@ct/contracts": "workspace:*",
+    "@ct/publicdata": "workspace:*",
     "ngeohash": "0.6.4",
     "zod": "4.6.5"
   },
   "devDependencies": {
-    "@ct/publicdata": "workspace:*",
     "@ct/qloo": "workspace:*",
     "@types/ngeohash": "0.6.8"
   }

@@ -42,6 +42,7 @@ export function intentFor(partial: Partial<Intent> = {}): Intent {
     constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
     safety: { allowed: true, category: null, reframe: null },
     read_as: { nearest: false, not_covered: [] },
+    candidates: { named_areas: [], named_markets: [], obvious_entities: [], obvious_areas: [], obvious_markets: [] },
     assumptions: ["US geography"],
     mnemonic: "BRAND ALPHA <BRAND> HLTH",
     ...partial,

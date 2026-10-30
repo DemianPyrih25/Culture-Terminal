@@ -1,539 +1,707 @@
 {
-  "$comment": "Brand name -> the US-listed company whose SEC filings company_financials (S13, PLAN §5.2) reads. Names and tickers only, no figures (D29). A brand matches only when the entity resolves exactly (D20) to one of these names; any other brand gets UNAVAILABLE with NOT_A_LISTED_COMPANY, never a guess. `note` says when the brand is part of a larger company: SEC figures are company-wide, never brand-level. Every ticker was checked against the SEC ticker map and has us-gaap revenue in its company facts; foreign IFRS filers are left out. The match is on the name Qloo returns (case aside), so each brand is listed under that name as well as its common one; check every key against Qloo with `pnpm exec tsx tools/dev/listed-brands.ts` after editing this file. Re-check when a company is acquired, taken private or renames its ticker.",
+  "$comment": "Brand name -> the US-listed company whose SEC filings company_financials (S13, PLAN §5.2) reads. Names and tickers only, no figures (D29). A brand matches only when the entity resolves exactly (D20) to one of these names; any other brand gets UNAVAILABLE with NOT_A_LISTED_COMPANY, never a guess. `note` says when the brand is part of a larger company: SEC figures are company-wide, never brand-level. `relation` says how the brand relates to the company (Part 9 open issue 6): `self` when the company is named for the brand and it is the main business (Nike, Starbucks, Marriott Hotels), so its figures are shown with the note; `parent` when the brand is one of several inside a larger company (Sprite, HOKA, Marriott Bonvoy), whose filings never break it out: the agent then shows no figures and says so (NOT_SEPARATELY_REPORTED, naming `parent_name`). Every entry states its relation. Every ticker was checked against the SEC ticker map and has us-gaap revenue in its company facts; foreign IFRS filers are left out. The match is on the name Qloo returns (case aside), so each brand is listed under that name as well as its common one; check every key against Qloo with `pnpm exec tsx tools/dev/listed-brands.ts` after editing this file. Re-check when a company is acquired, taken private or renames its ticker.",
   "brands": {
     "Coca-Cola": {
       "ticker": "KO",
       "company": "The Coca-Cola Company",
-      "note": "The Coca-Cola Company also sells Sprite, Fanta and other drinks; figures are company-wide."
+      "note": "The Coca-Cola Company also sells Sprite, Fanta and other drinks; figures are company-wide.",
+      "relation": "self"
     },
     "Sprite": {
       "ticker": "KO",
       "company": "The Coca-Cola Company",
-      "note": "A brand of The Coca-Cola Company; figures are company-wide."
+      "note": "A brand of The Coca-Cola Company; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "The Coca-Cola Company"
     },
     "Fanta": {
       "ticker": "KO",
       "company": "The Coca-Cola Company",
-      "note": "A brand of The Coca-Cola Company; figures are company-wide."
+      "note": "A brand of The Coca-Cola Company; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "The Coca-Cola Company"
     },
     "Pepsi": {
       "ticker": "PEP",
       "company": "PepsiCo, Inc.",
-      "note": "PepsiCo also owns Frito-Lay, Gatorade and Quaker; figures are company-wide."
+      "note": "PepsiCo also owns Frito-Lay, Gatorade and Quaker; figures are company-wide.",
+      "relation": "self"
     },
     "Mountain Dew": {
       "ticker": "PEP",
       "company": "PepsiCo, Inc.",
-      "note": "A brand of PepsiCo; figures are company-wide."
+      "note": "A brand of PepsiCo; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "PepsiCo, Inc."
     },
     "Gatorade": {
       "ticker": "PEP",
       "company": "PepsiCo, Inc.",
-      "note": "A brand of PepsiCo; figures are company-wide."
+      "note": "A brand of PepsiCo; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "PepsiCo, Inc."
     },
     "Doritos": {
       "ticker": "PEP",
       "company": "PepsiCo, Inc.",
-      "note": "A brand of PepsiCo (Frito-Lay); figures are company-wide."
+      "note": "A brand of PepsiCo (Frito-Lay); figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "PepsiCo, Inc."
     },
     "Dr Pepper": {
       "ticker": "KDP",
       "company": "Keurig Dr Pepper Inc.",
-      "note": "A brand of Keurig Dr Pepper; figures are company-wide."
+      "note": "A brand of Keurig Dr Pepper; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Keurig Dr Pepper Inc."
     },
     "Monster Energy": {
       "ticker": "MNST",
-      "company": "Monster Beverage Corporation"
+      "company": "Monster Beverage Corporation",
+      "relation": "self"
     },
     "Monster": {
       "ticker": "MNST",
-      "company": "Monster Beverage Corporation"
+      "company": "Monster Beverage Corporation",
+      "relation": "self"
     },
     "Celsius": {
       "ticker": "CELH",
-      "company": "Celsius Holdings, Inc."
+      "company": "Celsius Holdings, Inc.",
+      "relation": "self"
     },
     "Modelo": {
       "ticker": "STZ",
       "company": "Constellation Brands, Inc.",
-      "note": "A beer brand Constellation Brands sells in the US; figures are company-wide."
+      "note": "A beer brand Constellation Brands sells in the US; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Constellation Brands, Inc."
     },
     "Corona": {
       "ticker": "STZ",
       "company": "Constellation Brands, Inc.",
-      "note": "Constellation Brands holds the US rights; figures are company-wide."
+      "note": "Constellation Brands holds the US rights; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Constellation Brands, Inc."
     },
     "Samuel Adams": {
       "ticker": "SAM",
       "company": "The Boston Beer Company, Inc.",
-      "note": "A brand of The Boston Beer Company; figures are company-wide."
+      "note": "A brand of The Boston Beer Company; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "The Boston Beer Company, Inc."
     },
     "Samuel Adams Beer": {
       "ticker": "SAM",
       "company": "The Boston Beer Company, Inc.",
-      "note": "A brand of The Boston Beer Company; figures are company-wide."
+      "note": "A brand of The Boston Beer Company; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "The Boston Beer Company, Inc."
     },
     "Coors Light": {
       "ticker": "TAP",
       "company": "Molson Coors Beverage Company",
-      "note": "A brand of Molson Coors; figures are company-wide."
+      "note": "A brand of Molson Coors; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Molson Coors Beverage Company"
     },
     "Jack Daniel's": {
       "ticker": "BF-B",
       "company": "Brown-Forman Corporation",
-      "note": "A brand of Brown-Forman; figures are company-wide."
+      "note": "A brand of Brown-Forman; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Brown-Forman Corporation"
     },
     "Jack Daniels": {
       "ticker": "BF-B",
       "company": "Brown-Forman Corporation",
-      "note": "A brand of Brown-Forman; figures are company-wide."
+      "note": "A brand of Brown-Forman; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Brown-Forman Corporation"
     },
     "Starbucks": {
       "ticker": "SBUX",
-      "company": "Starbucks Corporation"
+      "company": "Starbucks Corporation",
+      "relation": "self"
     },
     "McDonald's": {
       "ticker": "MCD",
-      "company": "McDonald's Corporation"
+      "company": "McDonald's Corporation",
+      "relation": "self"
     },
     "Chipotle": {
       "ticker": "CMG",
-      "company": "Chipotle Mexican Grill, Inc."
+      "company": "Chipotle Mexican Grill, Inc.",
+      "relation": "self"
     },
     "Chipotle Mexican Grill": {
       "ticker": "CMG",
-      "company": "Chipotle Mexican Grill, Inc."
+      "company": "Chipotle Mexican Grill, Inc.",
+      "relation": "self"
     },
     "Wingstop": {
       "ticker": "WING",
-      "company": "Wingstop Inc."
+      "company": "Wingstop Inc.",
+      "relation": "self"
     },
     "Sweetgreen": {
       "ticker": "SG",
-      "company": "Sweetgreen, Inc."
+      "company": "Sweetgreen, Inc.",
+      "relation": "self"
     },
     "Shake Shack": {
       "ticker": "SHAK",
-      "company": "Shake Shack Inc."
+      "company": "Shake Shack Inc.",
+      "relation": "self"
     },
     "Domino's": {
       "ticker": "DPZ",
-      "company": "Domino's Pizza, Inc."
+      "company": "Domino's Pizza, Inc.",
+      "relation": "self"
     },
     "Domino's Pizza": {
       "ticker": "DPZ",
-      "company": "Domino's Pizza, Inc."
+      "company": "Domino's Pizza, Inc.",
+      "relation": "self"
     },
     "Taco Bell": {
       "ticker": "YUM",
       "company": "Yum! Brands, Inc.",
-      "note": "A brand of Yum! Brands; figures are company-wide."
+      "note": "A brand of Yum! Brands; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Yum! Brands, Inc."
     },
     "KFC": {
       "ticker": "YUM",
       "company": "Yum! Brands, Inc.",
-      "note": "A brand of Yum! Brands; figures are company-wide."
+      "note": "A brand of Yum! Brands; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Yum! Brands, Inc."
     },
     "Kentucky Fried Chicken": {
       "ticker": "YUM",
       "company": "Yum! Brands, Inc.",
-      "note": "A brand of Yum! Brands; figures are company-wide."
+      "note": "A brand of Yum! Brands; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Yum! Brands, Inc."
     },
     "Dutch Bros": {
       "ticker": "BROS",
-      "company": "Dutch Bros Inc."
+      "company": "Dutch Bros Inc.",
+      "relation": "self"
     },
     "Dutch Bros. Coffee": {
       "ticker": "BROS",
-      "company": "Dutch Bros Inc."
+      "company": "Dutch Bros Inc.",
+      "relation": "self"
     },
     "CAVA": {
       "ticker": "CAVA",
-      "company": "CAVA Group, Inc."
+      "company": "CAVA Group, Inc.",
+      "relation": "self"
     },
     "Texas Roadhouse": {
       "ticker": "TXRH",
-      "company": "Texas Roadhouse, Inc."
+      "company": "Texas Roadhouse, Inc.",
+      "relation": "self"
     },
     "Olive Garden": {
       "ticker": "DRI",
       "company": "Darden Restaurants, Inc.",
-      "note": "A brand of Darden Restaurants; figures are company-wide."
+      "note": "A brand of Darden Restaurants; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Darden Restaurants, Inc."
     },
     "Wendy's": {
       "ticker": "WEN",
-      "company": "The Wendy's Company"
+      "company": "The Wendy's Company",
+      "relation": "self"
     },
     "Burger King": {
       "ticker": "QSR",
       "company": "Restaurant Brands International Inc.",
-      "note": "A brand of Restaurant Brands International; figures are company-wide."
+      "note": "A brand of Restaurant Brands International; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Restaurant Brands International Inc."
     },
     "Papa John's": {
       "ticker": "PZZA",
-      "company": "Papa John's International, Inc."
+      "company": "Papa John's International, Inc.",
+      "relation": "self"
     },
     "Papa John's Pizza": {
       "ticker": "PZZA",
-      "company": "Papa John's International, Inc."
+      "company": "Papa John's International, Inc.",
+      "relation": "self"
     },
     "Nike": {
       "ticker": "NKE",
       "company": "NIKE, Inc.",
-      "note": "NIKE, Inc. also owns Jordan and Converse; figures are company-wide."
+      "note": "NIKE, Inc. also owns Jordan and Converse; figures are company-wide.",
+      "relation": "self"
     },
     "Converse": {
       "ticker": "NKE",
       "company": "NIKE, Inc.",
-      "note": "A brand of Nike; figures are company-wide."
+      "note": "A brand of Nike; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "NIKE, Inc."
     },
     "Lululemon": {
       "ticker": "LULU",
-      "company": "lululemon athletica inc."
+      "company": "lululemon athletica inc.",
+      "relation": "self"
     },
     "lululemon athletica": {
       "ticker": "LULU",
-      "company": "lululemon athletica inc."
+      "company": "lululemon athletica inc.",
+      "relation": "self"
     },
     "Crocs": {
       "ticker": "CROX",
-      "company": "Crocs, Inc."
+      "company": "Crocs, Inc.",
+      "relation": "self"
     },
     "UGG": {
       "ticker": "DECK",
       "company": "Deckers Outdoor Corporation",
-      "note": "A brand of Deckers Brands; figures are company-wide."
+      "note": "A brand of Deckers Brands; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Deckers Outdoor Corporation"
     },
     "HOKA": {
       "ticker": "DECK",
       "company": "Deckers Outdoor Corporation",
-      "note": "A brand of Deckers Brands; figures are company-wide."
+      "note": "A brand of Deckers Brands; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Deckers Outdoor Corporation"
     },
     "Under Armour": {
       "ticker": "UAA",
-      "company": "Under Armour, Inc."
+      "company": "Under Armour, Inc.",
+      "relation": "self"
     },
     "Levi's": {
       "ticker": "LEVI",
-      "company": "Levi Strauss & Co."
+      "company": "Levi Strauss & Co.",
+      "relation": "self"
     },
     "Levi Strauss & Co.": {
       "ticker": "LEVI",
-      "company": "Levi Strauss & Co."
+      "company": "Levi Strauss & Co.",
+      "relation": "self"
     },
     "Ralph Lauren": {
       "ticker": "RL",
-      "company": "Ralph Lauren Corporation"
+      "company": "Ralph Lauren Corporation",
+      "relation": "self"
     },
     "The North Face": {
       "ticker": "VFC",
       "company": "V.F. Corporation",
-      "note": "A brand of VF Corporation; figures are company-wide."
+      "note": "A brand of VF Corporation; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "V.F. Corporation"
     },
     "Vans": {
       "ticker": "VFC",
       "company": "V.F. Corporation",
-      "note": "A brand of VF Corporation; figures are company-wide."
+      "note": "A brand of VF Corporation; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "V.F. Corporation"
     },
     "Abercrombie & Fitch": {
       "ticker": "ANF",
       "company": "Abercrombie & Fitch Co.",
-      "note": "Abercrombie & Fitch Co. also owns Hollister; figures are company-wide."
+      "note": "Abercrombie & Fitch Co. also owns Hollister; figures are company-wide.",
+      "relation": "self"
     },
     "American Eagle": {
       "ticker": "AEO",
       "company": "American Eagle Outfitters, Inc.",
-      "note": "American Eagle Outfitters also owns Aerie; figures are company-wide."
+      "note": "American Eagle Outfitters also owns Aerie; figures are company-wide.",
+      "relation": "self"
     },
     "American Eagle Outfitters": {
       "ticker": "AEO",
       "company": "American Eagle Outfitters, Inc.",
-      "note": "American Eagle Outfitters also owns Aerie; figures are company-wide."
+      "note": "American Eagle Outfitters also owns Aerie; figures are company-wide.",
+      "relation": "self"
     },
     "Gap": {
       "ticker": "GAP",
       "company": "Gap Inc.",
-      "note": "Gap Inc. also owns Old Navy, Banana Republic and Athleta; figures are company-wide."
+      "note": "Gap Inc. also owns Old Navy, Banana Republic and Athleta; figures are company-wide.",
+      "relation": "self"
     },
     "Old Navy": {
       "ticker": "GAP",
       "company": "Gap Inc.",
-      "note": "A brand of Gap Inc.; figures are company-wide."
+      "note": "A brand of Gap Inc.; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Gap Inc."
     },
     "Coach": {
       "ticker": "TPR",
       "company": "Tapestry, Inc.",
-      "note": "A brand of Tapestry; figures are company-wide."
+      "note": "A brand of Tapestry; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Tapestry, Inc."
     },
     "Columbia Sportswear": {
       "ticker": "COLM",
-      "company": "Columbia Sportswear Company"
+      "company": "Columbia Sportswear Company",
+      "relation": "self"
     },
     "Columbia Sportswear Company": {
       "ticker": "COLM",
-      "company": "Columbia Sportswear Company"
+      "company": "Columbia Sportswear Company",
+      "relation": "self"
     },
     "e.l.f. Cosmetics": {
       "ticker": "ELF",
       "company": "e.l.f. Beauty, Inc.",
-      "note": "The main brand of e.l.f. Beauty; figures are company-wide."
+      "note": "The main brand of e.l.f. Beauty; figures are company-wide.",
+      "relation": "self"
     },
     "e.l.f.": {
       "ticker": "ELF",
       "company": "e.l.f. Beauty, Inc.",
-      "note": "The main brand of e.l.f. Beauty; figures are company-wide."
+      "note": "The main brand of e.l.f. Beauty; figures are company-wide.",
+      "relation": "self"
     },
     "Ulta Beauty": {
       "ticker": "ULTA",
-      "company": "Ulta Beauty, Inc."
+      "company": "Ulta Beauty, Inc.",
+      "relation": "self"
     },
     "Ulta": {
       "ticker": "ULTA",
-      "company": "Ulta Beauty, Inc."
+      "company": "Ulta Beauty, Inc.",
+      "relation": "self"
     },
     "Estée Lauder": {
       "ticker": "EL",
-      "company": "The Estée Lauder Companies Inc."
+      "company": "The Estée Lauder Companies Inc.",
+      "relation": "self"
     },
     "Estee Lauder": {
       "ticker": "EL",
-      "company": "The Estée Lauder Companies Inc."
+      "company": "The Estée Lauder Companies Inc.",
+      "relation": "self"
     },
     "Clinique": {
       "ticker": "EL",
       "company": "The Estée Lauder Companies Inc.",
-      "note": "A brand of The Estée Lauder Companies; figures are company-wide."
+      "note": "A brand of The Estée Lauder Companies; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "The Estée Lauder Companies Inc."
     },
     "Clinique Laboratories, LLC": {
       "ticker": "EL",
       "company": "The Estée Lauder Companies Inc.",
-      "note": "A brand of The Estée Lauder Companies; figures are company-wide."
+      "note": "A brand of The Estée Lauder Companies; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "The Estée Lauder Companies Inc."
     },
     "Coty": {
       "ticker": "COTY",
-      "company": "Coty Inc."
+      "company": "Coty Inc.",
+      "relation": "self"
     },
     "Coty Airspun": {
       "ticker": "COTY",
       "company": "Coty Inc.",
-      "note": "Coty Airspun is one face-powder line of Coty Inc.; figures are company-wide."
+      "note": "Coty Airspun is one face-powder line of Coty Inc.; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Coty Inc."
     },
     "Bath & Body Works": {
       "ticker": "BBWI",
-      "company": "Bath & Body Works, Inc."
+      "company": "Bath & Body Works, Inc.",
+      "relation": "self"
     },
     "Target": {
       "ticker": "TGT",
-      "company": "Target Corporation"
+      "company": "Target Corporation",
+      "relation": "self"
     },
     "Walmart": {
       "ticker": "WMT",
       "company": "Walmart Inc.",
-      "note": "Walmart Inc. figures include Sam's Club and international stores; they are company-wide."
+      "note": "Walmart Inc. figures include Sam's Club and international stores; they are company-wide.",
+      "relation": "self"
     },
     "Costco": {
       "ticker": "COST",
-      "company": "Costco Wholesale Corporation"
+      "company": "Costco Wholesale Corporation",
+      "relation": "self"
     },
     "Amazon": {
       "ticker": "AMZN",
       "company": "Amazon.com, Inc.",
-      "note": "Amazon.com, Inc. figures include AWS and every other segment; they are company-wide."
+      "note": "Amazon.com, Inc. figures include AWS and every other segment; they are company-wide.",
+      "relation": "self"
     },
     "Best Buy": {
       "ticker": "BBY",
-      "company": "Best Buy Co., Inc."
+      "company": "Best Buy Co., Inc.",
+      "relation": "self"
     },
     "Dick's Sporting Goods": {
       "ticker": "DKS",
-      "company": "Dick's Sporting Goods, Inc."
+      "company": "Dick's Sporting Goods, Inc.",
+      "relation": "self"
     },
     "DICK'S Sporting Goods": {
       "ticker": "DKS",
-      "company": "Dick's Sporting Goods, Inc."
+      "company": "Dick's Sporting Goods, Inc.",
+      "relation": "self"
     },
     "TJ Maxx": {
       "ticker": "TJX",
       "company": "The TJX Companies, Inc.",
-      "note": "A banner of The TJX Companies; figures are company-wide."
+      "note": "A banner of The TJX Companies; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "The TJX Companies, Inc."
     },
     "T.J. Maxx": {
       "ticker": "TJX",
       "company": "The TJX Companies, Inc.",
-      "note": "A banner of The TJX Companies; figures are company-wide."
+      "note": "A banner of The TJX Companies; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "The TJX Companies, Inc."
     },
     "Five Below": {
       "ticker": "FIVE",
-      "company": "Five Below, Inc."
+      "company": "Five Below, Inc.",
+      "relation": "self"
     },
     "Etsy": {
       "ticker": "ETSY",
-      "company": "Etsy, Inc."
+      "company": "Etsy, Inc.",
+      "relation": "self"
     },
     "Chewy": {
       "ticker": "CHWY",
-      "company": "Chewy, Inc."
+      "company": "Chewy, Inc.",
+      "relation": "self"
     },
     "Williams-Sonoma": {
       "ticker": "WSM",
-      "company": "Williams-Sonoma, Inc."
+      "company": "Williams-Sonoma, Inc.",
+      "relation": "self"
     },
     "YETI": {
       "ticker": "YETI",
-      "company": "YETI Holdings, Inc."
+      "company": "YETI Holdings, Inc.",
+      "relation": "self"
     },
     "Peloton": {
       "ticker": "PTON",
-      "company": "Peloton Interactive, Inc."
+      "company": "Peloton Interactive, Inc.",
+      "relation": "self"
     },
     "Traeger": {
       "ticker": "COOK",
-      "company": "Traeger, Inc."
+      "company": "Traeger, Inc.",
+      "relation": "self"
     },
     "Traeger Grills": {
       "ticker": "COOK",
-      "company": "Traeger, Inc."
+      "company": "Traeger, Inc.",
+      "relation": "self"
     },
     "Harley-Davidson": {
       "ticker": "HOG",
-      "company": "Harley-Davidson, Inc."
+      "company": "Harley-Davidson, Inc.",
+      "relation": "self"
     },
     "Apple": {
       "ticker": "AAPL",
-      "company": "Apple Inc."
+      "company": "Apple Inc.",
+      "relation": "self"
     },
     "Apple Inc": {
       "ticker": "AAPL",
-      "company": "Apple Inc."
+      "company": "Apple Inc.",
+      "relation": "self"
     },
     "GoPro": {
       "ticker": "GPRO",
-      "company": "GoPro, Inc."
+      "company": "GoPro, Inc.",
+      "relation": "self"
     },
     "Sonos": {
       "ticker": "SONO",
-      "company": "Sonos, Inc."
+      "company": "Sonos, Inc.",
+      "relation": "self"
     },
     "Roku": {
       "ticker": "ROKU",
-      "company": "Roku, Inc."
+      "company": "Roku, Inc.",
+      "relation": "self"
     },
     "Roku, Inc": {
       "ticker": "ROKU",
-      "company": "Roku, Inc."
+      "company": "Roku, Inc.",
+      "relation": "self"
     },
     "Netflix": {
       "ticker": "NFLX",
-      "company": "Netflix, Inc."
+      "company": "Netflix, Inc.",
+      "relation": "self"
     },
     "Garmin": {
       "ticker": "GRMN",
-      "company": "Garmin Ltd."
+      "company": "Garmin Ltd.",
+      "relation": "self"
     },
     "Logitech": {
       "ticker": "LOGI",
-      "company": "Logitech International S.A."
+      "company": "Logitech International S.A.",
+      "relation": "self"
     },
     "Snapchat": {
       "ticker": "SNAP",
       "company": "Snap Inc.",
-      "note": "The app of Snap Inc.; figures are company-wide."
+      "note": "The app of Snap Inc.; figures are company-wide.",
+      "relation": "self"
     },
     "Pinterest": {
       "ticker": "PINS",
-      "company": "Pinterest, Inc."
+      "company": "Pinterest, Inc.",
+      "relation": "self"
     },
     "Instagram": {
       "ticker": "META",
       "company": "Meta Platforms, Inc.",
-      "note": "An app of Meta Platforms; figures are company-wide."
+      "note": "An app of Meta Platforms; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Meta Platforms, Inc."
     },
     "Uber": {
       "ticker": "UBER",
-      "company": "Uber Technologies, Inc."
+      "company": "Uber Technologies, Inc.",
+      "relation": "self"
     },
     "DoorDash": {
       "ticker": "DASH",
-      "company": "DoorDash, Inc."
+      "company": "DoorDash, Inc.",
+      "relation": "self"
     },
     "Roblox": {
       "ticker": "RBLX",
-      "company": "Roblox Corporation"
+      "company": "Roblox Corporation",
+      "relation": "self"
     },
     "Take-Two Interactive": {
       "ticker": "TTWO",
-      "company": "Take-Two Interactive Software, Inc."
+      "company": "Take-Two Interactive Software, Inc.",
+      "relation": "self"
     },
     "Xbox": {
       "ticker": "MSFT",
       "company": "Microsoft Corporation",
-      "note": "A brand of Microsoft; figures are company-wide."
+      "note": "A brand of Microsoft; figures are company-wide.",
+      "relation": "parent",
+      "parent_name": "Microsoft Corporation"
     },
     "GameStop": {
       "ticker": "GME",
-      "company": "GameStop Corp."
+      "company": "GameStop Corp.",
+      "relation": "self"
     },
     "Airbnb": {
       "ticker": "ABNB",
-      "company": "Airbnb, Inc."
+      "company": "Airbnb, Inc.",
+      "relation": "self"
     },
     "Marriott": {
       "ticker": "MAR",
-      "company": "Marriott International, Inc."
+      "company": "Marriott International, Inc.",
+      "relation": "self"
     },
     "Marriott International": {
       "ticker": "MAR",
-      "company": "Marriott International, Inc."
+      "company": "Marriott International, Inc.",
+      "relation": "self"
     },
     "Marriott Hotels": {
       "ticker": "MAR",
       "company": "Marriott International, Inc.",
-      "note": "Marriott Hotels is one brand of Marriott International; figures are company-wide."
+      "note": "Marriott Hotels is one brand of Marriott International; figures are company-wide.",
+      "relation": "self"
+    },
+    "Marriott Bonvoy": {
+      "ticker": "MAR",
+      "company": "Marriott International, Inc.",
+      "note": "Marriott Bonvoy is the loyalty brand of Marriott International; its filings never report it apart.",
+      "relation": "parent",
+      "parent_name": "Marriott International, Inc."
     },
     "Hilton": {
       "ticker": "HLT",
-      "company": "Hilton Worldwide Holdings Inc."
+      "company": "Hilton Worldwide Holdings Inc.",
+      "relation": "self"
     },
     "Hilton Hotels & Resorts": {
       "ticker": "HLT",
-      "company": "Hilton Worldwide Holdings Inc."
+      "company": "Hilton Worldwide Holdings Inc.",
+      "relation": "self"
     },
     "Hyatt": {
       "ticker": "H",
-      "company": "Hyatt Hotels Corporation"
+      "company": "Hyatt Hotels Corporation",
+      "relation": "self"
     },
     "Hyatt Hotels Corporation": {
       "ticker": "H",
-      "company": "Hyatt Hotels Corporation"
+      "company": "Hyatt Hotels Corporation",
+      "relation": "self"
+    },
+    "Hyatt Regency": {
+      "ticker": "H",
+      "company": "Hyatt Hotels Corporation",
+      "note": "Hyatt Regency is one hotel brand of Hyatt Hotels Corporation; its filings never report it apart.",
+      "relation": "parent",
+      "parent_name": "Hyatt Hotels Corporation"
     },
     "Booking.com": {
       "ticker": "BKNG",
       "company": "Booking Holdings Inc.",
-      "note": "A brand of Booking Holdings; figures are company-wide."
+      "note": "A brand of Booking Holdings; figures are company-wide.",
+      "relation": "self"
     },
     "Expedia": {
       "ticker": "EXPE",
-      "company": "Expedia Group, Inc."
+      "company": "Expedia Group, Inc.",
+      "relation": "self"
     },
     "Delta Air Lines": {
       "ticker": "DAL",
-      "company": "Delta Air Lines, Inc."
+      "company": "Delta Air Lines, Inc.",
+      "relation": "self"
     },
     "Southwest Airlines": {
       "ticker": "LUV",
-      "company": "Southwest Airlines Co."
+      "company": "Southwest Airlines Co.",
+      "relation": "self"
     },
     "Royal Caribbean": {
       "ticker": "RCL",
-      "company": "Royal Caribbean Cruises Ltd."
+      "company": "Royal Caribbean Cruises Ltd.",
+      "relation": "self"
     },
     "Royal Caribbean International": {
       "ticker": "RCL",
-      "company": "Royal Caribbean Cruises Ltd."
+      "company": "Royal Caribbean Cruises Ltd.",
+      "relation": "self"
     },
     "Vail Resorts": {
       "ticker": "MTN",
-      "company": "Vail Resorts, Inc."
+      "company": "Vail Resorts, Inc.",
+      "relation": "self"
     }
   }
 }

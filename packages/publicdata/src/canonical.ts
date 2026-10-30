@@ -2,9 +2,10 @@ import { buildQueryString, sha256Hex } from "@ct/qloo";
 import type { PublicEnv, PublicRequest } from "./api";
 
 /**
- * Canonical public-data requests and cache keys. A request's query is built by this package only (SEC
- * and Census builders), already in one canonical form, and never holds an API key: the live transport
- * adds CENSUS_API_KEY on the wire. So the key is in neither the cache key, the call log nor provenance.
+ * Canonical public-data requests and cache keys. A request's query is built by this package only (SEC,
+ * Census and Overpass builders), already in one canonical form, and never holds an API key: the live
+ * transport adds CENSUS_API_KEY on the wire. So the key is in neither the cache key, the call log nor
+ * provenance. An Overpass request is a POST whose body is the canonical QL text (osm/query.ts).
  */
 
 /** Key namespace: mock bodies can never answer a live call, and live bodies never answer a mock one. */
@@ -24,13 +25,34 @@ export function publicQueryString(query: Readonly<Record<string, string>>): stri
   return buildQueryString(query);
 }
 
-/** sha256Hex(`<namespace>|GET|<source>|<path>?<sorted qs>`). Refuses a query that carries a credential. */
+/**
+ * sha256Hex(`<namespace>|GET|<source>|<path>?<sorted qs>`), or for a POST
+ * sha256Hex(`<namespace>|POST|<source>|<endpoint>|<normalised body>`): the endpoint template rather than
+ * the concrete path, so a cached count still answers after OSM_OVERPASS_URL moves to another instance
+ * (the data is the same OpenStreetMap). Refuses a query that carries a credential.
+ */
 export function publicCacheKey(request: PublicRequest, namespace: PublicCacheNamespace): string {
   for (const name of Object.keys(request.query)) {
     if (isSecretParam(name)) throw new Error(`@ct/publicdata: the query parameter "${name}" must never be part of a request`);
   }
+  if (request.method === "POST") {
+    if (request.body === undefined || request.body === "") throw new Error("@ct/publicdata: a POST request needs a body");
+    return sha256Hex(`${namespace}|POST|${request.source}|${request.endpoint}|${normaliseBody(request.body)}`);
+  }
   return sha256Hex(`${namespace}|GET|${request.source}|${request.path}?${publicQueryString(request.query)}`);
 }
+
+/**
+ * The body as keyed: whitespace runs collapsed, the ends trimmed (the builder emits no line breaks; this
+ * is a guard), and a leading Overpass settings statement (`[out:json][timeout:25]…;`) dropped. Settings
+ * only limit how long and how much memory the server may use; an answer that arrived is the same data,
+ * so the warm-up's longer limits serve runs.
+ */
+export const normaliseBody = (body: string): string =>
+  body
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^(\[[a-z]+:[^\]]*\] ?)+; ?/, "");
 
 const REDACT_MAX_CHARS = 96;
 const REDACT_LIST_SHOWN = 2;

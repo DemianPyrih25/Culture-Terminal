@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { checkSpend, readSpend, readUsdCap, reserveSpend, settleSpend, SpendFileError } from "./spend";
+import { checkSpend, DEFAULT_DEV_USD_CAP, readSpend, readUsdCap, reserveSpend, settleSpend, SpendFileError } from "./spend";
 
 const dirs: string[] = [];
 const tempFile = (): string => {
@@ -73,6 +73,7 @@ describe("the spend tally", () => {
 describe("the cap", () => {
   it("reads LLM_DEV_USD_CAP with a fallback and refuses nonsense", () => {
     expect(readUsdCap({}, "LLM_DEV_USD_CAP", 15)).toBe(15);
+    expect(DEFAULT_DEV_USD_CAP).toBe(45);
     expect(readUsdCap({ LLM_DEV_USD_CAP: " 2.5 " }, "LLM_DEV_USD_CAP", 15)).toBe(2.5);
     expect(() => readUsdCap({ LLM_DEV_USD_CAP: "-1" }, "LLM_DEV_USD_CAP", 15)).toThrow(/positive number/);
   });

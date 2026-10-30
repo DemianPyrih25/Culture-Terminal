@@ -8,7 +8,8 @@ export type RuleId =
   | "decimal"
   | "anthropic-key"
   | "invisible-char"
-  | "bundle-secret";
+  | "bundle-secret"
+  | "bundle-entity-id";
 
 export interface Finding {
   /** Forward-slash path relative to the repository root. */

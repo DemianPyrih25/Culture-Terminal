@@ -46,7 +46,10 @@ describe("public data contracts", () => {
     };
     expect(PublicCallMeta.parse(meta)).toEqual(meta);
     expect(PublicCallMeta.safeParse({ ...meta, source: "qloo" }).success).toBe(false);
-    for (const endpoint of PublicEndpoint.options) expect(PUBLIC_ENDPOINTS[endpoint].host).toMatch(/\.gov$/);
+    for (const endpoint of PublicEndpoint.options) {
+      const { source, host } = PUBLIC_ENDPOINTS[endpoint];
+      expect(host).toMatch(source === "osm" ? /^overpass-api\.de$/ : /\.gov$/);
+    }
   });
 
   it("reads public-data client errors by name and code only", () => {

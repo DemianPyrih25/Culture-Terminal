@@ -21,6 +21,7 @@ const created = stamp(1, {
     usdNudge: 0.4,
     usdHard: 0.6,
     modelResponses: 5,
+    conceptReserveCalls: 3,
   },
   parentRunId: null,
   model: "fake",

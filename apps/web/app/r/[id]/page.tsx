@@ -41,7 +41,7 @@ export default async function PermalinkPage(props: PageProps<"/r/[id]">) {
 
   const { state, model } = found;
   const permalink = `/r/${encodeURIComponent(id)}`;
-  if (model.terminal?.kind === "refused") return <RefusedAnswerPage model={model} fallbackQuestion={found.question} permalink={permalink} />;
+  if (model.terminal?.kind === "refused") return <RefusedAnswerPage model={model} fallbackQuestion={found.question} permalink={permalink} unlisted={!found.showcase} />;
   const run = `/run/${encodeURIComponent(id)}`;
   const datasets = await loadFirstPaintDatasets(id, model);
   return (
@@ -54,6 +54,8 @@ export default async function PermalinkPage(props: PageProps<"/r/[id]">) {
       links={{ permalink, replay: `${run}?replay=1` }}
       fallbackQuestion={found.question}
       datasets={datasets}
+      // D31: a reader's own run says it is unlisted; the head above is noindex with no card.
+      unlisted={!found.showcase}
     />
   );
 }

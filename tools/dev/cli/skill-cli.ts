@@ -9,6 +9,7 @@ import {
   DEFAULT_RUN_LIMITS,
   EntityType,
   MetroId,
+  NO_RUN_CANDIDATES,
   SkillId,
   type EntityRef,
   type EventInput,
@@ -298,6 +299,9 @@ export function createSkillSession(
       pillar: "investment",
       phase: "wave1",
       toolCallId,
+      // A skill run outside a run: no question, so no concept parts and no candidates (R2, R3).
+      concepts: [],
+      candidates: NO_RUN_CANDIDATES,
     }),
   };
 }

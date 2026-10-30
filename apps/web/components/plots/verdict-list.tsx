@@ -11,7 +11,8 @@ import type { PlotBaseProps, PlotTable } from "./types";
  * could not be scored say so. Each row prints why in words ("0.04 above the bar"). Names wrap, never cut.
  */
 
-export type VerdictTone = "keep" | "add" | "veto" | "unscored";
+/** category (R2, D48): measured against the concept's broader category only, so it carries no keep or veto. */
+export type VerdictTone = "keep" | "add" | "veto" | "unscored" | "category";
 
 export interface VerdictItem {
   key?: string;
@@ -37,6 +38,7 @@ const MARK: Readonly<Record<VerdictTone, { icon: IconName; className: string }>>
   add: { icon: "search", className: "text-accent" },
   veto: { icon: "ban", className: "text-ink-2" },
   unscored: { icon: "circle-dashed", className: "text-ink-2" },
+  category: { icon: "circle-dot", className: "text-ink-2" },
 };
 
 function Name({ item, verdict }: { item: VerdictItem; verdict: VerdictTone }) {

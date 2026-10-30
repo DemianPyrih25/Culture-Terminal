@@ -1,10 +1,11 @@
 import "server-only";
-import { createAnthropic, type AnthropicLike } from "@ct/agent";
-import type { GeoApi, Lane, Mode } from "@ct/contracts";
-import { getDb, listPublicFigureNames, type Db } from "@ct/db";
+import { createAnthropic, type AnthropicLike, type ContextCache } from "@ct/agent";
+import { SCREENER_DAILY_KV_PREFIX, type GeoApi, type Lane, type Mode } from "@ct/contracts";
+import { getContext, getDb, incrementKvCounter, listPublicFigureNames, putContext, recordFeatureUse, type Db } from "@ct/db";
 import { createGeo } from "@ct/geo";
 import { createPgPublicStore, createPublicDataClient, publicDataOptionsFromEnv, type PublicDataClient } from "@ct/publicdata";
 import { createPgQlooStore, createQlooClient, qlooClientOptionsFromEnv, type QlooClient } from "@ct/qloo";
+import { tasteMapFromScreen } from "@ct/quant";
 import { judgeTokenFromEnv } from "./access";
 import { findAlreadyHave, type AnswerCache } from "./answer-cache";
 import { ModeService, qlooUsageReader, spendPolicyFromEnv } from "./breakers";
@@ -23,15 +24,21 @@ import {
   modeOverrideFromEnv,
   qlooDailyFreshCapFromEnv,
   qlooDisabledFromEnv,
+  runQueueMaxFromEnv,
+  runQueueWaitSFromEnv,
+  sideConfigFromEnv,
+  visitorLimitsFromEnv,
 } from "./config";
 import { desModeFrom } from "./des/mode";
 import { DesService } from "./des/service";
 import { vettedPersonFrom } from "./des/vetted";
 import { EventBus } from "./event-bus";
 import { todayLlmUsd } from "./llm-spend";
+import { kvLocalities } from "./localities";
 import { log } from "./log";
 import { readStoredMode, writeMode, type StoredModeValue } from "./mode";
 import { RunManager } from "./run-manager";
+import { ScreenerService } from "./screener/service";
 
 /**
  * Process-wide singletons, created on first use. They live on globalThis because Next.js can load
@@ -57,6 +64,10 @@ interface Slots {
   des?: DesService;
   /** The gazetteer its skill context carries, made on first use. */
   desGeo?: GeoApi;
+  /** The brand screener and its Category Taste Map (Part 10). */
+  screener?: ScreenerService;
+  /** The side context blocks' cache (Part 11, R4/R5), on the context_cache table. */
+  contextCache?: ContextCache;
 }
 
 const KEY = "__ctContainer";
@@ -218,6 +229,51 @@ export function getDesService(): DesService {
     mode: (lane) => desModeFrom(getModeService(), lane),
     geo: () => (s.desGeo ??= createGeo()),
     vettedPerson: vettedPersonFrom(() => listPublicFigureNames(getDatabase())),
+    recordUse: (use) => recordFeatureUse(getDatabase(), use),
+  }));
+}
+
+/**
+ * The cache of the side context blocks (R4, R5, D25: "What AI knows" 7 days, "From the web" 24 hours) on
+ * the shared context_cache table, so every run and instance reuses a block inside its lifetime. A read or
+ * write failure is the caller's to swallow: the side call then simply runs uncached.
+ */
+export function getContextCache(): ContextCache {
+  const s = slots();
+  return (s.contextCache ??= {
+    get: async (key) => {
+      const row = await getContext(getDatabase(), key, new Date());
+      return row ? { body: row.body, createdAt: row.createdAt.toISOString() } : null;
+    },
+    put: async (row) => {
+      await putContext(getDatabase(), {
+        key: row.key,
+        kind: row.kind,
+        model: row.model,
+        body: row.body,
+        usd: row.usd,
+        expiresAt: new Date(Date.now() + row.ttlMs),
+      });
+    },
+  });
+}
+
+/**
+ * The brand screener (PLAN §5.5) on this process's Qloo client, mode machine and pinned localities;
+ * $0 LLM. Its taste map is classical MDS over the screen's own triangular similarity calls.
+ */
+export function getScreenerService(): ScreenerService {
+  const s = slots();
+  return (s.screener ??= new ScreenerService({
+    qloo: getQlooClient,
+    qlooEnabled: !qlooDisabledFromEnv(),
+    mode: (lane) => desModeFrom(getModeService(), lane),
+    localities: () => kvLocalities(getDatabase(), { feature: "screener" }),
+    tasteMap: tasteMapFromScreen,
+    countScreen: async (nowMs) => {
+      await incrementKvCounter(getDatabase(), `${SCREENER_DAILY_KV_PREFIX}${new Date(nowMs).toISOString().slice(0, 10)}`);
+    },
+    recordUse: (use) => recordFeatureUse(getDatabase(), use),
   }));
 }
 
@@ -230,12 +286,25 @@ export function getRunManager(): RunManager {
     fakeMaxActive: fakeRunMaxActiveFromEnv(),
     hourlyCap: fakeRunHourlyCapFromEnv(),
     retentionMs: fakeRunRetentionMsFromEnv(),
-    agent: { qloo: getQlooClient, publicdata: getPublicDataClient, anthropic: getAnthropic, mode: laneMode },
+    agent: {
+      qloo: getQlooClient,
+      publicdata: getPublicDataClient,
+      anthropic: getAnthropic,
+      mode: laneMode,
+      // R4/R5 (D45): the side context calls' settings and their shared cache (context_cache).
+      side: sideConfigFromEnv(),
+      contextCache: getContextCache,
+    },
+    // D24 per-visitor lane (VISITOR_MAX_ACTIVE / VISITOR_HOURLY_CAP / VISITOR_DAILY_CAP).
+    visitorLimits: visitorLimitsFromEnv(),
     agentHourlyCap: agentRunHourlyCapFromEnv(),
     judgeHourlyCap: judgeRunHourlyCapFromEnv(),
     agentDailyCap: agentRunDailyCapFromEnv(),
     judgeDailyCap: judgeRunDailyCapFromEnv(),
     agentMaxActive: agentRunMaxActiveFromEnv(),
+    // D24: runs past the slots wait in one FIFO queue per lane.
+    queueMax: runQueueMaxFromEnv(),
+    queueWaitMs: runQueueWaitSFromEnv() * 1000,
     // A closed judge lane holds no slot.
     judgeMaxActive: judgeTokenFromEnv() ? judgeRunMaxActiveFromEnv() : 0,
     llmDailyUsdCap: llmDailyUsdCapFromEnv(),

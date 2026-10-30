@@ -162,15 +162,17 @@ export async function openCliQloo(options: CliQlooOptions): Promise<CliQloo> {
   };
 }
 
-/** "mock", "dev (SEC on, Census off: CENSUS_API_KEY not set)" or "off": the public-data part of a CLI header. */
+/** "mock", "dev (SEC on, Census off, OSM on: CENSUS_API_KEY not set)" or "off": the public-data part of a CLI header. */
 export function describePublicData(client: PublicDataClient | null): string {
   if (client === null) return "off";
   if (client.env === "mock") return "mock";
+  const osm = client.configured.osm === true;
   const off = [
     client.configured.sec ? null : "SEC_USER_AGENT",
     client.configured.census ? null : "CENSUS_API_KEY",
+    osm ? null : "OSM_USER_AGENT",
   ].filter((v) => v !== null);
-  const state = `SEC ${client.configured.sec ? "on" : "off"}, Census ${client.configured.census ? "on" : "off"}`;
+  const state = `SEC ${client.configured.sec ? "on" : "off"}, Census ${client.configured.census ? "on" : "off"}, OSM ${osm ? "on" : "off"}`;
   return `${client.env} (${state}${off.length === 0 ? "" : `: ${off.join(" and ")} not set`})`;
 }
 

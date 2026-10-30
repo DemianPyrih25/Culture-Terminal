@@ -1,5 +1,5 @@
 import type { Mode } from "@ct/contracts";
-import { DEFAULT_DAILY_FRESH_CAP, DEFAULT_TAG_CAP } from "./budget";
+import { DEFAULT_DAILY_FRESH_CAP, DEFAULT_JUDGING_END_DATE, DEFAULT_TAG_CAP } from "./budget";
 import type { QlooClientOptions } from "./client";
 import { createHttpTransport, DEFAULT_QLOO_BASE_URL, normaliseBaseUrl } from "./http-transport";
 import type { QlooLogger } from "./logger";
@@ -18,7 +18,11 @@ import type { Transport } from "./transport-types";
  *   "" and "off" keep it off), since its daily cap and month floor already guard the quota. Mock mode
  *   never applies it: synthetic calls cost nothing.
  * - QLOO_RPS: global requests per second, default 1.5 (prod sets 7).
- * - QLOO_DAILY_FRESH_CAP: prod fresh calls per UTC day, default 1,900 (lowered during abuse).
+ * - QLOO_DAILY_FRESH_CAP: prod fresh calls per UTC day outside the judging window, default 1,900 (lowered
+ *   during abuse).
+ * - JUDGING_END_DATE: the last judging day (UTC, YYYY-MM-DD), default 2026-11-16. Until then the prod daily
+ *   cap is recomputed each UTC day from the month's remaining calls (dailyFreshCapFor, D24); "off" keeps the
+ *   static cap only.
  * - Environment: "prod" when NODE_ENV=production and QLOO_ENV is not "dev"; otherwise "dev". QLOO_ENV=dev
  *   lets a production build (e.g. a local `next start`) keep the development floor and caps.
  */
@@ -59,6 +63,7 @@ export function qlooClientOptionsFromEnv(env: NodeJS.ProcessEnv, deps: QlooEnvDe
     tagCap: parseTagCap(env.QLOO_TAG_CAP, qlooEnv),
     rps: parseRps(env.QLOO_RPS),
     dailyFreshCap: parsePositiveInt("QLOO_DAILY_FRESH_CAP", env.QLOO_DAILY_FRESH_CAP) ?? DEFAULT_DAILY_FRESH_CAP,
+    judgingEndDate: parseJudgingEndDate(env.JUDGING_END_DATE),
     store: deps.store,
     logger: deps.logger,
     onModeChange: deps.onModeChange,
@@ -93,6 +98,17 @@ function parseRps(raw: string | undefined): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n <= 0 || n > MAX_RPS) throw new Error(`QLOO_RPS must be a number in (0, ${MAX_RPS}], got "${raw}"`);
   return n;
+}
+
+/** JUDGING_END_DATE: a real calendar day as YYYY-MM-DD, "off" for none; unset is the default day. */
+export function parseJudgingEndDate(raw: string | undefined): string | null {
+  const value = raw?.trim() ?? "";
+  if (value === "") return DEFAULT_JUDGING_END_DATE;
+  if (value.toLowerCase() === "off") return null;
+  const ms = /^\d{4}-\d{2}-\d{2}$/.test(value) ? Date.parse(`${value}T00:00:00.000Z`) : Number.NaN;
+  const valid = Number.isFinite(ms) && new Date(ms).toISOString().slice(0, 10) === value;
+  if (!valid) throw new Error(`JUDGING_END_DATE must be a date as YYYY-MM-DD or "off", got "${raw}"`);
+  return value;
 }
 
 function parsePositiveInt(name: string, raw: string | undefined): number | null {

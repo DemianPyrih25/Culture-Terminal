@@ -1,4 +1,5 @@
-import { AgeBucket, type Job, type Metric, type SkillId } from "@ct/contracts";
+import type { Job, Metric, SkillId } from "@ct/contracts";
+import { AGE_BUCKET_VALUES } from "@ct/contracts/values";
 
 /**
  * The key-figure strip per job, all thirteen, so a live brief can show which figures are in and which are
@@ -49,7 +50,7 @@ const one = (key: string, extra: Omit<KpiPick, "key"> = {}): KpiPick => ({ key, 
 /** A share percentile read in a market context: its second subject ref is a market, not an age bucket or audience. */
 export const inMarket = (m: Metric): boolean => {
   const context = m.subjectRefs[1];
-  return context !== undefined && !AgeBucket.safeParse(context).success && !context.startsWith("urn:");
+  return context !== undefined && !(AGE_BUCKET_VALUES as readonly string[]).includes(context) && !context.startsWith("urn:");
 };
 
 /** A rank shift that rose: "Top climber" never shows a shift of zero or less (ANSWER_QUALITY §3). */

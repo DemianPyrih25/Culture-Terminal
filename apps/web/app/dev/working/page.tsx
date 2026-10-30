@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { reduceRunEvents, stampEvent, type EventInput, type RunEvent } from "@ct/contracts";
+import type { EventInput, RunEvent } from "@ct/contracts";
+import { reduceRunEvents, stampEvent } from "@ct/contracts/values";
 import { BriefView } from "@/components/brief/brief-view";
 import { DraftChartCard, draftKeyNumber, WorkingView, type WorkingViewProps } from "@/components/working";
 import { buildAnswerModel } from "@/lib/answer";

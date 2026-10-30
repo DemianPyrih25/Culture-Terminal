@@ -3,21 +3,25 @@
 import type { ReactNode } from "react";
 import type { RunState } from "@ct/contracts";
 import type { BriefModel } from "../../lib/brief";
+import { endedInQueue, queuedPlace, queueWaitLeftS } from "../../lib/run-stream";
 import { noticed, readingAs, replayTime, WORKING_JOB_LABEL, workingProgress, workingTime } from "../../lib/brief/steps";
 import { ANSWERS_HREF, PageHead, SiteShell } from "../chrome";
 import { cx, KeyNumber, topicForPillar, type KeyNumberProps } from "../ui";
 import { GuessesCard } from "./guesses";
-import { editQuestionHref, NotFoundCard, ProgressCard } from "./progress-card";
+import { editQuestionHref, NotFoundCard, ProgressCard, QueuedCard } from "./progress-card";
 import { ReplayControls, type ReplayControlsProps } from "./replay-controls";
 import { lookupChips } from "./sources";
 import { ReconnectingState, StateCard } from "./state-cards";
 import { StopButton, useStopRun } from "./stop";
 import { WhichOneCard } from "./which-one";
+import { buildAnswerContext } from "../../lib/answer/context";
+import { ContextRow } from "../answer/context-cards";
 
 /**
  * The working view (N03 early, N04 late, N16 end states): the page while an answer is being made, and
  * the page of a run that ended before its answer. The page head with Stop, the progress card (or the
- * end-state card in its slot), then what has arrived: draft key numbers, a draft chart and the guesses.
+ * end-state card in its slot), then what has arrived: draft key numbers, a draft chart and the guesses,
+ * and the context cards ("What AI knows (not verified)", "From the web") as soon as each block settles.
  */
 
 export interface WorkingReplay extends ReplayControlsProps {
@@ -87,6 +91,8 @@ export function WorkingView({
   const editHref = editQuestionHref(question);
   const hasEvidence = keyNumbers.length > 0 || chart !== null;
   const priors = model.priors.items;
+  // Waiting for a live slot (D24): only a live run waits; a replay plays its queue part instantly.
+  const place = mode === "live" ? queuedPlace(state) : null;
   // A run that stopped will not score its guesses: the caption does not promise it.
   const guessCaption = state.ended !== null ? "Written before any data." : undefined;
 
@@ -99,7 +105,11 @@ export function WorkingView({
         <NotFoundCard mention={terminal.mention} editHref={editHref} className={END_CARD} />
       );
   } else if (terminal && state.ended !== null) {
-    slot = <StateCard terminal={terminal} question={question} compact={hasEvidence} className={END_CARD} />;
+    slot = <StateCard terminal={terminal} question={question} compact={hasEvidence} unstarted={endedInQueue(state)} className={END_CARD} />;
+  } else if (place) {
+    // The clock the page reads, as an instant: the run's first event plus the time since it.
+    const now = Date.parse(state.createdAt ?? place.at) + elapsedMs;
+    slot = <QueuedCard position={place.position} waitLeftS={queueWaitLeftS(place, now)} editHref={editHref} />;
   } else {
     slot = (
       <ProgressCard
@@ -144,6 +154,7 @@ export function WorkingView({
       ) : priors.length > 0 ? (
         <GuessesCard priors={priors} variant="full" caption={guessCaption} className={RISE} />
       ) : null}
+      <ContextRow context={buildAnswerContext(state)} className={RISE} />
     </SiteShell>
   );
 }

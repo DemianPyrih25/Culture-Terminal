@@ -3,14 +3,16 @@
 import { useId, useState } from "react";
 import type { BriefSource, RequestRef } from "../../lib/brief";
 import { Button, buttonClassName, copyText, cx, Icon } from "../ui";
-import { isMockReference, publicRequestLink, requestCurl, type CallQuery } from "./curl";
-import { freshnessText, requestPairs, sourceDescription, sourceLine } from "./source-copy";
+import { isMockReference, overpassLink, publicRequestLink, QLOO_IDS_LINE, requestCopy, type CallQuery } from "./request-copy";
+import { freshnessText, isPublicLookup, requestPairs, sourceDescription, sourceLine } from "./source-copy";
 
 /**
  * C/SourceRow: one lookup. Its description and chevron toggle it; under them the endpoint line and how
- * fresh it is. Open, the request block (redacted parameters and the short request id), then "Copy id"
- * and "Copy as curl". An SEC EDGAR or US Census lookup (Part 9) shows its reference, and "Open at the
- * source" and "Copy URL" with the public request URL instead of a curl: no key is ever shown.
+ * fresh it is. Open, the request block (redacted parameters with names where Qloo entity ids were, and
+ * the short request id), then "Copy id" and "Copy request" (R8: the ids stay on our server; the request
+ * id identifies the call). An SEC EDGAR or US Census lookup (Part 9) shows its reference, and "Open at the
+ * source" and "Copy URL" with the public request URL. An OpenStreetMap lookup (R6) shows its Overpass
+ * query and "Open in Overpass Turbo". No key is ever shown.
  */
 
 /** What a row needs of a lookup: a Sources entry, or a footnote's request the run did not stream. */
@@ -44,7 +46,7 @@ export function lookupOf(request: RequestRef, sources: readonly BriefSource[]): 
 
 export interface SourceRowProps {
   lookup: Lookup;
-  /** The call's full query, for an exact curl. */
+  /** The call's full query, for an exact copy, a public link or an Overpass query. */
   query?: CallQuery | null;
   defaultOpen?: boolean;
   /** Names for the run's refs (refNames), so "R1" in a parameter reads as its name. */
@@ -56,9 +58,10 @@ export interface SourceRowProps {
 export function SourceRow({ lookup, query, defaultOpen = false, names, onCopied }: SourceRowProps) {
   const [open, setOpen] = useState(defaultOpen);
   const id = useId();
-  const curl = requestCurl(lookup, query);
+  const copyable = requestCopy(lookup, query);
   const link = publicRequestLink(lookup, query);
-  const publicSource = lookup.source === "sec" || lookup.source === "census";
+  const overpass = overpassLink(lookup, query);
+  const publicSource = isPublicLookup(lookup.source);
   const copy = (text: string) =>
     void copyText(text).then((ok) => onCopied?.(ok ? "Copied" : "Copy failed: select the text instead"));
   return (
@@ -110,26 +113,52 @@ export function SourceRow({ lookup, query, defaultOpen = false, names, onCopied 
               </Button>
             </>
           ) : null}
-          {curl ? (
-            <Button variant="secondary" size="sm" icon="copy" onClick={() => copy(curl.command)} data-curl={curl.command} data-curl-exact={curl.exact}>
-              Copy as curl
+          {overpass ? (
+            <>
+              <a
+                href={overpass.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-overpass-url={overpass.url}
+                className={buttonClassName("secondary", "sm")}
+              >
+                Open in Overpass Turbo
+              </a>
+              <Button variant="secondary" size="sm" icon="copy" onClick={() => copy(overpass.query)}>
+                Copy query
+              </Button>
+            </>
+          ) : null}
+          {copyable ? (
+            <Button variant="secondary" size="sm" icon="copy" onClick={() => copy(copyable.text)} data-request-copy={copyable.text} data-request-exact={copyable.exact}>
+              Copy request
             </Button>
           ) : null}
         </div>
-        {curl ? <p className="type-caption text-ink-2">The curl reads your own key from $QLOO_API_KEY.</p> : null}
-        {publicSource ? <p className="type-caption text-ink-2">{publicNote(lookup, link)}</p> : null}
+        {overpass ? (
+          <pre className="max-h-48 overflow-auto rounded-sm bg-sunken p-3 font-mono text-[12px] leading-[18px] whitespace-pre-wrap text-ink [overflow-wrap:anywhere]" data-overpass-query>
+            {overpass.query}
+          </pre>
+        ) : null}
+        {copyable ? <p className="type-caption text-ink-2">{QLOO_IDS_LINE}</p> : null}
+        {publicSource ? <p className="type-caption text-ink-2">{publicNote(lookup, link ?? (overpass ? {} : null))}</p> : null}
       </div>
     </li>
   );
 }
 
-/** The line under an SEC or Census lookup: how to repeat it, and what a rebuilt or test link means. */
-export function publicNote(lookup: Pick<Lookup, "source" | "requestId">, link: { exact: boolean } | null): string {
+/** The line under a public lookup: how to repeat it, and what a rebuilt or test link means. */
+export function publicNote(lookup: Pick<Lookup, "source" | "requestId">, link: { exact?: boolean } | null): string {
+  if (lookup.source === "osm") {
+    if (isMockReference(lookup.requestId)) return "Test data: this lookup was answered with invented places, not by OpenStreetMap.";
+    const how = "A public OpenStreetMap request (Overpass API): no key needed. Map data © OpenStreetMap contributors, under the Open Database License (ODbL).";
+    return link ? how : `${how} The exact query was not recorded for this lookup.`;
+  }
   if (isMockReference(lookup.requestId)) return "Test data: this lookup was answered with invented figures, not by the SEC or the Census.";
   const how =
     lookup.source === "sec"
       ? "A public SEC EDGAR request: no key needed. Scripts must send a User-Agent naming you and a contact email."
       : "A public US Census Data API request. The Census asks for a free API key: add &key= with your own to repeat it.";
   if (!link) return `${how} The exact request was not recorded for this lookup.`;
-  return link.exact ? how : `${how} Some values were shortened in the trace, so the link is a sketch, not an exact replay.`;
+  return link.exact !== false ? how : `${how} Some values were shortened in the trace, so the link is a sketch, not an exact replay.`;
 }

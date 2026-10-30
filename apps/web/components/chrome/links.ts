@@ -10,10 +10,16 @@ export const NEW_QUESTION_HREF = `/#${ASK_FIELD_ID}`;
 /** The visitor's own answers. */
 export const ANSWERS_HREF = "/briefs";
 
+/** The visitor's followed brands, places and questions (§2.4). */
+export const FOLLOWING_HREF = "/following";
+
+/** The brand screener (§5.5). */
+export const SCREENER_HREF = "/screener";
+
 export const HOW_IT_WORKS_HREF = "/how-it-works";
 
 /** The header's sections, in order. */
-export type NavKey = "answers" | "how";
+export type NavKey = "answers" | "following" | "screener" | "how";
 
 export interface NavItem {
   key: NavKey;
@@ -23,5 +29,7 @@ export interface NavItem {
 
 export const SITE_NAV: readonly NavItem[] = [
   { key: "answers", label: "Your answers", href: ANSWERS_HREF },
+  { key: "following", label: "Following", href: FOLLOWING_HREF },
+  { key: "screener", label: "Screener", href: SCREENER_HREF },
   { key: "how", label: "How it works", href: HOW_IT_WORKS_HREF },
 ];

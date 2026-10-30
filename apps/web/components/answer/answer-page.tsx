@@ -8,12 +8,16 @@ import type { BriefModel } from "../../lib/brief";
 import { PageHead, SiteShell, useShareLink, type MenuItem } from "../chrome";
 import { useHowWeKnow } from "../drawer";
 import { AreaMap } from "../figures/area-map";
+import { FollowMenu, noteFollowOptions } from "../following";
 import { LiftMapCard } from "../figures/lift-map-card";
+import { AreaStandingCard, supplyForMap } from "../figures/lift-standing";
+import { SupplyTable } from "../figures/supply-table";
 import { Button, ChartCard, ChartTable, cx, Icon, IconButton, KeyNumber, Popover, Tag } from "../ui";
 import { GUESS_CAPTION, GuessesCard, StateCard } from "../working";
 import { AskNextCard } from "./ask-next";
-import { AIAloneCard, ChangeCard, ConceptNote, NextStepsCard, ReadAsNote, VerdictCard, WhyRow } from "./cards";
+import { AIAloneCard, ChangeCard, ConceptNote, NextStepsCard, ReadAsNote, UnlistedNote, VerdictCard, WhyRow } from "./cards";
 import { ChartBodyView } from "./chart-bodies";
+import { ContextRow } from "./context-cards";
 import { useFetchedDatasets } from "./datasets";
 import { ChartSheet, MoreCharts } from "./more-charts";
 
@@ -26,7 +30,8 @@ import { ChartSheet, MoreCharts } from "./more-charts";
  */
 
 /** What the page reads from the run besides the brief model (a full RunState fits). */
-export type AnswerPageState = Pick<RunState, "resolves"> & Partial<Pick<RunState, "metrics" | "ghost" | "report" | "evidence" | "intent">>;
+export type AnswerPageState = Pick<RunState, "resolves"> &
+  Partial<Pick<RunState, "metrics" | "ghost" | "report" | "evidence" | "intent" | "aiContext" | "webContext">>;
 
 export interface AnswerPageProps {
   model: BriefModel;
@@ -39,6 +44,8 @@ export interface AnswerPageProps {
   fallbackQuestion?: string | null;
   /** Datasets the server already read for the first paint (a permalink's lift map); the rest are fetched. */
   datasets?: Readonly<Record<string, DatasetEnvelope>>;
+  /** A reader's own question, not a curated showcase (D31): the page says it is unlisted. */
+  unlisted?: boolean;
 }
 
 /** Spans on the six-column grid from 900 px; below it every card takes the row. */
@@ -110,6 +117,7 @@ function MapSlot({ answer, className }: { answer: AnswerModel; className?: strin
         headingLevel={2}
         onSource={how.available ? () => how.open({ figure: chart.datasetId }) : undefined}
         className={className}
+        osm={supplyForMap(chart.body.data, answer.supply.map((s) => s.data))}
       />
     );
   }
@@ -148,8 +156,8 @@ function Cell({ cell, answer, model }: { cell: AnswerCell; answer: AnswerModel; 
   return chart ? <AnswerChartCard chart={chart} className={span} /> : null;
 }
 
-/** The page head's actions: How we know, Share and the ellipsis menu. */
-function HeadActions({ permalink, replay }: { permalink: string; replay: string | null }) {
+/** The page head's actions: How we know, Follow, Share and the ellipsis menu. */
+function HeadActions({ permalink, replay, follow }: { permalink: string; replay: string | null; follow?: ReactNode }) {
   const how = useHowWeKnow();
   const { share, toast } = useShareLink(permalink);
   const item = "flex h-10 w-full items-center gap-3 rounded-sm px-3 text-left text-[15px] leading-6 font-medium text-ink transition-colors hover:bg-sunken";
@@ -160,6 +168,7 @@ function HeadActions({ permalink, replay }: { permalink: string; replay: string 
           How we know
         </Button>
       ) : null}
+      {follow}
       <Button variant="secondary" icon="share-2" onClick={share}>
         Share
       </Button>
@@ -231,10 +240,19 @@ function writeChartParam(chart: MoreChart | null) {
   window.history.replaceState(window.history.state, "", url);
 }
 
-export function AnswerPage({ model, state, runId = model.runId, links, fallbackQuestion = null, datasets }: AnswerPageProps) {
+export function AnswerPage({ model, state, runId = model.runId, links, fallbackQuestion = null, datasets, unlisted = false }: AnswerPageProps) {
   const fetched = useFetchedDatasets(model.evidence.figures, datasets);
   const run = useMemo(
-    () => ({ resolves: state.resolves, ghost: state.ghost ?? null, report: state.report ?? null, metrics: state.metrics, intent: state.intent ?? null, evidence: state.evidence }),
+    () => ({
+      resolves: state.resolves,
+      ghost: state.ghost ?? null,
+      report: state.report ?? null,
+      metrics: state.metrics,
+      intent: state.intent ?? null,
+      evidence: state.evidence,
+      aiContext: state.aiContext ?? null,
+      webContext: state.webContext ?? null,
+    }),
     [state],
   );
   const answer = useMemo(() => buildAnswerModel(model, run, { datasets: fetched, fallbackQuestion }), [model, run, fetched, fallbackQuestion]);
@@ -262,6 +280,11 @@ export function AnswerPage({ model, state, runId = model.runId, links, fallbackQ
     ...(links.replay ? [{ label: "Watch it being made", icon: "circle-play", href: links.replay } satisfies MenuItem] : []),
   ];
   const { head, verdict } = answer;
+  // Following (§2.4): the note's brand, place and question, each a follow of its own.
+  const followOptions = useMemo(
+    () => noteFollowOptions(runId, { question: head.question, job: answer.job ?? null, intent: state.intent ?? null, resolves: state.resolves }),
+    [runId, head.question, answer.job, state.intent, state.resolves],
+  );
   const ghost = answer.ghost;
   // Row E: AI alone + Change, or Change + the guesses when the guesses had no chart beside them.
   const besideChange = !ghost && answer.guessesBesideChange;
@@ -282,11 +305,12 @@ export function AnswerPage({ model, state, runId = model.runId, links, fallbackQ
           mobileEyebrow={head.mobileEyebrow}
           question={head.question}
           compare={head.compare ?? undefined}
-          actions={<HeadActions permalink={links.permalink} replay={links.replay} />}
+          actions={<HeadActions permalink={links.permalink} replay={links.replay} follow={<FollowMenu options={followOptions} />} />}
           className="pb-0.5"
         />
 
-        {answer.concept ? <ConceptNote text={answer.concept} /> : null}
+        {unlisted ? <UnlistedNote /> : null}
+        {answer.concept ? <ConceptNote text={answer.concept} level={answer.conceptLevel} /> : null}
         {answer.readAs ? <ReadAsNote readAs={answer.readAs} /> : null}
 
         <div className={ROW}>
@@ -309,9 +333,25 @@ export function AnswerPage({ model, state, runId = model.runId, links, fallbackQ
           </div>
         ))}
 
+        {answer.standing ? <AreaStandingCard data={answer.standing.data} supply={answer.standing.supply} /> : null}
+
+        {answer.supply.map((s) => (
+          <SupplyTable
+            key={s.datasetId}
+            data={s.data}
+            kind={s.data.mix ? "What the area already has" : "Places already there"}
+            title={s.title}
+            headingLevel={2}
+            formulaId={s.formulaId}
+            onSource={how.available ? () => how.open({ figure: s.datasetId }) : undefined}
+          />
+        ))}
+
         {rowE}
 
         <WhyRow why={answer.why} />
+
+        <ContextRow context={answer.context} />
 
         <MoreCharts charts={answer.more} onOpen={openSheet} />
 
@@ -331,11 +371,22 @@ export function AnswerPage({ model, state, runId = model.runId, links, fallbackQ
  * A permalink of a question we declined (the run's refusal card): the page head and the refused card with
  * its suggested question. No numbers, so no drawer.
  */
-export function RefusedAnswerPage({ model, fallbackQuestion = null, permalink }: { model: BriefModel; fallbackQuestion?: string | null; permalink: string }) {
+export function RefusedAnswerPage({
+  model,
+  fallbackQuestion = null,
+  permalink,
+  unlisted = false,
+}: {
+  model: BriefModel;
+  fallbackQuestion?: string | null;
+  permalink: string;
+  unlisted?: boolean;
+}) {
   const answer = useMemo(() => buildAnswerModel(model, { resolves: [] }, { fallbackQuestion }), [model, fallbackQuestion]);
   return (
     <SiteShell header="inner" mobileHeader="answer" sharePath={permalink} mainClassName="flex flex-col gap-6 pt-6 pb-12 max-md:gap-4 max-md:pt-4 max-md:pb-2">
       <PageHead topic={answer.head.topic} eyebrow={answer.head.eyebrow} mobileEyebrow={answer.head.mobileEyebrow} question={answer.head.question} />
+      {unlisted ? <UnlistedNote /> : null}
       {model.terminal ? (
         <div className={ROW}>
           <StateCard terminal={model.terminal} question={answer.head.question} className={cx(SPAN[4], "min-w-0")} />

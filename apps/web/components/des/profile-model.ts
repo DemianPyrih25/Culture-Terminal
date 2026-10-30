@@ -232,6 +232,8 @@ export interface ProfileHow {
   live: number;
   /** How the name was matched. */
   matched: string;
+  /** What this view cost: Qloo requests from today's allowance and $0 of AI (FEATURE_COSTS.des_profile). */
+  cost: string;
   /** The fixed limits of each part and the flags it raised. */
   notes: string[];
   sources: ProfileSource[];
@@ -436,7 +438,17 @@ export function freshText(receipt: Pick<DesReceipt, "cache" | "cacheLabel">, fet
   return age ? `Saved copy, ${age} old` : "Saved copy";
 }
 
-function howOf(sheet: Tearsheet): ProfileHow {
+/**
+ * What opening this profile cost. A profile served again from the answer cache made no request; a new
+ * one spent its live requests from today's Qloo allowance, its saved copies nothing. No AI model runs.
+ */
+export function costText(live: number, cachedAt: string | null): string {
+  if (cachedAt !== null) return "No Qloo request for this view: a profile read earlier. AI cost $0.";
+  if (live === 0) return "No live Qloo request: every answer was a saved copy. AI cost $0.";
+  return `${live} live Qloo ${live === 1 ? "request" : "requests"} from today's allowance. AI cost $0.`;
+}
+
+function howOf(sheet: Tearsheet, cachedAt: string | null): ProfileHow {
   const notes = [...new Set([...sheet.sections.dna.notes, ...sheet.sections.neighbours.notes, ...sheet.sections.travel.notes])];
   const live = sheet.receipts.filter((r) => r.cache === "miss").length;
   return {
@@ -445,6 +457,7 @@ function howOf(sheet: Tearsheet): ProfileHow {
     requests: sheet.requests.total,
     saved: sheet.requests.total - live,
     live,
+    cost: costText(live, cachedAt),
     matched: sheet.picked
       ? "You picked this one from Qloo's matches; nothing was picked for you."
       : "The name was matched exactly, name and type, before any data was read.",
@@ -478,7 +491,7 @@ export function buildProfile(sheet: Tearsheet, cachedAt: string | null): Profile
     tags: tagsCard(sheet),
     neighbours: neighboursCard(sheet),
     travel: travelCard(sheet),
-    how: howOf(sheet),
+    how: howOf(sheet, cachedAt),
   };
 }
 

@@ -1,27 +1,42 @@
 import { PUBLIC_ENDPOINTS } from "@ct/contracts";
 import { PublicDataError, type PublicRequest, type PublicTransport } from "./api";
 import { publicQueryString } from "./canonical";
+import { OSM_TIMEOUT_MS, overpassTarget } from "./osm/client";
 
 /**
- * The live transport: one HTTPS GET per attempt to the three public hosts only, a 20 s timeout and a
- * body cap enforced while it streams. Redirects are never followed (the Census API answers a missing
- * or invalid key with one). SEC gets SEC_USER_AGENT verbatim as its User-Agent, as SEC's fair-access
- * policy requires; Census gets CENSUS_API_KEY as the `key` query parameter, added here on the wire
- * only, so it is in no cache key, call row, event or provenance. Errors never carry the URL.
+ * The live transport: one HTTPS GET per attempt to the three SEC and Census hosts only, a 20 s timeout
+ * and a body cap enforced while it streams. Redirects are never followed (the Census API answers a
+ * missing or invalid key with one). SEC gets SEC_USER_AGENT verbatim as its User-Agent, as SEC's
+ * fair-access policy requires; Census gets CENSUS_API_KEY as the `key` query parameter, added here on
+ * the wire only, so it is in no cache key, call row, event or provenance. OpenStreetMap is the one POST,
+ * and only to the configured OSM_OVERPASS_URL: the form body `data=<QL>` (a read-only query), with
+ * OSM_USER_AGENT as the User-Agent the Overpass usage policy asks for, and a 45 s timeout (the query
+ * itself is limited to 25 s). Errors never carry the URL.
  */
 
 export const PUBLIC_TIMEOUT_MS = 20_000;
 /** A company-facts file runs to several MB before the client keeps only its SecConcepts. */
 export const PUBLIC_MAX_RESPONSE_BYTES = 40 * 1024 * 1024;
 
-const HOSTS: ReadonlySet<string> = new Set(Object.values(PUBLIC_ENDPOINTS).map((e) => e.host));
+/** SEC and Census hosts; the Overpass host is whatever OSM_OVERPASS_URL names. */
+const HOSTS: ReadonlySet<string> = new Set(
+  Object.values(PUBLIC_ENDPOINTS)
+    .filter((e) => e.source !== "osm")
+    .map((e) => e.host),
+);
 
 export interface PublicHttpTransportOptions {
   /** Sent verbatim as the User-Agent to SEC; null makes every SEC request fail with not_configured. */
   secUserAgent: string | null;
   /** The Census Data API key; null makes every Census request fail with not_configured. */
   censusApiKey: string | null;
+  /** Sent verbatim as the User-Agent to Overpass; null or absent makes every OpenStreetMap request fail with not_configured. */
+  osmUserAgent?: string | null;
+  /** The Overpass endpoint (default https://overpass-api.de/api/interpreter); OpenStreetMap requests go nowhere else. */
+  osmOverpassUrl?: string;
   timeoutMs?: number;
+  /** Timeout of one Overpass request (default 45 s: a busy instance queues it first). */
+  osmTimeoutMs?: number;
   maxBytes?: number;
   /** Injectable for tests; defaults to the global fetch. */
   fetch?: typeof fetch;
@@ -49,15 +64,32 @@ export function createPublicHttpTransport(options: PublicHttpTransportOptions): 
   const userAgent = options.secUserAgent?.trim() || null;
   if (userAgent !== null && !isHeaderSafe(userAgent)) throw new Error("SEC_USER_AGENT must be printable ASCII on one line");
   const censusKey = options.censusApiKey?.trim() || null;
-  const timeoutMs = options.timeoutMs ?? PUBLIC_TIMEOUT_MS;
+  const osmUserAgent = options.osmUserAgent?.trim() || null;
+  if (osmUserAgent !== null && !isHeaderSafe(osmUserAgent)) throw new Error("OSM_USER_AGENT must be printable ASCII on one line");
+  const overpass = overpassTarget(options.osmOverpassUrl);
   const maxBytes = options.maxBytes ?? PUBLIC_MAX_RESPONSE_BYTES;
   const fetchImpl = options.fetch ?? globalThis.fetch;
 
   const transport = async (request: PublicRequest, signal?: AbortSignal) => {
-    if (!HOSTS.has(request.host)) throw new PublicDataError("bad_request", `host ${request.host} is not a public-data host`, { source: request.source });
-    let url = publicUrl(request);
+    const osm = request.source === "osm";
+    if (osm ? request.host !== overpass.host || request.path !== overpass.path : !HOSTS.has(request.host)) {
+      throw new PublicDataError("bad_request", `host ${request.host} is not a public-data host`, { source: request.source });
+    }
+    if ((request.method === "POST") !== osm) {
+      throw new PublicDataError("bad_request", `${request.method ?? "GET"} is not how ${request.host} is read`, { source: request.source });
+    }
+    let url = osm ? overpass.url : publicUrl(request);
     const headers: Record<string, string> = { Accept: "application/json" };
-    if (request.source === "sec") {
+    let body: string | undefined;
+    if (osm) {
+      if (osmUserAgent === null) {
+        throw new PublicDataError("not_configured", "OSM_USER_AGENT is not set: the Overpass API usage policy asks for a User-Agent naming the product and a contact", { source: "osm" });
+      }
+      if (request.body === undefined || request.body === "") throw new PublicDataError("bad_request", "an Overpass request needs a query", { source: "osm" });
+      headers["User-Agent"] = osmUserAgent;
+      headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8";
+      body = `data=${encodeURIComponent(request.body)}`;
+    } else if (request.source === "sec") {
       if (userAgent === null) {
         throw new PublicDataError("not_configured", "SEC_USER_AGENT is not set: SEC EDGAR requires a User-Agent naming the product and a contact email", { source: "sec" });
       }
@@ -69,13 +101,17 @@ export function createPublicHttpTransport(options: PublicHttpTransportOptions): 
       }
       url += `${url.includes("?") ? "&" : "?"}key=${encodeURIComponent(censusKey)}`;
     }
+    const timeoutMs = osm ? (options.osmTimeoutMs ?? OSM_TIMEOUT_MS) : (options.timeoutMs ?? PUBLIC_TIMEOUT_MS);
     const timeout = AbortSignal.timeout(timeoutMs);
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const started = performance.now();
     try {
-      const response = await fetchImpl(url, { method: "GET", headers, redirect: "manual", signal: combined });
+      const init: RequestInit = { method: osm ? "POST" : "GET", headers, redirect: "manual", signal: combined };
+      if (body !== undefined) init.body = body;
+      const response = await fetchImpl(url, init);
       const bytes = await readCapped(response, maxBytes, request);
-      return { status: response.status, body: new TextDecoder().decode(bytes), ms: performance.now() - started };
+      const retryAfterS = parseRetryAfter(response.headers.get("retry-after"), Date.now());
+      return { status: response.status, body: new TextDecoder().decode(bytes), ms: performance.now() - started, retryAfterS };
     } catch (err) {
       if (signal?.aborted) throw signal.reason;
       if (err instanceof PublicDataError) throw err;
@@ -86,6 +122,15 @@ export function createPublicHttpTransport(options: PublicHttpTransportOptions): 
     }
   };
   return Object.assign(transport, { censusKeyed: censusKey !== null });
+}
+
+/** Retry-After in seconds: a number of seconds or an HTTP date; null when absent or unreadable. */
+export function parseRetryAfter(header: string | null, nowMs: number): number | null {
+  if (header === null) return null;
+  const text = header.trim();
+  if (/^\d+$/.test(text)) return Number(text);
+  const at = Date.parse(text);
+  return Number.isNaN(at) ? null : Math.max(0, (at - nowMs) / 1000);
 }
 
 /** Reads the body, refusing anything over `maxBytes` as it streams. */

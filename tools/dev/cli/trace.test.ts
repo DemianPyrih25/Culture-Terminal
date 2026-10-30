@@ -1,4 +1,4 @@
-import { DEFAULT_RUN_LIMITS, type EventInput, type Intent } from "@ct/contracts";
+import { DEFAULT_RUN_LIMITS, EMPTY_CANDIDATES, type EventInput, type Intent } from "@ct/contracts";
 import { describe, expect, it } from "vitest";
 import { memoryIo } from "./io";
 import { createTracePrinter, formatEvent, newTraceState } from "./trace";
@@ -12,6 +12,7 @@ const INTENT: Intent = {
   constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
   safety: { allowed: true, category: null, reframe: null },
   read_as: { nearest: false, not_covered: [] },
+  candidates: EMPTY_CANDIDATES,
   assumptions: [],
   mnemonic: "BRAND ALPHA <BRAND> HLTH",
 };

@@ -365,6 +365,15 @@ export function miniViz(dataset: DatasetEnvelope | null): MiniViz | null {
     case "Scorecard":
       viz = null;
       break;
+    // A taste map's axes mean nothing (only distances do); the card's scatter draws a split and axis
+    // labels, so it would read as a quadrant. The card shows its key figures instead.
+    case "TasteMap":
+      viz = null;
+      break;
+    // OpenStreetMap counts are context beside the taste read, with an attribution a card cannot carry.
+    case "Supply":
+      viz = null;
+      break;
   }
   if (viz === null) return null;
   // A viz whose every label was an id or undrawable text has nothing to show.

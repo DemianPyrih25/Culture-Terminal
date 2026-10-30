@@ -44,10 +44,11 @@ function wordList(items: readonly string[]): string {
 }
 
 /**
- * The owner's disclosure (Part 9 o03 decision), one sentence per concept: "The exact product, "X", is
- * not in the data, so the category "Y" was tested instead." or, with no category found, "…, and no
- * close category was found either, so the product could not be tested at all." One part of several
- * reads "The part "X" is not in the data, so the category "Y" was tested for it instead." Null when
+ * The owner's disclosure (Part 9 o03 decision, worded per R2/D48 in Part 11), per concept: "'X' is not
+ * in Qloo's data, so this answer reads its broader category, 'Y'. It gives no winner, keep or veto for 'X'
+ * itself." or, with no category found, "The exact product, "X", is not in the data, and no close category
+ * was found either, so the product could not be tested at all." One part of several reads "The part 'X'
+ * is not in Qloo's data, so this answer reads its broader category, 'Y', for it. …". Null when
  * every concept had a tag of its own. Code opens the thesis with it and puts it first among the limitations,
  * so the reader sees it before any figure.
  */
@@ -63,9 +64,16 @@ export function conceptDisclosure(substitutes: readonly ConceptSubstitute[]): st
       const what = whole ? `the ${noun}` : "that part";
       return [`${subject} is not in the data, and no close category was found either, so ${what} could not be tested at all.`];
     }
+    // R2 (D48): a category-level read, said first, with no verdict on the concept itself.
     const one = categories.length === 1;
-    const instead = whole ? "instead" : "for it instead";
-    return [`${subject} is not in the data, so the ${one ? "category" : "categories"} ${wordList(categories)} ${one ? "was" : "were"} tested ${instead}.`];
+    const single = (q: string) => `'${q.slice(1, -1)}'`;
+    const named = single(name);
+    const what = whole ? named : `The part ${named}`;
+    const forIt = whole ? "" : ", for it";
+    return [
+      `${what} is not in Qloo's data, so this answer reads its broader ${one ? "category" : "categories"}, ${wordList(categories.map(single))}${forIt}. ` +
+        `It gives no winner, keep or veto for ${named} itself.`,
+    ];
   });
   return sentences.length === 0 ? null : sentences.join(" ");
 }

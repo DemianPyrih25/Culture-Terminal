@@ -111,7 +111,9 @@ describe("the profile", () => {
     expect(html).toMatch(/<h1[^>]*>Juniper Cola<\/h1>/);
     expect(text).toMatch(/Brand · Audience profile · Data as of \d{1,2} [A-Z][a-z]{2} \d{4}/);
     expect(html).toContain('href="/ask?q=Who%20is%20the%20Juniper%20Cola%20audience%3F"');
-    for (const action of ["Ask about Juniper Cola", "Look up another", "How we know"]) expect(text).toContain(action);
+    for (const action of ["Ask about Juniper Cola", "Look up another", "Follow", "How we know"]) expect(text).toContain(action);
+    // A brand profile can be followed (§2.4): re-run later as a brand-health note.
+    expect(html).toContain('data-follow="brand"');
     expect(text).toContain("Who its fans are, what else they love, and where their taste travels.");
     // Key numbers, from the tearsheet's popularity, youth and gender figures.
     for (const label of ["How widely known", "Age lean", "Gender lean"]) expect(html).toContain(`aria-label="${label}"`);

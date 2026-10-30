@@ -3,11 +3,17 @@ import { cx } from "../ui/cx";
 import { Hatch } from "../ui/skeleton";
 import { TAG_PRESETS, Tag } from "../ui/tag";
 import { NO_DATA } from "./format";
-import type { PlotTag } from "./types";
+import type { PlotTag, PlotTagOne } from "./types";
 
-/** A plot's tag: a preset or free words with a tone. */
-export function PlotTagView({ tag, className }: { tag: PlotTag | null | undefined; className?: string }) {
-  if (!tag) return null;
+const isTagList = (tag: PlotTag): tag is readonly PlotTagOne[] => Array.isArray(tag);
+
+/** Several tags, or none: an empty list is no tag. */
+export function plotTags(...tags: (PlotTag | null | undefined)[]): PlotTag | null {
+  const list = tags.flatMap((t) => (!t ? [] : isTagList(t) ? [...t] : [t]));
+  return list.length === 0 ? null : list.length === 1 ? (list[0] as PlotTagOne) : list;
+}
+
+function OneTag({ tag, className }: { tag: PlotTagOne; className?: string }) {
   if (typeof tag === "string") return <Tag preset={tag} className={className} />;
   return (
     <Tag tone={tag.tone} className={className}>
@@ -16,11 +22,26 @@ export function PlotTagView({ tag, className }: { tag: PlotTag | null | undefine
   );
 }
 
-/** The words of a tag, for tables and accessible names. */
+/** A plot's tag: a preset or free words with a tone, or several of them in a wrapping row. */
+export function PlotTagView({ tag, className }: { tag: PlotTag | null | undefined; className?: string }) {
+  if (!tag) return null;
+  if (!isTagList(tag)) return <OneTag tag={tag} className={className} />;
+  if (tag.length === 0) return null;
+  return (
+    <span className={cx("inline-flex flex-wrap items-center gap-1", className)}>
+      {tag.map((t, i) => (
+        <OneTag key={i} tag={t} />
+      ))}
+    </span>
+  );
+}
+
+const oneText = (tag: PlotTagOne) => (typeof tag === "string" ? TAG_PRESETS[tag].label : tag.label);
+
+/** The words of a tag (several joined with " · "), for tables and accessible names. */
 export function tagText(tag: PlotTag | null | undefined): string {
   if (!tag) return "";
-  if (typeof tag === "string") return TAG_PRESETS[tag].label;
-  return tag.label;
+  return isTagList(tag) ? tag.map(oneText).join(" · ") : oneText(tag);
 }
 
 /** An empty plot: the hatch with its pill ("No data"), never an empty box or a zero. */

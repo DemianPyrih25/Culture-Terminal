@@ -1,8 +1,9 @@
 import "server-only";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { MarketId, type Lane, type Mode, type RunStatus } from "@ct/contracts";
+import { MarketId, SCREENER_DAILY_KV_PREFIX, type Lane, type Mode, type RunStatus } from "@ct/contracts";
 import { countQlooCallsByCache, countRunsSince, getKv, getQlooUsage, pingDb, recentRunStatuses, type Queryable } from "@ct/db";
+import { OSM_DAILY_KV_PREFIX, osmDailyMaxFromEnv } from "@ct/publicdata";
 import { LANE_SHARE, MOCK_QUOTA_KV_KEY, QUOTA_KV_KEY, QuotaSnapshot, utcDay, type QlooClient, type QlooEnv } from "@ct/qloo";
 import { z } from "zod";
 import metros from "../../../config/metros.json";
@@ -15,8 +16,11 @@ import {
   judgeRunMaxActiveFromEnv,
   llmDailyUsdCapFromEnv,
   modeOverrideFromEnv,
+  osmConfiguredFromEnv,
   qlooDailyFreshCapFromEnv,
   qlooDisabledFromEnv,
+  runQueueMaxFromEnv,
+  runQueueWaitSFromEnv,
 } from "./config";
 import {
   getAnthropic,
@@ -27,7 +31,7 @@ import {
   getStoredMode,
   lastKnownMode,
 } from "./container";
-import { LLM_USD_METRIC } from "./llm-spend";
+import { CONTEXT_AI_USD_METRIC, CONTEXT_WEB_USD_METRIC, LLM_USD_METRIC, WEB_SEARCHES_METRIC } from "./llm-spend";
 import { localitiesKvKey, localityCoverage, type LocalityCoverage } from "./localities";
 import { log } from "./log";
 import type { StoredModeValue } from "./mode";
@@ -144,6 +148,12 @@ export interface StatusReport {
     accepting: boolean | null;
     /** Runs in progress in this process, live and test. */
     activeHere: number | null;
+    /**
+     * The global run queue (D24): live runs waiting for a slot in this process now (null when unknown),
+     * how many may wait (RUN_QUEUE_MAX; 0 = no queue) and the seconds each may wait. readStatus always
+     * sets it; absent only in a reading from a server without the queue.
+     */
+    queue?: { waiting: number | null; max: number; waitS: number };
     /** Live runs one process holds at once, per lane. */
     slots: Record<Lane, number>;
     /** How many of the latest runs `recent` reads (RECENT_RUNS). */
@@ -162,7 +172,24 @@ export interface StatusReport {
    * config/metros.json: market ids and counts, never a locality id. Null when it could not be read.
    */
   localities: LocalityStatus | null;
+  /**
+   * Today's (UTC) use of what draws on shared budgets outside a question's own Qloo calls (Part 11):
+   * brand screens, the side context calls' spend and searches, and OpenStreetMap requests against
+   * OSM_DAILY_MAX. Each count is null when it could not be read. Absent in readings from servers before it.
+   */
+  today?: TodayUsage;
 }
+
+/** Today's screens, side-call spend and OpenStreetMap requests (counts only, D31). */
+export interface TodayUsage {
+  /** Brand screens run today (kv screener.count.<day>, counted by the screener). */
+  screens: number | null;
+  /** The side context calls today: "What AI knows" and "From the web" USD (part of llm.todayUsd) and billed searches. */
+  context: { aiUsd: number | null; webUsd: number | null; webSearches: number | null };
+  /** Overpass requests today (kv osm.count.<day>, counted by the OpenStreetMap client) against the daily cap. */
+  osm: { configured: boolean; requests: number | null; dailyMax: number };
+}
+
 
 /**
  * The locality pins on /status. The coverage fields are the map cities every run needs
@@ -228,9 +255,13 @@ export interface StatusLimits {
   llmDailyUsdCap: number;
   hourlyCap: Record<Lane, number>;
   slots: Record<Lane, number>;
+  /** The run queue (D24): runs that may wait, and seconds each may wait. */
+  queue: { max: number; waitS: number };
   fakeHourlyCap: number;
   qlooDailyFreshCap: number;
   qlooDisabled: boolean;
+  /** OpenStreetMap: OSM_USER_AGENT set, and OSM_DAILY_MAX. Absent in sources from before Part 11. */
+  osm?: { configured: boolean; dailyMax: number };
 }
 
 /** The part of the Qloo client status reads. */
@@ -248,7 +279,7 @@ export interface StatusSources {
   limits(): StatusLimits;
   anthropicConfigured(): boolean;
   /** This process's run manager; throws when it cannot be made (no database configured). */
-  runManager(): { activeCount(): number; isAccepting(): boolean };
+  runManager(): { activeCount(): number; queuedCount(): number; isAccepting(): boolean };
   migrations(): { applied: boolean; skipped: boolean; journal: MigrationJournal | null };
   /** MODE_OVERRIDE as it is now. */
   override(): Mode | null;
@@ -269,6 +300,10 @@ export interface StatusSources {
   qlooCache(env: QlooEnv, since: Date): Promise<QlooCacheCount>;
   /** kv metro_localities' coverage of the map cities every run needs and of every config market. */
   localities(): Promise<LocalityStatus>;
+  /** usage_daily for the UTC day under any metric (the side calls' spend and searches); absent: not read. */
+  usage?(day: string, lane: Lane | "all", metric: string): Promise<number>;
+  /** A kv counter (screener.count.<day>, osm.count.<day>), 0 when unset; absent: not read. */
+  kvCount?(key: string): Promise<number>;
   /**
    * The Qloo client's view; null when it cannot be configured (live Qloo without a key). The stored
    * snapshot may be read only when `storedReadable` (the database answered the ping).
@@ -402,9 +437,11 @@ export function defaultStatusSources(): StatusSources {
       llmDailyUsdCap: llmDailyUsdCapFromEnv(),
       hourlyCap: { public: agentRunHourlyCapFromEnv(), judge: judgeRunHourlyCapFromEnv() },
       slots: laneSlots(agentRunMaxActiveFromEnv(), judgeTokenFromEnv() ? judgeRunMaxActiveFromEnv() : 0),
+      queue: { max: runQueueMaxFromEnv(), waitS: runQueueWaitSFromEnv() },
       fakeHourlyCap: fakeRunHourlyCapFromEnv(),
-      qlooDailyFreshCap: qlooDailyFreshCapFromEnv(),
+      qlooDailyFreshCap: todayQlooCap(),
       qlooDisabled: qlooDisabledFromEnv(),
+      osm: { configured: osmConfiguredFromEnv(), dailyMax: osmDailyMaxOrDefault() },
     }),
     anthropicConfigured: () => getAnthropic() !== null,
     runManager: () => getRunManager(),
@@ -422,8 +459,35 @@ export function defaultStatusSources(): StatusSources {
     recentStatuses: (hashPrefix, limit) => readRecentStatuses(getDatabase(), hashPrefix, limit),
     qlooCache: (env, since) => readQlooCache(getDatabase(), env, since),
     localities: () => readLocalityStatus(getDatabase()),
+    usage: (day, lane, metric) => getQlooUsage(getDatabase(), { day, lane, metric }),
+    kvCount: async (key) => kvCountOf(await getKv(getDatabase(), key)),
     qloo: (storedReadable) => readQlooView(storedReadable),
   };
+}
+
+/** OSM_DAILY_MAX as the OpenStreetMap client reads it; a malformed value (refused by the client) reads as 0. */
+function osmDailyMaxOrDefault(): number {
+  try {
+    return osmDailyMaxFromEnv(process.env);
+  } catch {
+    return 0;
+  }
+}
+
+/** Today's prod Qloo cap as the client applies it (recomputed each UTC day during judging), else the env's. */
+function todayQlooCap(): number {
+  const fallback = qlooDailyFreshCapFromEnv();
+  try {
+    return getQlooClient().dailyFreshCap?.() ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** A kv counter's value: a whole number, or 0 when unset or not a number. */
+export function kvCountOf(raw: unknown): number {
+  const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
 }
 
 // Composition --------------------------------------------------------------------------------------------
@@ -571,6 +635,21 @@ export async function readStatus(sources: StatusSources = defaultStatusSources()
   // With the database down every read below would only wait for its timeout.
   const read = <T>(what: string, fn: () => Promise<T>): Promise<T | null> => (dbOk ? attempt(what, fn) : Promise.resolve(null));
 
+  const usageOf = (metric: string) => (sources.usage ? read(metric, () => sources.usage!(day, "all", metric)) : Promise.resolve(null));
+  const kvOf = (key: string) => (sources.kvCount ? read(key, () => sources.kvCount!(key)) : Promise.resolve(null));
+  const [aiUsd, webUsd, webSearches, screens, osmRequests] = await Promise.all([
+    usageOf(CONTEXT_AI_USD_METRIC),
+    usageOf(CONTEXT_WEB_USD_METRIC),
+    usageOf(WEB_SEARCHES_METRIC),
+    kvOf(`${SCREENER_DAILY_KV_PREFIX}${day}`),
+    kvOf(`${OSM_DAILY_KV_PREFIX}${day}`),
+  ]);
+  const today: TodayUsage = {
+    screens,
+    context: { aiUsd: roundUsd(aiUsd), webUsd: roundUsd(webUsd), webSearches: webSearches === null ? null : Math.round(webSearches) },
+    osm: { configured: limits.osm?.configured ?? false, requests: osmRequests, dailyMax: limits.osm?.dailyMax ?? 0 },
+  };
+
   const [stored, decided, todayUsd, publicUsd, judgeUsd, publicHour, judgeHour, testHour, liveRecent, testRecent, pins, view] =
     await Promise.all([
       read("stored mode", () => sources.storedMode()),
@@ -646,6 +725,11 @@ export async function readStatus(sources: StatusSources = defaultStatusSources()
   const runs: StatusReport["runs"] = {
     accepting: manager ? quiet<boolean | null>(() => manager.isAccepting(), null) : null,
     activeHere: manager ? quiet<number | null>(() => manager.activeCount(), null) : null,
+    queue: {
+      waiting: manager ? quiet<number | null>(() => manager.queuedCount(), null) : null,
+      max: limits.queue.max,
+      waitS: limits.queue.waitS,
+    },
     slots: { public: limits.slots.public, judge: limits.slots.judge },
     recentLimit: RECENT_RUNS,
     lanes: {
@@ -691,6 +775,7 @@ export async function readStatus(sources: StatusSources = defaultStatusSources()
       pinned: pins.pinned,
       markets: { total: pins.markets.total, missing: [...pins.markets.missing] },
     },
+    today,
   };
 }
 

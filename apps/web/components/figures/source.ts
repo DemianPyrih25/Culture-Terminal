@@ -1,4 +1,5 @@
-import { PUBLIC_SOURCE_LABEL, type Evidence } from "@ct/contracts";
+import type { Evidence } from "@ct/contracts";
+import { PUBLIC_SOURCE_LABEL } from "@ct/contracts/values";
 import type { FigureSource } from "./figure-frame";
 
 /** "Qloo", "SEC EDGAR", "US Census Bureau": a bundle's source as the line names it. */

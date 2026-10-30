@@ -5,7 +5,7 @@
 // when no database is reachable.
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { pickerKey } from "@ct/agent";
-import { reduceRunEvents, type Intent, type RunEvent } from "@ct/contracts";
+import { EMPTY_CANDIDATES, reduceRunEvents, type Intent, type RunEvent } from "@ct/contracts";
 import { getRun, listLedgerRows } from "@ct/db";
 import type { QlooClient } from "@ct/qloo";
 import { searchParams } from "@ct/quant";
@@ -53,6 +53,7 @@ const TWIN_INTENT: Intent = {
   constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
   safety: { allowed: true, category: null, reframe: null },
   read_as: { nearest: false, not_covered: [] },
+  candidates: EMPTY_CANDIDATES,
   assumptions: [],
   mnemonic: "TWIN COLA <BRAND> HLTH",
 };

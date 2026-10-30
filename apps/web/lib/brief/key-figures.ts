@@ -1,4 +1,5 @@
-import { MetroId, type Comparator, type Job, type Metric } from "@ct/contracts";
+import type { Comparator, Job, Metric } from "@ct/contracts";
+import { METRO_ID_VALUES } from "@ct/contracts/values";
 import { capitalize, COMPARATOR_TEXT, metricShortLabel } from "./format";
 import { slotFor } from "./kpi-slots";
 import { metricView, type Ledger } from "./ledger";
@@ -119,7 +120,7 @@ export const KEY_FIGURE_SPECS: Readonly<Record<string, KeySpec>> = {
   // Lift map: "1.48×" vs the named baseline; the map's precision "gh7 · 1.00"; white space "0.62 · Latent & open".
   "lift.area": {
     // A neighbourhood's lift names it; the metro-wide "not measured" one keeps the slot's label.
-    label: (c) => fromLabel(c.metric, /^lift of (.+?) vs the /) ?? (MetroId.safeParse(c.metric.subjectRefs[0]).success ? null : c.subject) ?? c.slot ?? "Area lift",
+    label: (c) => fromLabel(c.metric, /^lift of (.+?) vs the /) ?? ((METRO_ID_VALUES as readonly string[]).includes(c.metric.subjectRefs[0] ?? "") ? null : c.subject) ?? c.slot ?? "Area lift",
     versus: (c) => {
       const baseline = fromLabel(c.metric, / vs the (.+?baseline)/);
       return baseline ? `vs ${baseline}` : COMPARATOR_TEXT.BASELINE;

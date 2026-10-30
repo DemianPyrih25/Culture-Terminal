@@ -15,6 +15,7 @@ import {
   type RunLimits,
   SEVERITY_RANK,
   type SkillId,
+  type SkillStatus,
 } from "@ct/contracts";
 import { sanitizeQlooName, sanitizeQlooText, type AudienceSegment } from "@ct/qloo";
 import type { FollowupLead } from "../analyst";
@@ -22,16 +23,19 @@ import type { AnalystMode } from "../anthropic";
 import { MIN_OK_EVIDENCE } from "../checker";
 import { wrapQuestion } from "../clerk";
 import type { RunRegistry } from "../registry";
+import { wordList } from "../report/format";
 import { isSkillAvailable, toolLabel } from "./catalogue";
 import { listedAreas, runAreaMetros } from "./areas";
 import { audienceSegmentsFor, audiencesBlock } from "./audiences";
 import { compareCities, describeMarket, isGazetteerMetro, MARKET_CATALOGUE, MARKET_TIERS, marketTier, type RunMarket } from "./markets";
+import { LOCAL_SUPPLY_TYPES, type LocalSupplyType } from "./osmTypes";
 import { describeChainedStep, describeDeferredStep, describeScanStep, type ScanPlan } from "./scan";
 
 /**
  * The ANALYST's first user message (director.md §1 "The first user message"): labelled blocks
  * written by code, in this order: TODAY, MODE, DESK, JOB, BUDGET, CLERK, REGISTRY, MARKETS,
- * AUDIENCES, AREAS, OPENING SCAN, UNAVAILABLE TOOLS, CASE SUMMARY, then the wrapped question.
+ * AUDIENCES, AREAS, LOCAL SUPPLY TYPES, OPENING SCAN,
+ * UNAVAILABLE TOOLS, CASE SUMMARY, then the wrapped question.
  * Everything per run lives here, never in the system prompt, so the cached prefix stays frozen.
  * Text that came from the user or from Qloo is escaped so it can never open or close a tag.
  */
@@ -47,6 +51,7 @@ export const RUN_CONTEXT_LABELS = [
   "MARKETS",
   "AUDIENCES",
   "AREAS",
+  "LOCAL SUPPLY TYPES",
   "OPENING SCAN",
   "UNAVAILABLE TOOLS",
   "CASE SUMMARY",
@@ -78,6 +83,13 @@ export interface RunContextInput {
   caseSummary: string | null;
   /** The raw question; wrapQuestion sanitises, caps and wraps it. */
   question: string;
+  /**
+   * True when local_supply can run (a public-data client with OpenStreetMap configured): the LOCAL SUPPLY
+   * TYPES block lists the place type keys it takes. Defaults to false (no block).
+   */
+  localSupply?: boolean;
+  /** The place types listed; defaults to config/osm_tags.json's verified ones. */
+  supplyTypes?: readonly LocalSupplyType[];
 }
 
 const NONE = "none in this build";
@@ -169,6 +181,8 @@ export interface RanCall {
   findingIds: readonly string[];
   /** The digest rows it returned; null when it failed or was refused (conceptPartlyTagged reads find_tags rows). */
   rows?: readonly DigestRow[] | null;
+  /** How it ended: the skill's status, or null when it failed or was refused (SUBJECT_NO_DATA reads it). */
+  status?: SkillStatus | null;
 }
 
 export interface FindingLeadsInput {
@@ -265,10 +279,10 @@ function budgetBlock(input: RunContextInput): string {
   if (!input.qlooEnabled) {
     // A public-data tool whose source is not configured is on the UNAVAILABLE list (D7), so it is not named here.
     const live = PUBLIC_DATA_TOOLS.filter((t) => !input.unavailable.includes(t));
-    const sources = live.map((t) => (t === "company_financials" ? "SEC" : "Census")).join(" and ");
+    const sources = wordList(live.map((t) => PUBLIC_TOOL_WORDS[t]));
     const publicTools =
       input.publicData === true && live.length > 0
-        ? ` Only ${live.join(" and ")} still ${live.length === 1 ? "reads" : "read"} ${sources} data.`
+        ? ` Only ${wordList(live)} still ${live.length === 1 ? "reads" : "read"} ${sources} data.`
         : "";
     return [
       "BUDGET:",
@@ -283,7 +297,7 @@ function budgetBlock(input: RunContextInput): string {
   const chainedCalls = [...chained, ...deferred].reduce((n, c) => n + c.estimate, 0);
   return [
     "BUDGET:",
-    `- Qloo network calls: ${limits.qlooCalls} for the run (warning at ${limits.qlooWarnAt}); cached requests are free. SEC and Census reads cost none.`,
+    `- Qloo network calls: ${limits.qlooCalls} for the run (warning at ${limits.qlooWarnAt}); cached requests are free. SEC, Census and OpenStreetMap reads cost none.`,
     `- Opening scan: about ${scanCalls + chainedCalls} network calls of that budget.`,
     `- Turn 2: up to ${limits.followupCalls} network calls and about ${s(limits.followupMs)}.`,
     `- Time: wrap-up notice at ${s(limits.softMs)}, hard stop at ${s(limits.hardMs)}.`,
@@ -291,6 +305,17 @@ function budgetBlock(input: RunContextInput): string {
   ].join("\n");
 }
 
+/** The source each public-data tool reads, in the budget line's words. */
+const PUBLIC_TOOL_WORDS: Readonly<Record<(typeof PUBLIC_DATA_TOOLS)[number], string>> = {
+  company_financials: "SEC",
+  area_economics: "Census",
+  local_supply: "OpenStreetMap",
+};
+
+/**
+ * REGISTRY, one JSON row per entity and tag. An entity the question named or CLERK expected carries
+ * "candidate": "You named" or "Expected" (R3): it belongs in every set the job scores.
+ */
 function registryBlock(registry: RunRegistry): string {
   const rows = registry.registryTable().map((r) => ({
     ref: r.ref,
@@ -298,6 +323,7 @@ function registryBlock(registry: RunRegistry): string {
     type: r.type,
     disambiguation: r.disambiguation === null ? null : sanitizeQlooText(r.disambiguation, NAME_MAX),
     popularity: r.popularity,
+    ...(r.candidate === undefined ? {} : { candidate: r.candidate }),
   }));
   return rows.length === 0 ? "REGISTRY: empty (no entity resolved)" : `REGISTRY:\n${rows.map((r) => safeJson(r)).join("\n")}`;
 }
@@ -380,6 +406,17 @@ function citiesLine(intent: Intent, markets: readonly RunMarket[]): string {
   );
 }
 
+/**
+ * LOCAL SUPPLY TYPES (R6, D46): the OpenStreetMap place type keys local_supply takes, with their labels,
+ * when it can run; otherwise "none", and the tool is on UNAVAILABLE TOOLS.
+ */
+function supplyTypesBlock(input: RunContextInput): string {
+  if (input.localSupply !== true) return `LOCAL SUPPLY TYPES: none (local_supply cannot run in this build)`;
+  const types = input.supplyTypes ?? LOCAL_SUPPLY_TYPES;
+  const listed = types.map((t) => `${t.key} (${escapeAngles(t.label)})`).join("; ");
+  return `LOCAL SUPPLY TYPES (local_supply place_types; OpenStreetMap, counts are a floor): ${listed === "" ? NONE : listed}`;
+}
+
 function scanBlock(input: RunContextInput): string {
   if (!input.qlooEnabled) return "OPENING SCAN: none (Qloo is disabled for this run).";
   const { plan, estimates } = input.scan;
@@ -415,6 +452,7 @@ export function buildRunContext(input: RunContextInput): string {
     marketsBlock(input),
     audiencesBlock(audienceSegmentsFor(intent.pillar, input.audiences ?? []), NONE),
     areasBlock(input.geo, intent),
+    supplyTypesBlock(input),
     scanBlock(input),
     `UNAVAILABLE TOOLS: ${unavailable}`,
     `CASE SUMMARY: ${input.caseSummary === null ? "none" : escapeAngles(input.caseSummary)}`,

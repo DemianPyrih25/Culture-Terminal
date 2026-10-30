@@ -24,7 +24,7 @@ import {
 } from "@ct/contracts";
 import { emptyResultFinding } from "../findings";
 import { SKILL_LIMITATIONS } from "../limitations";
-import { addSkillEvidence, attemptAllKeepingFailures, countUncached, type Attempt } from "./common";
+import { addSkillEvidence, attemptAllKeepingFailures, conceptReadOf, countUncached, type Attempt } from "./common";
 import { skillErrorResult, skillResult, type DigestTarget } from "./digest";
 import { curatedConceptOfTag, HEATMAP_BASELINE, isVerifiedPlaceFilter } from "./findTags/curated";
 import { tagUse } from "./findTags/tags";
@@ -52,7 +52,11 @@ import {
   addLatentDemand,
   addLiftMap,
   addLiftMetrics,
+  addPopularityMetrics,
+  areaSourceOf,
+  areaStandings,
   byLift,
+  focusWhy,
   liftDigestRows,
   noLiftWhy,
   type LiftEvidence,
@@ -505,6 +509,10 @@ async function runGeoLift(input: LiftInput, ctx: SkillCtx): Promise<SkillResult>
     findings: [],
     datasetIds: [],
     notices: [...concept.notices],
+    conceptRead: conceptReadOf(
+      concept.heatmapTags.map((t) => t.ref),
+      ctx.registry,
+    ),
   };
   const conceptRefs = [...concept.heatmapTags.map((t) => t.ref), ...concept.analogs.map((e) => e.ref)];
   const conceptParse = heat.kind === "ok" ? heatCells(heat.value.data.results.heatmap) : null;
@@ -611,6 +619,16 @@ async function runGeoLift(input: LiftInput, ctx: SkillCtx): Promise<SkillResult>
   const space: Map<string, AreaSupply> = whiteSpace(lifts, counts, supply?.capped ?? false);
 
   const metrics = addLiftMetrics(run, { grid, areas: lifts, supply: space, conceptRefs, evidence, gap, focus, supplyGap, capped: supply?.capped ?? false });
+  metrics.popularity = addPopularityMetrics(run, lifts, conceptRefs, evidence, focus.length);
+  const standings = areaStandings(lifts);
+  if (standings.hidden.length > 0) {
+    const names = (xs: readonly AreaLift[]) => xs.map((a) => safeName(a.name)).join(", ");
+    run.notices.push(
+      `Hidden pockets (stand out for their size, not where the crowd is): ${names(standings.hidden)}` +
+        (standings.popular.length > 0 ? `; already popular: ${names(standings.popular)}` : "") +
+        ". Never call a hidden pocket the best area on its own.",
+    );
+  }
   addLiftMap(run, {
     grid,
     areas: lifts,
@@ -624,7 +642,8 @@ async function runGeoLift(input: LiftInput, ctx: SkillCtx): Promise<SkillResult>
     focus: focus.map((a) => a.id),
     supplyGap,
   });
-  run.notices.unshift(...focusNotices(focus, lifts, metrics, space));
+  const sourceOf = (id: string) => areaSourceOf(run, id);
+  run.notices.unshift(...focusNotices(focus, lifts, metrics, space, sourceOf));
   // No suggestion: geo_lift counts only with a verified category, so another tag found now would repeat this sample.
   if (supply !== null && supply.returned === 0 && !supply.truncated && !supply.failed) {
     addFindingDraft(run, emptyResultFinding({ what: `the venue supply sample in ${metroLabel}`, suggestion: null }), []);
@@ -633,7 +652,7 @@ async function runGeoLift(input: LiftInput, ctx: SkillCtx): Promise<SkillResult>
 
   const supplyShort = supplyRequest !== null && (supply === null || supply.truncated || supply.failed);
   const partial = gap !== null || supplyMissing || supplyShort;
-  return finish(run, out, partial ? "partial" : "ok", liftDigestRows(lifts, space, metrics, focus));
+  return finish(run, out, partial ? "partial" : "ok", liftDigestRows(lifts, space, metrics, focus, (id) => areaSourceOf(run, id)));
 }
 
 /** The named areas the metro's gazetteer knows, in the question's order; any other id gets a notice. */
@@ -653,21 +672,28 @@ function focusAreas(ids: readonly string[], lifts: readonly AreaLift[], run: Lif
  * never reads a missing lift as a low one. A named area whose venues cannot carry a supply label (the
  * rule in ./geoLift/lift) says so, so the note never calls it crowded or open.
  */
-function focusNotices(focus: readonly AreaLift[], lifts: readonly AreaLift[], metrics: LiftMetrics, space: ReadonlyMap<string, AreaSupply>): string[] {
+function focusNotices(
+  focus: readonly AreaLift[],
+  lifts: readonly AreaLift[],
+  metrics: LiftMetrics,
+  space: ReadonlyMap<string, AreaSupply>,
+  sourceOf: (id: string) => string | undefined,
+): string[] {
   const ranked = byLift(lifts);
   return focus.map((a) => {
     const name = safeName(a.name);
+    const why = focusWhy(sourceOf(a.id));
     const lift = metrics.areas.get(a.id)?.id;
     if (a.lift === null) {
       return (
-        `${name} (${a.id}), the area the question names, has no lift: ${noLiftWhy(a)} (${lift ?? "no metric"}). ` +
+        `${name} (${a.id}), ${why.notice}, has no lift: ${noLiftWhy(a)} (${lift ?? "no metric"}). ` +
         "Say so plainly; do not rank it or read it as low interest."
       );
     }
     const cite = [lift, metrics.rank.get(a.id)?.id, metrics.confidence.get(a.id)?.id, metrics.supply.get(a.id)?.id].filter((x) => x !== undefined);
     return (
-      `${name} (${a.id}), the area the question names, ranks ${ranked.indexOf(a) + 1} of ${ranked.length} areas with a lift ` +
-      `(${cite.join(", ")}): lead with it, then the top areas.` +
+      `${name} (${a.id}), ${why.notice}, ranks ${ranked.indexOf(a) + 1} of ${ranked.length} areas with a lift ` +
+      `(${cite.join(", ")}): ${why.lead}.` +
       (space.get(a.id)?.thin === true ? ` Its competition reads "${THIN_SUPPLY_LABEL}": never call it crowded, open or few.` : "")
     );
   });

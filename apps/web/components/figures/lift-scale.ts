@@ -1,4 +1,5 @@
-import { METRO_LABEL, type GeoLiftCell, type GeoLiftNeighbourhood, type GeoLiftPayload, type WhiteSpaceQuadrant } from "@ct/contracts";
+import type { GeoLiftCell, GeoLiftNeighbourhood, GeoLiftPayload, WhiteSpaceQuadrant } from "@ct/contracts";
+import { METRO_LABEL } from "@ct/contracts/values";
 import { formatNumber } from "./format";
 import { geohashCentre, unionBounds, type Bounds } from "./geohash";
 import { clamp, textWidth } from "./scale";
@@ -162,6 +163,15 @@ export function formatLift(lift: number): string {
   return `${formatNumber(lift, "lift", { digits: 2 })}×`;
 }
 
+/** A named place from an OpenStreetMap supply read (R6), drawn on the map's "Similar places" layer. */
+export interface MapPlace {
+  name: string;
+  lat: number;
+  lon: number;
+  /** The place type's label, e.g. "Cafés and coffee shops". */
+  type: string;
+}
+
 /** A labelled neighbourhood: where to put it and what it says. */
 export interface LiftLabel {
   id: string;
@@ -177,6 +187,10 @@ export interface LiftLabel {
   fewRivals?: boolean;
   /** An area the question names: an accent pin, listed first. */
   named?: boolean;
+  /** R7: a numbered pin whose area is a hidden pocket (high lift, little interest overall); its flag says so. */
+  hidden?: boolean;
+  /** R7: an area among the most popular overall (raw interest), pinned with an outlined mark and "Already popular". */
+  popular?: boolean;
 }
 
 /**
@@ -308,7 +322,34 @@ export function mapPins(data: GeoLiftPayload, max = 3): LiftLabel[] {
       rank: i + 1,
       fewRivals: fewRivals(n, data),
       ...((data.focusAreas ?? []).includes(n.id) ? { named: true } : {}),
+      ...(n.standing === "hidden" ? { hidden: true } : {}),
     }));
+}
+
+/**
+ * R7: the areas where the concept is already popular (the payload's `popular` list, the top 3 by raw
+ * interest), as outlined pins beside the numbered extra-interest pins, and the top hidden pockets the
+ * numbered pins miss, in RAW and LIFT alike. An area already pinned keeps its pin. A coarse map, or one
+ * stored before Part 11, pins none.
+ */
+export function popularPins(data: GeoLiftPayload, pinned: readonly LiftLabel[] = []): LiftLabel[] {
+  if (data.coarse) return [];
+  const centres = cellCentres(data.cells);
+  const taken = new Set(pinned.map((p) => p.id));
+  const popular = (data.popular ?? []).slice(0, 3).flatMap((id) => {
+    const n = data.neighbourhoods.find((x) => x.id === id);
+    if (!n || taken.has(id)) return [];
+    taken.add(id);
+    return [{ id, name: n.name, lift: n.lift ?? 1, at: centres.get(id) ?? null, top: false, popular: true }];
+  });
+  // The top hidden pockets the numbered pins do not already mark get a pin of their own, flagged as hidden.
+  const hidden = (data.hidden ?? []).slice(0, 3).flatMap((id) => {
+    const n = data.neighbourhoods.find((x) => x.id === id);
+    if (!n || n.lift === null || taken.has(id)) return [];
+    taken.add(id);
+    return [{ id, name: n.name, lift: n.lift, at: centres.get(id) ?? null, top: false, hidden: true }];
+  });
+  return [...popular, ...hidden];
 }
 
 /** The mean centre of each neighbourhood's cells. */
@@ -399,9 +440,15 @@ export function flagValue(lift: number): string {
   return `${formatLift(lift)} interest`;
 }
 
+/** A flag's second line by pin: "Already popular", "1.42× interest · hidden pocket", or "1.42× interest". */
+export function flagText(label: Pick<LiftLabel, "lift" | "popular" | "hidden">): string {
+  if (label.popular) return "Already popular";
+  return label.hidden ? `${flagValue(label.lift)} · hidden pocket` : flagValue(label.lift);
+}
+
 /** A pin flag's size: the name 13/600 over the value 12, padding 6 10. */
-export function flagSize(label: Pick<LiftLabel, "name" | "lift">): { w: number; h: number } {
-  const w = Math.max(textWidth(flagName(label.name), 13, { weight: 600 }), textWidth(flagValue(label.lift), 12, { weight: 400 }));
+export function flagSize(label: Pick<LiftLabel, "name" | "lift" | "popular" | "hidden">): { w: number; h: number } {
+  const w = Math.max(textWidth(flagName(label.name), 13, { weight: 600 }), textWidth(flagText(label), 12, { weight: 400 }));
   return { w: Math.ceil(w + 20), h: 46 };
 }
 

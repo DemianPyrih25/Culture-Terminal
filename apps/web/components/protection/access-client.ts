@@ -1,5 +1,6 @@
-import { Lane, Mode } from "@ct/contracts";
-import { z } from "zod";
+import type { Lane, Mode } from "@ct/contracts";
+import { LANE_VALUES, MODE_VALUES } from "@ct/contracts/values";
+import { bool, nonEmpty, nullable, object, oneOf, readAs, str, type Read } from "../../lib/read";
 
 /**
  * The browser side of GET /api/access: the visitor's lane and its mode, and the human check
@@ -9,24 +10,31 @@ import { z } from "zod";
  * a new check or pauses live analysis. Mounted readers hear of every new read.
  */
 
-const AccessSchema = z.object({
-  lane: Lane,
+export interface Access {
+  lane: Lane;
   /** Null when the server could not read it. */
-  mode: Mode.nullable(),
+  mode: Mode | null;
   /** The step-down's sentence ("Live analysis is paused: …"); null while live. */
-  message: z.string().nullable(),
-  until: z.string().nullable(),
+  message: string | null;
+  until: string | null;
   /** Null while the check is off (no Turnstile keys). */
-  turnstile: z.object({ siteKey: z.string().min(1) }).nullable(),
+  turnstile: { siteKey: string } | null;
   /** This browser holds a valid human-check cookie (httpOnly, so only the server can tell). */
-  verified: z.boolean(),
-});
+  verified: boolean;
+}
 
-export type Access = z.infer<typeof AccessSchema>;
+const AccessSchema: Read<Access> = object({
+  lane: oneOf(LANE_VALUES),
+  mode: nullable(oneOf(MODE_VALUES)),
+  message: nullable(str),
+  until: nullable(str),
+  turnstile: nullable(object({ siteKey: nonEmpty })),
+  verified: bool,
+});
 
 /** The answer as Access, or null when it is not one. */
 export function readAccess(body: unknown): Access | null {
-  const parsed = AccessSchema.safeParse(body);
+  const parsed = readAs(AccessSchema, body);
   return parsed.success ? parsed.data : null;
 }
 

@@ -37,8 +37,8 @@ function Wordmark({ compact = false }: { compact?: boolean }) {
 }
 
 /**
- * C/Header: 64 tall (the 1 px line included) on surface. The wordmark left; Your answers and How it
- * works right (gap 28), and on inner pages the secondary "New question". Below 768 px it is the 56 px
+ * C/Header: 64 tall (the 1 px line included) on surface. The wordmark left; Your answers, Following,
+ * Screener and How it works right (gap 28; 20 below 1024 px so four links fit at 768), and on inner pages the secondary "New question". Below 768 px it is the 56 px
  * phone header with the menu sheet, or the answer variant with back and share.
  */
 export function Header({ variant = "inner", active = null, mobile = "default", backHref = ANSWERS_HREF, sharePath, menuItems }: HeaderProps) {
@@ -47,7 +47,7 @@ export function Header({ variant = "inner", active = null, mobile = "default", b
       <div className={cx(PAGE_COLUMN, "flex h-[63px] items-center justify-between gap-6 max-md:hidden")}>
         <Wordmark />
         <div className="flex items-center gap-5">
-          <nav aria-label="Main" className="flex items-center gap-7">
+          <nav aria-label="Main" className="flex items-center gap-5 lg:gap-7">
             {SITE_NAV.map((item) => {
               const on = item.key === active;
               return (

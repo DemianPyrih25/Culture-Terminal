@@ -50,13 +50,15 @@ describe("run-skill peer_landscape", () => {
     expect(text).toContain("SUBSTITUTION MAP · BRAND ALPHA · D1");
     expect(text).toMatch(/▸ R1 Brand Alpha/);
     expect(text).toMatch(/hub score\s+distinct/);
-    expect(text).toMatch(/DATASETS \(1\)\n.+\n {2}D1\s+Matrix\s+Substitution Map · Brand Alpha\s+5×5 similarity/);
+    expect(text).toMatch(/DATASETS \(2\)\n.+\n {2}D1\s+Matrix\s+Substitution Map · Brand Alpha\s+5×5 similarity/);
+    // The Category Taste Map from the same matrix: no extra Qloo call.
+    expect(text).toMatch(/ {2}D2\s+TasteMap\s+Category Taste Map · Brand Alpha\s+5 points · stress/);
     expect(text).toContain("METRICS");
     expect(text).toMatch(/M\d+\s+.+\s+DERIVED\s+subs\.distinctiveness\s+subs\.\w+/);
     expect(text).toContain("FINDINGS");
     expect(text).toContain("QUOTA");
     expect(text).toContain("month left    49,000 of 50,000");
-    expect(text).toContain("dev floor     stops at 38,000");
+    expect(text).toContain("dev floor     stops at 32,000");
     // One resolve search, two discovery calls, k−1 = 4 scoring calls.
     expect(cacheColumn(text)).toEqual(Array(7).fill("MISS"));
     expect(text).toContain("this run      7 network · 0 cached");

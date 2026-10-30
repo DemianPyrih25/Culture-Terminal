@@ -1,4 +1,4 @@
-import { QUESTION_MAX_CHARS } from "@ct/contracts";
+import { QUESTION_MAX_CHARS } from "@ct/contracts/values";
 
 /** The Ask page for a question (A02): /ask?q=…, with the parent brief of a follow-up. */
 export function askHref(question: string, parentRunId?: string | null): string {

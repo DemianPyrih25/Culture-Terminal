@@ -109,7 +109,7 @@ describe("conceptSubstitutes (the owner's o03 decision)", () => {
 
   it("writes the disclosure that opens the thesis and leads the limitations", () => {
     const tested = [{ concept: "Fizzy kelp tonic", scope: "brand", categories: ["Sea Snacks"] }];
-    const sentence = 'The exact product, "Fizzy kelp tonic", is not in the data, so the category "Sea Snacks" was tested instead.';
+    const sentence = "'Fizzy kelp tonic' is not in Qloo's data, so this answer reads its broader category, 'Sea Snacks'. It gives no winner, keep or veto for 'Fizzy kelp tonic' itself.";
     expect(conceptDisclosure(tested)).toBe(sentence);
     expect(withConceptDisclosure("Taste leans coastal.", tested)).toBe(`${sentence} Taste leans coastal.`);
     expect(conceptLimitation(tested)).toEqual({ source: "flag", flag: "CONCEPT_NOT_IN_DATA", text: sentence });
@@ -117,10 +117,10 @@ describe("conceptSubstitutes (the owner's o03 decision)", () => {
       'The exact concept, "quiet listening room", is not in the data, and no close category was found either, so the concept could not be tested at all.',
     );
     expect(conceptDisclosure([{ concept: "kelp tonic", scope: "brand", categories: ["Sea Snacks", "Soft Drinks"] }])).toContain(
-      'the categories "Sea Snacks" and "Soft Drinks" were tested instead.',
+      "reads its broader categories, 'Sea Snacks' and 'Soft Drinks'.",
     );
     expect(conceptDisclosure([{ concept: "beach look", scope: "brand", categories: ["Swim Gear"], whole: false }])).toBe(
-      'The part "beach look" is not in the data, so the category "Swim Gear" was tested for it instead.',
+      "The part 'beach look' is not in Qloo's data, so this answer reads its broader category, 'Swim Gear', for it. It gives no winner, keep or veto for 'beach look' itself.",
     );
     expect(conceptDisclosure([{ concept: "beach look", scope: "brand", categories: [], whole: false }])).toBe(
       'The part "beach look" is not in the data, and no close category was found either, so that part could not be tested at all.',

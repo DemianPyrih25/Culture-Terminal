@@ -14,6 +14,7 @@ import {
   SlateTable,
   VerdictList,
   WinnerTable,
+  plotTags,
   type PlotTag,
 } from "../plots";
 
@@ -23,6 +24,10 @@ import {
  */
 
 const gem = (on: boolean): PlotTag | null => (on ? "hidden-gem" : null);
+
+/** A row's chips (R3 "You named" / "Expected", R4 "Already there …") after its own tag. */
+const withMarks = (tag: PlotTag | null | undefined, marks: readonly string[] | undefined): PlotTag | null =>
+  plotTags(tag, (marks ?? []).map((label) => ({ tone: "muted" as const, label })));
 
 /**
  * Block DNA deltas ("+38", "−24") on the diverging pair's ratio scale: 2^(v / max), so a bar's length (its
@@ -38,7 +43,7 @@ export function ChartBodyView({ body, label }: { body: ChartBody; label: string 
         <BarList
           label={label}
           max={1}
-          rows={body.rows.map((r) => ({ label: r.label, sublabel: r.sublabel, value: r.fraction, display: r.display, tone: r.tone === "accent" ? "accent" : "muted", tag: r.tag }))}
+          rows={body.rows.map((r) => ({ label: r.label, sublabel: r.sublabel, value: r.fraction, display: r.display, tone: r.tone === "accent" ? "accent" : "muted", tag: withMarks(r.tag, r.marks) }))}
         />
       );
     case "winner":
@@ -86,22 +91,22 @@ export function ChartBodyView({ body, label }: { body: ChartBody; label: string 
       return (
         <SlateTable
           label={label}
-          rows={body.rows.map((r) => ({ category: r.category, icon: r.icon, name: r.best, href: r.href, fit: r.best ? r.fraction : null, display: r.display, tag: gem(r.gem) }))}
+          rows={body.rows.map((r) => ({ category: r.category, icon: r.icon, name: r.best, href: r.href, fit: r.best ? r.fraction : null, display: r.display, tag: withMarks(gem(r.gem), r.marks) }))}
         />
       );
     case "numbered":
-      return <NumberedList label={label} items={body.rows.map((r) => ({ name: r.label, tag: gem(r.gem) }))} />;
+      return <NumberedList label={label} items={body.rows.map((r) => ({ name: r.label, tag: withMarks(gem(r.gem), r.marks) }))} />;
     case "neighbours":
       return (
         <NeighbourColumns
           label={label}
-          columns={body.columns.map((c) => ({ key: c.key, label: c.label, icon: c.icon, items: c.items.map((r) => ({ name: r.label, href: r.href, tag: gem(r.gem) })) }))}
+          columns={body.columns.map((c) => ({ key: c.key, label: c.label, icon: c.icon, items: c.items.map((r) => ({ name: r.label, href: r.href, tag: withMarks(gem(r.gem), r.marks) })) }))}
         />
       );
     case "diverging":
       return <DivergingRows label={label} minDomain={body.max} rows={body.rows.map((r) => ({ label: r.label, value: r.value, display: r.display }))} />;
     case "ranks":
-      return <RankTrackList label={label} rows={body.rows.map((r) => ({ label: r.label, sublabel: r.sublabel, rank: r.rank, of: r.of, tag: gem(r.gem) }))} />;
+      return <RankTrackList label={label} rows={body.rows.map((r) => ({ label: r.label, sublabel: r.sublabel, rank: r.rank, of: r.of, tag: withMarks(gem(r.gem), r.marks) }))} />;
     case "verdicts":
       return (
         <VerdictList

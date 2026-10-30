@@ -1,7 +1,17 @@
-// A scripted public-data client for runAgent tests: the PublicDataClient contract with invented SEC and
-// Census answers (a made-up CIK, invented figures; D29), call records with provenance, and the
-// `public` records the run turns into events. No network.
-import type { CensusAcsData, CensusGeo, PublicCallMeta, PublicDataApi, SecCompany, SecCompanyFacts, SecFactPoint } from "@ct/contracts";
+// A scripted public-data client for runAgent tests: the PublicDataClient contract with invented SEC,
+// Census and OpenStreetMap answers (a made-up CIK, invented figures and places; D29), call records with
+// provenance, and the `public` records the run turns into events. No network.
+import type {
+  CensusAcsData,
+  CensusGeo,
+  OsmCounts,
+  OsmPlace,
+  PublicCallMeta,
+  PublicDataApi,
+  SecCompany,
+  SecCompanyFacts,
+  SecFactPoint,
+} from "@ct/contracts";
 import { publicProvenanceRequest, type PublicCallRecord, type PublicDataClient, type RunPublic } from "@ct/publicdata";
 
 const FETCHED = "2026-10-21T08:00:00.000Z";
@@ -44,7 +54,7 @@ export interface FakePublicData extends PublicDataClient {
 }
 
 /** `configured` mirrors PublicDataClient.configured: a source set to false is one the server cannot read (D7). */
-export function fakePublicData(options: { configured?: { sec?: boolean; census?: boolean } } = {}): FakePublicData {
+export function fakePublicData(options: { configured?: { sec?: boolean; census?: boolean; osm?: boolean } } = {}): FakePublicData {
   const records: PublicCallRecord[] = [];
   let next = 0;
   const forScope = (runId: string | null, onCall?: (record: PublicCallRecord) => void): RunPublic => {
@@ -98,6 +108,18 @@ export function fakePublicData(options: { configured?: { sec?: boolean; census?:
         const base = { source: "census" as const, endpoint: "/data/acs/acs5" as const, host: "api.census.gov", path: "/data/2023/acs/acs5", query: { for: where } };
         return answer(toolCallId, { ...base, reference: `acs5 2023 ${where}` }, data);
       },
+      osmCounts: (q) => {
+        // Invented counts: a fixed number per shape and type, so tests can read them back.
+        const counts: OsmCounts["counts"] = Object.fromEntries(q.shapes.map((sh, i) => [sh.id, Object.fromEntries(q.types.map((t, j) => [t.key, 3 + i + j]))]));
+        const data: OsmCounts = { counts, osmBase: "2026-10-01T00:00:00Z" };
+        const base = { source: "osm" as const, endpoint: "/api/interpreter" as const, host: "overpass.example.org", path: "/api/interpreter", query: {}, method: "POST" as const, body: "[out:json];" };
+        return answer(toolCallId, { ...base, reference: "osm-2026-10-01T00:00:00Z" }, data);
+      },
+      osmPlaces: (q) => {
+        const places: OsmPlace[] = q.types.slice(0, 1).map((t, i) => ({ name: `Example Place ${i + 1}`, brand: null, lat: 36.1, lon: -86.7, typeKey: t.key, osmType: "node", osmId: 1000 + i }));
+        const base = { source: "osm" as const, endpoint: "/api/interpreter" as const, host: "overpass.example.org", path: "/api/interpreter", query: {}, method: "POST" as const, body: "[out:json];" };
+        return answer(toolCallId, { ...base, reference: "osm-2026-10-01T00:00:00Z" }, places);
+      },
     });
     return {
       forTool: api,
@@ -110,7 +132,7 @@ export function fakePublicData(options: { configured?: { sec?: boolean; census?:
   };
   return {
     env: "mock",
-    configured: { sec: options.configured?.sec ?? true, census: options.configured?.census ?? true },
+    configured: { sec: options.configured?.sec ?? true, census: options.configured?.census ?? true, osm: options.configured?.osm ?? true },
     records,
     forRun: (scope) => forScope(scope.runId, scope.onCall),
     standalone: (options) => forScope(null, options?.onCall),

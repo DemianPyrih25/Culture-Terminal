@@ -12,10 +12,12 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgTable,
   primaryKey,
   text,
   timestamp,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 
 export const RUN_STATUSES = [
@@ -36,14 +38,18 @@ export type RunMode = (typeof RUN_MODES)[number];
 export const RUN_LANES = ["public", "judge"] as const;
 export type RunLane = (typeof RUN_LANES)[number];
 
+/** What a visitor follows (PLAN Part 10, §2.4): a brand, a place or a question. Mirrors @ct/contracts FollowKind. */
+export const FOLLOW_KINDS = ["brand", "place", "question"] as const;
+export type FollowKindName = (typeof FOLLOW_KINDS)[number];
+
 export const CACHE_STATUSES = ["hit", "miss", "stale", "coalesced", "reused"] as const;
 export type CacheStatus = (typeof CACHE_STATUSES)[number];
 
 /** Canonical (qloo_cache) or redacted (qloo_calls) query parameters, one string per key. */
 export type QlooParams = Record<string, string>;
 
-/** The public data sources (PLAN §5.2): SEC EDGAR and the US Census Bureau. */
-export const PUBLIC_SOURCES = ["sec", "census"] as const;
+/** The public data sources (PLAN §5.2): SEC EDGAR, the US Census Bureau and OpenStreetMap (Overpass API). */
+export const PUBLIC_SOURCES = ["sec", "census", "osm"] as const;
 export type PublicSourceName = (typeof PUBLIC_SOURCES)[number];
 
 /** Where an evidence bundle's data came from. */
@@ -108,6 +114,9 @@ export const runs = pgTable(
     // Cancellation is a database flag polled by the run loop, so it survives across instances
     // and does not depend on in-memory state (SPEC §3.2).
     cancelRequestedAt: tstz("cancel_requested_at"),
+    // When the run left the queue and started (markStarted). Null for a run that never started (queue
+    // timeout, cancel or shutdown while queued): such runs count toward no visitor or global cap.
+    startedAt: tstz("started_at"),
   },
   (t) => [
     check(
@@ -377,6 +386,84 @@ export const kv = pgTable("kv", {
   updatedAt: tstz("updated_at").notNull().defaultNow(),
 });
 
+/**
+ * Following (PLAN Part 10, §2.4, §3.2): what one visitor follows, with what a re-run needs and the
+ * latest note. visitor_key is a salted hash, never a raw address or cookie value. No change alerts:
+ * the page shows the latest note and a re-run, nothing else.
+ */
+export const follows = pgTable(
+  "follows",
+  {
+    id: text("id").primaryKey().default(sql`gen_random_uuid()::text`),
+    visitorKey: text("visitor_key").notNull(),
+    kind: text("kind").$type<FollowKindName>().notNull(),
+    // Stable per kind (@ct/contracts followSubjectKey): one row per visitor, kind and subject.
+    subjectKey: text("subject_key").notNull(),
+    label: text("label").notNull(),
+    // What a re-run starts: the question, and the job and metro it was read as (null when none).
+    question: text("question").notNull(),
+    job: text("job"),
+    metro: text("metro"),
+    latestRunId: text("latest_run_id").references(() => runs.id, { onDelete: "set null" }),
+    // A re-run that stopped at the picker (needs_input) and waits for the visitor's pick; cleared when
+    // the picked run completes and becomes latest_run_id.
+    pendingRunId: text("pending_run_id").references(() => runs.id, { onDelete: "set null" }),
+    createdAt: tstz("created_at").notNull().defaultNow(),
+    updatedAt: tstz("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    check("follows_kind_check", sql`${t.kind} IN (${sql.raw(FOLLOW_KINDS.map((k) => `'${k}'`).join(", "))})`),
+    uniqueIndex("follows_visitor_subject_uq").on(t.visitorKey, t.kind, t.subjectKey),
+    index("follows_visitor_created_idx").on(t.visitorKey, t.createdAt),
+    index("follows_latest_run_idx").on(t.latestRunId),
+  ],
+);
+
+/** The side context calls' kinds (R4, R5): "What AI knows (not verified)" and "From the web". */
+export const CONTEXT_KINDS = ["ai", "web"] as const;
+export type ContextKind = (typeof CONTEXT_KINDS)[number];
+
+/**
+ * Cache of the side context blocks (R4, R5, D25: AI 7 days, web 24 hours). Only ok and empty blocks are
+ * stored. Rows hold model and web text, never Qloo data. key = sha256 of the question, job, subject, place,
+ * kind and model (agent side/cache).
+ */
+export const contextCache = pgTable(
+  "context_cache",
+  {
+    key: text("key").primaryKey(),
+    kind: text("kind").$type<ContextKind>().notNull(),
+    model: text("model").notNull(),
+    body: jsonb("body").$type<unknown>().notNull(),
+    usd: numeric("usd", { precision: 10, scale: 6, mode: "number" }).notNull().default(0),
+    createdAt: tstz("created_at").notNull().defaultNow(),
+    expiresAt: tstz("expires_at").notNull(),
+  },
+  (t) => [
+    check("context_cache_kind_check", sql`${t.kind} IN (${sql.raw(CONTEXT_KINDS.map((k) => `'${k}'`).join(", "))})`),
+    index("context_cache_expires_idx").on(t.expiresAt),
+  ],
+);
+
+/**
+ * One row per use of a code-only feature (screener, brand profile): what it actually spent, so /method can
+ * show measured medians beside the plan figures (Part 10 open issue).
+ */
+export const featureUses = pgTable(
+  "feature_uses",
+  {
+    id: text("id").primaryKey().default(sql`gen_random_uuid()::text`),
+    feature: text("feature").notNull(),
+    ts: tstz("ts").notNull().defaultNow(),
+    qlooNetwork: integer("qloo_network").notNull(),
+    qlooCached: integer("qloo_cached").notNull(),
+    publicCalls: integer("public_calls").notNull().default(0),
+    llmUsd: numeric("llm_usd", { precision: 10, scale: 6, mode: "number" }).notNull().default(0),
+    ms: integer("ms").notNull(),
+  },
+  (t) => [index("feature_uses_feature_ts_idx").on(t.feature, t.ts)],
+);
+
 /** Showcase mention → pinned Qloo entity. Entity ids live only here, never in git (D29). */
 export const showcasePins = pgTable(
   "showcase_pins",
@@ -407,3 +494,7 @@ export type UsageDailyRow = typeof usageDaily.$inferSelect;
 export type IpUsageRow = typeof ipUsage.$inferSelect;
 export type KvRow = typeof kv.$inferSelect;
 export type ShowcasePinRow = typeof showcasePins.$inferSelect;
+export type FollowRow = typeof follows.$inferSelect;
+export type ContextCacheRow = typeof contextCache.$inferSelect;
+export type FeatureUseRow = typeof featureUses.$inferSelect;
+export type NewFollowRow = typeof follows.$inferInsert;

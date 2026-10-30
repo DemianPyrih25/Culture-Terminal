@@ -1,3 +1,4 @@
+import { ScrollRegion } from "../figures/scroll-region";
 import { cx } from "../ui/cx";
 import { PlotEmpty } from "./parts";
 import type { PlotBaseProps, PlotTable } from "./types";
@@ -26,8 +27,9 @@ export interface DataRowsProps extends PlotBaseProps {
 export function DataRows({ columns, rows, label, emptyLabel, className }: DataRowsProps) {
   if (rows.length === 0) return <PlotEmpty label={emptyLabel} className={className} />;
   return (
-    <div data-plot="rows" className={cx("min-w-0 overflow-x-auto", className)}>
-      <table aria-label={label} className="w-full border-collapse text-left tabular-nums">
+    // A named, focusable region while it scrolls sideways, so the keyboard can scroll it too.
+    <ScrollRegion label={label} view="rows" className={className}>
+      <table data-plot="rows" aria-label={label} className="w-full border-collapse text-left tabular-nums">
         <thead>
           <tr className="h-8 border-b border-line">
             <th scope="col" className="pr-4 text-[12px] leading-4 font-semibold text-ink-2">
@@ -61,7 +63,7 @@ export function DataRows({ columns, rows, label, emptyLabel, className }: DataRo
           ))}
         </tbody>
       </table>
-    </div>
+    </ScrollRegion>
   );
 }
 

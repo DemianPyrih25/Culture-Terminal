@@ -15,7 +15,7 @@ import { BASEMAP_STYLE, MapAttribution, ZoomButtons, routeMapWorker } from "./ma
 export { BASEMAP_ATTRIBUTION, BASEMAP_STYLE, MapAttribution } from "./map-base";
 export { fitPadding, overlayBoxes } from "./lift-scale";
 import { MapPinMark } from "./lift-map-parts";
-import { TOKEN_RGB, cellFills, fitPadding, flagName, flagSize, flagValue, focusBounds, formatLift, overlayBoxes, pinRadius, placeChips, type LiftLabel, type LiftMode, type Rgb } from "./lift-scale";
+import { TOKEN_RGB, cellFills, fitPadding, flagName, flagSize, flagText, focusBounds, formatLift, overlayBoxes, pinRadius, placeChips, type LiftLabel, type LiftMode, type MapPlace, type Rgb } from "./lift-scale";
 
 /**
  * The WebGL LiftMap (PLAN §8.4): a light OpenFreeMap basemap in MapLibre with deck.gl on top
@@ -31,6 +31,8 @@ export interface LiftMapCanvasProps {
   labels: readonly LiftLabel[];
   label: string;
   outlinesUrl: string | null;
+  /** Similar places from OpenStreetMap (R6), drawn when the layer is on; empty draws none. */
+  places?: readonly MapPlace[];
   reducedMotion: boolean;
   /** The basemap and layers have drawn: the schematic underneath can step aside. */
   onReady: () => void;
@@ -44,7 +46,7 @@ interface Marker {
   position: [number, number];
 }
 
-export default function LiftMapCanvas({ data, mode, labels, label, outlinesUrl, reducedMotion, onReady, onError }: LiftMapCanvasProps) {
+export default function LiftMapCanvas({ data, mode, labels, label, outlinesUrl, places = [], reducedMotion, onReady, onError }: LiftMapCanvasProps) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const overlayRef = useRef<MapLibreOverlay | null>(null);
@@ -182,10 +184,27 @@ export default function LiftMapCanvas({ data, mode, labels, label, outlinesUrl, 
               }),
             ]
           : []),
+        ...(places.length > 0
+          ? [
+              new ScatterplotLayer<MapPlace>({
+                id: "lift-osm",
+                data: places as MapPlace[],
+                getPosition: (p) => [p.lon, p.lat],
+                getRadius: 4,
+                radiusUnits: "pixels",
+                getFillColor: rgba(TOKEN_RGB.second, 1),
+                getLineColor: rgba(TOKEN_RGB.surface, 1),
+                lineWidthUnits: "pixels",
+                getLineWidth: 1,
+                stroked: true,
+                pickable: true,
+              }),
+            ]
+          : []),
       ],
       getTooltip: (info: PickingInfo) => tooltip(info, data),
     });
-  }, [data, mode, outlines, labels, reducedMotion, loaded]);
+  }, [data, mode, outlines, labels, places, reducedMotion, loaded]);
 
   // Label chips follow the camera.
   useEffect(() => {
@@ -244,7 +263,7 @@ export default function LiftMapCanvas({ data, mode, labels, label, outlinesUrl, 
                 style={{ left: flag.x, top: flag.y }}
               >
                 <span className="text-[13px] leading-[18px] font-semibold text-ink">{flagName(marker.label.name)}</span>
-                <span className="text-[12px] leading-4 text-ink-2">{flagValue(marker.label.lift)}</span>
+                <span className="text-[12px] leading-4 text-ink-2">{flagText(marker.label)}</span>
               </span>
             ) : null}
           </span>
@@ -288,6 +307,10 @@ function tooltip(info: PickingInfo, data: GeoLiftPayload): { text: string; style
     if (!n) return null;
     const what = n.lift === null ? "no lift: too few cells or too coarse" : `lift ${formatLift(n.lift)} · ${n.n} gated cells`;
     return { text: `${n.name}\n${what}`, style: TOOLTIP_STYLE };
+  }
+  if (id === "lift-osm") {
+    const p = object as MapPlace;
+    return { text: `${p.name}\n${p.type} · © OpenStreetMap contributors`, style: TOOLTIP_STYLE };
   }
   if (id === "lift-supply") {
     const p = object as { label: string };

@@ -9,6 +9,8 @@
 //   pick?   no exact match: a run with it as the primary stops with a picker of these candidates, and
 //           those marked [key] reach the company once picked (a person checks the right one is a key);
 //   absent  no exact match and no candidate is a key: no Qloo entity reaches the company.
+// Each line also shows the entry's relation (Part 9 open issue 6): "[parent: <company>]" for a brand inside a
+// larger company, which runs never show figures for (NOT_SEPARATELY_REPORTED).
 // Exit 3 when any name FAILs. Prints the plan and calls only with --yes; cached searches cost nothing.
 // Prints names only, never entity ids or Qloo values.
 import { existsSync, readFileSync } from "node:fs";
@@ -27,6 +29,8 @@ const TOOL_CALL = "cli-listed-brands";
 interface Row {
   name: string;
   ticker: string;
+  /** The parent company of a sub-brand (relation parent), else null. */
+  parent: string | null;
   matchClass: string;
   /** The exact match applied, or each exact tie a person could pick. */
   resolved: { name: string; listed: boolean }[];
@@ -39,8 +43,14 @@ async function main(argv: string[]): Promise<number> {
   const yes = argv.includes("--yes");
   const tagAt = argv.indexOf("--tag");
   const tag = tagAt >= 0 ? (argv[tagAt + 1] ?? null) : null;
-  const config = JSON.parse(readFileSync(CONFIG, "utf8")) as { brands: Record<string, { ticker: string }> };
-  const names = Object.entries(config.brands).map(([name, c]) => ({ name, ticker: c.ticker }));
+  const config = JSON.parse(readFileSync(CONFIG, "utf8")) as {
+    brands: Record<string, { ticker: string; company: string; relation?: "self" | "parent"; parent_name?: string }>;
+  };
+  const names = Object.entries(config.brands).map(([name, c]) => ({
+    name,
+    ticker: c.ticker,
+    parent: c.relation === "parent" ? (c.parent_name ?? c.company) : null,
+  }));
 
   const qloo = await openCliQloo({ env: process.env, mock: false, tag, store: "pg", logger: stderrLogger((l) => consoleIo.err(l)) });
   try {
@@ -69,13 +79,14 @@ async function main(argv: string[]): Promise<number> {
       const candidates = c.matchClass === "exact" ? [] : c.alternatives.map((a) => named(a.name));
       const status: Row["status"] =
         resolved.length > 0 ? (resolved.every((r) => r.listed) ? "ok" : "FAIL") : candidates.some((x) => x.listed) ? "pick?" : "absent";
-      rows.push({ name: m.name, ticker: m.ticker, matchClass: c.matchClass, resolved, candidates, status });
+      rows.push({ name: m.name, ticker: m.ticker, parent: m.parent, matchClass: c.matchClass, resolved, candidates, status });
     }
     for (const r of rows) {
       const got = r.resolved.map((x) => `${x.name}${x.listed ? "" : " [NOT A KEY]"}`).join(" | ");
       const offered = r.candidates.map((x) => `${x.name}${x.listed ? " [key]" : ""}`).join(" | ");
       const qloo = got === "" ? `${r.matchClass}; candidates: ${offered === "" ? "none" : offered}` : got;
-      consoleIo.out(terminalSafe(`${r.status.padEnd(6)} ${r.name} (${r.ticker}) -> ${qloo}`));
+      const relation = r.parent === null ? "" : ` [parent: ${r.parent}]`;
+      consoleIo.out(terminalSafe(`${r.status.padEnd(6)} ${r.name} (${r.ticker})${relation} -> ${qloo}`));
     }
     const count = (s: Row["status"]): number => rows.filter((r) => r.status === s).length;
     const failed = count("FAIL");

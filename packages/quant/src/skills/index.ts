@@ -15,6 +15,7 @@ import { tasteTwinsSkill } from "./tasteTwins";
 import { conceptVectorSkill } from "./conceptVector";
 import { companyFinancialsSkill } from "./companyFinancials";
 import { areaEconomicsSkill } from "./areaEconomics";
+import { localSupplySkill } from "./localSupply";
 
 /**
  * The skills behind the ANALYST tools (PLAN §10.1): one per SkillId, each in its own module. Every
@@ -37,6 +38,7 @@ export const SKILLS: SkillRegistry = {
   concept_vector: conceptVectorSkill,
   company_financials: companyFinancialsSkill,
   area_economics: areaEconomicsSkill,
+  local_supply: localSupplySkill,
 };
 
 export { unavailableSkill } from "./unavailable";
@@ -60,7 +62,8 @@ export { curatedConcept } from "./findTags/curated";
 export { NEAREST_SEPARATOR } from "./findTags";
 export { buildSkillDigest, fitSkillDigest, orderedFlags, skillErrorResult, skillResult } from "./digest";
 export type { DigestParts, DigestTarget } from "./digest";
-export { addSkillEvidence, addSkillMetric, attemptAll, countUncached, isBudgetError, registerEntity } from "./common";
+export { addSkillEvidence, addSkillMetric, attemptAll, conceptReadOf, countUncached, isBudgetError, registerEntity, stampCandidateSources } from "./common";
+export { localSupplySkill, MARKET_RADIUS_M, MAX_SUPPLY_METRICS, osmPeriod, ringFromWkt } from "./localSupply";
 export type { Attempt, EntityDraft, MetricSpec, Registration } from "./common";
 // The supply-label rule geo_lift, the CHECKER (V10) and the web answer read competitor counts by; the lift map
 // mirrors its numbers for the client bundle and for runs stored before the rule.

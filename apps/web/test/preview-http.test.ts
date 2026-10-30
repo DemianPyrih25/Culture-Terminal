@@ -108,7 +108,7 @@ describe("POST /api/preview", () => {
     expect(paused.body.error).toBe("Live analysis is paused: it was paused by the operator.");
     g.__ctContainer = { runs: stub, modes: testModes(), answers: testAnswers() };
 
-    useService(previewDeps(clerkAnswering(), { todayUsd: async () => 5 }));
+    useService(previewDeps(clerkAnswering(), { todayUsd: async () => 9 }));
     const spent = await previewQuestion(postJson("/api/preview", { question: QUESTION }));
     expect(spent.status).toBe(503);
     expect(Number(spent.headers.get("retry-after"))).toBeGreaterThan(0);

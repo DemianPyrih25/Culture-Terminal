@@ -1,5 +1,5 @@
 import type { DigestRow, EntityType, EvidenceId, Metric, NoValueReason, RankedPayload, SlopePayload } from "@ct/contracts";
-import type { FormulaId } from "../../formulas";
+import { THIN_SAMPLE, type FormulaId } from "../../formulas";
 import { clamp } from "../../stats";
 import { addSkillEvidence, addSkillMetric } from "../common";
 import { fixed2, rankText, safeFullName, safeName } from "../format";
@@ -177,6 +177,7 @@ function fitMetric(run: RankRun, c: Candidate, row: GridRow, cell: GridCell, evi
       evidenceIds: evidence,
       n: row.scored,
       comparator: "WITHIN_CALL",
+      thin: row.scored < THIN_SAMPLE.rankedRows,
     }),
   );
 }

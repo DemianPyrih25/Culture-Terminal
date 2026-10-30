@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { applyEvent, initialRunState, type RunEvent, type RunState } from "@ct/contracts";
+import type { RunEvent, RunState } from "@ct/contracts";
+import { applyEvent, initialRunState } from "@ct/contracts/values";
 import { RunStreamClient, type ConnectionStatus, type RunStreamClientOptions, type RunStreamSnapshot } from "./sse-client";
 
 /**
@@ -46,6 +47,45 @@ export interface ReplayPlayerOptions {
 
 const tsOf = (event: RunEvent | undefined) => (event ? Date.parse(event.ts) : Number.NaN);
 
+// The run queue (D24) -----------------------------------------------------------------------------------
+
+type QueuePlace = NonNullable<RunState["queue"]>;
+
+/**
+ * Where a queued run's work starts in its timeline: the first event after its first run.queued that is
+ * not another run.queued (the agent's own run.created, or the end of a run that never started). -1 for
+ * a run that never queued, null for one still waiting.
+ */
+function workStartIn(types: readonly RunEvent["type"][]): number | null {
+  const queued = types.indexOf("run.queued");
+  if (queued === -1) return -1;
+  for (let i = queued + 1; i < types.length; i++) if (types[i] !== "run.queued") return i;
+  return null;
+}
+
+/**
+ * A run waiting for a slot: its place from the latest run.queued, or null once its work starts (the
+ * agent's run.created follows the queue events) or it ends. Only a live run waits.
+ */
+export function queuedPlace(state: RunState): QueuePlace | null {
+  if (state.ended !== null || state.status !== "queued" || state.queue === null) return null;
+  return state.timeline.at(-1)?.type === "run.queued" ? state.queue : null;
+}
+
+/** Whole seconds a queued run may still wait at `now`: its last waitSMax, less the time since it was told. */
+export function queueWaitLeftS(place: QueuePlace, now: number): number {
+  const since = now - Date.parse(place.at);
+  return Math.max(0, place.waitSMax - (Number.isFinite(since) ? Math.max(0, Math.floor(since / 1000)) : 0));
+}
+
+/** The run waited in the queue and ended there, before any work: a timeout, a cancel or a restart. */
+export function endedInQueue(state: RunState): boolean {
+  if (state.ended === null) return false;
+  const types = state.timeline.map((t) => t.type);
+  const start = workStartIn(types);
+  return start !== -1 && (start === null || types[start] !== "run.created");
+}
+
 /**
  * Plays recorded events into a RunState at 1×, 4×, 8×, 16× or instantly: each event waits for the gap
  * since the one before it divided by the speed. Events that share a moment apply together, with one
@@ -63,6 +103,12 @@ export class ReplayPlayer {
   private wait: { startedAt: number; delay: number } | null = null;
   /** What was left of a wait when playback paused. */
   private remaining: number | null = null;
+  /**
+   * The queue's part of the recording (D24): events up to this index play with no wait, and run time
+   * counts from it, since waiting for a slot is not the run's work. -1 when the run never queued; null
+   * while the recording is still in the queue.
+   */
+  private workStart: number | null = -1;
   /** Wall time the latest event applied. */
   private appliedAt = 0;
   private snapshot: ReplaySnapshot;
@@ -91,6 +137,9 @@ export class ReplayPlayer {
     const last = this.events.at(-1);
     if (event.runId !== this.runId || (last && event.seq <= last.seq)) return;
     this.events.push(event);
+    if (this.workStart === null || (this.workStart === -1 && event.type === "run.queued")) {
+      this.workStart = workStartIn(this.events.map((e) => e.type));
+    }
     if (this.playing && this.timer === null && this.index === this.events.length - 1) this.schedule();
     else this.emit();
   };
@@ -161,11 +210,16 @@ export class ReplayPlayer {
 
   /** The wall-time wait before event `i`: its gap from the previous event at the current speed. */
   private delayBefore(i: number): number {
-    if (i === 0 || this.speed === "instant") return 0;
+    if (i === 0 || this.speed === "instant" || this.inQueue(i)) return 0;
     const gap = tsOf(this.events[i]) - tsOf(this.events[i - 1]);
     if (!Number.isFinite(gap) || gap <= 0) return 0;
     const scaled = Math.round(gap / this.speed);
     return this.speed === 1 ? scaled : Math.min(scaled, this.maxDelayMs);
+  }
+
+  /** Event `i` belongs to the queue's part of the recording. */
+  private inQueue(i: number): boolean {
+    return this.workStart === null || i <= this.workStart;
   }
 
   private schedule(): void {
@@ -211,9 +265,10 @@ export class ReplayPlayer {
   private build(): ReplaySnapshot {
     const loaded = this.events.length;
     const complete = this.events.at(-1)?.type === "run.end";
-    const start = tsOf(this.events[0]);
+    // Run time starts with the work: a queued run's wait is left out of its length and its playhead.
+    const start = tsOf(this.workStart === null ? this.events.at(-1) : this.events[Math.max(0, this.workStart)]);
     const durationMs = complete && loaded > 0 ? Math.max(0, tsOf(this.events.at(-1)) - start) : null;
-    const positionMs = this.index > 0 ? Math.max(0, tsOf(this.events[this.index - 1]) - start) : 0;
+    const positionMs = this.index > 0 && !this.inQueue(this.index - 1) ? Math.max(0, tsOf(this.events[this.index - 1]) - start) : 0;
     const done = complete && this.index >= loaded;
     const progress = done
       ? 1

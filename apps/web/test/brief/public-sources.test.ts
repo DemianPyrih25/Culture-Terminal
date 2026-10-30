@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from "vitest";
 import { buildLedger, buildSources, createFootnoteRegistry, figureSource, inlineText } from "../../lib/brief";
 import { publicEndpointOf, requestHead, requestsForEvidence, shortReference } from "../../lib/brief/ledger";
 import { readAsOf } from "../../lib/brief/method";
-import { publicRequestLink, requestCurl } from "../../components/drawer/curl";
+import { publicRequestLink, requestCopy } from "../../components/drawer/request-copy";
 import { requestPairs, sourceDescription, sourceLine } from "../../components/drawer/source-copy";
 import { publicNote } from "../../components/drawer/source-row";
 import { focusView } from "../../components/drawer/focus-card";
@@ -169,8 +169,8 @@ describe("the request inspector for public lookups", () => {
     expect(requestPairs(sec)).toContainEqual(["reference", CIK]);
   });
 
-  it("gives an SEC or Census URL, never a curl and never a key", () => {
-    expect(requestCurl(sec, undefined)).toBeNull();
+  it("gives an SEC or Census URL, never a Qloo request copy and never a key", () => {
+    expect(requestCopy(sec, undefined)).toBeNull();
     const exact = publicRequestLink(sec, { path: `/api/xbrl/companyfacts/${CIK}.json`, query: {}, host: "data.sec.gov" });
     expect(exact).toEqual({ url: `https://data.sec.gov/api/xbrl/companyfacts/${CIK}.json`, exact: true });
     expect(publicRequestLink(sec, undefined)?.url).toBe(`https://data.sec.gov/api/xbrl/companyfacts/${CIK}.json`);

@@ -1,4 +1,5 @@
-import { METRO_LABEL, type EntityType, type GhostPickCategory, type Job, type MetroId, type Pillar, type SponsorCategory } from "@ct/contracts";
+import type { ConfidenceRule, EntityType, GhostPickCategory, Job, MetroId, Pillar, SponsorCategory } from "@ct/contracts";
+import { METRO_LABEL } from "@ct/contracts/values";
 
 /**
  * The answer page's fixed words (design/redesign.pen, N05 and N07–N12): job labels, chart kinds and
@@ -202,3 +203,15 @@ export const BLOCK_FAMILY_LABEL: Readonly<Record<string, string>> = {
 /** The verdict card when the data could not support a call. */
 export const NOT_ENOUGH_LINE = "Not enough data to call this";
 export const NOT_ENOUGH_LEAD = "Here's what we found.";
+
+/**
+ * Why a confidence cap holds the band down (R1, D47), as the verdict card says it after the band:
+ * "Medium: the signal is mixed". Only the rules in CONFIDENCE_CAP have a cap.
+ */
+export const CAP_REASON: Readonly<Partial<Record<ConfidenceRule, string>>> = {
+  signal_mixed: "the signal is mixed",
+  signal_weak: "the signal is weak",
+  thin_sample: "the headline rests on a small sample",
+  category_level: "only the concept's broader category was read, not the concept itself",
+  concept_partly_tagged: "part of the concept was not tested",
+};

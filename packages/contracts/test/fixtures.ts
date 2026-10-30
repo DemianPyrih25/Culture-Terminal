@@ -1,5 +1,7 @@
 // Synthetic fixtures: invented entities only, no Qloo values, ids or request ids (D29).
 import {
+  type AiContextBlock,
+  type WebContextBlock,
   DEFAULT_RUN_LIMITS,
   GHOST_HONESTY_LINE,
   stampEvent,
@@ -30,6 +32,7 @@ export const intent: Intent = {
   constraints: { concepts: [], sponsor_categories: [], domains: ["artist"], ages: [], notes: [], concept_description: null },
   safety: { allowed: true, category: null, reframe: null },
   read_as: { nearest: false, not_covered: [] },
+  candidates: { named_areas: [], named_markets: [], obvious_entities: [], obvious_areas: [], obvious_markets: [] },
   assumptions: ["US geography"],
   mnemonic: "JUNIPER COLA <BRAND> HLTH",
 };
@@ -449,6 +452,8 @@ export const fullRunInputs: EventInput[] = [
       honestyLine: GHOST_HONESTY_LINE,
     },
   },
+  { type: "context.ai", block: aiContextBlock(), usd: 0.012, ms: 6_400 },
+  { type: "context.web", block: webContextBlock(), usd: 0.041, ms: 18_200 },
   {
     type: "usage",
     llmUsd: 0.18,
@@ -460,6 +465,51 @@ export const fullRunInputs: EventInput[] = [
   { type: "error", code: "qloo_rate_limited", message: "Throttled; retried.", retryable: true },
   { type: "run.end", status: "completed", elapsedMs: 53_000, reason: null },
 ];
+
+/** An invented "What AI knows (not verified)" block: no digits, no spelled numbers (R4). */
+export function aiContextBlock(): AiContextBlock {
+  return {
+    status: "ok",
+    items: [
+      { topic: "Ownership", text: "Juniper Cola is reported to be independently owned.", kind: "deal" },
+      { topic: "Footprint", text: "It is said to sell mainly through regional grocers.", kind: "footprint" },
+    ],
+    presenceMarkets: ["nashville"],
+    model: "claude-sonnet-5-5",
+    generatedAt: ts(40),
+    cached: false,
+    note: null,
+    droppedForNumbers: 1,
+  };
+}
+
+/** An invented "From the web" block with example.com links (R5). */
+export function webContextBlock(): WebContextBlock {
+  return {
+    status: "ok",
+    items: [
+      {
+        claim: "Juniper Cola opened a tasting room in Nashville last spring.",
+        url: "https://news.example.com/juniper-cola-tasting-room",
+        title: "Juniper Cola opens a tasting room",
+        publisher: "news.example.com",
+        published: "April 30, 2025",
+        publishedIso: "2025-04-30",
+        retrievedAt: ts(41),
+        citedText: "Juniper Cola opened a tasting room in Nashville",
+      },
+    ],
+    model: "claude-haiku-5-5",
+    searches: 2,
+    retrievedAt: ts(41),
+    cached: false,
+    note: null,
+    droppedForNumbers: 0,
+  };
+}
+
+/** A run waiting second in the global queue (D24). */
+export const queuedInput: EventInput = { type: "run.queued", position: 2, ahead: 1, waitSMax: 120 };
 
 export const needsInputInput: EventInput = {
   type: "needs_input",

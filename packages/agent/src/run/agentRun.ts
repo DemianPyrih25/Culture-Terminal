@@ -11,6 +11,8 @@ import {
   type EventInputOf,
   type Flag,
   type Intent,
+  type Limitation,
+  type MarketId,
   type Phase,
   type RegisteredEntity,
   type Report,
@@ -33,17 +35,27 @@ import { createEntityRegistry } from "../registry";
 import type { AgentRunOptions, AgentRunResult } from "../run";
 import { POSITION_FAILED, recordPosition } from "../report/position";
 import { recordScorecard } from "../scorecard";
+import { SIDE_TIMEOUTS, startSideContext, WEB_SEARCH_USD_PER_SEARCH, type ContextCache, type SideClient, type SideConfig, type SideContextHandle, type SideContextResult } from "../side";
 import { areaMentionsToGeo } from "./areaMentions";
 import { runAreaMetros } from "./areas";
 import { loadRunAudiences, NO_RUN_AUDIENCES } from "./audiences";
+import { buildRunCandidates, withJobCandidates, withKnownMarkets } from "./candidates";
 import { ALL_SKILLS, toolLabel, UNAVAILABLE_SKILLS } from "./catalogue";
 import { conceptPartlyTagged, conceptSubstitutes, questionConcepts, unusedRefs } from "./conceptCoverage";
 import { buildRunContext, evidenceStatus, findingLeads, type RanCall } from "./context";
 import { createFollowupDeadline, type FollowupDeadline } from "./followup";
 import { gazetteer } from "./gazetteer";
-import { gateEvidence, privatePersonNames, privatePersonRefusal, runResolutionGate, type GateResolved } from "./gate";
+import {
+  EMPTY_GATE,
+  expectedMissingText,
+  gateEvidence,
+  privatePersonNames,
+  privatePersonRefusal,
+  runResolutionGate,
+  type GateResolved,
+} from "./gate";
 import { RunEvents, RunMeter } from "./meter";
-import { runMarkets, unknownMarketIssues } from "./markets";
+import { compareCities, MARKET_CATALOGUE, runMarkets, unknownMarketIssues } from "./markets";
 import { unconfiguredTools } from "./publicConfig";
 import { chainFeed, emptyScan, namedAreaIds, planScan, type ScanPlan } from "./scan";
 import { estimateSkillCalls, runSkillCall, shortError, SkillsRan, type SkillCallOutcome, type SkillRunnerDeps } from "./tools";
@@ -138,6 +150,58 @@ function callMeta(input: unknown): { stepId: StepId | null; triggerFindingId: Ev
 
 const phaseOfTurn = (turn: 1 | 2 | 3): Phase => (turn === 1 ? "wave1" : "followup");
 
+/** The tools a concept test runs: the follow-up reserve holds calls for them (D24, Part 9 open issue 1). */
+const CONCEPT_CLAIMANTS: ReadonlySet<SkillId> = new Set<SkillId>(["find_tags", "concept_vector", "geo_lift"]);
+
+/** Tools whose call on the subject says nothing about Qloo's data for it: lookups and public data. */
+const SUBJECT_EXEMPT: ReadonlySet<SkillId> = new Set<SkillId>(["find_tags", "resolve_entities", "company_financials", "area_economics", "local_supply"]);
+
+/** Every string anywhere in a tool input: the refs it sends, among other values. */
+function stringsOf(value: unknown, out = new Set<string>()): Set<string> {
+  if (typeof value === "string") out.add(value);
+  else if (Array.isArray(value)) for (const v of value) stringsOf(v, out);
+  else if (isRecord(value)) for (const v of Object.values(value)) stringsOf(v, out);
+  return out;
+}
+
+/** "Austin, TX": the market label of an id config/metros.json lists, or null. */
+function marketLabel(id: string): string | null {
+  const m = MARKET_CATALOGUE.find((x) => x.id === id);
+  return m === undefined ? null : `${m.label}, ${m.state}`;
+}
+
+/**
+ * The place the side context calls read the question in: its map city, else the market a named venue is in,
+ * else the cities a comparison names; null when it names none.
+ */
+export function placeLabelOf(intent: Intent): string | null {
+  const own = intent.geo.metro ?? intent.geo.market;
+  const label = own === null ? null : marketLabel(own);
+  if (label !== null) return label;
+  const cities = compareCities(intent).flatMap((id) => marketLabel(id) ?? []);
+  return cities.length === 0 ? null : cities.join("; ");
+}
+
+/**
+ * The one AI-context line the ANALYST ever sees (D45): the validated market ids the side call reports the
+ * subject already operates in. It is model knowledge, never cited and never a number; nothing else from the
+ * side calls reaches any model.
+ */
+export function presenceLine(ids: readonly MarketId[]): string | null {
+  const labels = [...new Set(ids)].flatMap((id) => marketLabel(id) ?? []);
+  if (labels.length === 0) return null;
+  return (
+    `AI CONTEXT (model knowledge, not measured, never cite it): the subject is reported to already operate in ${labels.join("; ")}. ` +
+    "When you recommend new markets, prefer others, or say that it already operates there."
+  );
+}
+
+/** The SUBJECT_NO_DATA limitation (V7 extension, 1.13). */
+export function subjectNoDataText(subject: string): string {
+  const name = subject.replace(/[\p{Cc}\p{Cf}]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 60).trim();
+  return `Qloo returned no data for ${name}. No look-alike was used in its place.`;
+}
+
 /**
  * The ANALYST's LLM caps net of what CLERK already spent, so the run as a whole stays within
  * RunLimits.usdNudge/usdHard (PLAN §4.2: they are per run, CLERK included).
@@ -145,6 +209,20 @@ const phaseOfTurn = (turn: 1 | 2 | 3): Phase => (turn === 1 ? "wave1" : "followu
 export function analystLimits(limits: RunLimits, spentUsd: number): RunLimits {
   const left = (cap: number): number => Math.max(cap - spentUsd, Number.MIN_VALUE);
   return { ...limits, usdNudge: left(limits.usdNudge), usdHard: left(limits.usdHard) };
+}
+
+/** The side calls a run makes: `side` as given, else built from `sideConfig` and the run's own client. */
+function sideOptionsOf(
+  options: Pick<AgentRunOptions, "side" | "sideConfig" | "contextCache" | "anthropic">,
+): { client: SideClient; cache: ContextCache | null; config: SideConfig } | null {
+  if (options.side) return options.side;
+  if (!options.sideConfig) return null;
+  const { anthropic } = options;
+  return {
+    client: { create: (req, opts) => Promise.resolve(anthropic.messages.create(req, opts)) },
+    cache: options.contextCache ?? null,
+    config: options.sideConfig,
+  };
 }
 
 export async function executeRun(options: AgentRunOptions): Promise<AgentRunResult> {
@@ -166,6 +244,9 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
   const abortCode = (): ErrorCode => (options.signal.aborted ? "cancelled" : "timeout");
 
   let ledger: RunLedger | null = null;
+  /** The side context calls (R4, R5): started once CLERK's intent passes the safety checks. */
+  let side: SideContextHandle | null = null;
+  const sideAbort = new AbortController();
   /** CLERK's intent once it passed the safety check; it stays null when CLERK failed or refused. */
   let intent: Intent | null = null;
   let analystModel: string | null = null;
@@ -192,6 +273,21 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
     return end("failed", reason, report);
   };
   const cancelled = () => end("cancelled", "the run was cancelled");
+  /**
+   * Settles the side calls within `waitMs` (an unfinished call is aborted) and meters their spend: tokens as
+   * LLM spend, search fees as unmetered spend, so the receipt, the daily breaker and /method include them
+   * (D45). Once only; null when they never started.
+   */
+  const settleSide = async (waitMs: number): Promise<SideContextResult | null> => {
+    const handle = side;
+    if (handle === null) return null;
+    side = null;
+    const result = await handle.settled(waitMs);
+    const fees = result.webSearches * WEB_SEARCH_USD_PER_SEARCH;
+    meter.addLlm(result.usage, Math.max(0, result.usd - fees));
+    meter.addUnmetered(Math.min(fees, result.usd));
+    return result;
+  };
 
   try {
     events.emit({
@@ -209,7 +305,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
     if (options.intent !== undefined) {
       if (options.signal.aborted) return cancelled();
       // A preview's intent may predate CLERK's area backstop, so it is applied again (it is idempotent).
-      read = areaMentionsToGeo(normalizeIntent(options.intent), gazetteer());
+      read = withJobCandidates(withKnownMarkets(areaMentionsToGeo(normalizeIntent(options.intent), gazetteer())));
       events.emit({ type: "clerk", intent: read, ms: 0 });
     } else {
       const clerkStarted = now();
@@ -224,13 +320,63 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       if (clerk.kind === "refusal") {
         return end("refused", clerk.explanation ?? "CLERK declined the question.");
       }
-      read = normalizeIntent(clerk.intent);
+      read = withJobCandidates(withKnownMarkets(normalizeIntent(clerk.intent)));
       events.emit({ type: "clerk", intent: read, ms: Math.max(0, now() - clerkStarted) });
     }
     const refusal = refusalOf(read) ?? privatePersonRefusal(read);
     if (refusal !== null) return end("refused", refusal);
     intent = read;
     const { job, pillar } = read;
+
+    // R4/R5 (D45): the side context calls start now and run beside the gate, the scan and turn 1. Each
+    // block's event goes out when it settles; the run waits for them only just before ASSEMBLE.
+    const sideCost = { aiUsd: 0, webUsd: 0 };
+    const sideStartedAt = now();
+    const sideOptions = sideOptionsOf(options);
+    if (sideOptions) {
+      side = startSideContext({
+        runId: options.runId,
+        question,
+        intent: read,
+        mode: options.mode,
+        // Only a mention CLERK marked primary is the subject: a launch_test's named comparisons are not the
+        // product, so their footprint never reads as the subject's presence.
+        subjectName: read.mentions.find((m) => m.role === "primary")?.text ?? null,
+        placeLabel: placeLabelOf(read),
+        client: sideOptions.client,
+        cache: sideOptions.cache,
+        config: sideOptions.config,
+        signal: AbortSignal.any([options.signal, sideAbort.signal]),
+        emit: (e) => {
+          if (e.type === "context.ai") sideCost.aiUsd = e.usd;
+          else if (e.type === "context.web") sideCost.webUsd = e.usd;
+          events.emit(e);
+        },
+        now,
+      });
+    }
+    const concepts = questionConcepts(read);
+    /** Every skill call that ran, with the findings it issued, so a listed follow-up never repeats one. */
+    const ranCalls: RanCall[] = [];
+    /** True once a concept test (a claimant) has run in turn 2: the reserve is then released. */
+    let claimantFollowupRan = false;
+    const registry = createEntityRegistry();
+    // R8 (D51): the qloo and evidence events carry names, never entity ids.
+    events.scrubWith((id) => registry.byEntityId(id)?.name ?? null);
+    /**
+     * D24's follow-up reserve: while a concept part has no exact tag and no concept test has answered yet,
+     * other follow-up calls leave limits.conceptReserveCalls for one (Part 9 open issue 1).
+     */
+    const conceptReserveActive = (): boolean => {
+      if (concepts.length === 0 || claimantFollowupRan) return false;
+      // A concept test that already answered (the scan's, on the concept or its category) is what the reserve
+      // was kept for: holding calls for a repeat would starve the question's other parts (partners, podcasts).
+      if (ranCalls.some((c) => c.tool === "concept_vector" && (c.status === "ok" || c.status === "partial"))) return false;
+      const tags = registry.tags();
+      if (tags.some((t) => t.conceptMatch === "category" || t.conceptMatch === "proxy")) return true;
+      if (conceptSubstitutes({ concepts, calls: ranCalls }).length > 0) return true;
+      return !tags.some((t) => t.conceptMatch === "exact");
+    };
 
     // B: the run's Qloo scope, registry, ledger and the resolution gate --------------------------------
     let phase: Phase = "scan";
@@ -246,6 +392,11 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       },
       onWarn: () => events.emit(meter.usageEvent()),
       signal: runAbort.signal,
+      reserve: {
+        calls: limits.conceptReserveCalls,
+        claims: (tool) => tool !== null && CONCEPT_CLAIMANTS.has(tool),
+        active: conceptReserveActive,
+      },
     });
     // SEC and Census reads: their calls are logged and shown apart from Qloo's and cost no Qloo call.
     const runPublic =
@@ -262,7 +413,13 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
     const unconfigured = unconfiguredTools(publicConfigured);
     /** Run-level limitation flags raised outside any skill: the not-configured sources the run needed. */
     const runFlags = new Set<Flag>();
-    const registry = createEntityRegistry();
+    /** Flag limitations with their own text (the names, the parent company, the subject), once each. */
+    const flagLimitations: Limitation[] = [];
+    const addFlagLimitation = (flag: Flag, text: string): void => {
+      if (!flagLimitations.some((l) => l.text === text)) flagLimitations.push({ source: "flag", flag, text });
+    };
+    /** Plain limitation lines the run adds (no flag). */
+    const runLimitations: string[] = [];
     const runLedger = createRunLedger({
       emit: events.emit,
       provenanceOf: (id) => runQloo.provenance(id) ?? runPublic?.provenance(id) ?? null,
@@ -273,24 +430,34 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
     const areaMetros = runAreaMetros(read);
     const areas = areaMetros.flatMap((metro) => geo.neighbourhoods(metro).map((n) => n.name));
 
-    let gate: GateResolved = { kind: "resolved", entities: [], primary: null, peers: [], dropped: 0, limitations: [], calls: [], primaryCalls: [] };
+    let gate: GateResolved = EMPTY_GATE;
     if (qlooEnabled) {
       const outcome = await runResolutionGate({ intent: read, qloo: runQloo.forTool(null), registry, pins: options.pins ?? {} });
-      if (options.signal.aborted) return cancelled();
+      if (options.signal.aborted) {
+        await settleSide(0);
+        return cancelled();
+      }
       if (outcome.kind === "failed") {
+        await settleSide(0);
         const code = qlooErrorCode(outcome.error) ?? "internal";
         const message = shortError(outcome.error);
         const retryable = code === "qloo_unavailable" || code === "qloo_rate_limited";
         return fail(code, message, retryable, `The question's main entity could not be looked up: ${message}`);
       }
-      if (outcome.kind === "refused") return end("refused", outcome.reason);
+      if (outcome.kind === "refused") {
+        await settleSide(0);
+        return end("refused", outcome.reason);
+      }
       if (outcome.entities.length > 0) events.emit({ type: "resolve", entities: outcome.entities });
       if (outcome.kind === "needs_input") {
         events.emit(outcome.picker);
+        await settleSide(0);
         return end("needs_input", outcome.reason);
       }
       gate = outcome;
     }
+    const missing = expectedMissingText(gate);
+    if (missing !== null) addFlagLimitation("EXPECTED_CANDIDATE_MISSING", missing);
     const skillsRan = new SkillsRan();
     const drops = gateEvidence(gate);
     if (drops !== null) {
@@ -300,6 +467,10 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
 
     // The desk's AUDIENCES from the pinned catalogue (D21): read once, offered to the ANALYST and checked on every call.
     const audiences = qlooEnabled ? await loadRunAudiences(options.qloo, pillar) : NO_RUN_AUDIENCES;
+
+    // R3: the run's candidates, handed to every skill and to the scan's sets.
+    const markets = await runMarkets(options.localities ?? null, geo);
+    const candidates = buildRunCandidates({ intent: read, gate, geo, markets });
 
     // C: the opening scan, started before the ANALYST so it runs alongside turn 1 -------------------
     const deps: SkillRunnerDeps = {
@@ -333,8 +504,10 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         if (result.evidenceIds.length > 0) skillsRan.add(tool, result.flags, input);
       },
       questionAreas: read.geo.metro === null ? null : { metro: read.geo.metro, ids: namedAreaIds(read, geo) },
+      concepts,
+      candidates,
+      onLimitation: addFlagLimitation,
     };
-    const markets = await runMarkets(deps.localities, geo);
     const scan: ScanPlan = qlooEnabled
       ? planScan(job, {
           intent: read,
@@ -344,9 +517,18 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
           markets,
           publicData: runPublic !== null,
           publicConfigured: publicConfigured ?? undefined,
+          candidates: {
+            entities: gate.candidates.flatMap((c) => registry.entity(c.ref) ?? []),
+            areas: candidates.areas,
+            markets: candidates.markets,
+          },
         })
       : emptyScan();
     for (const flag of scan.flags) runFlags.add(flag);
+    for (const l of scan.limitations) {
+      if (l.flag === null) runLimitations.push(l.text);
+      else addFlagLimitation(l.flag, l.text);
+    }
     // Estimated before the scan starts: once its requests are in flight the probe counts them as cached.
     const scanEstimates = new Map(
       await Promise.all(scan.steps.map(async (s) => [s.toolCallId, await estimateSkillCalls(deps, s.tool, s.input)] as const)),
@@ -360,8 +542,6 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       );
       return p;
     };
-    /** Every skill call that ran, with the findings it issued, so a listed follow-up never repeats one. */
-    const ranCalls: RanCall[] = [];
     /** The tool of every opening-scan call, so the loop never calls a plan step naming one still to run. */
     const scanTools: SkillId[] = [];
     const scanCall = async (toolCallId: string, tool: SkillId, input: unknown, estimatedCalls: number | null) => {
@@ -370,7 +550,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         { toolCallId, tool, input, phase: "scan", stepId: null, triggerFindingId: null, estimatedCalls },
         runAbort.signal,
       );
-      ranCalls.push({ tool, input, findingIds: outcome.result?.findingIds ?? [], rows: outcome.result?.forModel.top_rows ?? null });
+      ranCalls.push({ tool, input, findingIds: outcome.result?.findingIds ?? [], rows: outcome.result?.forModel.top_rows ?? null, status: callStatus(outcome) });
       scanTools.push(tool);
       return outcome;
     };
@@ -415,11 +595,18 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         // Chained steps read what their scan step returned (geo_lift on find_tags' rows, scoring on
         // cross_domain's), not the whole registry, which wave-1 calls running alongside may already have
         // added to. A chained step may follow another, so each one's outcome joins `ran` in turn.
-        const feedFrom = (tool: SkillId) =>
-          chainFeed(
-            ran.flatMap((r) => (r.tool === tool && r.outcome.result !== null ? [r.outcome.result.forModel] : [])),
-            { registry, ledger: runLedger, geo, metros: areaMetros },
-          );
+        const feedFrom = (tool: SkillId) => {
+          const results = ran.flatMap((r) => (r.tool === tool && r.outcome.result !== null ? [r.outcome.result] : []));
+          const ids = new Set<string>(results.flatMap((r) => r.datasetIds));
+          return {
+            ...chainFeed(
+              results.map((r) => r.forModel),
+              { registry, ledger: runLedger, geo, metros: areaMetros },
+            ),
+            // The datasets the step made: local_supply reads a lift map's popular areas from them (R7).
+            datasets: runLedger.snapshot().datasets.filter((d) => ids.has(d.id)),
+          };
+        };
         // Consecutive chained steps that follow the same step, and not one another, run in parallel
         // (city_compare's per-city fingerprints and lift maps after find_tags); digests keep table order.
         const groups: (typeof scan.chained)[] = [];
@@ -481,9 +668,32 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       publicData: runPublic !== null,
       caseSummary: options.parent?.caseSummary ?? null,
       question: options.question,
+      localSupply: runPublic !== null && !unconfigured.includes("local_supply"),
     });
     const planEvent = new PlanEvent(events);
     analystModel = model;
+    /**
+     * The subject's name when it resolved but every Qloo call that read it came back empty or failed (V7
+     * extension, SUBJECT_NO_DATA); null otherwise. Refused calls never ran and do not count.
+     */
+    const subjectNoData = (): string | null => {
+      const primary = gate.primary;
+      if (!qlooEnabled || primary === null) return null;
+      const used = ranCalls.filter((c) => !SUBJECT_EXEMPT.has(c.tool) && c.status !== null && c.status !== undefined && stringsOf(c.input).has(primary.ref));
+      if (used.length === 0) return null;
+      return used.every((c) => c.status === "empty" || c.status === "error") ? primary.name : null;
+    };
+    /** What the CHECKER's honesty rules read from the run (V7 extension, V9 disclosure, V12). */
+    const honestyInput = () => ({
+      concepts,
+      disclosure: { concept: conceptSubstitutes({ concepts, calls: ranCalls }).length > 0, readAs: read.read_as.nearest },
+      subjectNoData: subjectNoData(),
+      // V12 (e): the question's own peers and areas (You named) apart from CLERK's expected ones.
+      named: {
+        entities: candidates.entities.some((e) => e.source === "user_named"),
+        areas: candidates.areas.some((a) => a.source === "user_named"),
+      },
+    });
     /** Network calls turn 2 could still make: its own allowance, within what the run has left. */
     const followupCallsLeft = (): number =>
       Math.min(limits.qlooCalls - runQloo.networkUsed(), limits.followupCalls - runQloo.followupNetworkUsed());
@@ -521,7 +731,16 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
               calls.map(async (call) => {
                 const meta = { ...callMeta(call.input), estimatedCalls: estimates.get(call.id) ?? null, deadline };
                 const o = await runSkillCall(deps, { toolCallId: call.id, tool: call.name, input: call.input, phase, ...meta }, signal);
-                ranCalls.push({ id: call.id, tool: call.name, input: call.input, findingIds: o.result?.findingIds ?? [], rows: o.result?.forModel.top_rows ?? null });
+                ranCalls.push({
+                  id: call.id,
+                  tool: call.name,
+                  input: call.input,
+                  findingIds: o.result?.findingIds ?? [],
+                  rows: o.result?.forModel.top_rows ?? null,
+                  status: callStatus(o),
+                });
+                // A concept test ran in turn 2: the follow-up reserve held for it is released.
+                if (turn !== 1 && CONCEPT_CLAIMANTS.has(call.name) && o.result !== null) claimantFollowupRan = true;
                 if (turn === 1 && call.name === "resolve_entities") notePeers(o);
                 return { tool_use_id: call.id, content: o.content, ...(o.isError ? { is_error: true } : {}) };
               }),
@@ -537,7 +756,10 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         if (closed !== 1) return [];
         planEvent.flush();
         const digests = [...(await scanDigests), ...(await deferredDigests())];
-        return digests.length === 0 ? [] : [SCAN_RESULTS_HEADER, ...digests];
+        // D45: the presence markets only, if the AI-context call has them by now (no wait).
+        const presence = side === null ? null : await side.presence(0);
+        const line = presence === null ? null : presenceLine(presence);
+        return [...(digests.length === 0 ? [] : [SCAN_RESULTS_HEADER, ...digests]), ...(line === null ? [] : [line])];
       },
       // Written once the loop knows whether follow-ups are still allowed, so it never contradicts TURN 3.
       closingContext: (closed, next) => {
@@ -572,6 +794,7 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
           areas,
           competitionAsked: job === "site_selection",
           attempt: context.final ? 2 : 1,
+          ...honestyInput(),
         });
         lastCheck = check;
         events.emit({
@@ -612,15 +835,38 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
     await Promise.allSettled([...work]);
     planEvent.flush();
 
-    if (outcome.status === "cancelled" || options.signal.aborted) return cancelled();
-    if (outcome.status === "refused") return end("refused", outcome.reason ?? "the ANALYST declined the question");
+    if (outcome.status === "cancelled" || options.signal.aborted) {
+      await settleSide(0);
+      return cancelled();
+    }
+    if (outcome.status === "refused") {
+      await settleSide(0);
+      return end("refused", outcome.reason ?? "the ANALYST declined the question");
+    }
+
+    // R4/R5: the context blocks settle now, waiting at most until SIDE_TIMEOUTS.webMs after they started and
+    // never past the hard stop; median ANALYST time is longer, so this wait is usually zero.
+    const hardStopAt = startedAt + limits.hardMs;
+    const sideResult = await settleSide(Math.max(0, Math.min(sideStartedAt + SIDE_TIMEOUTS.webMs, hardStopAt) - now()));
+    if (sideResult !== null) events.emit(meter.usageEvent());
 
     // H: ASSEMBLE ------------------------------------------------------------------------------------
     const plan = outcome.submittedPlan ?? planEvent.plan;
     // The accepted draft is the one the CHECKER saw last; checking it again is only a fallback.
     const check =
       outcome.status === "completed" && outcome.draft !== null
-        ? (lastCheck ?? checkReport({ draft: outcome.draft, plan, ledger: runLedger.snapshot(), qlooEnabled, registry, areas, competitionAsked: job === "site_selection", attempt: 2 }))
+        ? (lastCheck ??
+          checkReport({
+            draft: outcome.draft,
+            plan,
+            ledger: runLedger.snapshot(),
+            qlooEnabled,
+            registry,
+            areas,
+            competitionAsked: job === "site_selection",
+            attempt: 2,
+            ...honestyInput(),
+          }))
         : null;
     let report: Report;
     try {
@@ -636,7 +882,11 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       const snapshot = runLedger.snapshot();
       // The owner's o03 decision: a concept with no tag of its own is tested on its nearest category (or
       // not at all), and the note says so at the top; either way it counts as partly tested (D2).
-      const substitutes = conceptSubstitutes({ concepts: questionConcepts(read), calls: ranCalls });
+      const substitutes = conceptSubstitutes({ concepts, calls: ranCalls });
+      // R2 (D48): a concept read through its broader category is a category-level read for the whole note.
+      if (substitutes.some((s) => s.categories.length > 0)) runFlags.add("CATEGORY_LEVEL_READ");
+      const noData = subjectNoData();
+      if (noData !== null) addFlagLimitation("SUBJECT_NO_DATA", subjectNoDataText(noData));
       const context: ReportContext = {
         runId: options.runId,
         question,
@@ -648,7 +898,12 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         qlooCalls: meter.receiptCalls(),
         publicCalls: meter.receiptPublicCalls(),
         usage: { elapsedMs: meter.elapsedMs(), llmUsd: meter.usd(), tokens: meter.tokens() },
-        models: { clerk: CLERK_MODEL, analyst: outcome.model, ghost: null },
+        models: {
+          clerk: CLERK_MODEL,
+          analyst: outcome.model,
+          ghost: null,
+          ...(sideResult === null ? {} : { context: sideResult.models.ai, web: sideResult.models.web }),
+        },
         droppedEntities: gate.dropped,
         codeFallbacks: events.fallbacks,
         skillLimitations: [...skillsRan.limitations(), ...gate.limitations, ...cardLimitations],
@@ -662,11 +917,20 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
         conceptPartlyTagged:
           substitutes.length > 0 ||
           conceptPartlyTagged({
-            concepts: questionConcepts(read),
+            concepts,
             calls: ranCalls,
             findings: snapshot.findings,
           }),
         conceptSubstitutes: substitutes,
+        flagLimitations,
+        runLimitations,
+        ...(sideResult === null
+          ? {}
+          : {
+              aiContext: sideResult.ai,
+              webContext: sideResult.web,
+              sideCost: { aiUsd: sideCost.aiUsd, webUsd: sideCost.webUsd, webSearches: sideResult.webSearches },
+            }),
       };
       report = check !== null ? assembleReport({ ...context, check }) : buildIncompleteReport({ ...context, reason });
     } catch (err) {
@@ -687,8 +951,19 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
   } finally {
     options.signal.removeEventListener("abort", forwardAbort);
     runAbort.abort();
+    // Nothing outlives the run: a side call still in flight is aborted.
+    sideAbort.abort();
     events.close();
   }
+}
+
+/**
+ * How a skill call ended for SUBJECT_NO_DATA: its status, "error" when it threw (TOOL_FAILED), and null when
+ * it was refused before it ran (it read nothing).
+ */
+function callStatus(outcome: SkillCallOutcome): RanCall["status"] {
+  if (outcome.result !== null) return outcome.result.status;
+  return outcome.content.startsWith("TOOL_FAILED") ? "error" : null;
 }
 
 /**

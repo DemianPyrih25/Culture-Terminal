@@ -22,6 +22,20 @@
       "when": 1793107583925,
       "tag": "0002_public_data",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793312288397,
+      "tag": "0003_follows",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793335016181,
+      "tag": "0004_context_osm",
+      "breakpoints": true
     }
   ]
 }

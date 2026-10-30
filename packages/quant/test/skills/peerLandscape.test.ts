@@ -416,7 +416,9 @@ describe("peer_landscape: metrics, findings and digest", () => {
       values: { role: "outside_category", rank_to_target: 1, similarity_metric: nearest?.id, in_category: "no" },
     });
     expect(digest.evidence_ids).toEqual(["E1", "E2"]);
-    expect(digest.dataset_ids).toEqual(["D1"]);
+    // The Substitution Map, then the Category Taste Map drawn from the same calls.
+    expect(digest.dataset_ids).toEqual(["D1", "D2"]);
+    expect(run.ledger.datasets.map((d) => d.kind)).toEqual(["Matrix", "TasteMap"]);
     expect(digest.metrics.map((m) => m.id)).toEqual(result.metricIds);
     expect(digest.findings.map((f) => f.id)).toEqual(result.findingIds);
     const text = JSON.stringify(digest);

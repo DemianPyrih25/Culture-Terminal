@@ -1,5 +1,7 @@
 import type { z } from "zod";
 import type {
+  CandidateSource,
+  ConceptMatch,
   EntityType,
   Flag,
   KitWorkflow,
@@ -209,6 +211,11 @@ export interface RegisteredEntity {
   popularity: number | null;
   disambiguation: string | null;
   tags: readonly { tagId: string; name: string; type: string }[];
+  /**
+   * Where the entity came from (R3, D49): a name the question gave, an obvious candidate CLERK listed and
+   * the gate resolved exactly, or found by the data. Absent = `data`. Skills copy it to row `source`.
+   */
+  candidate?: CandidateSource;
 }
 
 export interface RegisteredTag {
@@ -219,11 +226,63 @@ export interface RegisteredTag {
   type: string;
   /** Taxonomy tags only (isTaxonomyTag): descriptive tags give no signal (probe G1, G6). */
   signalCapable: boolean;
+  /**
+   * How the tag matches the question's concept (R2, D48), set by find_tags: `exact`, `category` (a broader
+   * category, read as a category-level read) or `proxy` (a look-alike: never a verdict). Absent = not a
+   * concept tag, no restriction.
+   */
+  conceptMatch?: ConceptMatch;
+}
+
+/** The strength order of candidate sources: re-registering an entity keeps the strongest (R3). */
+export const CANDIDATE_SOURCE_RANK: Readonly<Record<CandidateSource, number>> = { user_named: 2, obvious: 1, data: 0 };
+
+/** The stronger of two candidate sources (absent = `data`). */
+export function strongerCandidate(a: CandidateSource | undefined, b: CandidateSource | undefined): CandidateSource {
+  const x = a ?? "data";
+  const y = b ?? "data";
+  return CANDIDATE_SOURCE_RANK[x] >= CANDIDATE_SOURCE_RANK[y] ? x : y;
+}
+
+/** The order of concept matches, weakest first: a metric carries the weakest match its call used (R2). */
+export const CONCEPT_MATCH_RANK: Readonly<Record<ConceptMatch, number>> = { proxy: 0, category: 1, exact: 2 };
+
+/** The weaker of two concept matches; undefined (no concept tag) is ignored. */
+export function weakerConceptMatch(a: ConceptMatch | undefined, b: ConceptMatch | undefined): ConceptMatch | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return CONCEPT_MATCH_RANK[a] <= CONCEPT_MATCH_RANK[b] ? a : b;
+}
+
+/** The stronger of two concept matches for one tag; undefined (not a concept tag) is ignored. */
+export function strongerConceptMatch(a: ConceptMatch | undefined, b: ConceptMatch | undefined): ConceptMatch | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return CONCEPT_MATCH_RANK[a] >= CONCEPT_MATCH_RANK[b] ? a : b;
 }
 
 /**
+ * The candidates of a run (R3, D49), built by the gate and handed to every skill: exact-resolved entities,
+ * gazetteer neighbourhood ids and market ids, each named by the question or expected by a specialist.
+ * Skills put them in the sets they score, candidates first, then data.
+ */
+export interface RunCandidates {
+  /** Exact-resolved entities by source, in question order. */
+  entities: readonly { ref: EntityRef; source: "user_named" | "obvious" }[];
+  /** Gazetteer neighbourhood ids by source, per metro. */
+  areas: readonly { metro: MetroId; id: string; source: "user_named" | "obvious" }[];
+  /** Market ids by source. */
+  markets: readonly { id: MarketId; source: "user_named" | "obvious" }[];
+}
+
+/** A run without candidates (stored runs, scans built outside a run, tests). */
+export const NO_RUN_CANDIDATES: RunCandidates = { entities: [], areas: [], markets: [] };
+
+/**
  * Maps run-local refs (R#, T#) to Qloo ids. Registration is idempotent by Qloo id: registering a
- * known entity or tag returns its existing ref.
+ * known entity or tag returns its existing ref. Re-registering an entity keeps the strongest candidate
+ * source (user_named > obvious > data, strongerCandidate); re-registering a tag keeps the strongest concept
+ * match it was given (strongerConceptMatch): a tag that is the exact tag of one concept part stays exact.
  */
 export interface EntityRegistry {
   registerEntity(entity: Omit<RegisteredEntity, "ref">): RegisteredEntity;
@@ -272,6 +331,10 @@ export interface SkillCtx {
   phase: Phase;
   /** The tool call (or opening-scan step) this skill run belongs to; carried on fallback and finding events. */
   toolCallId: string;
+  /** The question's concept parts (questionConcepts(intent) in the agent); empty when none (R2). */
+  concepts: readonly string[];
+  /** The run's user-named and obvious candidates (R3); NO_RUN_CANDIDATES when none. */
+  candidates: RunCandidates;
 }
 
 export interface SkillResult {

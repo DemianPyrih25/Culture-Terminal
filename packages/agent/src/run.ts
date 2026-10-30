@@ -15,6 +15,7 @@ import type { QlooClient } from "@ct/qloo";
 import type { AnalystMode, AnthropicLike } from "./anthropic";
 import type { LedgerSnapshot } from "./ledger";
 import { executeRun } from "./run/agentRun";
+import type { ContextCache, SideClient, SideConfig } from "./side";
 
 /**
  * One agent run end to end (PLAN §4.1 A–H): CLERK → resolution gate → opening scan in parallel with
@@ -71,6 +72,22 @@ export interface AgentRunOptions {
    * checks. Only a trusted server-side caller passes it; it never comes from the browser.
    */
   intent?: Intent;
+  /**
+   * The side context calls (R4, R5, D45): "What AI knows (not verified)" and "From the web". They start once
+   * CLERK's intent passes the safety checks and run beside the gate, the scan and ANALYST turn 1; the run
+   * waits for them only up to SIDE_TIMEOUTS.webMs after they started (never past the hard stop) before
+   * ASSEMBLE. Their spend joins the run's meter. Absent or null (tests, test runs, replay_only): neither runs
+   * and the report carries no context blocks. The server passes its Anthropic client, the DB-backed context
+   * cache and the side config from env (AI_CONTEXT_ENABLED, WEB_SEARCH_ENABLED, WEB_SEARCH_MAX_USES).
+   */
+  side?: { client: SideClient; cache: ContextCache | null; config: SideConfig } | null;
+  /**
+   * The same side calls as the server and the CLI hand them over: the settings and the shared cache. When
+   * `side` is absent the run builds it from these with its own `anthropic` client, so a caller never has
+   * to wrap the client itself. Absent: the side calls do not run.
+   */
+  sideConfig?: SideConfig | null;
+  contextCache?: ContextCache | null;
 }
 
 export interface AgentRunResult {

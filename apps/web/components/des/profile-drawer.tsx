@@ -98,6 +98,7 @@ function Summary({ how }: { how: ProfileHow }) {
         <KeyValue k="Requests">
           {plural(how.requests, "Qloo request")} · {how.saved} saved {how.saved === 1 ? "copy" : "copies"}, {how.live} fetched live
         </KeyValue>
+        <KeyValue k="Cost">{how.cost}</KeyValue>
         <KeyValue k="Name">{how.matched}</KeyValue>
         <KeyValue k="Written by">Code only. No AI model writes or reads any of this page.</KeyValue>
       </dl>

@@ -174,6 +174,21 @@ export function FailedCard({ terminal, question, className }: { terminal: Of<"fa
   );
 }
 
+/**
+ * Not started (D24): the question waited for a live slot and ended there, when its wait ran out or the
+ * server restarted. The run's own reason says which; nothing was spent.
+ */
+export function NotStartedCard({ reason, question, className }: { reason: string | null; question: string | null; className?: string }) {
+  return (
+    <EndCard state="not_started" tone="plain" icon="clock-4" iconClass="text-ink-2" heading="This question didn't start." className={className}>
+      <p className="type-lead text-ink">{reason ?? "No live slot freed up in time. Nothing was spent."}</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <AgainButton question={question} label="Ask again" />
+      </div>
+    </EndCard>
+  );
+}
+
 /** Partial: the evidence is here, the analysis ran out of time, nothing was checked. */
 export function PartialCard({ question, className }: { question: string | null; className?: string }) {
   return (
@@ -239,6 +254,8 @@ export interface StateCardProps {
   question: string | null;
   /** Numbers or charts already arrived: a failure shows as the compact line. */
   compact?: boolean;
+  /** The run ended in the queue before any work (endedInQueue): a failure shows as not started. */
+  unstarted?: boolean;
   className?: string;
 }
 
@@ -246,11 +263,12 @@ export interface StateCardProps {
  * The end-state card of a terminal: stopped, failed, partial or refused. A pick (needs_input) is the
  * which-one card, not this one; it renders nothing here.
  */
-export function StateCard({ terminal, question, compact = false, className }: StateCardProps) {
+export function StateCard({ terminal, question, compact = false, unstarted = false, className }: StateCardProps) {
   switch (terminal.kind) {
     case "cancelled":
       return <StoppedCard question={question} className={className} />;
     case "failed":
+      if (unstarted) return <NotStartedCard reason={terminal.reason} question={question} className={className} />;
       return compact ? <FailedInline question={question} /> : <FailedCard terminal={terminal} question={question} className={className} />;
     case "incomplete":
       return <PartialCard question={question} className={className} />;

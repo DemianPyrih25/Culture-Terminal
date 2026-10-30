@@ -1,5 +1,5 @@
 {
-  "$comment": "Curated showcases (PLAN §9, SPEC §9): tile text, desk, judge resonance, the intent CLERK is expected to produce, and why each lands. Names only (D29): every entity re-resolves exactly on the prod key before it is pinned, and the pins live in the database (showcase_pins), never here. expected.mentions lists the named entities CLERK should extract; extra_pins lists further entities the showcase run is expected to need, pinned the same way. Desks use the contracts Pillar values. trust.expected holds only the safety outcome: a refused question still gets a job (clerk.md), but which job is not part of that showcase.",
+  "$comment": "Curated showcases (PLAN §9, SPEC §9): tile text, desk, judge resonance, the intent CLERK is expected to produce, and why each lands (S8 to S13: what each tests, never a presumed result). Names only (D29): every entity re-resolves exactly on the prod key before it is pinned, and the pins live in the database (showcase_pins), never here. expected.mentions lists the named entities CLERK should extract; extra_pins lists further entities the showcase run is expected to need, pinned the same way. expected.candidates lists only the areas and markets the question itself names (the obvious candidates CLERK adds are model judgement, so they are not fixed here); expected.geo carries target_metro for taste_twins and cities for city_compare. Desks use the contracts Pillar values. trust.expected holds only the safety outcome: a refused question still gets a job (clerk.md), but which job is not part of that showcase.",
   "showcases": [
     {
       "code": "S1",
@@ -12,6 +12,7 @@
         "mentions": [{ "text": "Liquid Death", "entity_type": "brand", "role": "primary", "public_figure": false }],
         "geo": { "metro": null, "area": null },
         "concepts": [],
+        "candidates": { "named_areas": [], "named_markets": [] },
         "safety": { "allowed": true, "category": null }
       },
       "extra_pins": [
@@ -34,6 +35,7 @@
         ],
         "geo": { "metro": null, "area": null },
         "concepts": [],
+        "candidates": { "named_areas": [], "named_markets": [] },
         "safety": { "allowed": true, "category": null }
       },
       "extra_pins": [],
@@ -50,6 +52,7 @@
         "mentions": [],
         "geo": { "metro": "nashville", "area": "East Nashville" },
         "concepts": [],
+        "candidates": { "named_areas": [], "named_markets": [] },
         "safety": { "allowed": true, "category": null }
       },
       "extra_pins": [],
@@ -66,6 +69,7 @@
         "mentions": [],
         "geo": { "metro": "austin", "area": null },
         "concepts": ["natural-wine bar", "vinyl listening bar"],
+        "candidates": { "named_areas": [], "named_markets": [] },
         "safety": { "allowed": true, "category": null }
       },
       "extra_pins": [],
@@ -82,6 +86,7 @@
         "mentions": [{ "text": "Zach Bryan", "entity_type": "artist", "role": "primary", "public_figure": false }],
         "geo": { "metro": null, "area": null },
         "concepts": [],
+        "candidates": { "named_areas": [], "named_markets": [] },
         "safety": { "allowed": true, "category": null }
       },
       "extra_pins": [],
@@ -98,6 +103,7 @@
         "mentions": [{ "text": "Nate Bargatze", "entity_type": "person", "role": "primary", "public_figure": true }],
         "geo": { "metro": null, "area": null },
         "concepts": [],
+        "candidates": { "named_areas": [], "named_markets": [] },
         "safety": { "allowed": true, "category": null }
       },
       "extra_pins": [
@@ -119,10 +125,113 @@
         "mentions": [{ "text": "Trader Joe's", "entity_type": "brand", "role": "primary", "public_figure": false }],
         "geo": { "metro": null, "area": null },
         "concepts": [],
+        "candidates": { "named_areas": [], "named_markets": [] },
         "safety": { "allowed": true, "category": null }
       },
       "extra_pins": [],
       "why": "The cultural neighbourhood across domains, demographic indices and under-the-radar picks."
+    },
+    {
+      "code": "S8",
+      "slug": "east-nashville-cafe-twin",
+      "desk": "location",
+      "judge": "Operators",
+      "question": "My café thrives in East Nashville. Where is its twin in Austin?",
+      "expected": {
+        "job": "taste_twins",
+        "mentions": [],
+        "geo": { "metro": "nashville", "area": "East Nashville", "target_metro": "austin" },
+        "concepts": ["café"],
+        "candidates": { "named_areas": [], "named_markets": [] },
+        "safety": { "allowed": true, "category": null }
+      },
+      "extra_pins": [],
+      "why": "Tests Taste Twins: which Austin areas, among those checked, share East Nashville's venue-goer taste, what each twin shares and lacks, and the mapped cafés in each."
+    },
+    {
+      "code": "S9",
+      "slug": "hot-sauce-launch",
+      "desk": "investment",
+      "judge": "Investors",
+      "question": "We're a small premium hot-sauce brand. Which partners, podcasts and markets fit first?",
+      "expected": {
+        "job": "launch_test",
+        "mentions": [],
+        "geo": { "metro": null, "area": null },
+        "concepts": ["premium hot sauce"],
+        "candidates": { "named_areas": [], "named_markets": [] },
+        "safety": { "allowed": true, "category": null }
+      },
+      "extra_pins": [],
+      "why": "Tests a launch concept with no tag of its own: the answer reads its broader category and says so first, places the expected analogs against the category with no keep or veto, and reads markets and podcasts from those analogs, naming what it could not measure."
+    },
+    {
+      "code": "S10",
+      "slug": "liquid-death-collab",
+      "desk": "marketing",
+      "judge": "Brand leads",
+      "question": "Which brands would make a credible collaboration with Liquid Death?",
+      "expected": {
+        "job": "brand_collab",
+        "mentions": [{ "text": "Liquid Death", "entity_type": "brand", "role": "primary", "public_figure": false }],
+        "geo": { "metro": null, "area": null },
+        "concepts": [],
+        "candidates": { "named_areas": [], "named_markets": [] },
+        "safety": { "allowed": true, "category": null }
+      },
+      "extra_pins": [],
+      "why": "Tests cross-category partners scored on one scale, what each pair's audiences share and what each side brings."
+    },
+    {
+      "code": "S11",
+      "slug": "olipop-creators",
+      "desk": "marketing",
+      "judge": "Cedric the Entertainer, Abrams",
+      "question": "Which creators and podcasts fit Olipop's audience?",
+      "expected": {
+        "job": "creator_fit",
+        "mentions": [{ "text": "Olipop", "entity_type": "brand", "role": "primary", "public_figure": false }],
+        "geo": { "metro": null, "area": null },
+        "concepts": [],
+        "candidates": { "named_areas": [], "named_markets": [] },
+        "safety": { "allowed": true, "category": null }
+      },
+      "extra_pins": [],
+      "why": "Tests creator ranking within each kind, artists and podcasts on separate scales, with under-the-radar picks flagged only where the data meets that rule."
+    },
+    {
+      "code": "S12",
+      "slug": "wine-bar-three-cities",
+      "desk": "location",
+      "judge": "Operators",
+      "question": "Austin vs Nashville vs Denver for a natural-wine bar: where does its audience run deepest?",
+      "expected": {
+        "job": "city_compare",
+        "mentions": [],
+        "geo": { "metro": "austin", "area": null, "cities": ["austin", "nashville", "denver"] },
+        "concepts": ["natural-wine bar"],
+        "candidates": { "named_areas": [], "named_markets": [] },
+        "safety": { "allowed": true, "category": null }
+      },
+      "extra_pins": [],
+      "why": "Tests city fingerprints side by side against the other map cities, the concept's standing and lift inside each city, and its mapped competitors."
+    },
+    {
+      "code": "S13",
+      "slug": "brooklyn-wine-bar",
+      "desk": "location",
+      "judge": "Boehly",
+      "question": "Where in Brooklyn should a natural-wine bar open?",
+      "expected": {
+        "job": "site_selection",
+        "mentions": [],
+        "geo": { "metro": "nyc", "area": "Brooklyn" },
+        "concepts": ["natural-wine bar"],
+        "candidates": { "named_areas": [], "named_markets": [] },
+        "safety": { "allowed": true, "category": null }
+      },
+      "extra_pins": [],
+      "why": "Tests the New York map: raw popularity against lift, where the concept is already popular beside its hidden pockets, mapped competitors and residents' figures."
     }
   ],
   "chain": {

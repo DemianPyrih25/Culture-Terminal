@@ -1,4 +1,4 @@
-import { CONFIDENCE_PENALTY, Confidence, ConfidenceRule } from "@ct/contracts";
+import { CONFIDENCE_CAP, CONFIDENCE_PENALTY, Confidence, ConfidenceRule } from "@ct/contracts";
 import { describe, expect, it } from "vitest";
 import { CONFIDENCE_RULE_LABEL, computeConfidence, type ConfidenceInput } from "../src/confidence";
 
@@ -14,7 +14,14 @@ const ONE: Readonly<Record<ConfidenceRule, ConfidenceInput>> = {
   insufficient_evidence: { insufficientEvidence: true },
   read_as_nearest_job: { readAsNearestJob: true },
   concept_partly_tagged: { conceptPartlyTagged: true },
+  signal_mixed: { signal: "mixed" },
+  signal_weak: { signal: "weak" },
+  thin_sample: { thinSample: true },
+  category_level: { categoryLevel: true },
 };
+
+const PENALTY_RULES = ConfidenceRule.options.filter((rule) => CONFIDENCE_CAP[rule] === undefined);
+const CAP_RULES = ConfidenceRule.options.filter((rule) => CONFIDENCE_CAP[rule] !== undefined);
 
 describe("computeConfidence", () => {
   it("starts at 100 HIGH with an empty breakdown", () => {
@@ -23,7 +30,7 @@ describe("computeConfidence", () => {
     expect(Confidence.parse(c)).toEqual(c);
   });
 
-  it.each(ConfidenceRule.options)("subtracts the %s penalty with its label", (rule) => {
+  it.each(PENALTY_RULES)("subtracts the %s penalty with its label", (rule) => {
     const c = computeConfidence(ONE[rule]);
     expect(c.score).toBe(100 - CONFIDENCE_PENALTY[rule]);
     expect(c.breakdown).toEqual([
@@ -51,7 +58,43 @@ describe("computeConfidence", () => {
     const c = computeConfidence({ conceptPartlyTagged: true });
     expect(c).toMatchObject({ score: 70, band: "MED" });
     expect(c.breakdown).toEqual([
-      { rule: "concept_partly_tagged", label: CONFIDENCE_RULE_LABEL.concept_partly_tagged, count: 1, points: -30 },
+      { rule: "concept_partly_tagged", label: CONFIDENCE_RULE_LABEL.concept_partly_tagged, count: 1, points: -30, cap: 70 },
+    ]);
+  });
+
+  it.each(CAP_RULES)("caps the score at the %s ceiling on its own (R1)", (rule) => {
+    const cap = CONFIDENCE_CAP[rule] as number;
+    const c = computeConfidence(ONE[rule]);
+    expect(c.score).toBe(cap);
+    expect(c.breakdown).toEqual([{ rule, label: CONFIDENCE_RULE_LABEL[rule], count: 1, points: cap - 100, cap }]);
+    expect(Confidence.parse(c)).toEqual(c);
+  });
+
+  it("never reads HIGH beside a mixed signal, a weak signal or a thin sample (R1)", () => {
+    expect(computeConfidence({ signal: "mixed" }).band).toBe("MED");
+    expect(computeConfidence({ signal: "weak" }).band).toBe("LOW");
+    expect(computeConfidence({ thinSample: true }).band).toBe("MED");
+    expect(computeConfidence({ categoryLevel: true }).band).toBe("MED");
+    expect(computeConfidence({ signal: "strong" })).toEqual({ score: 100, band: "HIGH", breakdown: [] });
+    expect(computeConfidence({ signal: "insufficient_evidence" }).breakdown).toEqual([]);
+  });
+
+  it("takes the lowest fired cap; only the binding cap line carries points", () => {
+    const c = computeConfidence({ signal: "mixed", categoryLevel: true, thinSample: true });
+    expect(c.score).toBe(60);
+    expect(c.breakdown.map((l) => [l.rule, l.points, l.cap])).toEqual([
+      ["signal_mixed", 0, 70],
+      ["thin_sample", 0, 70],
+      ["category_level", -40, 60],
+    ]);
+  });
+
+  it("gives a cap no points when penalties already sit below it", () => {
+    const c = computeConfidence({ signal: "mixed", droppedEntities: 3 });
+    expect(c.score).toBe(55);
+    expect(c.breakdown.map((l) => [l.rule, l.points])).toEqual([
+      ["dropped_entity", -45],
+      ["signal_mixed", 0],
     ]);
   });
 
@@ -83,8 +126,8 @@ describe("computeConfidence", () => {
   });
 
   it("lists breakdown lines in ConfidenceRule order", () => {
-    const all = computeConfidence(Object.assign({}, ...Object.values(ONE)) as ConfidenceInput);
-    expect(all.breakdown.map((l) => l.rule)).toEqual(ConfidenceRule.options);
+    const all = computeConfidence(Object.assign({}, ...Object.values(ONE), { signal: "mixed" }) as ConfidenceInput);
+    expect(all.breakdown.map((l) => l.rule)).toEqual(ConfidenceRule.options.filter((r) => r !== "signal_weak"));
     expect(all.score).toBe(Math.max(0, 100 - Object.values(CONFIDENCE_PENALTY).reduce((a, b) => a + b, 0)));
   });
 

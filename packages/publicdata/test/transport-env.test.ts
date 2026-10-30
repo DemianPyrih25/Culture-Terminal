@@ -87,21 +87,21 @@ describe("live transport", () => {
 describe("environment", () => {
   const store = createMemoryPublicStore();
 
-  it("QLOO_MOCK=1 selects the mock transport with both sources configured", () => {
+  it("QLOO_MOCK=1 selects the mock transport with every source configured", () => {
     const options = publicDataOptionsFromEnv({ QLOO_MOCK: "1", QLOO_TAG: "agent-x" } as NodeJS.ProcessEnv, { store });
     expect(options).toMatchObject({ env: "mock", tag: "agent-x", secUserAgent: null });
     const client = createPublicDataClient(options);
-    expect(client.configured).toEqual({ sec: true, census: true });
+    expect(client.configured).toEqual({ sec: true, census: true, osm: true });
   });
 
   it("live: SEC needs SEC_USER_AGENT and Census needs CENSUS_API_KEY; unset leaves them unconfigured", () => {
     const bare = createPublicDataClient(publicDataOptionsFromEnv({} as NodeJS.ProcessEnv, { store }));
     expect(bare.env).toBe("dev");
-    expect(bare.configured).toEqual({ sec: false, census: false });
+    expect(bare.configured).toEqual({ sec: false, census: false, osm: false });
     const full = publicDataOptionsFromEnv({ SEC_USER_AGENT: ` ${UA} `, CENSUS_API_KEY: FAKE_KEY, NODE_ENV: "production" } as NodeJS.ProcessEnv, { store });
     expect(full).toMatchObject({ env: "prod", secUserAgent: UA, tag: "dev" });
     expect(JSON.stringify(full)).not.toContain(FAKE_KEY);
-    expect(createPublicDataClient(full).configured).toEqual({ sec: true, census: true });
+    expect(createPublicDataClient(full).configured).toEqual({ sec: true, census: true, osm: false });
     expect(() => publicDataOptionsFromEnv({ SEC_USER_AGENT: `Culture Terminal ${String.fromCharCode(233)}` } as NodeJS.ProcessEnv, { store })).toThrow(/printable ASCII/);
     expect(() => publicDataOptionsFromEnv({ QLOO_MOCK: "yes" } as NodeJS.ProcessEnv, { store })).toThrow(/QLOO_MOCK/);
   });

@@ -25,6 +25,14 @@ test("Home fits 390 px, with the menu sheet", async ({ page }, testInfo) => {
   await expect(sheet).toBeHidden();
 });
 
+for (const path of ["/following", "/screener", "/method"] as const) {
+  test(`${path} fits 390 px`, async ({ page }) => {
+    await open(page, path);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    await expectNoSideScroll(page);
+  });
+}
+
 test("an answer stacks at 390 px, and its menu opens How we know", async ({ page }, testInfo) => {
   await open(page, ANSWER_SAMPLE);
   await expectAnswer(page);

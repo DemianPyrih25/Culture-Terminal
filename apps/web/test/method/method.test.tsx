@@ -5,11 +5,12 @@
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { CONFIDENCE_PENALTY, ConfidenceRule, GHOST_HONESTY_LINE, Job, ValidationRule } from "@ct/contracts";
+import { CONFIDENCE_CAP, CONFIDENCE_PENALTY, ConfidenceRule, GHOST_HONESTY_LINE, Job, ValidationRule } from "@ct/contracts";
 import { CONFIDENCE_RULE_LABEL, FORMULA_IDS, FORMULAS, MIN_BUSY_AREA_VENUES, MIN_SUPPLY_VENUES, THIN_SUPPLY_LABEL } from "@ct/quant";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { decode } from "../figures/markup";
+import { convictionRuleLabel } from "../../lib/brief/format";
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", async (importOriginal) => ({
@@ -68,16 +69,19 @@ const SUMMARY = {
 };
 
 describe("the /method page", () => {
-  it("renders in the new shell with an index of every section, How it works marked current", () => {
+  it("renders in the new shell with an index of every section, How it works marked current", async () => {
     expect(MethodPageModule.dynamic).toBe("force-dynamic");
     expect(MethodPageModule.metadata.title).toBe("Method · Culture Terminal");
-    const html = renderToStaticMarkup(<MethodPage />);
+    // Mock Qloo: the cost card states plan figures only and never reads the database.
+    vi.stubEnv("QLOO_MOCK", "1");
+    const html = renderToStaticMarkup(await MethodPage());
+    vi.unstubAllEnvs();
     expect(html).toMatch(/<h1[^>]*>Every formula and rule<\/h1>/);
     const nav = html.match(/<a[^>]*data-nav="how"[^>]*>/)?.[0] ?? "";
     expect(nav).toContain('href="/how-it-works"');
     expect(nav).toContain('aria-current="page"');
     expect(html).not.toContain('href="/trust"');
-    for (const id of [...METHOD_SECTION_ORDER, ...RULES_INDEX.map((r) => r.id)]) {
+    for (const id of [...METHOD_SECTION_ORDER, ...RULES_INDEX.map((r) => r.id), "coverage", "costs"]) {
       expect(html).toContain(`data-section="${id}"`);
       expect(html).toContain(`href="#${id}"`);
     }
@@ -156,9 +160,16 @@ describe("the /method page", () => {
     expect(rules.V10.text).toContain(THIN_SUPPLY_LABEL);
     const conviction = decode(section(html, "conviction"));
     for (const rule of ConfidenceRule.options) {
-      expect(conviction).toContain(`data-penalty="${rule}"`);
-      expect(conviction).toContain(CONFIDENCE_RULE_LABEL[rule]);
-      expect(conviction).toContain(`−${CONFIDENCE_PENALTY[rule]}`);
+      const cap = CONFIDENCE_CAP[rule];
+      // Quant's hover label, or the brief's own words while a rule has no quant label yet.
+      expect(conviction).toContain(decode(CONFIDENCE_RULE_LABEL[rule] ?? convictionRuleLabel(rule, 1)));
+      // R1: a cap rule that subtracts nothing is listed under Caps with its ceiling, not as a "−0" penalty.
+      if (cap !== undefined) expect(conviction).toContain(`data-cap="${rule}"`);
+      if (cap !== undefined) expect(conviction).toContain(`at most ${cap}`);
+      if (CONFIDENCE_PENALTY[rule] > 0 || cap === undefined) {
+        expect(conviction).toContain(`data-penalty="${rule}"`);
+        expect(conviction).toContain(`−${CONFIDENCE_PENALTY[rule]}`);
+      }
     }
     expect(conviction).toMatch(/High<\/span> <span[^>]*>75–100/);
     expect(conviction).toMatch(/Medium<\/span> <span[^>]*>50–74/);
@@ -228,5 +239,56 @@ describe("the evaluation section", () => {
     expect(formatEvalValue(3.5, "number")).toBe("3.5");
     expect(formatEvalValue(0.18, "usd")).toBe("$0.18");
     expect(formatEvalValue(null, "rate")).toBe("–");
+  });
+});
+
+describe("Part 11 on /method", () => {
+  const html = decode(view());
+
+  it("adds the AI and web context and the OpenStreetMap sections, in order before the formulas", () => {
+    expect(METHOD_SECTION_ORDER.indexOf("context")).toBeGreaterThan(METHOD_SECTION_ORDER.indexOf("conviction"));
+    expect(METHOD_SECTION_ORDER.indexOf("supply")).toBeLessThan(METHOD_SECTION_ORDER.indexOf("formulas"));
+    const context = section(html, "context");
+    expect(context).toContain("What AI knows (not verified)");
+    expect(context).toContain("It may state no number");
+    expect(context).toContain("Page text is untrusted data");
+    const supply = section(html, "supply");
+    expect(supply).toContain("Each count is a floor, not a census");
+    expect(supply).toContain("about the city's level");
+    expect(supply).toContain("© OpenStreetMap contributors");
+  });
+
+  it("lists every confidence cap with its ceiling", () => {
+    const conviction = section(html, "conviction");
+    for (const [rule, cap] of Object.entries(CONFIDENCE_CAP)) {
+      expect(conviction).toContain(`data-cap="${rule}"`);
+      expect(conviction).toContain(`at most ${cap}`);
+    }
+    expect(conviction).toContain("Medium: the signal is mixed");
+  });
+
+  it("has copy for V12 and V13, and V3 counts spelled-out numbers", () => {
+    const rules = checkerRules(methodFacts());
+    expect(rules.V12.title).toBe("Concepts and areas read honestly");
+    expect(rules.V13.text).toContain("about level");
+    expect(rules.V3.text).toContain("spelled out");
+    const checker = section(html, "checker");
+    expect(checker).toContain(rules.V12.title);
+    expect(checker).toContain(rules.V13.title);
+  });
+
+  it("groups the OpenStreetMap formulas once the registry has them", () => {
+    const osm = FORMULA_GROUPS.find((g) => g.id === "osm");
+    expect(osm?.skill).toBe("local_supply");
+    for (const id of osm?.formulas ?? []) expect((FORMULA_IDS as readonly string[]).includes(id)).toBe(true);
+  });
+});
+
+describe("Part 11 safe-use and data rows", () => {
+  it("states that entity ids stay on the server, web text is untrusted, AI text has no numbers, and the OSM licence", async () => {
+    const { DATA_HANDLING, SAFE_USE } = await import("../../content/trust");
+    const ids = SAFE_USE.map((r) => r.id);
+    expect(ids).toEqual(expect.arrayContaining(["ids-server-only", "web-untrusted", "ai-no-numbers"]));
+    expect(DATA_HANDLING.find((d) => d.term === "OpenStreetMap")?.text).toContain("Open Database License (ODbL) 1.0");
   });
 });

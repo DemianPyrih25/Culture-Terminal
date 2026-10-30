@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { DEFAULT_RUN_LIMITS as DEFAULTS } from "./values/limits";
+
+export * from "./values/limits";
 
 /** Per-run limits (D24, PLAN §4.2). Carried on `run.created` so the budget meter and replays show them. */
 export const RunLimits = z.object({
@@ -17,28 +20,16 @@ export const RunLimits = z.object({
   usdHard: z.number().positive(),
   /** At most this many model responses per run, including one nudge (D4). */
   modelResponses: z.int().positive(),
+  /**
+   * Follow-up calls held for a concept test (Part 9 open issue, D24): while the question has a concept part
+   * with no exact tag and no concept-testing follow-up (find_tags, concept_vector, geo_lift) has run, other
+   * follow-ups may not take the follow-up calls left below this. `run.created` events stored before Part 11
+   * read as 3.
+   */
+  conceptReserveCalls: z.int().nonnegative().default(DEFAULTS.conceptReserveCalls),
 });
 export type RunLimits = z.infer<typeof RunLimits>;
 
-export const DEFAULT_RUN_LIMITS: RunLimits = {
-  qlooCalls: 40,
-  qlooWarnAt: 30,
-  followupCalls: 8,
-  followupMs: 40_000,
-  softMs: 120_000,
-  hardMs: 180_000,
-  usdNudge: 0.4,
-  usdHard: 0.6,
-  modelResponses: 5,
-};
-
-/** Tool results sent to the model stay within this many tokens (PLAN §4.3). */
-export const MODEL_DIGEST_MAX_TOKENS = 1500;
-/** Rows of data a digest may show the model. */
-export const MODEL_DIGEST_MAX_ROWS = 12;
-/** Questions are capped and wrapped in <user_question> (§4.6). */
-export const QUESTION_MAX_CHARS = 400;
-/** Qloo descriptions are cut to this length before the model sees them (§4.6). */
-export const QLOO_DESCRIPTION_MAX_CHARS = 160;
-/** Case summary handed to a child run launched from next_moves (§7.3). */
-export const CASE_SUMMARY_MAX_TOKENS = 600;
+/** DEFAULT_RUN_LIMITS (./values/limits.ts) always satisfies the schema. */
+const _defaultsFit: RunLimits = DEFAULTS;
+void _defaultsFit;

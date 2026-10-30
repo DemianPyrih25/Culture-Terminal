@@ -1,5 +1,6 @@
 import {
   DEFAULT_RUN_LIMITS,
+  EMPTY_CANDIDATES,
   FIXED_DISCLAIMERS,
   JOB_PILLAR,
   PUBLIC_ENDPOINTS,
@@ -588,6 +589,7 @@ function intentOf(job: Job, mentions: Intent["mentions"], geo: Partial<Intent["g
     read_as: { nearest: false, not_covered: [] },
     assumptions: ["US geography"],
     mnemonic,
+    candidates: EMPTY_CANDIDATES,
   };
 }
 

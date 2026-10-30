@@ -9,15 +9,15 @@ import {
   stampEvent,
   unstampEvent,
 } from "../src/index";
-import { RUN_ID, fullRunInputs, needsInputInput, stampAll, ts } from "./fixtures";
+import { RUN_ID, fullRunInputs, needsInputInput, queuedInput, stampAll, ts } from "./fixtures";
 
-const allInputs = [...fullRunInputs, needsInputInput];
+const allInputs = [...fullRunInputs, needsInputInput, queuedInput];
 
 describe("RunEvent", () => {
   it("covers exactly the protocol's event types", () => {
     const unionTypes = RunEvent.options.map((o) => o.shape.type.value).sort();
     expect(unionTypes).toEqual([...RUN_EVENT_TYPES].sort());
-    expect(new Set(RUN_EVENT_TYPES).size).toBe(23);
+    expect(new Set(RUN_EVENT_TYPES).size).toBe(26);
   });
 
   it("has a fixture for every event type", () => {

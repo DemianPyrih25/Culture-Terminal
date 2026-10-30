@@ -2,6 +2,7 @@ import { z } from "zod";
 import { DatasetKind } from "./datasets";
 import {
   CacheStatus,
+  CandidateSource,
   EntityType,
   Flag,
   IsoDateTime,
@@ -30,6 +31,7 @@ import { RunLimits } from "./limits";
 import { PublicEndpoint } from "./public-data";
 import { QlooPath } from "./qloo-types";
 import {
+  AiContextBlock,
   GhostDiff,
   NumbersTraced,
   Report,
@@ -38,7 +40,15 @@ import {
   SubmitPlanInputShape,
   TokenUsage,
   ValidationIssue,
+  WebContextBlock,
 } from "./report";
+import {
+  encodeSseEvent as encodeSseEventValue,
+  stampEvent as stampEventValue,
+  unstampEvent as unstampEventValue,
+} from "./values/events";
+
+export * from "./values/events";
 
 /**
  * The SSE event protocol (PLAN §4.7, SPEC §4.8). Every event is `{seq, ts, runId, type, …payload}`:
@@ -80,6 +90,17 @@ export const ResolvedMention = z
     ),
     /** gate: the resolution gate before the ANALYST; tool: a resolve_entities call. */
     source: z.enum(["gate", "tool"]),
+    /**
+     * R3: user_named for a name the question gave, obvious for a name CLERK expected a specialist to check
+     * (resolved exactly or dropped quietly). Absent in runs stored before Part 11 (read as user_named for
+     * gate mentions).
+     */
+    candidate: CandidateSource.optional(),
+    /**
+     * The official name a known alias resolved to (config/brand_aliases.json, D20 alias exception), shown as
+     * "Read 'KFC' as 'Kentucky Fried Chicken'". Null or absent when no alias applied.
+     */
+    alias: z.string().nullable().optional(),
   })
   .refine((m) => (m.ref !== null) === (m.match === "exact"), { message: "only an exact match carries a ref" });
 export type ResolvedMention = z.infer<typeof ResolvedMention>;
@@ -107,6 +128,8 @@ export const ErrorCode = z.enum([
   "internal",
   "public_unavailable",
   "public_rate_limited",
+  /** The run waited RUN_QUEUE_WAIT_S for a slot and ended unrun (queueTimeoutReason). */
+  "queue_timeout",
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
@@ -128,6 +151,19 @@ const E = {
     parentRunId: z.string().nullable(),
     /** The ANALYST model for this run; the economy model in economy mode. */
     model: z.string(),
+  }),
+  /**
+   * The run waits for a slot in the global queue (D24). Emitted after run.created and again whenever its
+   * place changes; the first working event ends the wait. No estimate is invented: waitSMax is the
+   * longest the run still waits before it ends with queue_timeout, not a forecast of when it starts.
+   */
+  runQueued: event("run.queued", {
+    /** 1 = next to start. */
+    position: z.int().min(1),
+    /** Runs waiting ahead of this one (position − 1). */
+    ahead: z.int().nonnegative(),
+    /** Seconds left before the run gives up waiting. */
+    waitSMax: z.int().nonnegative(),
   }),
   clerk: event("clerk", { intent: StoredIntent, ms: z.number().nonnegative() }),
   resolve: event("resolve", { entities: z.array(ResolvedMention) }),
@@ -248,6 +284,13 @@ const E = {
   }),
   reportFinal: event("report.final", { report: Report }),
   ghost: event("ghost", { answer: StoredGhostAnswer, diff: GhostDiff }),
+  /**
+   * "What AI knows (not verified)" settled (R4): emitted once per run when the block settles, so the live
+   * page fills it in early. `usd` is the side call's spend (0 on a cache hit), `ms` its wall time.
+   */
+  contextAi: event("context.ai", { block: AiContextBlock, usd: z.number().nonnegative(), ms: z.number().nonnegative() }),
+  /** "From the web" settled (R5): emitted once per run when the block settles. */
+  contextWeb: event("context.web", { block: WebContextBlock, usd: z.number().nonnegative(), ms: z.number().nonnegative() }),
   /** Running totals for the run so far; each usage event replaces the last. */
   usage: event("usage", {
     llmUsd: z.number().nonnegative(),
@@ -265,6 +308,7 @@ const E = {
 
 export const RunEvent = z.discriminatedUnion("type", [
   E.runCreated.full,
+  E.runQueued.full,
   E.clerk.full,
   E.resolve.full,
   E.needsInput.full,
@@ -284,6 +328,8 @@ export const RunEvent = z.discriminatedUnion("type", [
   E.validation.full,
   E.reportFinal.full,
   E.ghost.full,
+  E.contextAi.full,
+  E.contextWeb.full,
   E.usage.full,
   E.error.full,
   E.runEnd.full,
@@ -293,6 +339,7 @@ export type RunEvent = z.infer<typeof RunEvent>;
 /** An event before the run manager stamps seq, ts and runId. */
 export const RunEventInput = z.discriminatedUnion("type", [
   E.runCreated.input,
+  E.runQueued.input,
   E.clerk.input,
   E.resolve.input,
   E.needsInput.input,
@@ -312,6 +359,8 @@ export const RunEventInput = z.discriminatedUnion("type", [
   E.validation.input,
   E.reportFinal.input,
   E.ghost.input,
+  E.contextAi.input,
+  E.contextWeb.input,
   E.usage.input,
   E.error.input,
   E.runEnd.input,
@@ -324,6 +373,7 @@ export type EventInputOf<T extends RunEventType> = Extract<EventInput, { type: T
 
 export const RUN_EVENT_TYPES = [
   "run.created",
+  "run.queued",
   "clerk",
   "resolve",
   "needs_input",
@@ -343,6 +393,8 @@ export const RUN_EVENT_TYPES = [
   "validation",
   "report.final",
   "ghost",
+  "context.ai",
+  "context.web",
   "usage",
   "error",
   "run.end",
@@ -367,13 +419,13 @@ export function safeParseRunEvent(raw: unknown): ReturnType<typeof RunEvent.safe
 
 /** Adds the envelope to an event input. */
 export function stampEvent(input: EventInput, envelope: EventEnvelope): RunEvent {
-  return { ...input, ...envelope } as RunEvent;
+  return stampEventValue(input, envelope) as RunEvent;
 }
 
 /** Splits an event into its envelope and input, e.g. to store `type` and the payload in run_events. */
 export function unstampEvent(event: RunEvent): { envelope: EventEnvelope; input: EventInput } {
-  const { seq, ts, runId, ...input } = event;
-  return { envelope: { seq, ts, runId }, input: input as EventInput };
+  const { envelope, input } = unstampEventValue(event);
+  return { envelope, input: input as EventInput };
 }
 
 /**
@@ -381,5 +433,5 @@ export function unstampEvent(event: RunEvent): { envelope: EventEnvelope; input:
  * EventSource.onmessage, so clients read `type` from the JSON instead.
  */
 export function encodeSseEvent(event: RunEvent): string {
-  return `id: ${event.seq}\ndata: ${JSON.stringify(event)}\n\n`;
+  return encodeSseEventValue(event);
 }

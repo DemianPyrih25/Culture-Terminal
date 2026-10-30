@@ -189,12 +189,15 @@ export interface PreviewDeps {
 export interface PreviewServiceOptions {
   /** CLERK calls this process makes for previews per rolling hour (default 120, PREVIEW_HOURLY_CAP). */
   hourlyCap?: number;
-  /** The daily LLM breaker in USD (default 1.40). */
+  /** The daily LLM breaker in USD (default 8, D24). */
   llmDailyUsdCap?: number;
   /** False (QLOO_DISABLED=1): no lookups, and no data requests in the estimate. Default true. */
   qlooEnabled?: boolean;
-  /** Fresh Qloo calls per day, for quotaShare (default 1,900). */
-  dailyFreshCap?: number;
+  /**
+   * Fresh Qloo calls per day, for quotaShare (default 1,900), or a reader of today's cap (the client's,
+   * recomputed each UTC day during judging, D24).
+   */
+  dailyFreshCap?: number | (() => number);
   ttlMs?: number;
   maxEntries?: number;
   now?: () => number;
@@ -402,7 +405,7 @@ export class PreviewService {
   private readonly hourlyCap: number;
   private readonly llmDailyUsdCap: number;
   private readonly qlooEnabled: boolean;
-  private readonly dailyFreshCap: number;
+  private readonly dailyFreshCap: () => number;
   private readonly ttlMs: number;
   private readonly maxEntries: number;
   private readonly now: () => number;
@@ -420,9 +423,10 @@ export class PreviewService {
   constructor(deps: PreviewDeps, options: PreviewServiceOptions = {}) {
     this.deps = deps;
     this.hourlyCap = options.hourlyCap ?? 120;
-    this.llmDailyUsdCap = options.llmDailyUsdCap ?? 1.4;
+    this.llmDailyUsdCap = options.llmDailyUsdCap ?? 8;
     this.qlooEnabled = options.qlooEnabled ?? true;
-    this.dailyFreshCap = options.dailyFreshCap ?? 1_900;
+    const cap = options.dailyFreshCap ?? 1_900;
+    this.dailyFreshCap = typeof cap === "function" ? cap : () => cap;
     this.ttlMs = options.ttlMs ?? PREVIEW_TTL_MS;
     this.maxEntries = options.maxEntries ?? PREVIEW_MAX_ENTRIES;
     this.now = options.now ?? Date.now;
@@ -679,7 +683,8 @@ export class PreviewService {
   private estimateOf(network: number, cached: number): PreviewEstimate {
     const networkCalls = Math.min(network, DEFAULT_RUN_LIMITS.qlooCalls);
     const seconds = Math.min(roundUpTo5(ANALYST_SECONDS + networkCalls * SECONDS_PER_NETWORK_CALL), DEFAULT_RUN_LIMITS.hardMs / 1000);
-    const quotaShare = Math.round((networkCalls / this.dailyFreshCap) * 10_000) / 10_000;
+    const dailyCap = Math.max(1, this.dailyFreshCap());
+    const quotaShare = Math.round((networkCalls / dailyCap) * 10_000) / 10_000;
     return { networkCalls, cachedCalls: cached, seconds, quotaShare };
   }
 }
@@ -699,7 +704,14 @@ export function getPreviewService(): PreviewService {
       hourlyCap: previewHourlyCapFromEnv(),
       llmDailyUsdCap: llmDailyUsdCapFromEnv(),
       qlooEnabled: !qlooDisabledFromEnv(),
-      dailyFreshCap: qlooDailyFreshCapFromEnv(),
+      dailyFreshCap: () => {
+        const fallback = qlooDailyFreshCapFromEnv();
+        try {
+          return getQlooClient().dailyFreshCap?.() ?? fallback;
+        } catch {
+          return fallback;
+        }
+      },
     },
   ));
 }

@@ -10,6 +10,8 @@ import {
   ScorecardPayload,
   SlatePayload,
   SlopePayload,
+  SupplyPayload,
+  TasteMapPayload,
   TrendWindow,
   type DatasetKind,
 } from "./datasets";
@@ -17,6 +19,7 @@ import {
   Badge,
   CacheStatus,
   Comparator,
+  ConceptMatch,
   EvidenceSource,
   FindingKind,
   IsoDateTime,
@@ -30,6 +33,9 @@ import {
 } from "./enums";
 import { DatasetIdSchema, EvidenceIdSchema, FindingIdSchema, MetricIdSchema } from "./ids";
 import { QlooPath } from "./qloo-types";
+import { isPublicProvenanceRequest as isPublicSourced } from "./values/ledger";
+
+export * from "./values/ledger";
 
 /**
  * The evidence ledger (PLAN §6): E# bundles of Qloo or public-data calls, M# metrics computed from
@@ -69,17 +75,19 @@ export const QlooProvenanceRequest = z.object({
 export type QlooProvenanceRequest = z.infer<typeof QlooProvenanceRequest>;
 
 /**
- * One SEC or Census request: the concrete host and path (e.g. data.sec.gov
+ * One SEC, Census or OpenStreetMap request: the concrete host and path (e.g. data.sec.gov
  * `/api/xbrl/companyfacts/CIK0000000001.json`) and the canonical query without any API key, so the
- * request can be repeated by anyone. `reference` is the call's PublicCallMeta reference.
+ * request can be repeated by anyone. `reference` is the call's PublicCallMeta reference. An Overpass
+ * request is a read-only POST whose `body` is the Overpass QL text (tags and gazetteer coordinates only).
  */
 export const PublicProvenanceRequest = z.object({
   source: PublicSource,
-  method: z.literal("GET"),
+  method: z.enum(["GET", "POST"]),
   host: z.string().min(1),
   path: z.string().startsWith("/"),
   query: z.record(z.string(), z.string()),
   reference: z.string().min(1),
+  body: z.string().optional(),
 });
 export type PublicProvenanceRequest = z.infer<typeof PublicProvenanceRequest>;
 
@@ -87,11 +95,11 @@ export const ProvenanceRequest = z.union([QlooProvenanceRequest, PublicProvenanc
 export type ProvenanceRequest = z.infer<typeof ProvenanceRequest>;
 
 export function isPublicProvenanceRequest(r: ProvenanceRequest): r is PublicProvenanceRequest {
-  return r.source !== undefined && r.source !== "qloo";
+  return isPublicSourced(r);
 }
 
 export function isQlooProvenanceRequest(r: ProvenanceRequest): r is QlooProvenanceRequest {
-  return !isPublicProvenanceRequest(r);
+  return !isPublicSourced(r);
 }
 
 /** The source a provenance request belongs to. */
@@ -168,6 +176,22 @@ export const Metric = z
      * "FY2024, 10-K filed 2025-02-14" or "ACS 2019-2023 5-year" (CHECKER V11). Absent or null for Qloo metrics.
      */
     period: z.string().min(1).nullable().optional(),
+    /**
+     * R1: the value rests on a thin sample (THIN_SAMPLE in quant formulas.ts), so a headline resting on it
+     * is never HIGH (confidence cap thin_sample). Absent in stored runs.
+     */
+    thin: z.boolean().optional(),
+    /**
+     * R2: the weakest concept match among the concept tags the metric's call used (proxy < category <
+     * exact); absent when the call used no concept tag. A `proxy` metric is never cited (CHECKER V12a); a
+     * `category` metric never carries a winner, keep or veto (V12b).
+     */
+    conceptRead: ConceptMatch.optional(),
+    /**
+     * A difference or rank gain inside the about-level band (ABOUT_LEVEL in quant formulas.ts): it reads
+     * "about average" / "about level" and never leads a headline (CHECKER V13).
+     */
+    level: z.literal("about_level").optional(),
   })
   .refine((m) => (m.value === null) === (m.badge === "UNAVAILABLE"), {
     message: "value is null exactly when the badge is UNAVAILABLE",
@@ -212,6 +236,8 @@ export const DatasetEnvelope = z.discriminatedUnion("kind", [
   z.object({ ...envelopeShape, kind: z.literal("Momentum"), payload: MomentumPayload }),
   z.object({ ...envelopeShape, kind: z.literal("Scorecard"), payload: ScorecardPayload }),
   z.object({ ...envelopeShape, kind: z.literal("Position"), payload: PositionPayload }),
+  z.object({ ...envelopeShape, kind: z.literal("TasteMap"), payload: TasteMapPayload }),
+  z.object({ ...envelopeShape, kind: z.literal("Supply"), payload: SupplyPayload }),
 ]);
 export type DatasetEnvelope = z.infer<typeof DatasetEnvelope>;
 export type DatasetOf<K extends DatasetKind> = Extract<DatasetEnvelope, { kind: K }>;

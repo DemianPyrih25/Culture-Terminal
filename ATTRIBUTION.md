@@ -829,6 +829,23 @@ Only a fixed set of fields is requested: total population, median age, household
 
 ACS figures are estimates from a survey, with margins of error. They describe residents, not visitors or workers who live elsewhere. An area's figures are rolled up from its ZCTAs or tracts (see "Census crosswalk"): counts are summed, and medians are a population-weighted average of the units' medians, which is an approximation. Every answer names the ACS vintage it used.
 
+## OpenStreetMap (Overpass API)
+
+Map data from OpenStreetMap, © OpenStreetMap contributors, available under the Open Database License (ODbL) 1.0, via the Overpass API.
+
+| | |
+|---|---|
+| Dataset | OpenStreetMap: counts and names of places by tag (cafés, bars, shops and the other place types in `config/osm_tags.json`), inside a neighbourhood outline, around a market's centre, or inside a map city's counties |
+| Publisher | OpenStreetMap contributors, through the OpenStreetMap Foundation; read with the Overpass API (`https://overpass-api.de/api/interpreter` by default, or the instance `OSM_OVERPASS_URL` names) |
+| URL | <https://www.openstreetmap.org/copyright> and <https://wiki.openstreetmap.org/wiki/Overpass_API> |
+| Licence | [Open Database License (ODbL) 1.0](https://opendatacommons.org/licenses/odbl/1-0/). Every figure, table and map layer built from it shows "© OpenStreetMap contributors" with a link to <https://www.openstreetmap.org/copyright>. |
+| Access | The Overpass usage policy: every request declares a User-Agent naming the product and a contact (`OSM_USER_AGENT`), one request at a time and at least a second apart, a daily cap for the whole deploy (`OSM_DAILY_MAX`, default 2,000, well under the policy's 10,000), and a 30-day cache. |
+| Used in | `packages/publicdata` (the client), and the local supply tool |
+
+`config/osm_tags.json` holds tag names only (such as `amenity=cafe`), with the date and taginfo usage count that admitted each one (taginfo statistics, <https://taginfo.openstreetmap.org>), and, per map city, the Wikidata ids of its counties (Wikidata is CC0) and each county's land area from the U.S. Census Bureau 2020 Gazetteer counties file (`2020_Gaz_counties_national`, ALAND, public domain, 17 U.S.C. § 105). **No OpenStreetMap counts or places are stored in this repository**: responses are cached privately in the application's database, and test fixtures use invented places and counts.
+
+OpenStreetMap is mapped by volunteers. A count is a floor, not a census: a place nobody has mapped is not counted, and how completely an area is mapped varies. Every answer says so, and names the date of the data it read.
+
 ## Qloo
 
 Taste data comes from the [Qloo](https://qloo.com) API at runtime. **No Qloo data is stored in this repository**: no responses, scores, entity IDs or request IDs. Responses are cached privately in the application's database, and `pnpm guard` and gitleaks check every commit for leaks.

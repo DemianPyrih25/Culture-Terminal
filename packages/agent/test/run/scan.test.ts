@@ -43,6 +43,8 @@ const NO_STEP = { trigger_finding_id: null, step_id: null };
 /** The public-data steps a run without a public-data client (or a question that cannot feed them) skips. */
 const FIN_SKIP = { tool: "company_financials", reason: "needs a brand primary that maps to a US-listed company, and public data on this server" };
 const ECON_SKIP = { tool: "area_economics", reason: "needs an area of a map city in the question, and public data on this server" };
+const SUPPLY_SKIP = { tool: "local_supply", reason: "needs an area of a map city in the question, and OpenStreetMap on this server" };
+const SUPPLY_LIFT_SKIP = { tool: "local_supply", reason: "needs a concept and a map city in the question, and OpenStreetMap on this server" };
 
 /** What a chained step reads, with the given parts and nothing else. */
 const feed = (parts: Partial<ChainFeed> = {}): ChainFeed => ({ tags: [], entities: [], areas: [], ...parts });
@@ -135,11 +137,12 @@ describe("planScan", () => {
     expect(describeScanStep(plan.steps[0]!)).toBe("find_tags (TAGS) for 1 concept(s)");
     // No metro in the question: the concept heatmap has nowhere to go.
     expect(plan.chained).toEqual([]);
-    expect(plan.skipped).toEqual([{ tool: "geo_lift", reason: "needs a concept and a gazetteer metro (one of the 13 map cities) in the question" }, ECON_SKIP]);
+    expect(plan.skipped).toEqual([{ tool: "geo_lift", reason: "needs a concept and a gazetteer metro (one of the 13 map cities) in the question" }, ECON_SKIP, SUPPLY_LIFT_SKIP]);
     expect(scanOf("site_selection").skipped.map((s) => s.reason)).toEqual([
       "needs a concept in the question",
       "needs a concept and a gazetteer metro (one of the 13 map cities) in the question",
       ECON_SKIP.reason,
+      SUPPLY_LIFT_SKIP.reason,
     ]);
   });
 
@@ -196,6 +199,7 @@ describe("planScan", () => {
       expect(scanOf(job, { intent: intent(job) }).skipped).toEqual([
         { tool: "block_dna", reason: "needs a neighbourhood from the AREAS list in a gazetteer metro" },
         ECON_SKIP,
+        SUPPLY_SKIP,
       ]);
     }
   });
@@ -356,7 +360,16 @@ describe("planScan: the Part 9 jobs", () => {
         input: { source: { kind: "nbhd", ref: "riverbend", metro: "nashville" }, target_metro: "austin", target_areas: [], concept_tags: [], ...NO_STEP },
       },
       { toolCallId: "scan-2", tool: "area_economics", input: { metro: "nashville", areas: ["riverbend"], ...NO_STEP } },
+      // R6: the source area's street activity in its own city (no concept, so no place type).
+      {
+        toolCallId: "scan-4",
+        tool: "local_supply",
+        input: { metro: "nashville", areas: ["riverbend"], market: null, place_types: [], mix: false, list_places: false, ...NO_STEP },
+      },
     ]);
+    expect(describeScanStep(plan.steps[2]!)).toBe(
+      "local_supply (SUPP) in riverbend (nashville): street activity only (no OpenStreetMap tag for the concept) (OpenStreetMap, 0 Qloo calls)",
+    );
     expect(describeScanStep(plan.steps[0]!)).toBe("taste_twins (TWIN) from riverbend (nashville) into austin, checking the 8 largest areas");
     expect(describeScanStep(plan.steps[1]!)).toBe("area_economics (ECON) for riverbend (nashville; US Census, 0 Qloo calls)");
     expect(plan.skipped).toEqual([{ tool: "find_tags", reason: "runs only when the question names a concept" }]);
@@ -384,7 +397,7 @@ describe("planScan: the Part 9 jobs", () => {
     // No place tag: the twins still run, code picking the areas by size.
     expect(twins!.input(feed())).toMatchObject({ concept_tags: [] });
     // Without public data the economics steps are skipped, never run to answer UNAVAILABLE.
-    expect(plan.skipped.map((s) => s.tool)).toEqual(["area_economics", "area_economics"]);
+    expect(plan.skipped.map((s) => s.tool)).toEqual(["area_economics", "area_economics", "local_supply", "local_supply"]);
   });
 
   it("taste_twins skips without a source area or another map city", () => {
@@ -600,7 +613,7 @@ describe("planScan: the Part 9 jobs", () => {
     // A brand not on the list never gets a step that could only answer UNAVAILABLE.
     expect(scanOf("head_to_head", { primary: entity(1), publicData: true }).skipped).toContainEqual(FIN_SKIP);
     const area = intentFor({ job: "area_profile", pillar: "location", geo: { ...intentFor().geo, metro: "nashville", area: "Riverbend" } });
-    expect(scanOf("area_profile", { intent: area, geo: AREA_GEO, publicData: true }).steps.map((s) => s.tool)).toEqual(["block_dna", "area_economics"]);
+    expect(scanOf("area_profile", { intent: area, geo: AREA_GEO, publicData: true }).steps.map((s) => s.tool)).toEqual(["block_dna", "area_economics", "local_supply"]);
     const site = intentFor({
       job: "site_selection",
       pillar: "location",
@@ -624,13 +637,16 @@ describe("planScan: the Part 9 jobs", () => {
     expect(unlisted.skipped).toContainEqual(FIN_SKIP);
     expect(unlisted.flags).toEqual([]);
     const area = intentFor({ job: "area_profile", pillar: "location", geo: { ...intentFor().geo, metro: "nashville", area: "Riverbend" } });
-    const noCensus = scanOf("area_profile", { intent: area, geo: AREA_GEO, publicData: true, publicConfigured: { sec: true, census: false } });
+    const noCensus = scanOf("area_profile", { intent: area, geo: AREA_GEO, publicData: true, publicConfigured: { sec: true, census: false, osm: false } });
     expect(noCensus.steps.map((s) => s.tool)).toEqual(["block_dna"]);
-    expect(noCensus.skipped).toEqual([{ tool: "area_economics", reason: PUBLIC_NOT_CONFIGURED_REASON.census }]);
-    expect(noCensus.flags).toEqual(["CENSUS_NOT_CONFIGURED"]);
-    // Both configured: planned as before, no flag.
-    const both = scanOf("area_profile", { intent: area, geo: AREA_GEO, publicData: true, publicConfigured: { sec: true, census: true } });
-    expect(both.steps.map((s) => s.tool)).toEqual(["block_dna", "area_economics"]);
+    expect(noCensus.skipped).toEqual([
+      { tool: "area_economics", reason: PUBLIC_NOT_CONFIGURED_REASON.census },
+      { tool: "local_supply", reason: PUBLIC_NOT_CONFIGURED_REASON.osm },
+    ]);
+    expect(noCensus.flags).toEqual(["CENSUS_NOT_CONFIGURED", "OSM_NOT_CONFIGURED"]);
+    // All configured: planned as before, no flag.
+    const both = scanOf("area_profile", { intent: area, geo: AREA_GEO, publicData: true, publicConfigured: { sec: true, census: true, osm: true } });
+    expect(both.steps.map((s) => s.tool)).toEqual(["block_dna", "area_economics", "local_supply"]);
     expect(both.flags).toEqual([]);
   });
 });

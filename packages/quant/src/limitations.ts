@@ -78,6 +78,18 @@ export const FLAG_TEXT: Readonly<Record<Flag, string>> = {
   CENSUS_NOT_CONFIGURED: `${PUBLIC_NOT_CONFIGURED_REASON.census}, so no Census area figures are shown.`,
   CONCEPT_NOT_IN_DATA:
     "The exact product or concept asked about is not in the data, so it was tested at category level or not at all.",
+  EXPECTED_CANDIDATE_MISSING:
+    "Some names a specialist would expect to see had no exact match in Qloo's data, so they are not in the comparison; nothing was put in their place.",
+  CATEGORY_LEVEL_READ:
+    "The concept itself is not in Qloo's data, so this answer reads only its broader category; it gives no winner, keep or veto for the concept itself.",
+  PROXY_TAG_IGNORED:
+    "A look-alike tag that only resembles the concept was found but not used as evidence, because it would stand in for something the data does not hold.",
+  SUBJECT_NO_DATA:
+    "Qloo returned no data for the subject of the question, so there is no measured taste reading for it; no look-alike was used in its place.",
+  OSM_NOT_CONFIGURED: `${PUBLIC_NOT_CONFIGURED_REASON.osm}, so no counts of nearby places are shown.`,
+  OSM_SUPPLY_FLOOR: "OpenStreetMap is mapped by volunteers: counts are a floor, not a census.",
+  NOT_SEPARATELY_REPORTED:
+    "The brand is part of a larger listed company that does not report it separately, so no company figures are shown for it.",
 };
 
 /**
@@ -108,6 +120,13 @@ export const FLAG_SEVERITY: Readonly<Record<Flag, Severity>> = {
   SEC_NOT_CONFIGURED: "medium",
   CENSUS_NOT_CONFIGURED: "medium",
   CONCEPT_NOT_IN_DATA: "high",
+  EXPECTED_CANDIDATE_MISSING: "medium",
+  CATEGORY_LEVEL_READ: "high",
+  PROXY_TAG_IGNORED: "medium",
+  SUBJECT_NO_DATA: "high",
+  OSM_NOT_CONFIGURED: "medium",
+  OSM_SUPPLY_FLOOR: "low",
+  NOT_SEPARATELY_REPORTED: "medium",
 };
 
 /**
@@ -178,6 +197,10 @@ export const SKILL_LIMITATIONS: Readonly<Record<SkillId, readonly string[]>> = {
     "Each analog is compared with the concept's 50th result (its last, when fewer come back) inside one Qloo call; Qloo has no sales or pricing data.",
   ],
   company_financials: [COMPANY_LEVEL, "Reported figures sit beside the taste signals; neither explains the other."],
+  local_supply: [
+    "Counts come from OpenStreetMap, mapped by volunteers: they are a floor, not a census, and say nothing about sales, rents or foot traffic.",
+    "An area is compared with its city (the county or counties around it), an approximate reference.",
+  ],
   area_economics: [
     RESIDENTS_ONLY,
     "Area figures add up the Census units inside each area; medians are population-weighted averages of unit medians, so they are approximate.",

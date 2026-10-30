@@ -23,3 +23,4 @@ export * from "./env";
 export * from "./logger";
 export * from "./trim";
 export * from "./provenance";
+export * from "./redact";

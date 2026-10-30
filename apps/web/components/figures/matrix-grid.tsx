@@ -1,4 +1,5 @@
 import type { MatrixCell, MatrixPayload, MetricUnit } from "@ct/contracts";
+import { CANDIDATE_SOURCE_LABEL } from "@ct/contracts/values";
 import { FigureFrame, figureLabel, type FigureMeta } from "./figure-frame";
 import { FigureTable, type TableRow } from "./figure-table";
 import { axisCodes, cellText, formatNumber, reasonLabel, sentenceCase, type NumberStyle } from "./format";
@@ -593,7 +594,9 @@ export function matrixTableSpec(data: MatrixPayload, caption: string, style: Num
     if (row.group !== null && row.group !== (data.rows[i - 1]?.group ?? null)) {
       rows.push({ key: `section-${i}`, section: row.group });
     }
-    const name = row.key === data.targetKey ? `${row.label} (target)` : row.label;
+    // R3: a name the question gave or a specialist would check first says so ("You named", "Expected").
+    const chip = row.source ? CANDIDATE_SOURCE_LABEL[row.source] : null;
+    const name = [row.key === data.targetKey ? `${row.label} (target)` : row.label, chip].filter(Boolean).join(" · ");
     rows.push({
       key: row.key,
       cells: [
@@ -613,7 +616,10 @@ export function matrixTableSpec(data: MatrixPayload, caption: string, style: Num
   }
   return {
     caption: `${caption}: ${data.valueLabel}`,
-    columns: [{ label: data.mode === "share" ? "Row" : "Entity" }, ...data.cols.map((c) => ({ label: c.label, numeric: true }))],
+    columns: [
+      { label: data.mode === "share" ? "Row" : "Entity" },
+      ...data.cols.map((c) => ({ label: c.source && CANDIDATE_SOURCE_LABEL[c.source] ? `${c.label} · ${CANDIDATE_SOURCE_LABEL[c.source]}` : c.label, numeric: true })),
+    ],
     rows,
   };
 }

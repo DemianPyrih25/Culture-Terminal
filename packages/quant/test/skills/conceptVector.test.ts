@@ -161,3 +161,41 @@ describe("concept_vector with a planted veto", () => {
     expect(await conceptVectorSkill.estimateCalls(run.input, fakeProbe(() => false), run.registry)).toBe(2);
   });
 });
+
+describe("concept_vector: category-level and look-alike tags (R2)", () => {
+  function withMatch(match: "category" | "proxy") {
+    const q = scripted();
+    const registry = new FakeRegistry();
+    const run = fakeRun(q.api, registry);
+    const tag = registry.registerTag({ tagId: "urn:tag:genre:brand:invented_condiments", name: "condiments", type: "urn:tag:genre:brand", signalCapable: true, conceptMatch: match });
+    const refs = ANALOGS.map((a) => registerInvented(registry, { id: a.id, name: a.name, category: null }).ref);
+    const input = conceptVectorSkill.input.parse({ concept_tags: [tag.ref], type: "brand", analogs: refs, trigger_finding_id: null, step_id: "S4" });
+    return { ...run, calls: q.calls, input, ctx: { ...run.ctx, concepts: ["invented fermented chili paste"] } };
+  }
+
+  it("scores analogs against the category with no keep, veto, ADD or ANALOG_VETOED", async () => {
+    const s = withMatch("category");
+    const result = await conceptVectorSkill.run(s.input, s.ctx);
+    expect(result.flags).toContain("CATEGORY_LEVEL_READ");
+    expect(s.ledger.findings.map((f) => f.kind)).not.toContain("ANALOG_VETOED");
+    const d = s.ledger.datasets.find((x) => x.kind === "Ranked") as Extract<DatasetEnvelope, { kind: "Ranked" }>;
+    const flags = d.payload.groups.flatMap((g) => g.rows.flatMap((r) => r.flags));
+    expect(flags).not.toContain("KEEP");
+    expect(flags).not.toContain("VETO");
+    expect(flags).not.toContain("ADD");
+    expect(flags).toContain("CATEGORY");
+    expect(d.payload.caption).toMatch(/^Category-level read: analogs scored against 'condiments', since the data has no tag for 'invented fermented chili paste'\. No keep or veto is given\./);
+    expect(s.ledger.metrics.every((m) => m.conceptRead === "category")).toBe(true);
+    expect(s.ledger.metrics.map((m) => m.display).join(" ")).not.toMatch(/KEEP|VETO/);
+    expect(JSON.stringify(result.forModel.top_rows)).not.toMatch(/"(KEEP|VETO|ADD)"/);
+  });
+
+  it("tests nothing from look-alike tags only", async () => {
+    const s = withMatch("proxy");
+    const result = await conceptVectorSkill.run(s.input, s.ctx);
+    expect(result.status).toBe("error");
+    expect(s.calls).toEqual([]);
+    expect(s.ledger.datasets).toEqual([]);
+    expect(result.forModel.notices.join(" ")).toMatch(/concept is not in the data/);
+  });
+});

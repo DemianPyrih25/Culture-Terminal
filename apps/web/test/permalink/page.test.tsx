@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reduceRunEvents, type RunEvent, type RunState } from "@ct/contracts";
 import { buildBriefModel, inlineText, type BriefModel } from "../../lib/brief";
+import { SIGNAL_LABEL } from "../../lib/brief/format";
 import { sampleEvents } from "../../server/samples";
 import { endedAs, slice, text, upTo } from "../brief-page/support";
 import PermalinkLayout from "../../app/r/[id]/layout";
@@ -98,6 +99,29 @@ describe("a finished answer", () => {
     await renderPage();
     const metadata = await generateMetadata(pageProps());
     expect(metadata).toEqual({ title: "Is the Juniper Cola audience a moat or a niche? · Culture Terminal", robots: { index: false, follow: false } });
+  });
+
+  it("says a reader's own run is unlisted (D31); a curated showcase carries no such note", async () => {
+    serve(stateOf(BRIEF));
+    const own = await renderPage();
+    expect(own).toContain('data-unlisted="true"');
+    expect(text(own)).toContain("Unlisted · user question");
+    serve(stateOf(BRIEF), true);
+    expect(await renderPage()).not.toContain("data-unlisted");
+  });
+
+  it("heads the verdict with the verdict tag, else the signal label for a run stored without one", async () => {
+    const stored = stateOf(BRIEF);
+    if (!stored.report) throw new Error("no report");
+    const verdictOf = (html: string) => text(slice(html, 'id="verdict-title"', "</h2>"));
+    serve(stateOf(BRIEF, { report: { ...stored.report, verdict: { ...stored.report.verdict, tag: "Taste island" } } }));
+    expect(verdictOf(await renderPage())).toContain("Taste island");
+    // Stored before the tag existed (null), or with one that breaks the rule: the signal label.
+    const label = SIGNAL_LABEL[stored.report.verdict.signal];
+    serve(stateOf(BRIEF, { report: { ...stored.report, verdict: { ...stored.report.verdict, tag: null } } }));
+    expect(verdictOf(await renderPage())).toContain(label);
+    serve(stateOf(BRIEF, { report: { ...stored.report, verdict: { ...stored.report.verdict, tag: "Ranks 3rd of 8 brands" } } }));
+    expect(verdictOf(await renderPage())).toContain(label);
   });
 
   it("indexes a curated showcase, its question as the title and its answer as the description", async () => {

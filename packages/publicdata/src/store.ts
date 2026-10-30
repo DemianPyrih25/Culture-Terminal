@@ -1,6 +1,7 @@
 import { supersedes } from "@ct/qloo";
 import {
   getPublicCacheEntry,
+  incrementKvCounter,
   insertPublicCalls,
   pinPublicCacheEntry,
   PUBLIC_SOURCES,
@@ -14,6 +15,8 @@ import type { PublicCallLogRow, PublicStore, StoredPublicEntry } from "./api";
 export interface MemoryPublicStore extends PublicStore {
   readonly entries: ReadonlyMap<string, StoredPublicEntry & { hits: number }>;
   readonly calls: readonly PublicCallLogRow[];
+  /** Counters (the OpenStreetMap daily request count), writable so tests can preset one. */
+  readonly counters: Map<string, number>;
 }
 
 const copyEntry = (e: StoredPublicEntry): StoredPublicEntry => ({
@@ -28,9 +31,16 @@ const copyEntry = (e: StoredPublicEntry): StoredPublicEntry => ({
 export function createMemoryPublicStore(): MemoryPublicStore {
   const entries = new Map<string, StoredPublicEntry & { hits: number }>();
   const calls: PublicCallLogRow[] = [];
+  const counters = new Map<string, number>();
   return {
     entries,
     calls,
+    counters,
+    async incrementCounter(key, by = 1) {
+      const n = (counters.get(key) ?? 0) + by;
+      counters.set(key, n);
+      return n;
+    },
     async getEntry(key) {
       const e = entries.get(key);
       return e ? copyEntry(e) : null;
@@ -67,7 +77,7 @@ export function createMemoryPublicStore(): MemoryPublicStore {
 
 const isPublicSource = (s: string): s is (typeof PUBLIC_SOURCES)[number] => (PUBLIC_SOURCES as readonly string[]).includes(s);
 
-/** The Postgres PublicStore: public_cache and public_calls through the @ct/db repos. */
+/** The Postgres PublicStore: public_cache, public_calls and the kv counters through the @ct/db repos. */
 export function createPgPublicStore(db: Queryable): PublicStore {
   return {
     async getEntry(key) {
@@ -98,5 +108,6 @@ export function createPgPublicStore(db: Queryable): PublicStore {
     async logCalls(rows) {
       if (rows.length > 0) await insertPublicCalls(db, rows.map((row) => ({ ...row, ms: row.ms === null ? null : Math.round(row.ms) })));
     },
+    incrementCounter: (key, by = 1) => incrementKvCounter(db, key, by),
   };
 }

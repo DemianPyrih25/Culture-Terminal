@@ -1,6 +1,6 @@
 "use client";
 
-import type { GeoLiftPayload } from "@ct/contracts";
+import type { GeoLiftPayload, SupplyPayload } from "@ct/contracts";
 import { useId, useState } from "react";
 import { Button } from "../ui/button";
 import { cardClassName } from "../ui/card";
@@ -12,7 +12,17 @@ import { liftCaption, liftTableSpec } from "./lift-map";
 import { outlinesUrl as defaultOutlinesUrl } from "./lift-outlines";
 import { MAP_CARD_KIND, MAP_CARD_TITLE, MODE_TEXT } from "./lift-map-parts";
 import { LiftMapView } from "./lift-map-view";
-import { flagValue, mapPins, namedAreas, namedPins, type LiftMode } from "./lift-scale";
+import { flagValue, mapPins, namedAreas, namedPins, popularPins, type LiftMode, type MapPlace } from "./lift-scale";
+
+/** The OpenStreetMap layer's toggle words (R6). */
+export const OSM_LAYER_LABEL = "Similar places (OpenStreetMap)";
+
+/** A supply read's named places as map points, with their type's label. */
+export function osmMapPlaces(supply: SupplyPayload | null | undefined): MapPlace[] {
+  if (!supply) return [];
+  const label = new Map(supply.types.map((t) => [t.key, t.label]));
+  return supply.places.map((p) => ({ name: p.name, lat: p.lat, lon: p.lon, type: label.get(p.typeKey) ?? p.typeKey }));
+}
 
 /**
  * The site_selection map card (N08, row C, span 6, 464 tall): the LiftMap on the left (about 70 %) and a
@@ -41,6 +51,8 @@ export interface LiftMapCardProps {
   headingLevel?: 2 | 3;
   id?: string;
   className?: string;
+  /** An OpenStreetMap supply read of the same city (R6): its named places can be shown as a layer. */
+  osm?: SupplyPayload | null;
 }
 
 export function LiftMapCard({
@@ -56,13 +68,20 @@ export function LiftMapCard({
   headingLevel = 3,
   id,
   className,
+  osm = null,
 }: LiftMapCardProps) {
   const [mode, setMode] = useState<LiftMode>(initialMode ?? (data.coarse ? "RAW" : "LIFT"));
   const [open, setOpen] = useState(false);
   const menuId = useId();
   const pins = mapPins(data, 3);
   // The areas the question names: marked on the map, and listed first with their rank (or why they have none).
-  const labels = [...pins, ...namedPins(data, pins)];
+  const labels0 = [...pins, ...namedPins(data, pins)];
+  // R7: where the concept is already popular, pinned beside the extra-interest pins in both layers.
+  const standing = popularPins(data, labels0);
+  const popular = standing.filter((p) => p.popular);
+  const labels = [...labels0, ...standing];
+  const places = osmMapPlaces(osm);
+  const [showPlaces, setShowPlaces] = useState(false);
   const named = namedAreas(data).filter((a) => !pins.some((p) => p.id === a.id));
   const Heading = `h${headingLevel}` as "h2" | "h3";
   const shown: "LIFT" | "RAW" = mode === "RAW" ? "RAW" : "LIFT";
@@ -83,6 +102,7 @@ export function LiftMapCard({
             height={464}
             outlinesUrl={outlinesUrl === undefined ? defaultOutlinesUrl(data.metro) : outlinesUrl}
             interactive={interactive}
+            places={showPlaces ? places : []}
           />
         </div>
         <div className="flex min-w-0 flex-col gap-4 p-5 md:p-6">
@@ -162,14 +182,39 @@ export function LiftMapCard({
                     <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
                       <span className="text-[13px] leading-[18px] text-ink-2 tabular-nums">{p.named ? `Your area · ${flagValue(p.lift)}` : flagValue(p.lift)}</span>
                       {p.fewRivals ? <Tag preset="few-rivals" /> : null}
+                      {p.hidden ? <Tag tone="second">Hidden pocket</Tag> : null}
                     </span>
                   </span>
                 </li>
               ))}
             </ol>
           )}
+          {popular.length > 0 ? (
+            <ul className="flex flex-col gap-2" aria-label="Where it's already popular" data-popular-list="true">
+              {popular.map((p) => (
+                <li key={p.id} className="grid grid-cols-[24px_minmax(0,1fr)] items-start gap-x-3">
+                  <span aria-hidden="true" className="mt-0.5 flex size-6 items-center justify-center rounded-full border-2 border-ink bg-surface">
+                    <span className="size-1.5 rounded-full bg-ink" />
+                  </span>
+                  <span className="flex min-w-0 flex-col">
+                    <span className="text-[15px] leading-6 font-semibold break-words text-ink">{p.name}</span>
+                    <span className="text-[13px] leading-[18px] text-ink-2">Already popular</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {places.length > 0 ? (
+            <label className="flex min-h-9 items-center gap-2 self-start type-label text-ink">
+              <input type="checkbox" checked={showPlaces} onChange={(e) => setShowPlaces(e.target.checked)} className="size-4 accent-[var(--color-second)]" data-osm-toggle="true" />
+              {OSM_LAYER_LABEL}
+            </label>
+          ) : null}
           <div className="mt-auto flex flex-col gap-3">
-            <p className="m-0 type-caption text-ink-2">{caption ?? liftCaption(data)}</p>
+            <p className="m-0 type-caption text-ink-2">
+              {caption ?? liftCaption(data)}
+              {showPlaces && places.length > 0 ? ` Places: © OpenStreetMap contributors (ODbL); ${osm?.completeness ?? "counts are a floor."}` : ""}
+            </p>
             {onSource || draft ? (
               <Button variant="quiet" size="sm" icon="receipt" disabled={draft} onClick={onSource} className="self-start" aria-label={`Source: ${title}`}>
                 Source

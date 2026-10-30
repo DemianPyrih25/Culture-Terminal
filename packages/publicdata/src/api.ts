@@ -5,6 +5,8 @@ import type {
   EventInputOf,
   PublicDataApi,
   PublicDataErrorCode,
+  OsmShape,
+  OsmTypeQuery,
   PublicEndpoint,
   PublicProvenanceRequest,
   PublicSource,
@@ -22,9 +24,11 @@ export type PublicLogger = QlooLogger;
 // Requests and transport ---------------------------------------------------------------------------
 
 /**
- * One GET as the client builds it. `query` is canonical (sorted when keyed) and never holds an API key:
- * the transport adds CENSUS_API_KEY itself, so the key is in neither the cache key nor provenance.
- * Canonical cache key: sha256Hex(`pd-v1|GET|<source>|<path>?<sorted qs>`), `mock-pd-v1` under mock.
+ * One request as the client builds it. `query` is canonical (sorted when keyed) and never holds an API
+ * key: the transport adds CENSUS_API_KEY itself, so the key is in neither the cache key nor provenance.
+ * Canonical cache key: sha256Hex(`pd-v1|GET|<source>|<path>?<sorted qs>`), `mock-pd-v1` under mock. The
+ * Overpass endpoint is the one POST (a read-only query in the form body): its key is
+ * sha256Hex(`pd-v1|POST|osm|/api/interpreter|<QL>`).
  */
 export interface PublicRequest {
   source: PublicSource;
@@ -33,16 +37,34 @@ export interface PublicRequest {
   /** The concrete path, e.g. `/api/xbrl/companyfacts/CIK0000000001.json` or `/data/2023/acs/acs5`. */
   path: string;
   query: Readonly<Record<string, string>>;
+  /** GET when absent. Only OpenStreetMap (Overpass) requests are POSTed. */
+  method?: "GET" | "POST";
+  /** The POST body's query text (canonical Overpass QL): part of the cache key and of provenance. */
+  body?: string;
+  /** What the trace and the call log show for a POST in place of its empty query (shapes, types). */
+  trace?: Readonly<Record<string, string>>;
+  /** What an Overpass request asks, in answer order. Never sent: the mock transport answers from it. */
+  osm?: OsmRequestPlan;
 }
+
+/** The structured form of an Overpass request (the QL says the same thing in text). */
+export type OsmRequestPlan =
+  | { kind: "counts"; pairs: readonly { shape: OsmShape; typeKey: string }[] }
+  | { kind: "places"; shape: OsmShape; types: readonly OsmTypeQuery[]; limit: number };
 
 export interface PublicTransportResponse {
   status: number;
   /** The response body as text; empty for 204. */
   body: string;
   ms: number;
+  /** The Retry-After header in seconds, when the response carried one (Overpass sends it with 429). */
+  retryAfterS?: number | null;
 }
 
-/** GET only. The live transport sends SEC_USER_AGENT verbatim to SEC and adds the Census key to Census queries. */
+/**
+ * One attempt. The live transport sends SEC_USER_AGENT verbatim to SEC, adds the Census key to Census
+ * queries, and POSTs Overpass queries with OSM_USER_AGENT.
+ */
 export type PublicTransport = (request: PublicRequest, signal?: AbortSignal) => Promise<PublicTransportResponse>;
 
 // Call records --------------------------------------------------------------------------------------
@@ -61,8 +83,12 @@ export interface PublicCallRecord {
   path: string;
   /** Canonical query without any key: the provenance query. */
   query: Record<string, string>;
-  /** The same with long values (e.g. ZCTA lists) shortened, for the trace. */
+  /** The same with long values (e.g. ZCTA lists) shortened, for the trace; for a POST, its trace summary. */
   paramsRedacted: Record<string, string>;
+  /** GET when absent. */
+  method?: "GET" | "POST";
+  /** The POST body (Overpass QL) for provenance; absent for GET. */
+  body?: string;
   cache: CacheStatus;
   /** Served from an expired entry after a network failure (STALE_CACHE). */
   stale: boolean;
@@ -102,11 +128,12 @@ export function publicProvenanceRequest(record: PublicCallRecord): PublicProvena
   if (record.reference === null) return null;
   return {
     source: record.source,
-    method: "GET",
+    method: record.method ?? "GET",
     host: record.host,
     path: record.path,
     query: { ...record.query },
     reference: record.reference,
+    ...(record.body === undefined ? {} : { body: record.body }),
   };
 }
 
@@ -168,7 +195,11 @@ export interface PublicCallLogRow {
   error: string | null;
 }
 
-/** Persistence behind the client: Postgres in the app, memory in tests. No quota counters (public data has none). */
+/**
+ * Persistence behind the client: Postgres in the app, memory in tests. SEC and Census have no quota; the
+ * one counter is OpenStreetMap's daily request count (kv `osm.count.<YYYY-MM-DD>`), shared by every
+ * process on the database.
+ */
 export interface PublicStore {
   getEntry(key: string): Promise<StoredPublicEntry | null>;
   /** Inserts or refreshes an entry with the qloo_cache rules: pins stay, newer wins, a non-2xx never replaces a pin. */
@@ -176,6 +207,11 @@ export interface PublicStore {
   recordHit(key: string): Promise<void>;
   pinEntry(key: string): Promise<boolean>;
   logCalls(rows: readonly PublicCallLogRow[]): Promise<void>;
+  /**
+   * Adds `by` to a numeric counter and returns the new value, atomically. A store without it (or one
+   * that fails) leaves the client counting in its own process.
+   */
+  incrementCounter?(key: string, by?: number): Promise<number>;
 }
 
 // Client --------------------------------------------------------------------------------------------------
@@ -188,8 +224,22 @@ export interface PublicDataClientOptions {
   tag: string;
   /** SEC_USER_AGENT; null when unset: live SEC calls then throw PublicDataError("not_configured"). */
   secUserAgent: string | null;
-  /** Requests per second per source (SEC ≤5, Census ≤5). */
-  rps?: { sec?: number; census?: number };
+  /**
+   * OSM_USER_AGENT; null or absent leaves OpenStreetMap not configured outside mock: its calls throw
+   * PublicDataError("not_configured") and `configured.osm` is false.
+   */
+  osmUserAgent?: string | null;
+  /** OSM_OVERPASS_URL (default DEFAULT_OSM_OVERPASS_URL): its host and path are what requests and provenance name. */
+  osmOverpassUrl?: string;
+  /** OSM_DAILY_MAX: Overpass network requests per UTC day for the whole deploy (default 2000). */
+  osmDailyMax?: number;
+  /**
+   * The warm-up only: county-union queries get Overpass's 180 s limit instead of 40 s (pair it with a
+   * transport whose osmTimeoutMs is longer). The answers land under the same cache keys runs use.
+   */
+  osmLongQueries?: boolean;
+  /** Requests per second per source (SEC ≤5, Census ≤5, OpenStreetMap 1 with one request in flight). */
+  rps?: { sec?: number; census?: number; osm?: number };
   logger?: PublicLogger;
   now?: Now;
   sleep?: Sleep;
@@ -218,7 +268,8 @@ export interface PublicDataClient {
   /**
    * Which sources can be called, for /api/health: SEC needs SEC_USER_AGENT outside mock; Census needs
    * CENSUS_API_KEY outside mock (the Census Data API answers keyless requests with a redirect to its
-   * missing-key page).
+   * missing-key page); OpenStreetMap needs OSM_USER_AGENT outside mock (the Overpass usage policy asks
+   * for an identifying User-Agent).
    */
   readonly configured: Readonly<Record<PublicSource, boolean>>;
   forRun(scope: PublicRunScope): RunPublic;

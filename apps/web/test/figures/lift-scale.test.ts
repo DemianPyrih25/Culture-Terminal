@@ -211,7 +211,7 @@ describe("competitor counts on the lift map", () => {
 
   it("gives every area the same supply read as geo_lift's white space on the same invented areas", () => {
     // Six invented areas; b is tiny, so its one venue is the densest of the capped sample.
-    const lifted = (id: string, demandPct: number, areaKm2 = 1): AreaLift => ({ id, name: id, areaKm2, covered: 10, n: 10, lift: 1 + demandPct, conf: 0.8, reason: null, demandPct });
+    const lifted = (id: string, demandPct: number, areaKm2 = 1): AreaLift => ({ id, name: id, areaKm2, covered: 10, n: 10, lift: 1 + demandPct, conf: 0.8, reason: null, demandPct, raw: null, rawPct: null, standing: null });
     const areas = [lifted("a", 1), lifted("b", 0.8, 0.05), lifted("c", 0.6), lifted("d", 0.4), lifted("e", 0.2), lifted("f", 0)];
     const counts = new Map([["a", 0], ["b", 1], ["c", 4], ["d", 6], ["e", 2], ["f", 5]]);
     const ws = whiteSpace(areas, counts, true);

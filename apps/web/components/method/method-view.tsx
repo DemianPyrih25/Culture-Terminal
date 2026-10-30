@@ -1,5 +1,6 @@
 import {
   Badge,
+  CONFIDENCE_CAP,
   CONFIDENCE_PENALTY,
   ConfidenceRule,
   GHOST_HONESTY_LINE,
@@ -20,6 +21,7 @@ import {
   CHECKER_NOTE,
   checkerRules,
   CONFIDENCE_ONCE,
+  CONTEXT_COPY,
   CONVICTION_COPY,
   EVAL_COPY,
   FORMULA_GROUPS,
@@ -34,12 +36,13 @@ import {
   type MethodFacts,
   methodSteps,
   SCAN_COPY,
+  SUPPLY_COPY,
   type StepCopy,
   TURNS_HEADING,
   VERDICT_MEANING,
   VERDICT_WORD,
 } from "../../content/method";
-import { BADGE_LABEL, CONVICTION_BAND_LABEL, formatUtcDate, JOB_LABEL, TOOL_LABEL } from "../../lib/brief/format";
+import { BADGE_LABEL, CONVICTION_BAND_LABEL, convictionRuleLabel, formatUtcDate, JOB_LABEL, TOOL_LABEL } from "../../lib/brief/format";
 import { topicForPillar } from "../ui/topic";
 import { cx } from "../ui/cx";
 import { Icon, type IconName } from "../ui/icons";
@@ -47,7 +50,7 @@ import { Hatch } from "../ui/skeleton";
 import { Tag } from "../ui/tag";
 import { formatEvalValue, type EvalState, type EvalSummary } from "./eval-summary";
 import { bandRanges, modelLabel, penaltyText } from "./facts";
-import { BODY, Colophon, LABEL, LIST, REFERENCE_ANCHOR, ReferenceLayout, RefNote, RefSection, ROW, SUBHEAD } from "./reference";
+import { BODY, Colophon, type IndexItem, LABEL, LIST, REFERENCE_ANCHOR, ReferenceLayout, RefNote, RefSection, ROW, SUBHEAD } from "./reference";
 import { RULES_INDEX, RulesSections, type RulesFacts } from "./rules-sections";
 import { TexFormula } from "./tex";
 
@@ -69,6 +72,8 @@ export interface MethodViewProps {
   evaluation: EvalState;
   /** The rules moved from /trust, read from the code and the server's configuration. */
   rules: RulesFacts;
+  /** Sections the page renders after this view (coverage, cost per use), for the index. */
+  appendix?: readonly IndexItem[];
 }
 
 const TABLE = "w-full border-collapse";
@@ -280,10 +285,10 @@ function Conviction() {
             </th>
             <td className="py-2 text-right type-body-strong text-ink tabular-nums">{CONFIDENCE_START}</td>
           </tr>
-          {ConfidenceRule.options.map((rule) => (
+          {ConfidenceRule.options.filter((rule) => CONFIDENCE_PENALTY[rule] > 0 || CONFIDENCE_CAP[rule] === undefined).map((rule) => (
             <tr key={rule} className={ROW} data-penalty={rule}>
               <th scope="row" className={cx(BODY, "py-2 pr-3 text-left font-normal")}>
-                {CONFIDENCE_RULE_LABEL[rule]}
+                {CONFIDENCE_RULE_LABEL[rule] ?? convictionRuleLabel(rule, 1)}
               </th>
               <td className="w-[120px] py-2 text-right whitespace-nowrap tabular-nums">
                 <span className="type-body text-ink">{penaltyText(rule)}</span>{" "}
@@ -291,6 +296,27 @@ function Conviction() {
               </td>
             </tr>
           ))}
+        </tbody>
+      </table>
+      <h3 className={SUBHEAD}>{CONVICTION_COPY.capsHeading}</h3>
+      <p className={BODY}>{CONVICTION_COPY.capsIntro}</p>
+      <table className={TABLE} data-confidence-caps="true">
+        <caption className="sr-only">{CONVICTION_COPY.capsCaption}</caption>
+        <tbody>
+          {ConfidenceRule.options.flatMap((rule) => {
+            const cap = CONFIDENCE_CAP[rule];
+            if (cap === undefined) return [];
+            return [
+              <tr key={rule} className={ROW} data-cap={rule}>
+                <th scope="row" className={cx(BODY, "py-2 pr-3 text-left font-normal")}>
+                  {CONFIDENCE_RULE_LABEL[rule] ?? convictionRuleLabel(rule, 1)}
+                </th>
+                <td className="w-[120px] py-2 text-right whitespace-nowrap tabular-nums">
+                  <span className="type-body text-ink">{CONVICTION_COPY.atMost(cap)}</span>
+                </td>
+              </tr>,
+            ];
+          })}
         </tbody>
       </table>
       <p className="flex flex-wrap items-center gap-x-5 gap-y-1" data-bands="true">
@@ -304,6 +330,51 @@ function Conviction() {
           </span>
         ))}
       </p>
+    </div>
+  );
+}
+
+// AI and web context, OpenStreetMap places ---------------------------------------------------------------
+
+function ContextBlocks() {
+  return (
+    <div className="flex flex-col gap-4" data-method-context="true">
+      <p className={BODY}>{CONTEXT_COPY.intro}</p>
+      <div className="flex flex-col gap-2">
+        <h3 className={SUBHEAD}>{CONTEXT_COPY.aiHeading}</h3>
+        {CONTEXT_COPY.ai.map((t) => (
+          <p key={t} className={BODY}>
+            {t}
+          </p>
+        ))}
+      </div>
+      <div className="flex flex-col gap-2">
+        <h3 className={SUBHEAD}>{CONTEXT_COPY.webHeading}</h3>
+        {CONTEXT_COPY.web.map((t) => (
+          <p key={t} className={BODY}>
+            {t}
+          </p>
+        ))}
+      </div>
+      <div className="flex flex-col gap-2">
+        <h3 className={SUBHEAD}>{CONTEXT_COPY.offHeading}</h3>
+        <p className={BODY}>{CONTEXT_COPY.off}</p>
+      </div>
+    </div>
+  );
+}
+
+function SupplyMethod() {
+  return (
+    <div className="flex flex-col gap-3" data-method-supply="true">
+      <p className={BODY}>{SUPPLY_COPY.intro}</p>
+      <ul className="flex list-disc flex-col gap-1.5 pl-5">
+        {SUPPLY_COPY.points.map((t) => (
+          <li key={t} className={BODY}>
+            {t}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
@@ -473,12 +544,13 @@ function Evaluation({ evaluation }: { evaluation: EvalState }) {
 
 // The page -----------------------------------------------------------------------------------------------
 
-export function MethodView({ facts, scan, endpoints, trendWindow, evaluation, rules }: MethodViewProps) {
+export function MethodView({ facts, scan, endpoints, trendWindow, evaluation, rules, appendix = [] }: MethodViewProps) {
   const steps = methodSteps(facts);
   const index = [
     { id: "sources", label: METHOD_SOURCES.heading },
     ...METHOD_SECTION_ORDER.map((id) => ({ id, label: METHOD_SECTIONS[id].title })),
     ...RULES_INDEX,
+    ...appendix,
   ];
   const head = (
     <header className="flex flex-col gap-3 pb-2">
@@ -502,6 +574,12 @@ export function MethodView({ facts, scan, endpoints, trendWindow, evaluation, ru
       </Section>
       <Section id="conviction" note={<RefNote trace={CONVICTION_COPY.noteTrace}>{CONVICTION_COPY.note}</RefNote>}>
         <Conviction />
+      </Section>
+      <Section id="context" note={<RefNote trace={CONTEXT_COPY.noteTrace}>{CONTEXT_COPY.note}</RefNote>}>
+        <ContextBlocks />
+      </Section>
+      <Section id="supply" note={<RefNote trace={SUPPLY_COPY.noteTrace}>{SUPPLY_COPY.note}</RefNote>}>
+        <SupplyMethod />
       </Section>
       <Section id="formulas" note={<RefNote trace={FORMULAS_COPY.noteTrace}>{FORMULAS_COPY.note}</RefNote>}>
         <Formulas scan={scan} />

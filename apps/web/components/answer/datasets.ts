@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { DatasetEnvelope } from "@ct/contracts";
+import type { DatasetEnvelope } from "@ct/contracts";
 import type { AnswerDatasets } from "../../lib/answer";
 import type { BriefFigure } from "../../lib/brief";
 import { withoutNoiseTags } from "../../lib/tag-noise";
@@ -10,6 +10,8 @@ import { withoutNoiseTags } from "../../lib/tag-noise";
  * Datasets too large to stream inline (a big lift map or matrix) are fetched from
  * /api/runs/[id]/datasets/[did] once the run is stored. One fetch per URL for the page's lifetime once it
  * succeeds: an envelope never changes once stored. A failure is never kept, so the next mount asks again.
+ * The envelope schema (and with it zod) loads only when a dataset is fetched, in a chunk of its own, so
+ * the page's first load carries no validator (the client bundle split).
  */
 
 const loads = new Map<string, Promise<DatasetEnvelope | null>>();
@@ -19,7 +21,9 @@ export function loadDataset(url: string, doFetch: typeof fetch = fetch): Promise
   if (known) return known;
   const load = doFetch(url)
     .then((res) => (res.ok ? res.json() : null))
-    .then((json: unknown) => {
+    .then(async (json: unknown) => {
+      if (json === null) return null;
+      const { DatasetEnvelope } = await import("@ct/contracts");
       const parsed = DatasetEnvelope.safeParse(json);
       return parsed.success ? withoutNoiseTags(parsed.data) : null;
     })

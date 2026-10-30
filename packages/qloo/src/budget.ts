@@ -1,4 +1,4 @@
-import type { Lane, Mode, Phase, RunLimits } from "@ct/contracts";
+import type { Lane, Mode, Phase, RunLimits, SkillId } from "@ct/contracts";
 import { BudgetError } from "./errors";
 import type { Now } from "./limiter";
 import type { QlooLogger } from "./logger";
@@ -17,15 +17,72 @@ import type { QlooEnv, QlooStore } from "./store";
  * (60/40) and in total: standalone calls draw on the total only, and a lane run must fit both.
  */
 
-export const DEV_MONTH_FLOOR = 38_000;
+/**
+ * Development stops at 32,000 calls left this month (D24, PLAN §11): the judging reserve of 30,000 (15
+ * judging days at the 2,000-call minimum daily cap) plus the prod floor of 2,000.
+ */
+export const DEV_MONTH_FLOOR = 32_000;
 export const PROD_MONTH_FLOOR = 2_000;
+/** The static prod daily cap: outside the judging window, or before any remaining figure exists. */
 export const DEFAULT_DAILY_FRESH_CAP = 1_900;
+/** The dynamic daily cap never goes below this during judging (D24). */
+export const JUDGING_DAILY_CAP_MIN = 2_000;
+/** The last judging day (UTC), JUDGING_END_DATE's default. */
+export const DEFAULT_JUDGING_END_DATE = "2026-11-16";
 export const DEFAULT_TAG_CAP = 200;
 /** Share of the daily fresh-call cap each lane may use (D24: 40% reserved for judges). */
 export const LANE_SHARE: Readonly<Record<Lane, number>> = { public: 0.6, judge: 0.4 };
 
 export const monthFloorFor = (env: QlooEnv): number => (env === "prod" ? PROD_MONTH_FLOOR : DEV_MONTH_FLOOR);
 
+const DAY_MS = 86_400_000;
+
+/** Whole UTC days from `day` to `endDay` inclusive (both YYYY-MM-DD); 0 once `day` is past `endDay`. */
+export function judgingDaysLeft(day: string, endDay: string): number {
+  const from = Date.parse(`${day}T00:00:00.000Z`);
+  const to = Date.parse(`${endDay}T00:00:00.000Z`);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from > to) return 0;
+  return Math.round((to - from) / DAY_MS) + 1;
+}
+
+export interface DailyCapInputs {
+  /** QLOO_DAILY_FRESH_CAP (or DEFAULT_DAILY_FRESH_CAP): the cap outside the judging window. */
+  staticCap: number;
+  /** The month's remaining calls from the last response; null before one was seen. */
+  monthRemaining: number | null;
+  /** The UTC day the cap is for (YYYY-MM-DD). */
+  day: string;
+  /** JUDGING_END_DATE (YYYY-MM-DD), or null for no judging window. */
+  judgingEndDate: string | null;
+  /** The prod floor (PROD_MONTH_FLOOR). */
+  floor: number;
+}
+
+/**
+ * Today's prod fresh-call cap (D24): during judging, the month's calls above the floor spread over the
+ * judging days left, at least JUDGING_DAILY_CAP_MIN and never more than the calls above the floor:
+ * min(remaining - floor, max(2000, floor((remaining - floor) / daysLeft))). Outside the window (past
+ * JUDGING_END_DATE, none set, or no remaining figure yet) the static cap. Never below 0.
+ */
+export function dailyFreshCapFor(inputs: DailyCapInputs): number {
+  const { staticCap, monthRemaining, day, judgingEndDate, floor } = inputs;
+  if (judgingEndDate === null || monthRemaining === null) return staticCap;
+  const daysLeft = judgingDaysLeft(day, judgingEndDate);
+  if (daysLeft <= 0) return staticCap;
+  const above = Math.max(0, monthRemaining - floor);
+  return Math.max(0, Math.min(above, Math.max(JUDGING_DAILY_CAP_MIN, Math.floor(above / daysLeft))));
+}
+
+/**
+ * The follow-up calls a run holds back for one kind of tool (D24: 3 for the concept test while the
+ * question has a concept part with no exact tag, PLAN §4.2). While `active()`, a follow-up call by a tool
+ * `claims` does not cover may not bring the follow-up calls left below `calls`.
+ */
+export interface FollowupReserve {
+  calls: number;
+  claims: (tool: SkillId | null) => boolean;
+  active: () => boolean;
+}
 /** The run (or standalone scope) a network call is charged to. */
 export interface BudgetScope {
   readonly runId: string | null;
@@ -34,6 +91,8 @@ export interface BudgetScope {
   readonly lane: Lane | null;
   readonly phase: () => Phase;
   readonly onWarn?: (warning: QlooBudgetWarning) => void;
+  /** Follow-up calls held for a claimant tool (RunScope.reserve); absent for none. */
+  readonly reserve?: FollowupReserve;
   network: number;
   followup: number;
   warned: boolean;
@@ -58,7 +117,10 @@ export interface BudgetGatesOptions {
   env: QlooEnv;
   tag: string;
   tagCap: number | null;
+  /** The static daily cap (QLOO_DAILY_FRESH_CAP); the judging window replaces it (dailyFreshCapFor). */
   dailyFreshCap: number;
+  /** JUDGING_END_DATE, or null: no dynamic daily cap. */
+  judgingEndDate?: string | null;
   monthFloor: number;
   store: QlooStore;
   quota: QuotaTracker;
@@ -100,14 +162,36 @@ export class BudgetGates {
   /** usage_daily increments that failed to write, by `day|lane`. */
   private readonly lostFresh = new Map<string, number>();
   private floorSignalled = false;
+  /** Today's dynamic cap once computed (dailyCap). */
+  private dayCap: { day: string; cap: number } | null = null;
 
   constructor(private readonly options: BudgetGatesOptions) {
     this.tagCap = options.env === "mock" ? null : options.tagCap;
   }
 
-  /** Runs the gates in order and reserves one network call, or throws BudgetError naming the gate. */
-  reserve(scope: BudgetScope): Promise<Reservation> {
-    return this.mutex.run(() => this.check(scope));
+  /**
+   * Runs the gates in order and reserves one network call, or throws BudgetError naming the gate. `tool`
+   * is the skill the call belongs to (null for bookkeeping), for the run's follow-up reserve.
+   */
+  reserve(scope: BudgetScope, tool: SkillId | null = null): Promise<Reservation> {
+    return this.mutex.run(() => this.check(scope, tool));
+  }
+
+  /** Today's prod fresh-call cap: the judging window's dynamic cap, fixed for the UTC day once computed. */
+  dailyCap(now: number = this.options.now()): number {
+    const day = utcDay(now);
+    if (this.dayCap?.day === day) return this.dayCap.cap;
+    const monthRemaining = this.options.quota.snapshot().monthRemaining;
+    const cap = dailyFreshCapFor({
+      staticCap: this.options.dailyFreshCap,
+      monthRemaining,
+      day,
+      judgingEndDate: this.options.judgingEndDate ?? null,
+      floor: PROD_MONTH_FLOOR,
+    });
+    // Recomputed each UTC day from that day's first remaining figure; until one exists, the static cap.
+    if (monthRemaining !== null) this.dayCap = { day, cap };
+    return cap;
   }
 
   /**
@@ -128,7 +212,7 @@ export class BudgetGates {
     return this.tagCap === null ? run() : this.mutex.run(run);
   }
 
-  private async check(scope: BudgetScope): Promise<Reservation> {
+  private async check(scope: BudgetScope, tool: SkillId | null): Promise<Reservation> {
     const { env, tag, store, quota, logger } = this.options;
     const tagCap = this.tagCap;
     await quota.load();
@@ -140,6 +224,13 @@ export class BudgetGates {
       }
       if (followup && scope.followup >= limits.followupCalls) {
         throw this.refuse("followup_cap", `follow-ups have used their ${limits.followupCalls} Qloo network calls`);
+      }
+      const reserve = scope.reserve;
+      if (followup && reserve !== undefined && reserve.calls > 0 && !reserve.claims(tool) && reserve.active()) {
+        const left = limits.followupCalls - scope.followup;
+        if (left <= reserve.calls) {
+          throw this.refuse("followup_cap", `the last ${reserve.calls} follow-up Qloo calls are held for the concept test (${left} left)`);
+        }
       }
     }
     if (tagCap !== null) {
@@ -155,8 +246,9 @@ export class BudgetGates {
     const day = utcDay(this.options.now());
     if (env === "prod") {
       // A lane run must fit its own share and the day's total, which standalone calls also draw on.
-      const caps: [string, number][] = [["all", this.options.dailyFreshCap]];
-      if (scope.lane !== null) caps.unshift([scope.lane, Math.floor(this.options.dailyFreshCap * LANE_SHARE[scope.lane])]);
+      const dailyCap = this.dailyCap();
+      const caps: [string, number][] = [["all", dailyCap]];
+      if (scope.lane !== null) caps.unshift([scope.lane, Math.floor(dailyCap * LANE_SHARE[scope.lane])]);
       for (const [lane, cap] of caps) {
         const used = await store.freshCalls({ day, lane }).catch((err: unknown) => {
           logger.error({ err: String(err), lane }, "qloo daily cap: counter unavailable");

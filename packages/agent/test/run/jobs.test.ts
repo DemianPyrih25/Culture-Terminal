@@ -164,6 +164,8 @@ async function runJob(c: JobCase & { pinned?: readonly MarketId[] }) {
   expect(report.exhibits[0]?.kind).toBe("Scorecard");
   expect(report.kpis.length).toBeGreaterThan(0);
   expect(report.verdict.signal).toBe("mixed");
+  // ANSWER_QUALITY automated checks: none of the owner's problems that code can see (Part 11).
+  expect(report.audit, c.intent.job).toEqual([]);
   return { ...harness, report };
 }
 

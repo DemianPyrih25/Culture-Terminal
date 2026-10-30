@@ -12,6 +12,8 @@ import {
 } from "@ct/agent";
 import {
   DEFAULT_RUN_LIMITS,
+  EMPTY_CANDIDATES,
+  NO_RUN_CANDIDATES,
   type GeoApi,
   type Intent,
   type Lane,
@@ -24,7 +26,7 @@ import {
   type SkillCtx,
   type SkillId,
 } from "@ct/contracts";
-import { BudgetError, type QlooCallRecord, type QlooClient, type QlooTool, type RunQloo } from "@ct/qloo";
+import { BudgetError, scrubEntityIds, type QlooCallRecord, type QlooClient, type QlooTool, type RunQloo } from "@ct/qloo";
 import { addSkillMetric, normaliseName, searchParams, SKILLS } from "@ct/quant";
 import { desHref, desMnemonic, type DesQuery, type DesType } from "../../components/des/des-href";
 import type { DesCandidate, DesOutcome, DesSectionId, Tearsheet } from "../../components/des/model";
@@ -105,6 +107,11 @@ export interface DesDeps {
    * (./vetted.ts). Absent: only curated persons are looked up.
    */
   vettedPerson?: VettedPerson;
+  /**
+   * Records one finished lookup's measured cost (feature_uses, /method's measured costs). Never fails a
+   * lookup: an error is logged and dropped.
+   */
+  recordUse?: (use: FeatureUseRecord) => Promise<void>;
   now?: () => number;
 }
 
@@ -127,6 +134,23 @@ interface Answer {
   at: number;
 }
 
+/** One feature use as /method measures it: Qloo calls (network and cached) and wall time. */
+export interface FeatureUseRecord {
+  feature: "des_profile" | "screener";
+  qlooNetwork: number;
+  qlooCached: number;
+  ms: number;
+}
+
+/**
+ * R8 (D51): a tearsheet as the browser gets it: every Qloo entity id in its evidence and request
+ * parameters replaced by the entity's readable name (the server keeps the ids in its caches).
+ */
+export function publicSheet<T>(sheet: T, registry: Pick<RunRegistry, "entities">): T {
+  const names = new Map(registry.entities().map((e) => [e.entityId.toLowerCase(), e.name]));
+  return scrubEntityIds(sheet, (id) => names.get(id.toLowerCase()) ?? null) as T;
+}
+
 /** The answer-cache key: names compared as the gate compares them, and the pick. */
 export const desKey = (query: DesQuery): string => `${query.type}|${normaliseName(query.name)}|${query.pick ?? ""}`;
 
@@ -142,6 +166,7 @@ export function desIntent(query: { name: string; type: DesType }, publicFigure: 
     read_as: { nearest: false, not_covered: [] },
     assumptions: ["US geography"],
     mnemonic: desMnemonic(query),
+    candidates: EMPTY_CANDIDATES,
   };
 }
 
@@ -333,7 +358,17 @@ export class DesService {
       return { kind: "failed", message: FAILED_MESSAGE };
     } finally {
       this.limiter.settle(DES_RUN_QLOO_CAP, run.scope.networkUsed(), started, this.now());
+      this.recordUse(run, started);
     }
+  }
+
+  /** feature_uses: one row per lookup that reached Qloo (network or cache). */
+  private recordUse(run: Lookup, started: number): void {
+    if (this.deps.recordUse === undefined || run.calls.length === 0) return;
+    const network = run.calls.filter((c) => c.cache === "miss").length;
+    this.deps
+      .recordUse({ feature: "des_profile", qlooNetwork: network, qlooCached: run.calls.length - network, ms: Math.max(0, Math.round(this.now() - started)) })
+      .catch((err: unknown) => log.warn({ err }, "des: the feature use could not be recorded"));
   }
 
   private async resolveAndRun(run: Lookup, query: DesQuery, key: string, started: number): Promise<DesOutcome> {
@@ -383,7 +418,7 @@ export class DesService {
     if (primary === null) return { kind: "failed", message: FAILED_MESSAGE };
     const popularity = this.recordPopularity(run, primary, gate.primaryCalls);
     const sections = await this.runSections(run, primary);
-    const sheet = buildTearsheet({
+    const built = buildTearsheet({
       query: asked,
       picked,
       entity: { name: primary.name, type: query.type, disambiguation: primary.disambiguation },
@@ -393,6 +428,7 @@ export class DesService {
       sections,
       popularity,
     });
+    const sheet = publicSheet(built, run.registry);
     if (complete(sections)) this.remember(key, sheet, started);
     return { kind: "ready", sheet, cachedAt: null };
   }
@@ -453,6 +489,8 @@ export class DesService {
       pillar: "audience",
       phase: "scan",
       toolCallId,
+      concepts: [],
+      candidates: NO_RUN_CANDIDATES,
     });
     const section = async (skill: SkillId, toolCallId: string, input: () => unknown): Promise<SectionRun> => {
       try {

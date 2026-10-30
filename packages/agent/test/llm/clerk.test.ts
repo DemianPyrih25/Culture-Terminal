@@ -18,6 +18,7 @@ function intent(): IntentT {
     constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
     safety: { allowed: true, category: null, reframe: null },
     read_as: { nearest: false, not_covered: [] },
+    candidates: { named_areas: [], named_markets: [], obvious_entities: [], obvious_areas: [], obvious_markets: [] },
     assumptions: ["US geography"],
     mnemonic: "whatever the model wrote",
   };

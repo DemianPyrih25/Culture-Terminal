@@ -3,10 +3,14 @@ import { randomUUID } from "node:crypto";
 import {
   DEFAULT_RUN_LIMITS,
   placeSearchMarket,
+  queueTimeoutReason,
   reduceRunEvents,
   Report,
+  RUN_QUEUE_DEFAULTS,
+  RUN_QUEUE_FULL_MESSAGE,
   RunEvent,
   stampEvent,
+  type ErrorCode,
   type EventInput,
   type Intent,
   type Lane,
@@ -25,16 +29,22 @@ import {
   type AgentRunResult,
   type AnalystMode,
   type AnthropicLike,
+  type ContextCache,
+  type SideConfig,
 } from "@ct/agent";
 import {
   clearIpHashes,
   countRunsSince,
   createRun,
   getRun,
+  incrementQlooUsage,
   insertLedgerSnapshot,
   isCancelRequested,
   lockRun,
+  markStarted,
   purgeRuns,
+  setFollowLatestRun,
+  setPending,
   setStatus,
   updateRun,
   type LedgerSnapshotInput,
@@ -45,20 +55,24 @@ import {
 import type { PublicDataClient } from "@ct/publicdata";
 import type { QlooClient } from "@ct/qloo";
 import { normaliseName, searchParams } from "@ct/quant";
+import { utcDay } from "@ct/qloo";
 import { z } from "zod";
 import { laneModeOf, type LaneMode } from "./breakers";
+import { sideConfigFromEnv, visitorLimitsFromEnv } from "./config";
 import type { EventBus } from "./event-bus";
 import { appendRunEvent, readAllEvents, readEventAt, readLastEvent, sameEvent } from "./event-store";
 import { buildFakeScript, FAKE_MODEL, FAKE_QUESTION } from "./fake-script";
-import { preRunUsd, SpendMeter, todayLlmUsd } from "./llm-spend";
+import { CONTEXT_AI_USD_METRIC, CONTEXT_WEB_USD_METRIC, preRunUsd, SpendMeter, todayLlmUsd, WEB_SEARCHES_METRIC } from "./llm-spend";
 import { kvLocalities } from "./localities";
 import { log } from "./log";
+import { RunQueue, type TakenRun } from "./queue";
 import { QUESTION_HASH_PREFIX, questionHash } from "./question-hash";
 import { countLaneRunsSince } from "./run-counts";
-import { DEFAULT_VISITOR_LIMITS, VISITOR_HASH_RETENTION_MS, visitorWait, visitorWaitMessage, type VisitorLimits } from "./visitor-limits";
+import { VISITOR_HASH_RETENTION_MS, visitorWait, visitorWaitMessage, type VisitorLimits } from "./visitor-limits";
 
 /**
- * not_accepting: draining for a restart (503, retry). busy: no free slot (429, retry soon). limited:
+ * not_accepting: draining for a restart (503, retry). busy: no free slot and no room in the queue (429,
+ * retry soon). limited:
  * an hourly cap, or the rest of today's budget is held by runs in progress (429, not soon; see
  * retryAfterS). budget: today's LLM budget is spent (503, not before 00:00 UTC). unavailable: live
  * runs are switched off or not configured (503). invalid: the request itself is wrong (400).
@@ -158,6 +172,9 @@ const PAUSED_REASON = "Live analysis is paused. Answers you already have still o
 const VISITOR_ACTIVE_REASON = "Your last live question is still running. Ask again once it ends.";
 const DAILY_REASON = "Today's limit for live runs is reached. Answers you already have still open.";
 const JUDGE_DAILY_REASON = "The judge lane's daily limit for live runs is reached. Answers you already have still open.";
+const BUDGET_REASON = "Today's budget for live analysis is used up. Live runs resume at 00:00 UTC.";
+/** run.end reason of a queued run the server dropped as it drained for a restart. */
+export const QUEUE_SHUTDOWN_REASON = "The server restarted before this question could start. Nothing was spent; ask it again in a moment.";
 
 /**
  * Agent-run slots per lane in one process (SPEC §10.4: 3 in all, the judge lane's 1 among them):
@@ -186,9 +203,29 @@ export interface AgentDeps {
    * the run with the decision's message.
    */
   mode: (lane: Lane) => Promise<LaneMode>;
+  /**
+   * The side context calls' settings (R4, R5, D45): "What AI knows" and "From the web". Absent: read from
+   * the environment (config.ts sideConfigFromEnv). The run's mode turns web search off in economy.
+   */
+  side?: SideConfig;
+  /**
+   * The side blocks' shared cache (context_cache; AI 7 days, web 24 hours). Absent or null: the side
+   * calls run uncached. A getter that throws is treated as no cache.
+   */
+  contextCache?: () => ContextCache | null;
 }
 
-export type RunAgentFn = (options: AgentRunOptions) => Promise<AgentRunResult>;
+/**
+ * What the run manager adds to runAgent's options for the side context calls (R4, R5). Kept apart from
+ * AgentRunOptions so this file compiles whatever the agent names them; the agent reads `sideConfig` and
+ * `contextCache` (Part 11 contract note in the ops handoff).
+ */
+export interface SideRunOptions {
+  sideConfig: SideConfig;
+  contextCache: ContextCache | null;
+}
+
+export type RunAgentFn = (options: AgentRunOptions & Partial<SideRunOptions>) => Promise<AgentRunResult>;
 
 export interface AgentRunRequest {
   /** The question as the user typed it; it is sanitized (and capped) before anything else sees it. */
@@ -240,23 +277,30 @@ export interface RunManagerOptions {
   agent?: AgentDeps;
   /** The agent entry point (default: runAgent from @ct/agent); tests inject a scripted one. */
   runAgent?: RunAgentFn;
-  /** Public-lane agent runs any process may start per rolling hour, counted in the database. */
+  /** Public-lane agent runs any process may start per rolling hour, counted in the database (default 120, D24). */
   agentHourlyCap?: number;
-  /** Judge-lane agent runs any process may start per rolling hour, counted apart (default 20, SPEC §10.4). */
+  /** Judge-lane agent runs any process may start per rolling hour, counted apart (default 30, D24). */
   judgeHourlyCap?: number;
-  /** Agent runs of both lanes any process may start per rolling 24 hours (default 200, SPEC §10.4 global). */
+  /** Agent runs of both lanes any process may start per rolling 24 hours (default 500, D24 overall). */
   agentDailyCap?: number;
-  /** Judge-lane agent runs any process may start per rolling 24 hours (default 60, SPEC §10.4). */
+  /** Judge-lane agent runs any process may start per rolling 24 hours (default 120, D24). */
   judgeDailyCap?: number;
   /**
-   * Agent runs of both lanes this process holds at once (default 3, PLAN §10.4 global concurrency),
+   * Agent runs of both lanes this process holds at once (default 6, D24 global concurrency),
    * judgeMaxActive of them held for the judge lane (laneSlots). They never share fakeMaxActive: anyone
    * may start a test run, and test runs must not be able to take a live run's slot.
    */
   agentMaxActive?: number;
-  /** Of agentMaxActive, the slots held for judge-lane runs (default 1, SPEC §10.4); 0 while the judge lane is closed. */
+  /** Of agentMaxActive, the slots held for judge-lane runs (default 2, D24); 0 while the judge lane is closed. */
   judgeMaxActive?: number;
-  /** The public lane's per-visitor limits (default 1 at once, 3 an hour, 8 a day, SPEC §10.4). */
+  /**
+   * Agent runs that may wait for a slot when every one of their lane is busy (D24: 12, RUN_QUEUE_MAX).
+   * Default 0: no queue, a run that finds no slot is refused as busy at once.
+   */
+  queueMax?: number;
+  /** How long a queued run waits for a slot before it ends unstarted (D24: 120 s, RUN_QUEUE_WAIT_S). */
+  queueWaitMs?: number;
+  /** The public lane's per-visitor limits (default from VISITOR_*: 2 at once, 10 an hour, 30 a day, D24). */
   visitorLimits?: VisitorLimits;
   /**
    * The daily LLM breaker in USD. A run starts only while today's spend, plus its pre-run reserve
@@ -277,7 +321,7 @@ export interface RunManagerOptions {
 export interface DrainResult {
   /** Runs that ended on their own within the grace period. */
   finished: number;
-  /** Runs stopped at the deadline and marked incomplete. */
+  /** Runs stopped at the deadline and marked incomplete, and queued runs ended before they started. */
   stopped: number;
 }
 
@@ -293,6 +337,29 @@ interface ActiveRun {
   spend: SpendMeter | null;
   /** What the run holds of today's budget until it records its own spend (preRunUsd of its ANALYST). */
   reserveUsd: number;
+}
+
+/**
+ * An agent run waiting in the queue (D24), from its reserved place to its start or its end. `run` is
+ * null until its admission has created the row.
+ */
+interface QueuedRun {
+  runId: string;
+  lane: Lane;
+  visitor: string | null;
+  deps: AgentDeps;
+  controller: AbortController;
+  done: Promise<void>;
+  release: () => void;
+  run: AgentRunContext | null;
+}
+
+/** How a run that never started ends: cancelled, timed out, refused at its start, or dropped at shutdown. */
+interface QueueEnd {
+  status: TerminalRunStatus;
+  reason: string;
+  /** An error event before run.end, for a failure the viewer can retry. */
+  code?: ErrorCode;
 }
 
 type Settled<T> = { kind: "result"; value: T } | { kind: "threw"; error: unknown } | { kind: "abandoned" };
@@ -380,6 +447,7 @@ class EventWriter {
   private closed = false;
   private warnedLate = false;
   private failed: unknown = null;
+  private first: string | null = null;
 
   constructor(
     private readonly runId: string,
@@ -394,6 +462,11 @@ class EventWriter {
   /** The error of the first failed write, or null. */
   get failure(): unknown {
     return this.failed;
+  }
+
+  /** The timestamp of the first event accepted, or null before it. */
+  get firstTs(): string | null {
+    return this.first;
   }
 
   readonly emit = (input: EventInput): void => {
@@ -419,6 +492,7 @@ class EventWriter {
     }
     const event = parsed.data;
     this.assigned = event.seq;
+    this.first ??= event.ts;
     this.tail = this.tail.then(() => this.write(event));
   };
 
@@ -469,8 +543,15 @@ interface AgentRunContext {
   /** Null when public data is not set up: the public tools then come back unavailable. */
   publicdata: PublicDataClient | null;
   anthropic: AnthropicLike;
+  /** The side context calls' settings and cache (R4, R5). */
+  side: SideRunOptions;
+  /** When the agent started; reset when a queued run leaves the queue, so run time never counts the wait. */
   startedAt: number;
   spend: SpendMeter;
+  /** Writes the run's events in order, from run.created (and its queue events) to run.end. */
+  writer: EventWriter;
+  /** Stops runAgent: cancel, shutdown, the watchdog, or a failed event write. */
+  abort: AbortController;
 }
 
 /**
@@ -491,6 +572,7 @@ interface AgentClients {
   qloo: QlooClient;
   publicdata: PublicDataClient | null;
   anthropic: AnthropicLike;
+  side: SideRunOptions;
 }
 
 /** Pins keyed the way runAgent looks them up (normaliseName); undefined when none are left. */
@@ -600,6 +682,19 @@ function endedStatus(rowStatus: RunStatus, state: RunState): RunStatus | null {
   return state.ended?.status ?? null;
 }
 
+/** run.created as the run manager writes it: a queued run's first event, or a run whose agent failed before its own. */
+function runCreatedInput(run: AgentRunContext): EventInput {
+  return {
+    type: "run.created",
+    question: run.question,
+    mode: run.mode,
+    lane: run.lane,
+    limits: DEFAULT_RUN_LIMITS,
+    parentRunId: run.parent?.runId ?? null,
+    model: ANALYST_CONFIGS[run.mode].model,
+  };
+}
+
 /**
  * Owns the runs this process is executing. Each event is validated against the contracts, given the
  * next seq, appended to run_events and only then published on the bus, so the database is always at
@@ -627,7 +722,14 @@ export class RunManager {
   private readonly agentWatchdogMs: number;
   private readonly agentStopGraceMs: number;
   private readonly qlooEnabled: boolean;
+  private readonly queueMax: number;
+  private readonly queueWaitMs: number;
   private readonly active = new Map<string, ActiveRun>();
+  /** Agent runs that wait for a slot (D24), in order; queuedRuns holds each from its reserved place to its start or end. */
+  private readonly queue: RunQueue<QueuedRun>;
+  private readonly queuedRuns = new Map<string, QueuedRun>();
+  /** The pending check of the queued runs' cancel flags, while any run waits. */
+  private queueCancelTimer: ReturnType<typeof setTimeout> | null = null;
   /** Orphan finalizations in flight, so viewers of one run in this process share one attempt. */
   private readonly finalizing = new Map<string, Promise<boolean>>();
   /** Tail of the admission queue: the hourly count and the insert run one start at a time. */
@@ -646,35 +748,53 @@ export class RunManager {
     this.cancelPollMs = options.cancelPollMs ?? 1000;
     this.agent = options.agent;
     this.runAgentFn = options.runAgent ?? runAgent;
-    this.agentHourlyCap = options.agentHourlyCap ?? 20;
-    this.judgeHourlyCap = options.judgeHourlyCap ?? 20;
-    this.agentDailyCap = options.agentDailyCap ?? 200;
-    this.judgeDailyCap = options.judgeDailyCap ?? 60;
-    this.agentMaxActive = options.agentMaxActive ?? 3;
-    this.slots = laneSlots(this.agentMaxActive, options.judgeMaxActive ?? 1);
-    this.visitorLimits = options.visitorLimits ?? DEFAULT_VISITOR_LIMITS;
-    this.llmDailyUsdCap = options.llmDailyUsdCap ?? 1.4;
+    this.agentHourlyCap = options.agentHourlyCap ?? 120;
+    this.judgeHourlyCap = options.judgeHourlyCap ?? 30;
+    this.agentDailyCap = options.agentDailyCap ?? 500;
+    this.judgeDailyCap = options.judgeDailyCap ?? 120;
+    this.agentMaxActive = options.agentMaxActive ?? RUN_QUEUE_DEFAULTS.maxActive;
+    this.slots = laneSlots(this.agentMaxActive, options.judgeMaxActive ?? 2);
+    this.visitorLimits = options.visitorLimits ?? visitorLimitsFromEnv();
+    this.llmDailyUsdCap = options.llmDailyUsdCap ?? 8;
     this.llmLaneUsdCap = options.llmLaneUsdCap ?? {};
     this.agentWatchdogMs = options.agentWatchdogMs ?? AGENT_WATCHDOG_MS;
     this.agentStopGraceMs = options.agentStopGraceMs ?? AGENT_STOP_GRACE_MS;
     this.qlooEnabled = options.qlooEnabled ?? true;
+    this.queueMax = Math.max(0, options.queueMax ?? 0);
+    this.queueWaitMs = options.queueWaitMs ?? RUN_QUEUE_DEFAULTS.waitS * 1000;
+    this.queue = new RunQueue<QueuedRun>({
+      max: this.queueMax,
+      waitMs: this.queueWaitMs,
+      onPlace: (_id, place, queued) => queued.run?.writer.emit({ type: "run.queued", ...place }),
+      onTimeout: (_id, queued) => {
+        const waitS = Math.round(this.queueWaitMs / 1000);
+        log.info({ runId: queued.runId, waitS }, "queued run timed out");
+        void this.endQueued(queued, { status: "failed", reason: queueTimeoutReason(waitS), code: "queue_timeout" });
+      },
+    });
   }
 
   isAccepting(): boolean {
     return this.accepting;
   }
 
+  /** The run is driven here: running, or waiting in the queue. */
   isLive(runId: string): boolean {
-    return this.active.has(runId);
+    return this.active.has(runId) || this.queuedRuns.has(runId);
   }
 
   activeCount(): number {
     return this.active.size;
   }
 
-  /** Resolves once the run's loop has written run.end (or immediately when it is not active here). */
+  /** Agent runs waiting for a slot here (D24), those still being admitted to the queue included. */
+  queuedCount(): number {
+    return this.queue.size;
+  }
+
+  /** Resolves once the run's loop has written run.end (or immediately when it is not live here). */
   async whenDone(runId: string): Promise<void> {
-    await this.active.get(runId)?.done;
+    await (this.active.get(runId) ?? this.queuedRuns.get(runId))?.done;
   }
 
   /** A test run; `client` (as AgentRunRequest.client) is recorded on its row and limits nothing. */
@@ -756,20 +876,31 @@ export class RunManager {
     if (paused.mode === "replay_only") throw new RunManagerError("unavailable", paused.message ?? PAUSED_REASON);
     const picked = await this.resolvePick(answer, clients.qloo);
     const parent = picked.parentRunId ? await this.parentContext(picked.parentRunId) : null;
-    return this.launchAgent(
+    const started = await this.launchAgent(
       { question: picked.question, lane: answer.lane, pins: picked.pins, parent, client: answer.client ?? null },
       clients,
     );
+    // A follow whose re-run waited on this pick now waits on the run the pick started.
+    await this.movePendingFollows(answer.runId, started.runId);
+    return started;
   }
 
+  /**
+   * Admits an agent run and starts it on a free slot of its lane, or queues it (D24) when every slot of
+   * its lane is busy or runs of its lane already wait: the run is created as queued, emits run.queued
+   * with its place and starts on its own when a slot frees (pump). The per-visitor, hourly and daily
+   * limits and the spent budget are checked as it joins; the mode and the budget's reserve again as it starts.
+   */
   private async launchAgent(launch: AgentLaunch, clients: AgentClients): Promise<{ runId: string }> {
     const { question, lane, pins, parent, intent } = launch;
     if (!this.accepting) throw new RunManagerError("not_accepting", NOT_ACCEPTING_REASON);
     // Each lane has slots of its own inside the total: public runs can never take the judge lane's.
-    if (this.activeAgentRuns(lane) >= this.slots[lane] || this.activeCountOf("agent") >= this.agentMaxActive) {
-      throw new RunManagerError("busy", BUSY_REASON);
+    // A free slot goes to the runs already waiting on its lane first.
+    const queued = !this.hasSlot(lane) || this.queue.waiting(lane) > 0;
+    if (queued && this.queue.size >= this.queueMax) {
+      throw new RunManagerError("busy", this.queueMax > 0 ? RUN_QUEUE_FULL_MESSAGE : BUSY_REASON);
     }
-    // The public lane's per-visitor limits (SPEC §10.4); the judge lane's are the lane's own.
+    // The public lane's per-visitor limits (SPEC §10.4); the judge lane's are the lane's own. Queued runs count.
     const visitor = lane === "public" ? launch.client : null;
     if (visitor !== null && this.activeVisitorRuns(visitor) >= this.visitorLimits.maxActive) {
       throw new RunManagerError("limited", VISITOR_ACTIVE_REASON, Math.ceil(DEFAULT_RUN_LIMITS.hardMs / 1000));
@@ -778,9 +909,13 @@ export class RunManager {
     const controller = new AbortController();
     let release: () => void = () => {};
     const done = new Promise<void>((resolve) => (release = resolve));
-    // Checked and reserved with no await in between, so concurrent starts respect the slots and drain sees it.
+    // Checked and reserved with no await in between, so concurrent starts respect the slots and the
+    // queue's size, and drain sees the run.
     const slot: ActiveRun = { controller, done, kind: "agent", lane, visitor, spend: null, reserveUsd: 0 };
-    this.active.set(runId, slot);
+    const waiting: QueuedRun = { runId, lane, visitor, deps: clients.deps, controller, done, release, run: null };
+    if (!queued) this.active.set(runId, slot);
+    else if (this.queue.reserve(runId, lane, waiting)) this.queuedRuns.set(runId, waiting);
+    else throw new RunManagerError("busy", RUN_QUEUE_FULL_MESSAGE);
     const spend = new SpendMeter(this.db, lane);
     let mode: AnalystMode;
     try {
@@ -806,26 +941,27 @@ export class RunManager {
         const cap = this.llmLaneUsdCap[lane] ?? this.llmDailyUsdCap;
         const reserve = preRunUsd(current);
         const today = await todayLlmUsd(this.db);
-        if (today + reserve > cap) {
-          throw new RunManagerError("budget", "Today's budget for live analysis is used up. Live runs resume at 00:00 UTC.");
-        }
+        if (today + reserve > cap) throw new RunManagerError("budget", BUDGET_REASON);
         // Runs in flight have spent little of what they will: each holds its reserve until it records more.
-        if (today + this.reservedUsd() + reserve > cap) {
+        // A queued run takes its reserve as it starts (admitQueued), when the runs ahead may have ended.
+        if (!queued && today + this.reservedUsd() + reserve > cap) {
           throw new RunManagerError(
             "limited",
             "Live runs in progress hold the rest of today's budget. Try again in a few minutes.",
             DEFAULT_RUN_LIMITS.hardMs / 1000,
           );
         }
-        // Admissions run one at a time, so the next one already counts this run's reserve.
-        slot.reserveUsd = reserve;
-        slot.spend = spend;
+        if (!queued) {
+          // Admissions run one at a time, so the next one already counts this run's reserve.
+          slot.reserveUsd = reserve;
+          slot.spend = spend;
+        }
         await createRun(this.db, {
           id: runId,
           question,
           // A follow-up's key carries its parent, so it never answers (or is answered by) the bare question.
           questionHash: questionHash(question, pins, current, parent?.runId ?? null),
-          status: "running",
+          status: queued ? "queued" : "running",
           mode: current,
           lane,
           model: ANALYST_CONFIGS[current].model,
@@ -834,27 +970,230 @@ export class RunManager {
           parentRunId: parent?.runId ?? null,
           // Every run keeps its visitor, judge runs too; only public runs count against it.
           ipHash: launch.client,
+          // A queued run is stamped when it leaves the queue (admitQueued); one that never does counts toward no cap.
+          ...(queued ? {} : { startedAt: new Date() }),
         });
         return current;
       });
     } catch (err) {
-      this.active.delete(runId);
+      if (queued) {
+        this.queue.leave(runId);
+        this.queuedRuns.delete(runId);
+      } else {
+        this.active.delete(runId);
+      }
       release();
       throw err;
     }
     if (launch.client !== null) this.forgetSoon();
-    const { qloo, publicdata, anthropic } = clients;
-    const run: AgentRunContext = { runId, question, lane, mode, pins, parent, intent, qloo, publicdata, anthropic, startedAt: Date.now(), spend };
-    void this.driveAgent(run, controller.signal).finally(() => {
-      this.active.delete(runId);
-      this.bus.close(runId);
-      release();
-    });
-    log.info(
-      { runId, mode, lane, child: parent !== null, pinned: pins !== undefined, previewed: intent !== undefined },
-      "agent run started",
-    );
+    const { qloo, publicdata, anthropic, side } = clients;
+    const abort = new AbortController();
+    const run: AgentRunContext = {
+      runId,
+      question,
+      lane,
+      mode,
+      pins,
+      parent,
+      intent,
+      qloo,
+      publicdata,
+      anthropic,
+      side,
+      startedAt: Date.now(),
+      spend,
+      writer: this.agentWriter(runId, lane, spend, abort),
+      abort,
+    };
+    const logged = { runId, mode, lane, child: parent !== null, pinned: pins !== undefined, previewed: intent !== undefined };
+    if (!queued) {
+      this.drive(run, controller.signal, release);
+      log.info(logged, "agent run started");
+      return { runId };
+    }
+    waiting.run = run;
+    run.writer.emit(runCreatedInput(run));
+    // A shutdown cleared the queue while this run was admitted: it ends before it ever waits.
+    if (!this.accepting || this.queue.enter(runId) === null) {
+      this.queue.leave(runId);
+      await this.endQueued(waiting, { status: "failed", reason: QUEUE_SHUTDOWN_REASON });
+      throw new RunManagerError("not_accepting", NOT_ACCEPTING_REASON);
+    }
+    this.watchQueuedCancels();
+    log.info({ ...logged, place: this.queue.place(runId) }, "agent run queued");
+    // A slot may have freed while this run was admitted.
+    this.pump();
     return { runId };
+  }
+
+  /** A free agent slot for this lane: its own slots and the total both have room. */
+  private hasSlot(lane: Lane): boolean {
+    return this.activeAgentRuns(lane) < this.slots[lane] && this.activeCountOf("agent") < this.agentMaxActive;
+  }
+
+  /** Drives an admitted agent run to its end, then frees its slot for the queue. */
+  private drive(run: AgentRunContext, shutdown: AbortSignal, release: () => void): void {
+    void this.driveAgent(run, shutdown).finally(() => {
+      this.active.delete(run.runId);
+      this.bus.close(run.runId);
+      release();
+      this.pump();
+    });
+  }
+
+  /** Starts queued runs, first in first out per lane, while their lanes have free slots. */
+  private pump(): void {
+    if (!this.accepting) return;
+    const canStart = (lane: Lane) => this.hasSlot(lane);
+    for (let next = this.queue.take(canStart); next; next = this.queue.take(canStart)) this.startQueued(next);
+  }
+
+  /** Moves a run taken from the queue onto the slot it was taken for, before any await. */
+  private startQueued(taken: TakenRun<QueuedRun>): void {
+    const queued = taken.value;
+    this.active.set(queued.runId, {
+      controller: queued.controller,
+      done: queued.done,
+      kind: "agent",
+      lane: queued.lane,
+      visitor: queued.visitor,
+      spend: null,
+      reserveUsd: 0,
+    });
+    this.queuedRuns.delete(queued.runId);
+    void this.admitQueued(taken);
+  }
+
+  /**
+   * A queued run's start: the lane's mode and today's budget are checked again, now that it is about to
+   * spend. A paused lane or a spent budget ends it unstarted; a budget held by the runs in flight puts
+   * it back at its place until one of them ends (and pumps the queue again).
+   */
+  private async admitQueued(taken: TakenRun<QueuedRun>): Promise<void> {
+    const queued = taken.value;
+    const run = queued.run!;
+    const slot = this.active.get(queued.runId)!;
+    type Start = "start" | "wait" | "gone" | QueueEnd;
+    let start: Start;
+    try {
+      start = await this.admit(async (): Promise<Start> => {
+        if (!this.accepting) return { status: "failed", reason: QUEUE_SHUTDOWN_REASON };
+        if (run.writer.failure !== null) return { status: "failed", reason: UNSAVED_REASON };
+        const { mode: current, message } = laneModeOf(await queued.deps.mode(run.lane));
+        if (current === "replay_only") return { status: "failed", reason: message ?? PAUSED_REASON };
+        // The run keeps the ANALYST it was admitted with: its row and run.created already name it.
+        const cap = this.llmLaneUsdCap[run.lane] ?? this.llmDailyUsdCap;
+        const reserve = preRunUsd(run.mode);
+        const today = await todayLlmUsd(this.db);
+        if (today + reserve > cap) return { status: "failed", reason: BUDGET_REASON };
+        if (today + this.reservedUsd() + reserve > cap) return "wait";
+        slot.reserveUsd = reserve;
+        slot.spend = run.spend;
+        // False when the row is no longer queued: another writer ended it.
+        if (!(await setStatus(this.db, run.runId, "running", { from: ["queued"] }))) return "gone";
+        // From here the run counts toward the visitor and global caps (started_at set).
+        await markStarted(this.db, run.runId);
+        return "start";
+      });
+    } catch (err) {
+      log.error({ err, runId: run.runId }, "a queued run could not be started");
+      start = { status: "failed", reason: AGENT_FAILED_REASON };
+    }
+    if (start === "start") {
+      run.startedAt = Date.now();
+      this.drive(run, queued.controller.signal, queued.release);
+      const joined = Date.parse(run.writer.firstTs ?? "");
+      log.info({ runId: run.runId, lane: run.lane, waitedMs: Number.isFinite(joined) ? run.startedAt - joined : null }, "queued run started");
+    } else if (start === "wait") {
+      this.active.delete(run.runId);
+      this.queuedRuns.set(run.runId, queued);
+      this.queue.restore(taken);
+      this.watchQueuedCancels();
+    } else if (start === "gone") {
+      log.warn({ runId: run.runId }, "queued run was ended by another writer; not starting it");
+      this.active.delete(run.runId);
+      this.bus.close(run.runId);
+      queued.release();
+      this.pump();
+    } else {
+      await this.endQueued(queued, start);
+    }
+  }
+
+  /**
+   * Ends a run that never started: its error event (if any) and run.end after its queue events, then
+   * the row. Nothing was spent. Frees whatever it held, a place or a slot, and starts the next run.
+   */
+  private async endQueued(queued: QueuedRun, end: QueueEnd): Promise<void> {
+    const run = queued.run;
+    try {
+      if (run) {
+        await run.writer.close();
+        const joined = Date.parse(run.writer.firstTs ?? "");
+        const elapsedMs = Math.max(0, Date.now() - (Number.isFinite(joined) ? joined : run.startedAt));
+        if (end.code) await run.writer.append({ type: "error", code: end.code, message: end.reason, retryable: true });
+        await run.writer.append({ type: "run.end", status: end.status, elapsedMs, reason: end.reason });
+        const patch: RunPatch = {
+          wallMs: Math.round(elapsedMs),
+          llmUsd: 0,
+          error: end.status === "failed" || end.status === "incomplete" ? { reason: end.reason } : null,
+        };
+        await withRetries("end-of-run status write", { runId: run.runId }, () =>
+          setStatus(this.db, run.runId, end.status, { from: ACTIVE_STATUSES, patch }),
+        );
+        log.info({ runId: run.runId, status: end.status, elapsedMs }, "queued run ended before it started");
+        await this.settlePendingFollows(run.runId, end.status);
+      }
+    } catch (err) {
+      if (err instanceof SeqTakenError) log.warn({ runId: queued.runId, seq: err.seq }, "queued run was ended by another writer");
+      // As for any run: finalizeOrphan rebuilds the row from a stored run.end or ends the run incomplete.
+      else log.error({ err, runId: queued.runId }, "could not record the end of a queued run");
+    } finally {
+      this.queuedRuns.delete(queued.runId);
+      this.active.delete(queued.runId);
+      this.bus.close(queued.runId);
+      queued.release();
+      this.pump();
+    }
+  }
+
+  /** Polls the cancel flags of the waiting runs while any wait; a raised flag ends that run as cancelled. */
+  private watchQueuedCancels(): void {
+    if (this.queueCancelTimer !== null || this.queue.size === 0) return;
+    this.queueCancelTimer = setTimeout(() => void this.checkQueuedCancels(), this.cancelPollMs);
+  }
+
+  private async checkQueuedCancels(): Promise<void> {
+    try {
+      for (const queued of this.queue.values()) {
+        if (!queued.run) continue;
+        let asked = false;
+        try {
+          asked = await isCancelRequested(this.db, queued.runId);
+        } catch (err) {
+          log.warn({ err, runId: queued.runId }, "cancel flag check failed; continuing");
+        }
+        // Null when it started or ended while the flag was read.
+        if (asked && this.queue.leave(queued.runId) !== null) void this.endQueued(queued, STOPS.cancelled);
+      }
+    } finally {
+      this.queueCancelTimer = null;
+      this.watchQueuedCancels();
+    }
+  }
+
+  /** The event writer of an agent run: stores, publishes and books each event; a failed store stops the run. */
+  private agentWriter(runId: string, lane: Lane, spend: SpendMeter, abort: AbortController): EventWriter {
+    return new EventWriter(runId, {
+      store: (event) => this.persist(event),
+      publish: (event) => this.bus.publish(event),
+      afterPublish: (event) => this.afterAgentEvent(runId, lane, event, spend),
+      onFailure: (err) => {
+        // A run whose events cannot be stored is not worth finishing.
+        if (!(err instanceof SeqTakenError)) log.error({ err, runId }, "agent run events could not be stored; stopping");
+        abort.abort();
+      },
+    });
   }
 
   private activeCountOf(kind: ActiveRun["kind"]): number {
@@ -870,10 +1209,11 @@ export class RunManager {
     return n;
   }
 
-  /** Public runs in flight here for this visitor. */
+  /** Public runs in flight or waiting in the queue here for this visitor. */
   private activeVisitorRuns(visitor: string): number {
     let n = 0;
     for (const run of this.active.values()) if (run.visitor === visitor) n += 1;
+    for (const run of this.queuedRuns.values()) if (run.visitor === visitor) n += 1;
     return n;
   }
 
@@ -902,7 +1242,18 @@ export class RunManager {
       log.error({ err }, "the Qloo client could not be created; refusing live runs");
       throw new RunManagerError("unavailable", "Live analysis is unavailable: the Qloo client is not configured.");
     }
-    return { deps, qloo, publicdata: this.publicDataClient(deps), anthropic };
+    return { deps, qloo, publicdata: this.publicDataClient(deps), anthropic, side: this.sideOptions(deps) };
+  }
+
+  /** The side context calls' settings and cache for a run; a cache that cannot be made leaves them uncached. */
+  private sideOptions(deps: AgentDeps): SideRunOptions {
+    let contextCache: ContextCache | null = null;
+    try {
+      contextCache = deps.contextCache?.() ?? null;
+    } catch (err) {
+      log.warn({ err }, "the context cache could not be made; side context calls run uncached");
+    }
+    return { sideConfig: deps.side ?? sideConfigFromEnv(), contextCache };
   }
 
   /**
@@ -1032,20 +1383,24 @@ export class RunManager {
     return next;
   }
 
-  /** SIGTERM step one: refuse new runs. */
+  /** SIGTERM step one: refuse new runs; queued runs no longer start. */
   beginShutdown(): void {
     this.accepting = false;
   }
 
   /**
-   * Waits up to `graceMs` for active runs to end, then stops the rest, which end as incomplete; an
-   * agent that ignores the stop is left behind after agentStopGraceMs. There is no event buffer to
-   * flush: every event is stored before it is published.
+   * Ends the queued runs at once (they would start into a restart), then waits up to `graceMs` for
+   * active runs to end and stops the rest, which end as incomplete; an agent that ignores the stop is
+   * left behind after agentStopGraceMs. There is no event buffer to flush: every event is stored before
+   * it is published.
    */
   async drain(graceMs: number): Promise<DrainResult> {
     this.beginShutdown();
+    // A run still being admitted to the queue ends itself once its admission returns (launchAgent).
+    const unstarted = this.queue.clear().flatMap(({ value }) => (value.run ? [value] : []));
+    await Promise.all(unstarted.map((queued) => this.endQueued(queued, { status: "failed", reason: QUEUE_SHUTDOWN_REASON })));
     const pending = [...this.active.values()];
-    if (pending.length === 0) return { finished: 0, stopped: 0 };
+    if (pending.length === 0) return { finished: 0, stopped: unstarted.length };
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<"deadline">((resolve) => {
       timer = setTimeout(() => resolve("deadline"), graceMs);
@@ -1060,7 +1415,7 @@ export class RunManager {
       for (const run of left) run.controller.abort();
       await Promise.all(left.map((r) => r.done));
     }
-    return { finished: pending.length - stopped, stopped };
+    return { finished: pending.length - stopped, stopped: stopped + unstarted.length };
   }
 
   /**
@@ -1071,7 +1426,7 @@ export class RunManager {
    * changed the run.
    */
   async finalizeOrphan(runId: string, reason: string = ORPHAN_REASON): Promise<boolean> {
-    if (this.active.has(runId)) return false;
+    if (this.isLive(runId)) return false;
     const pending = this.finalizing.get(runId);
     if (pending) return pending;
     const attempt = this.finalizeLocked(runId, reason).finally(() => this.finalizing.delete(runId));
@@ -1196,8 +1551,7 @@ export class RunManager {
    * read everything.
    */
   private async driveAgent(run: AgentRunContext, shutdown: AbortSignal): Promise<void> {
-    const { runId, lane, spend } = run;
-    const abort = new AbortController();
+    const { runId, lane, spend, writer, abort } = run;
     let stop: Stop | null = null;
     const stopWith = (why: Stop) => {
       stop ??= why;
@@ -1207,16 +1561,6 @@ export class RunManager {
     shutdown.addEventListener("abort", onShutdown, { once: true });
     if (shutdown.aborted) onShutdown();
     const watchdog = setTimeout(() => stopWith("overran"), this.agentWatchdogMs);
-    const writer = new EventWriter(runId, {
-      store: (event) => this.persist(event),
-      publish: (event) => this.bus.publish(event),
-      afterPublish: (event) => this.afterAgentEvent(runId, event, spend),
-      onFailure: (err) => {
-        // A run whose events cannot be stored is not worth finishing.
-        if (!(err instanceof SeqTakenError)) log.error({ err, runId }, "agent run events could not be stored; stopping");
-        abort.abort();
-      },
-    });
     const polling = new AbortController();
     const poller = this.pollCancel(runId, polling.signal, () => stopWith("cancelled"));
 
@@ -1239,6 +1583,9 @@ export class RunManager {
         localities: kvLocalities(this.db, { runId }),
         ...(run.intent ? { intent: run.intent } : {}),
         ...(this.qlooEnabled ? {} : { qlooEnabled: false }),
+        // The side context calls (R4, R5): settings from the environment, the shared context_cache.
+        sideConfig: run.side.sideConfig,
+        contextCache: run.side.contextCache,
       }))();
     const settled = await settleWithin(agent, abort.signal, this.agentStopGraceMs);
     clearTimeout(watchdog);
@@ -1281,17 +1628,7 @@ export class RunManager {
     const elapsedMs = Date.now() - run.startedAt;
     try {
       // runAgent failed before its first event: the stream still opens with run.created.
-      if (writer.stored === 0) {
-        await writer.append({
-          type: "run.created",
-          question: run.question,
-          mode: run.mode,
-          lane,
-          limits: DEFAULT_RUN_LIMITS,
-          parentRunId: run.parent?.runId ?? null,
-          model: ANALYST_CONFIGS[run.mode].model,
-        });
-      }
+      if (writer.stored === 0) await writer.append(runCreatedInput(run));
       await writer.append({ type: "run.end", status: outcome.status, elapsedMs, reason: outcome.reason });
       const patch = agentRunPatch(result, outcome, elapsedMs, spend.recorded);
       // A repeat after a lost reply finds the status already set and changes nothing.
@@ -1299,6 +1636,7 @@ export class RunManager {
         setStatus(this.db, runId, outcome.status, { from: ACTIVE_STATUSES, patch }),
       );
       log.info({ runId, status: outcome.status, events: writer.stored, elapsedMs, usd: spend.recorded }, "agent run ended");
+      await this.settlePendingFollows(runId, outcome.status);
     } catch (err) {
       if (err instanceof SeqTakenError) {
         log.warn({ runId, seq: err.seq }, "agent run was ended by another writer; stopping");
@@ -1334,16 +1672,64 @@ export class RunManager {
     }
   }
 
-  /** Bookkeeping once an agent event is stored: pillar and job after CLERK, LLM spend as it grows. */
-  private async afterAgentEvent(runId: string, event: RunEvent, spend: SpendMeter): Promise<void> {
+  /**
+   * Bookkeeping once an agent event is stored: pillar and job after CLERK, LLM spend as it grows, and the
+   * side context calls' share of it per UTC day (usage_daily, for /status): their spend is already in the
+   * run's LLM total, so these counters are a breakdown, never added to the daily breaker twice.
+   */
+  private async afterAgentEvent(runId: string, lane: Lane, event: RunEvent, spend: SpendMeter): Promise<void> {
     try {
       if (event.type === "clerk") {
         await updateRun(this.db, runId, { pillar: event.intent.pillar, job: event.intent.job, intent: event.intent });
       } else if (event.type === "usage") {
         await spend.upTo(event.llmUsd);
+      } else if (event.type === "context.ai" || event.type === "context.web") {
+        const day = utcDay(Date.now());
+        const lanes = [lane, "all"];
+        const metric = event.type === "context.ai" ? CONTEXT_AI_USD_METRIC : CONTEXT_WEB_USD_METRIC;
+        if (event.usd > 0) await incrementQlooUsage(this.db, { day, lanes, by: event.usd, metric });
+        if (event.type === "context.web" && !event.block.cached && event.block.searches > 0) {
+          await incrementQlooUsage(this.db, { day, lanes, by: event.block.searches, metric: WEB_SEARCHES_METRIC });
+        }
       }
     } catch (err) {
       log.warn({ err, runId, type: event.type }, "run bookkeeping failed; continuing");
+    }
+  }
+
+  /**
+   * Follows whose re-run waits on `runId` (follows.pending_run_id). Server-side only: keyed by run, read
+   * without a visitor key, and written back through the visitor-scoped repos.
+   */
+  private async pendingFollows(runId: string): Promise<{ id: string; visitorKey: string }[]> {
+    return this.db.query.follows.findMany({
+      columns: { id: true, visitorKey: true },
+      where: (follow, { eq }) => eq(follow.pendingRunId, runId),
+    });
+  }
+
+  /** A picker answer started `next` for the run a follow waited on: the follow now waits on `next`. */
+  private async movePendingFollows(waiting: string, next: string): Promise<void> {
+    try {
+      for (const follow of await this.pendingFollows(waiting)) await setPending(this.db, follow.id, next);
+    } catch (err) {
+      log.warn({ err, runId: waiting, next }, "could not move a follow's pending re-run to the picked run");
+    }
+  }
+
+  /**
+   * A run a follow waited on has ended: with a note, the follow points at it and stops waiting; still at
+   * a picker, it keeps waiting (the next pick moves it on); otherwise it stops waiting and keeps its last note.
+   */
+  private async settlePendingFollows(runId: string, status: RunStatus): Promise<void> {
+    if (status === "needs_input") return;
+    try {
+      for (const follow of await this.pendingFollows(runId)) {
+        if (status === "completed" || status === "incomplete") await setFollowLatestRun(this.db, follow.visitorKey, follow.id, runId);
+        await setPending(this.db, follow.id, null);
+      }
+    } catch (err) {
+      log.warn({ err, runId, status }, "could not settle the follows waiting on a run");
     }
   }
 

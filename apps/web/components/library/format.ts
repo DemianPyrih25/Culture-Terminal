@@ -1,4 +1,4 @@
-import { isVerdictTag } from "@ct/contracts";
+import { isVerdictTag } from "@ct/contracts/values";
 import { SIGNAL_LABEL } from "../../lib/brief/format";
 import type { BriefSummary } from "./briefs-client";
 

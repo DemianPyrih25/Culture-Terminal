@@ -82,6 +82,12 @@ function publicApi(options: { failFacts?: string; noTicker?: boolean } = {}): Pu
   const asked: string[] = [];
   return {
     asked,
+    osmCounts: async () => {
+      throw new Error("unused");
+    },
+    osmPlaces: async () => {
+      throw new Error("unused");
+    },
     secTicker: async (ticker) => {
       asked.push(`ticker:${ticker}`);
       return { data: options.noTicker ? null : { cik: "0000000042", ticker, title: "ALPHA HOLDINGS INC" }, meta: meta("pc-1", "company_tickers.json", "/files/company_tickers.json") };

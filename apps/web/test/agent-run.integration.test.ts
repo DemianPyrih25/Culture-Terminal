@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { pickerKey, type AgentRunOptions, type AgentRunResult } from "@ct/agent";
 import {
+  EMPTY_CANDIDATES,
   parseRunEvent,
   reduceRunEvents,
   type EventInput,
@@ -14,14 +15,17 @@ import {
 import type { QlooClient } from "@ct/qloo";
 import { searchParams } from "@ct/quant";
 import {
+  addFollow,
   countRunsSince,
   deleteKv,
+  getFollow,
   getQlooUsage,
   getRun,
   incrementQlooUsage,
   listLedgerRows,
   requestCancel,
   setKv,
+  setPending,
 } from "@ct/db";
 import { EventBus } from "../server/event-bus";
 import { readAllEvents } from "../server/event-store";
@@ -91,6 +95,7 @@ const REFUSED_INTENT: Intent = {
   constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
   safety: { allowed: false, category: "private_individual", reframe: null },
   read_as: { nearest: false, not_covered: [] },
+  candidates: EMPTY_CANDIDATES,
   assumptions: [],
   mnemonic: "ROWAN VALE <PERSON> AUD",
 };
@@ -627,6 +632,34 @@ describe.skipIf(!available)("agent runs against Postgres", () => {
       expect(run?.questionHash).toBe(questionHash(TWIN_QUESTION, pins, "live", parent.runId));
     }, 30_000);
 
+    it("moves a follow waiting on the picker to the picked run, and to that run's note once it completes", async () => {
+      const qloo = mockQlooClient();
+      const results = await twinSearch(qloo);
+      const waitingId = await waitingRun(qloo, results.slice(0, 2).map(candidateOf));
+      const db = t!.db;
+      const added = await addFollow(db, {
+        visitorKey: "visitor-follow-pick",
+        kind: "question",
+        subjectKey: "question:twin-cola-pick",
+        label: TWIN_QUESTION,
+        question: TWIN_QUESTION,
+        job: "brand_health",
+        metro: null,
+        latestRunId: null,
+      });
+      if (!added.ok) throw new Error("could not add the follow");
+      await setPending(db, added.follow.id, waitingId);
+
+      const go = deferred();
+      const { runs } = setup({ agent: agentDeps({ qloo: () => qloo }), runAgent: completedAgent({ beforeStart: go.promise }) });
+      const { runId } = await runs.answerPicker({ runId: waitingId, key: pickerKey(results[1]!.entity_id), lane: "public" });
+      // While the picked run works, the follow waits on it.
+      expect(await getFollow(db, "visitor-follow-pick", added.follow.id)).toMatchObject({ pendingRunId: runId, latestRunId: null });
+      go.resolve();
+      await runs.whenDone(runId);
+      expect(await getFollow(db, "visitor-follow-pick", added.follow.id)).toMatchObject({ pendingRunId: null, latestRunId: runId });
+    }, 30_000);
+
     it("refuses a key the run did not offer, a key no longer in the search, a run not waiting, and a Qloo failure", async () => {
       const qloo = mockQlooClient();
       const results = await twinSearch(qloo);
@@ -802,7 +835,7 @@ describe.skipIf(!available)("agent runs against Postgres", () => {
             ok: true,
             mode: "economy",
             db: { ok: true },
-            qloo: { env: "mock", today_network: 0, floor: 38_000, last_success: null, auth_errors: 0 },
+            qloo: { env: "mock", today_network: 0, floor: 32_000, last_success: null, auth_errors: 0 },
             llm: { cap: 900, configured: true },
             lanes: { public: { mode: "economy", breaker: "stored" }, judge: { mode: "economy", breaker: "stored" } },
           });

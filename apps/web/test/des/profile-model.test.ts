@@ -9,6 +9,7 @@ import {
   ageLean,
   ageSpan,
   buildProfile,
+  costText,
   fansTitle,
   freshText,
   genderLean,
@@ -158,6 +159,15 @@ describe("buildProfile", () => {
     expect(profile.how.requests).toBe(profile.how.saved + profile.how.live);
     expect(profile.how.matched).toContain("matched exactly");
     expect(buildProfile({ ...SHEET, picked: true }, null).how.matched).toContain("You picked this one");
+  });
+
+  it("says what the view cost: live Qloo requests from today's allowance, none when served again, and $0 of AI", () => {
+    expect(profile.how.cost).toMatch(/AI cost \$0\.$/);
+    expect(costText(9, null)).toBe("9 live Qloo requests from today's allowance. AI cost $0.");
+    expect(costText(1, null)).toBe("1 live Qloo request from today's allowance. AI cost $0.");
+    expect(costText(0, null)).toContain("every answer was a saved copy");
+    // A profile from the answer cache made no request now, whatever its receipts say it once cost.
+    expect(buildProfile(SHEET, "2026-10-23T09:00:00.000Z").how.cost).toContain("No Qloo request for this view");
   });
 
   it("says No data, never zero, when a part is missing", () => {

@@ -106,7 +106,7 @@ export interface ChainStep {
 /** One pinnable slug of the config. */
 export interface ShowcaseEntry {
   kind: "showcase" | "chain" | "trust";
-  /** S1…S7, CHAIN or TRUST. */
+  /** S1…S13, CHAIN or TRUST. */
   code: string;
   slug: string;
   /** showcase_order: the position in config/showcases.json, from 1. */
@@ -503,7 +503,10 @@ export async function findPins(
       }
       const reply = await qloo.search(params);
       const match = classifyMatches({ text: r.mention, type: r.entityType }, reply.data.results);
-      const applied = match.matchClass === "exact" ? match.exact[0] : undefined;
+      // A run that read the mention under another name (a known alias, or an expected name the gate read as
+      // its top result) applied the result carrying that name: the resolve event says which (alias).
+      const aliased = typeof r.alias === "string" && r.alias !== "" ? reply.data.results.find((x) => x.name === r.alias && x.types.includes(`urn:entity:${r.entityType}`)) : undefined;
+      const applied = match.matchClass === "exact" ? match.exact[0] : aliased;
       if (applied === undefined || (r.name !== null && applied.name !== r.name)) {
         findings.push({ ...base, entityId: null, source: null, problem: "the cached /search answer no longer holds the exact match the run applied" });
         continue;

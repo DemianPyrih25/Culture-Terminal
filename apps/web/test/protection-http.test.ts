@@ -111,7 +111,7 @@ describe("POST /api/runs: the answer cache (D26)", () => {
   });
 
   it("answers from the cache in replay-only mode, fresh or not, and refuses politely when it has nothing", async () => {
-    modeInputs.todayUsd = 5;
+    modeInputs.todayUsd = 9;
     expect(await answer(await http.startRun(postJson("/api/runs", { question: QUESTION, fresh: true })))).toEqual({
       status: 200,
       body: { runId: "run-cached-0001", cached: true },
@@ -125,7 +125,7 @@ describe("POST /api/runs: the answer cache (D26)", () => {
   });
 
   it("never answers a follow-up from the cache in replay-only mode: it is refused, not handed another brief", async () => {
-    modeInputs.todayUsd = 5;
+    modeInputs.todayUsd = 9;
     const child = await http.startRun(postJson("/api/runs", { question: QUESTION, parentRunId: "run-parent-0001" }));
     expect(await answer(child)).toEqual({
       status: 503,
@@ -267,7 +267,8 @@ describe("the judge lane", () => {
   });
 
   it("keeps running live for judges while the public lane is paused", async () => {
-    modeInputs.todayUsd = 0.9;
+    // Past the public lane's $4.74 replay point, under the judge lane's $6 economy point (D24).
+    modeInputs.todayUsd = 5;
     const human = await (async () => {
       // The public lane is replay only now, so a judge's browser passes the check on its own run.
       const cookie = await judgeCookie();
@@ -318,7 +319,7 @@ describe("POST /api/preview: the human check", () => {
   });
 
   it("tells the browser a brief would run on the economy analyst", async () => {
-    modeInputs.todayUsd = 0.6;
+    modeInputs.todayUsd = 4;
     g.__ctPreview = new PreviewService(previewDeps(clerkAnswering(clerkReply(testIntent()))));
     const res = await http.previewQuestion(postJson("/api/preview", { question: QUESTION, turnstileToken: GOOD_TOKEN }));
     expect(await res.json()).toMatchObject({
@@ -441,7 +442,7 @@ describe("/api/admin/mode", () => {
   it("shows the stored mode, the override and each lane's decision", async () => {
     vi.stubEnv("ADMIN_TOKEN", "admin-token-for-tests");
     vi.stubEnv("MODE_OVERRIDE", "");
-    modeInputs.todayUsd = 0.6;
+    modeInputs.todayUsd = 4;
     const { status, body } = await answer(await http.adminMode(admin()));
     expect(status).toBe(200);
     expect(body).toMatchObject({
@@ -472,7 +473,7 @@ describe("/api/admin/mode", () => {
 describe("GET /api/health: lanes and protection", () => {
   it("reports each lane's mode and breaker, the thresholds and the protection switches", async () => {
     g.__ctMigrationsApplied = true;
-    modeInputs.todayUsd = 0.5;
+    modeInputs.todayUsd = 4;
     modeInputs.qloo = qlooUsage();
     // A database whose ping and reads answer: just enough for health.
     const db = { execute: async () => [{ "?column?": 1 }] };
@@ -484,7 +485,7 @@ describe("GET /api/health: lanes and protection", () => {
         public: { mode: "economy", breaker: "llm_spend", until: "2026-10-23T00:00:00.000Z" },
         judge: { mode: "live", breaker: null },
       },
-      llm: { thresholds: { public: { economy_at: 0.49, replay_at: 0.79 }, judge: { economy_at: 1, replay_at: 1.35 } } },
+      llm: { thresholds: { public: { economy_at: 3.6, replay_at: 4.74 }, judge: { economy_at: 6, replay_at: 7.94 } } },
       protection: { turnstile: true, human_check: "on", judge_lane: true },
     });
   });

@@ -197,15 +197,15 @@ describe("daily lane cap (prod)", () => {
 });
 
 describe("month floor", () => {
-  it("stops development below 38,000 remaining without changing the mode", async () => {
+  it("stops development below 32,000 remaining without changing the mode", async () => {
     const modes: Mode[] = [];
-    const h = harness({ onModeChange: (m) => modes.push(m), transport: fakeTransport(() => ({ headers: { monthRemaining: 37_999 } })) });
+    const h = harness({ onModeChange: (m) => modes.push(m), transport: fakeTransport(() => ({ headers: { monthRemaining: 31_999 } })) });
     const qloo = h.client.standalone().forTool(null);
     const [a, b] = names(2);
     await qloo.search({ query: a ?? "" });
     expect(await gateOf(qloo.search({ query: b ?? "" }))).toBe("month_floor");
     expect(modes).toEqual([]);
-    expect(h.client.monthFloor).toBe(38_000);
+    expect(h.client.monthFloor).toBe(32_000);
   });
 
   it("switches prod to replay_only below 2,000 remaining, once", async () => {

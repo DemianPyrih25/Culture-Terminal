@@ -90,6 +90,23 @@ test("a key number's Source opens How we know on its number", async ({ page }, t
   await expect(drawer).toBeHidden();
 });
 
+test("the ledger lists every request behind the answer, each with its exact call", async ({ page }, testInfo) => {
+  await open(page, ANSWER_SAMPLE);
+  await expectAnswer(page);
+  await page.getByRole("button", { name: /^Source of / }).first().click();
+  const drawer = page.getByRole("dialog", { name: "How we know" });
+  await expect(drawer).toBeVisible();
+  const tab = drawer.getByRole("tab", { name: /^Sources \(\d+\)$/ });
+  const listed = Number(/\((\d+)\)/.exec(await tab.innerText())?.[1] ?? "0");
+  expect(listed, "the answer's sources").toBeGreaterThan(0);
+  await tab.click();
+  await expect(tab).toHaveAttribute("aria-selected", "true");
+  const rows = drawer.locator("[data-source-row]");
+  await expect(rows.first()).toBeVisible();
+  expect(await rows.count()).toBeGreaterThan(0);
+  await shot(page, testInfo, "ledger");
+});
+
 test("a replay at 4× plays the recording to its answer", async ({ page }, testInfo) => {
   test.setTimeout(90_000);
   // D26: a replay plays the stored events and starts nothing (the spend guard fails a POST /api/runs).

@@ -82,7 +82,12 @@ export function figureLegend(dataset: DatasetEnvelope | null): FigureLegend {
       return { ...empty, series: [{ key: dataset.payload.seed.ref, label: dataset.payload.seed.label, role: "subject" }] };
     case "Position":
       return { ...empty, series: [{ key: dataset.payload.subject.ref, label: dataset.payload.subject.label, role: "subject" }] };
+    case "TasteMap": {
+      const target = dataset.payload.points.find((p) => p.target);
+      return { ...empty, series: target ? [{ key: target.key, label: target.label, role: "subject" }] : [] };
+    }
     case "Ranked":
+    case "Supply":
     case "Scorecard":
       return empty;
   }

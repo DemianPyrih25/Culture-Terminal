@@ -116,6 +116,8 @@ describe("skill contract", () => {
       pillar: "investment",
       phase: "wave1",
       toolCallId: "toolu_fixture_9",
+      concepts: [],
+      candidates: { entities: [], areas: [], markets: [] },
     } satisfies SkillCtx;
 
     const input = momentumSkill.input.parse({ entities: ["R1"], type: "brand", trigger_finding_id: null, step_id: "S4" });

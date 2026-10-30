@@ -1,4 +1,4 @@
-import { tokenizeProse } from "@ct/contracts";
+import { tokenizeProse } from "@ct/contracts/values";
 import type { ReactNode } from "react";
 
 /**

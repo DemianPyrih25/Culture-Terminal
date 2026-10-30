@@ -53,6 +53,8 @@ export { MomentumStrip, TREND_TEXT, momentumDomain, momentumTableSpec, stepPath,
 export type { MomentumStripOptions, MomentumStripProps } from "./momentum-strip";
 export { PeerStrip, PositionCard, positionTableSpec } from "./position-card";
 export type { PositionCardOptions, PositionCardProps } from "./position-card";
+export { TASTE_MAP_DRAW_MIN, TasteMap, dotRadius, nearestOnMap, stressText, tasteMapCaption, tasteMapModel, tasteMapTableSpec } from "./taste-map";
+export type { TasteMapModel, TasteMapOptions, TasteMapProps } from "./taste-map";
 export { Exhibit, FigurePending } from "./exhibit";
 export type { ExhibitDisplay, ExhibitProps } from "./exhibit";
 export { plainProse, renderProse } from "./prose";

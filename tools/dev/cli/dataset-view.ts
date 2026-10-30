@@ -42,6 +42,12 @@ export function datasetShape(d: DatasetEnvelope): string {
       const valued = d.payload.axes.filter((a) => a.value !== null).length;
       return `${valued} of ${d.payload.axes.length} axes · ${count(d.payload.peerCount, "peer")}`;
     }
+    case "TasteMap":
+      return `${count(d.payload.k, "point")} · stress ${d.payload.stress.toFixed(2)} · ${count(d.payload.imputedPairs.length, "imputed pair")}`;
+    case "Supply": {
+      const where = d.payload.scope === "market" ? `${d.payload.market ?? "market"} r${d.payload.radiusKm ?? "?"} km` : (d.payload.metro ?? "areas");
+      return `${where} · ${count(d.payload.rows.length, "area")} × ${count(d.payload.types.length, "type")} · ${count(d.payload.places.length, "place")}${d.payload.city === null ? " · no city reference" : ""}`;
+    }
   }
 }
 

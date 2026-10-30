@@ -21,14 +21,14 @@ export { MiniBarColumns, miniBarDisplay, miniBarShares, miniBarTable } from "./m
 export type { MiniBarColumn, MiniBarColumnsProps, MiniBarRow } from "./mini-bars";
 export { NEIGHBOUR_DOMAINS, NeighbourColumns, NumberedList, neighbourTable, numberedListTable } from "./name-lists";
 export type { NameItem, NeighbourColumn, NeighbourColumnsProps, NumberedListProps } from "./name-lists";
-export { NoDataMark, PlotEmpty, PlotTagView, tagText } from "./parts";
+export { NoDataMark, PlotEmpty, PlotTagView, plotTags, tagText } from "./parts";
 export { RANK_TRACK_CAP, RankTrack, RankTrackList, rankText, rankTrackTable } from "./rank-track";
 export type { RankTrackListProps, RankTrackRow } from "./rank-track";
 export { CLIMB_LABEL, ClimbLegend, RankedFitList, fitDisplay, rankedFitTable } from "./ranked-fit";
 export type { RankedFitListProps, RankedFitRow } from "./ranked-fit";
 export { SLATE_HEADS, SlateTable, categoryIcon, slateTable } from "./slate-table";
 export type { SlateRow, SlateTableProps } from "./slate-table";
-export type { PlotBaseProps, PlotTable, PlotTag, PlotTone } from "./types";
+export type { PlotBaseProps, PlotTable, PlotTag, PlotTagOne, PlotTone } from "./types";
 export { Scoreboard, WinnerTable, winnerTable } from "./winner-table";
 export type { ScoreboardProps, Side, WinnerRow, WinnerTableProps } from "./winner-table";
 export { VerdictList, verdictListTable } from "./verdict-list";

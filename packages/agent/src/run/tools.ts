@@ -1,5 +1,7 @@
 import {
+  isId,
   isPublicDataTool,
+  NO_RUN_CANDIDATES,
   publicDataErrorCode,
   SkillId,
   wrapToolData,
@@ -8,11 +10,13 @@ import {
   type FindingId,
   type Flag,
   type GeoApi,
+  type Ledger,
   type LocalityApi,
   type MetroId,
   type Phase,
   type Pillar,
   type RunBudget,
+  type RunCandidates,
   type Skill,
   type SkillCtx,
   type SkillResult,
@@ -22,13 +26,14 @@ import {
 import { ensureMetrosIn } from "@ct/geo";
 import type { RunPublic } from "@ct/publicdata";
 import { qlooErrorCode, type RunQloo } from "@ct/qloo";
-import { normaliseName, SKILL_LIMITATIONS, SKILLS, skillErrorResult } from "@ct/quant";
+import { normaliseName, SKILL_LIMITATIONS, SKILLS, skillErrorResult, stampCandidateSources } from "@ct/quant";
 import type { RunLedger } from "../ledger";
 import { errorText, type AnalystToolErrorCode } from "../llm/notices";
 import type { RunRegistry } from "../registry";
 import { unlistedAudiences } from "./audiences";
 import { escapeAngles } from "./context";
 import type { FollowupDeadline } from "./followup";
+import { listedRelationOf, notSeparatelyReported } from "./listedBrands";
 import type { RunEvents } from "./meter";
 import { NOT_CONFIGURED_FLAG, notConfiguredRefusal, unconfiguredSource, type PublicConfigured } from "./publicConfig";
 
@@ -111,6 +116,15 @@ export interface SkillRunnerDeps {
    * city that names none gets them (withQuestionFocus), so every lift map ranks the reader's own area.
    */
   questionAreas?: { metro: MetroId; ids: readonly string[] } | null;
+  /** The question's concept parts (questionConcepts), handed to every skill (R2). Absent: none. */
+  concepts?: readonly string[];
+  /** The run's user-named and obvious candidates (R3), handed to every skill. Absent: NO_RUN_CANDIDATES. */
+  candidates?: RunCandidates;
+  /**
+   * A limitation the run raises outside any skill, with its own text: NOT_SEPARATELY_REPORTED for a brand
+   * inside a larger listed company whose financials a call asked for.
+   */
+  onLimitation?: (flag: Flag, text: string) => void;
 }
 
 /**
@@ -190,7 +204,7 @@ export const RANK_LOCATION_BULLET: string | undefined = SKILL_LIMITATIONS.rank_c
 type ToolArgs = EventInputOf<"tool.start">["args"];
 
 export const QLOO_DISABLED_NOTICE =
-  "Qloo is disabled for this run: no data is available from any Qloo tool (company_financials and area_economics still read SEC and Census data).";
+  "Qloo is disabled for this run: no data is available from any Qloo tool (company_financials, area_economics and local_supply still read SEC, Census and OpenStreetMap data).";
 const ERROR_MESSAGE_MAX = 200;
 
 function skillOf(id: SkillId): Skill<unknown> {
@@ -306,9 +320,28 @@ function refuseCall(
   return { content: errorText(as.code, message), isError: true, result: null };
 }
 
+/**
+ * Part 9 open issue 6: a brand config/listed_companies.json maps to a larger company (relation `parent`)
+ * has no figures of its own in the filings, so company_financials is never run for it: the call is
+ * refused before it runs and the run carries NOT_SEPARATELY_REPORTED, naming the parent, instead of the
+ * parent's figures read as the brand's.
+ */
+function refuseParentBrand(deps: SkillRunnerDeps, call: SkillCall): SkillCallOutcome | null {
+  if (call.tool !== "company_financials") return null;
+  const brand = (call.input as Partial<ToolInput<"company_financials">> | null)?.brand;
+  const entity = isId("R", brand) ? deps.registry.entity(brand) : null;
+  if (entity === null) return null;
+  const relation = listedRelationOf(entity.name);
+  if (relation.kind !== "parent") return null;
+  const text = notSeparatelyReported(entity.name, relation.parent);
+  deps.onLimitation?.("NOT_SEPARATELY_REPORTED", text);
+  return refuseCall(deps, call, `${escapeAngles(text)} No call ran; say so plainly if the question needs financial figures.`);
+}
+
 export async function runSkillCall(deps: SkillRunnerDeps, asked: SkillCall, signal: AbortSignal): Promise<SkillCallOutcome> {
   const call = withQuestionFocus(deps, asked);
-  const refusal = refuseNotConfigured(deps, call) ?? refusePrivatePersons(deps, call) ?? refuseUnlistedAudiences(deps, call);
+  const refusal =
+    refuseNotConfigured(deps, call) ?? refuseParentBrand(deps, call) ?? refusePrivatePersons(deps, call) ?? refuseUnlistedAudiences(deps, call);
   if (refusal !== null) return refusal;
   const { events } = deps;
   const { toolCallId } = call;
@@ -336,11 +369,12 @@ export async function runSkillCall(deps: SkillRunnerDeps, asked: SkillCall, sign
       result = skillErrorResult({ tool: call.tool, step: call.stepId }, QLOO_DISABLED_NOTICE);
     } else {
       signal.throwIfAborted();
-      const qloo = deps.qloo.forTool(toolCallId);
+      // The tool rides along so the run's follow-up reserve knows a concept test's calls (D24).
+      const qloo = deps.qloo.forTool(toolCallId, call.tool);
       const ctx: SkillCtx = {
         qloo: deadline === null ? qloo : deadline.qloo(qloo),
         publicdata: deps.publicdata?.forTool(toolCallId) ?? null,
-        ledger: deps.ledger.forToolCall(toolCallId),
+        ledger: withCandidateSources(deps.ledger.forToolCall(toolCallId), deps.registry),
         geo: deps.geo,
         localities: deps.localities,
         registry: deps.registry,
@@ -351,6 +385,8 @@ export async function runSkillCall(deps: SkillRunnerDeps, asked: SkillCall, sign
         pillar: deps.pillar,
         phase: call.phase,
         toolCallId,
+        concepts: deps.concepts ?? [],
+        candidates: deps.candidates ?? NO_RUN_CANDIDATES,
       };
       await ensureMetrosIn(deps.geo, call.input);
       result = await skillOf(call.tool).run(call.input, ctx);
@@ -404,4 +440,16 @@ export function publicErrorCode(err: unknown): ErrorCode | null {
   const code = publicDataErrorCode(err);
   if (code === null) return null;
   return code === "rate_limited" ? "public_rate_limited" : "public_unavailable";
+}
+
+/** A tool call's ledger whose datasets carry the run's candidate marks (R3): "You named" and "Expected" rows. */
+function withCandidateSources(ledger: Ledger, registry: RunRegistry): Ledger {
+  const addDataset: Ledger["addDataset"] = (input) => ledger.addDataset({ ...input, payload: stampCandidateSources(input.payload, registry) } as typeof input);
+  return new Proxy(ledger, {
+    get: (target, prop, receiver) => {
+      if (prop === "addDataset") return addDataset;
+      const value: unknown = Reflect.get(target, prop, receiver);
+      return typeof value === "function" ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+    },
+  });
 }

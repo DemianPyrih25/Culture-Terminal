@@ -1,4 +1,5 @@
-import { CONFIDENCE_PENALTY, tokenizeProse, type DatasetId, type EvidenceId, type MetricId, type ProseSegment } from "@ct/contracts";
+import type { DatasetId, EvidenceId, MetricId, ProseSegment } from "@ct/contracts";
+import { CONFIDENCE_PENALTY, tokenizeProse } from "@ct/contracts/values";
 import { capitalize, formatTrendWindow, isKnownAbsence, plural, TOOL_LABEL } from "./format";
 import { buildLedger, metricView, requestHead, requestsForEvidence, requestTrace, shortRequestTrace, sourceName, type Ledger } from "./ledger";
 import { areaReads } from "./location";

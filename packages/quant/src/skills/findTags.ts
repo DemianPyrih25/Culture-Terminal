@@ -1,4 +1,5 @@
 import {
+  type ConceptMatch,
   ANALYST_TOOLS,
   isTaxonomyTag,
   type DigestRow,
@@ -22,7 +23,8 @@ import { SKILL_LIMITATIONS } from "../limitations";
 import { addSkillEvidence, attemptAllKeepingFailures, countUncached, type Attempt } from "./common";
 import { skillResult, type DigestTarget } from "./digest";
 import { curatedConcept, HEATMAP_BASELINE, isVerifiedPlaceFilter, type CuratedConcept, type CuratedStatus } from "./findTags/curated";
-import { conceptWords, nameMatches, normaliseConcept, tagTypeOf, tagUse, type TagUse } from "./findTags/tags";
+import { conceptMatchOf, exactPart, MATCH_WORD, rememberExact, rememberNearest } from "./findTags/match";
+import { conceptWords, definingWordsLeft, nameMatches, normaliseConcept, tagTypeOf, tagUse, type TagUse } from "./findTags/tags";
 import { safeName, safeText } from "./format";
 
 /**
@@ -146,6 +148,8 @@ interface FoundTag {
 
 interface Run {
   ctx: SkillCtx;
+  /** R2: the match class of the concept being registered (findTags/match.ts); undefined = not a concept tag. */
+  match?: ConceptMatch;
   flags: Set<Flag>;
   evidenceIds: EvidenceId[];
   findings: Finding[];
@@ -153,9 +157,11 @@ interface Run {
   notices: string[];
 }
 
-function register(run: Run, draft: Omit<RegisteredTag, "ref">): RegisteredTag {
+function register(run: Run, base: Omit<RegisteredTag, "ref" | "conceptMatch">): RegisteredTag {
+  const draft: Omit<RegisteredTag, "ref"> = run.match === undefined ? base : { ...base, conceptMatch: run.match };
   const known = run.ctx.registry.byTagId(draft.tagId);
-  if (known !== null) return known;
+  // Re-registering keeps the strongest concept match (the registry's rule), so a tag found exactly once stays exact.
+  if (known !== null) return run.match === undefined ? known : run.ctx.registry.registerTag(draft);
   const tag = run.ctx.registry.registerTag(draft);
   run.registered.push(tag);
   return tag;
@@ -195,6 +201,7 @@ function recordSearch(run: Run, search: Search): void {
   run.findings.push(finding);
   const nearest = nearestCategories(returned, search.picked, search.query);
   search.nearest = nearest;
+  rememberNearest(run.ctx.registry, nearest);
   if (nearest.length > 0) {
     run.notices.push(
       `The tag search for '${query}' kept no usable tag: no returned category name shares all its words. The closest ${search.scope} categories ` +
@@ -264,14 +271,15 @@ function outcomeOf(search: Search | null, tags: readonly FoundTag[]): Outcome {
  * none) carries the nearest category names (`nearest`, NEAREST_SEPARATOR between them) on its rows, so
  * the opening scan can retry its concept test on the first.
  */
-function rowsFor(concept: Concept, tags: readonly FoundTag[], outcome: Outcome, nearest: readonly string[] = []): DigestRow[] {
+function rowsFor(concept: Concept, tags: readonly FoundTag[], outcome: Outcome, nearest: readonly string[] = [], conceptMatch?: ConceptMatch): DigestRow[] {
   const text = safeText(concept.text, 60);
   const near: Record<string, string> = outcome === "none" && nearest.length > 0 ? { nearest: nearest.join(NEAREST_SEPARATOR) } : {};
   if (tags.length === 0) return [{ ref: null, name: text, values: { concept: text, scope: concept.scope, match: outcome, ...near } }];
+  const reads: Record<string, string> = conceptMatch === undefined ? {} : { reads: MATCH_WORD[conceptMatch] };
   return tags.map((t) => ({
     ref: t.tag.ref,
     name: safeName(t.tag.name),
-    values: { concept: text, scope: concept.scope, use: t.use, source: t.source, status: t.status, ...near },
+    values: { concept: text, scope: concept.scope, use: t.use, source: t.source, status: t.status, ...reads, ...near },
   }));
 }
 
@@ -376,14 +384,32 @@ async function runFindTags(input: FindInput, ctx: SkillCtx): Promise<SkillResult
     if (s.attempt?.kind === "failed") run.notices.push(`The tag search for '${safeText(s.query, 60)}' failed (${s.attempt.code}); not looked up.`);
   }
 
-  const rows: DigestRow[] = [];
-  const outcomes: Outcome[] = [];
-  let placeTags = false;
-  for (const plan of plans) {
+  // R2: exact question parts first, so a part found exactly in this call no longer marks the call's other
+  // concepts as look-alikes; rows and notices keep the call's order.
+  const perPlan: { rows: DigestRow[]; notices: string[]; outcome: Outcome; place: boolean }[] = plans.map(() => ({ rows: [], notices: [], outcome: "none", place: false }));
+  const order = plans
+    .map((plan, i) => ({ plan, i, exact: exactPart(plan.concept.text, ctx.concepts) }))
+    .sort((a, b) => Number(b.exact !== null) - Number(a.exact !== null) || a.i - b.i);
+  let proxies = 0;
+  for (const { plan, i, exact } of order) {
+    const slot = perPlan[i] as (typeof perPlan)[number];
+    run.match = conceptMatchOf(plan.concept.text, ctx.concepts, ctx.registry);
     const key = requestKey(plan);
     const search = key === null ? null : (searches.get(key) ?? null);
+    // R2: a searched part whose kept tags leave a defining word uncovered ("non-alcoholic" when only Beer and
+    // Craft came back) is not in the data as itself: its tags read the broader category.
+    const left =
+      run.match === "exact" && plan.curated === null && search !== null && search.picked.some((t) => isTaxonomyTag(t.id))
+        ? definingWordsLeft(plan.concept.text, search.picked.filter((t) => isTaxonomyTag(t.id)).map((t) => t.name))
+        : [];
+    if (left.length > 0) {
+      run.match = "category";
+      slot.notices.push(
+        `No tag covers '${safeText(left.join(" "), 40)}' in '${safeText(plan.concept.text, 60)}': its tags read the broader category only (category level), so they give no keep, veto or winner for it.`,
+      );
+    }
     const fallback = plan.curated?.filterFallback === true && plan.curated.served.length > 0 ? fallbackTags(run, plan.curated, search) : null;
-    if (fallback !== null) run.notices.push(fallback.notice);
+    if (fallback !== null) slot.notices.push(fallback.notice);
     const tags =
       fallback !== null
         ? fallback.tags
@@ -393,13 +419,27 @@ async function runFindTags(input: FindInput, ctx: SkillCtx): Promise<SkillResult
             ? []
             : searchedTags(run, search);
     const outcome = outcomeOf(search, tags);
-    outcomes.push(outcome);
-    rows.push(...rowsFor(plan.concept, tags, outcome, search?.nearest ?? []));
-    run.notices.push(...placeNotices(plan.concept, tags, fallback !== null));
+    slot.outcome = outcome;
+    if (exact !== null && outcome === "found" && left.length === 0) rememberExact(ctx.registry, exact);
+    if (run.match === "proxy" && tags.length > 0) proxies += 1;
+    slot.rows.push(...rowsFor(plan.concept, tags, outcome, search?.nearest ?? [], run.match));
+    slot.notices.push(...placeNotices(plan.concept, tags, fallback !== null));
     if (plan.query === null && plan.curated === null) {
-      run.notices.push(`'${safeText(plan.concept.text, 60)}' has no words to search for; not looked up.`);
+      slot.notices.push(`'${safeText(plan.concept.text, 60)}' has no words to search for; not looked up.`);
     }
-    placeTags ||= tags.some((t) => t.use === "heatmap_signal" || t.use === "place_filter");
+    slot.place = tags.some((t) => t.use === "heatmap_signal" || t.use === "place_filter");
+  }
+  run.match = undefined;
+  const rows: DigestRow[] = perPlan.flatMap((p) => p.rows);
+  const outcomes: Outcome[] = perPlan.map((p) => p.outcome);
+  run.notices.push(...perPlan.flatMap((p) => p.notices));
+  const placeTags = perPlan.some((p) => p.place);
+  if (proxies > 0) {
+    run.flags.add("PROXY_TAG_IGNORED");
+    run.notices.push(
+      "Tags marked look-alike only resemble the question's concept, which the data does not hold: they are not evidence for it. " +
+        "Use a category-level read (marked category level) or say the concept is not in the data.",
+    );
   }
   if (placeTags) run.notices.unshift(PLACE_TAG_NOTICE);
 

@@ -14,6 +14,7 @@ export * from "./scorecard";
 export * from "./assemble";
 export * from "./run";
 export * from "./ghost";
+export * from "./side";
 export { pickerKey, findPickerChoice } from "./run/picker";
 export { UNAVAILABLE_SKILLS, isSkillAvailable } from "./run/catalogue";
 export { SCAN_TABLE, planScan, type ChainedScanStep, type ChainFeed, type DeferredScanStep, type ScanArea, type ScanPlan, type ScanStep } from "./run/scan";

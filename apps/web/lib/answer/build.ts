@@ -1,9 +1,14 @@
-import { METRO_LABEL, MetroId, type GhostPickCategory, type Job } from "@ct/contracts";
-import { buildGhostView, ghostOf, inlineText, type BriefModel, type Inline } from "../brief";
-import { cityFingerprints, selectFigures, shapeChart, moreCharts, type ChartContext } from "./charts";
+import type { GhostPickCategory, Job, MetroId, SupplyPayload } from "@ct/contracts";
+import { METRO_ID_VALUES, METRO_LABEL } from "@ct/contracts/values";
+import { hasStanding, supplyForMap } from "../../components/figures/lift-standing";
+import { buildGhostView, ghostOf, inlineText, type BriefFigure, type BriefModel, type Inline } from "../brief";
+import { bestLiftFigure, cityFingerprints, datasetOf, selectFigures, shapeChart, moreCharts, type ChartContext } from "./charts";
+import { buildAnswerContext } from "./context";
+import { datasetMarks, markBody, markTable } from "./marks";
 import {
   ADVICE_LINE,
   ANSWER_JOB_LABEL,
+  CAP_REASON,
   GHOST_JOB_CATEGORY,
   GHOST_NOUN,
   GHOST_OBVIOUS_POINTS,
@@ -29,6 +34,7 @@ import type {
   AnswerRun,
   AnswerStep,
   AnswerSubjects,
+  AnswerSupply,
   AnswerVerdict,
 } from "./types";
 
@@ -59,7 +65,7 @@ export function areaName(name: string): string {
 /** The map city a location's city names ("New York City" → nyc), by its label. */
 function metroOf(city: string | null): MetroId | null {
   const key = city?.trim().toLowerCase();
-  return MetroId.options.find((m) => METRO_LABEL[m].toLowerCase() === key) ?? null;
+  return METRO_ID_VALUES.find((m) => METRO_LABEL[m].toLowerCase() === key) ?? null;
 }
 
 /**
@@ -106,15 +112,24 @@ function buildHead(model: BriefModel, fallbackQuestion: string | null, subjects:
 
 const NEAREST_FLAG = "READ_AS_NEAREST_JOB";
 const CONCEPT_FLAG = "CONCEPT_NOT_IN_DATA";
+const CATEGORY_FLAG = "CATEGORY_LEVEL_READ";
 
 /**
- * The concept note (the owner's o03 decision): the CONCEPT_NOT_IN_DATA limitation's sentence, which the
- * agent writes with the names ("The exact product, "X", is not in the data, so the category "Y" was
- * tested instead."); null when the report has none.
+ * The concept note (the owner's o03 decision; R2, D48): the CONCEPT_NOT_IN_DATA limitation's sentence,
+ * which the agent writes with the names ("'X' is not in Qloo's data, so this answer reads its broader
+ * category, 'Y'. It gives no winner, keep or veto for 'X' itself."), else the CATEGORY_LEVEL_READ one;
+ * null when the report has neither.
  */
 export function buildConceptNote(model: BriefModel): string | null {
-  const text = model.risks.limitations.find((l) => l.flag === CONCEPT_FLAG)?.text.replace(/\s+/g, " ").trim() ?? "";
+  const pick = (flag: string) => model.risks.limitations.find((l) => l.flag === flag)?.text.replace(/\s+/g, " ").trim() ?? "";
+  const text = pick(CONCEPT_FLAG) || pick(CATEGORY_FLAG);
   return text === "" ? null : text;
+}
+
+/** category when the answer read only the concept's broader category (R2), missing when the concept is not in the data. */
+export function conceptLevel(model: BriefModel): "category" | "missing" | null {
+  if (model.risks.limitations.some((l) => l.flag === CATEGORY_FLAG)) return "category";
+  return model.risks.limitations.some((l) => l.flag === CONCEPT_FLAG) ? "missing" : null;
 }
 
 const NEAREST_FALLBACK = "This answers the closest question we cover, not every part of what you asked.";
@@ -181,8 +196,27 @@ export function headlineWithPeriod(inlines: readonly Inline[] | null): Inline[] 
 /** "Qloo", "Qloo and SEC": the sources the run's evidence came from, Qloo first. */
 function sourcesOf(run: AnswerRun): string {
   const have = new Set(Object.values(run.evidence ?? {}).map((e) => e.source ?? "qloo"));
-  const names = [...(have.size === 0 || have.has("qloo") ? ["Qloo"] : []), ...(have.has("sec") ? ["SEC"] : []), ...(have.has("census") ? ["Census"] : [])];
+  const names = [
+    ...(have.size === 0 || have.has("qloo") ? ["Qloo"] : []),
+    ...(have.has("sec") ? ["SEC"] : []),
+    ...(have.has("census") ? ["Census"] : []),
+    ...(have.has("osm") ? ["OpenStreetMap"] : []),
+  ];
   return wordList(names, "and");
+}
+
+/**
+ * The cap that sets the score (R1): the lowest cap among the fired cap rules, when the score equals it
+ * (score = min(100 − penalties, lowest cap)). "Medium: the signal is mixed"; null when penalties alone set it.
+ */
+export function capLine(model: Pick<BriefModel, "conviction">): string | null {
+  const { summary, why } = model.conviction;
+  if (!summary || !why) return null;
+  const caps = why.lines.filter((l): l is typeof l & { cap: number } => l.cap !== undefined && CAP_REASON[l.rule] !== undefined);
+  if (caps.length === 0) return null;
+  const lowest = caps.reduce((a, b) => (b.cap < a.cap ? b : a));
+  if (lowest.cap !== summary.score) return null;
+  return `${summary.bandLabel}: ${CAP_REASON[lowest.rule]}`;
 }
 
 function buildVerdict(model: BriefModel, run: AnswerRun): AnswerVerdict {
@@ -201,7 +235,8 @@ function buildVerdict(model: BriefModel, run: AnswerRun): AnswerVerdict {
     line: notEnough || line === "" ? line : withPeriod(line),
     headline: headlineWithPeriod(answer.headline),
     confidence: notEnough ? "insufficient_evidence" : (conviction.summary?.band ?? header.conviction?.band ?? null),
-    lowered: conviction.why ? conviction.why.lines.filter((l) => l.points < 0 || l.pointsText.startsWith("−")).map((l) => l.label) : [],
+    lowered: conviction.why ? conviction.why.lines.filter((l) => l.points < 0 || l.cap !== undefined || l.pointsText.startsWith("−")).map((l) => l.label) : [],
+    capLine: notEnough ? null : capLine(model),
     advice: header.investmentBanner || header.pillar === "investment" ? ADVICE_LINE : null,
     check,
   };
@@ -249,8 +284,8 @@ export function buildChanges(model: BriefModel, readAsShown = false, conceptShow
     if (/^Boundaries\s*©/i.test(l.text)) continue;
     // What the question asked beyond its job already leads the page (the Read as chip).
     if (readAsShown && l.flag === NEAREST_FLAG) continue;
-    // So does a concept the data does not hold (the concept note).
-    if (conceptShown && l.flag === CONCEPT_FLAG) continue;
+    // So does a concept the data does not hold, or holds only as a category (the concept note).
+    if (conceptShown && (l.flag === CONCEPT_FLAG || l.flag === CATEGORY_FLAG)) continue;
     out.push(l.text.trim());
   }
   return out.slice(0, CHANGES_MAX);
@@ -366,10 +401,19 @@ export function buildAnswerModel(model: BriefModel, run: AnswerRun, options: Bui
   };
   const figures = model.evidence.figures;
   const picked = selectFigures(job, figures, fetched);
+  const context = buildAnswerContext(run);
+  // R3 and R4 chips on the rows ("You named", "Expected", "Already there …"); the order stays the data's.
+  const marked = (figure: BriefFigure | null): AnswerChart | null => {
+    const chart = shapeChart(figure, ctx, figures, fetched);
+    const d = figure ? datasetOf(figure, fetched) : null;
+    if (!chart || !d) return chart;
+    const marks = datasetMarks(d, context.presence);
+    return { ...chart, body: markBody(chart.body, marks), table: markTable(chart.table, marks) };
+  };
   const charts: AnswerModel["charts"] = {
-    main: shapeChart(picked.main, ctx, figures, fetched),
-    second: shapeChart(picked.second, ctx, figures, fetched),
-    third: shapeChart(picked.third, ctx, figures, fetched),
+    main: marked(picked.main),
+    second: marked(picked.second),
+    third: marked(picked.third),
     map: shapeChart(picked.map, ctx, figures, fetched),
   };
   const used = new Set<string>(
@@ -385,6 +429,17 @@ export function buildAnswerModel(model: BriefModel, run: AnswerRun, options: Bui
   if (job === "city_compare" && charts.main?.body.type === "neighbours") {
     for (const p of cityFingerprints(figures, fetched)) used.add(p.datasetId);
   }
+  // R6: every OpenStreetMap supply read gets a row of its own; R7: the lift map's popular and hidden areas.
+  const supply: AnswerSupply[] = [];
+  for (const f of figures) {
+    const d = datasetOf(f, fetched);
+    if (d?.kind !== "Supply") continue;
+    supply.push({ datasetId: f.datasetId, footnote: f.footnote, title: f.title, formulaId: f.formulaIds[0] ?? null, data: d.payload });
+    used.add(f.datasetId);
+  }
+  const supplies: SupplyPayload[] = supply.map((s) => s.data);
+  const lift = job === "site_selection" || job === "taste_twins" ? bestLiftFigure(figures, fetched) : null;
+  const standing = lift && hasStanding(lift.data.payload) ? { datasetId: lift.figure.datasetId, data: lift.data.payload, supply: supplyForMap(lift.data.payload, supplies) } : null;
   const guesses = model.priors.items.length;
   const area = answerArea(model);
   // A lift map whose data is still on its way (undefined: loading; null: the fetch failed) keeps the map's row.
@@ -398,6 +453,7 @@ export function buildAnswerModel(model: BriefModel, run: AnswerRun, options: Bui
     job,
     head: buildHead(model, options.fallbackQuestion ?? null, subjects, intent),
     concept,
+    conceptLevel: concept ? conceptLevel(model) : null,
     readAs,
     verdict: buildVerdict(model, run),
     steps: buildSteps(model),
@@ -422,6 +478,9 @@ export function buildAnswerModel(model: BriefModel, run: AnswerRun, options: Bui
     ghostSpan: job && GHOST_WIDE.has(job) ? 3 : 4,
     changes: buildChanges(model, readAs !== null, concept !== null),
     why: { count: model.evidence.arguments.length, thesis: model.answer.thesis, arguments: model.evidence.arguments },
+    context,
+    standing,
+    supply,
     more: moreCharts(figures, used, fetched),
     ask: { moves: model.nextMoves, placeholder: placeholderOf(model, subjects, intent) },
   };

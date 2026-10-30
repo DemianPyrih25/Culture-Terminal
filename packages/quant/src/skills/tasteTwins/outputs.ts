@@ -11,6 +11,7 @@ import {
   type RankedRow,
   type ValueCell,
 } from "@ct/contracts";
+import { THIN_SAMPLE } from "../../formulas";
 import { rhoWords, twinFoundFinding, type TwinCandidate } from "../../findings";
 import { LIST_FAMILIES } from "../blockDna/calls";
 import { TAG_TAKE, type Compared } from "../blockDna/fingerprint";
@@ -103,6 +104,7 @@ export function addTwinMetrics(run: BlockRun, frame: TwinFrame, ordered: readonl
       evidenceIds: frame.evidenceIds,
       n: a.score?.shared ?? null,
       comparator: "CITY",
+      thin: rho !== null && (a.score?.shared ?? 0) < THIN_SAMPLE.twinSharedTags,
     });
     run.metrics.push(metric);
     out.rho.set(a.area.id, metric);

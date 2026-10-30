@@ -209,6 +209,9 @@ describe("geo_lift: supply and white space", () => {
     conf: demandPct === null ? null : 0.8,
     reason: demandPct === null ? "insufficient_n" : null,
     demandPct,
+    raw: null,
+    rawPct: null,
+    standing: null,
   });
   const areas = [lifted("a", 1), lifted("b", 2 / 3), lifted("c", 1 / 3), lifted("d", 0), lifted("e", null)];
 
@@ -376,6 +379,9 @@ describe("geo_lift: white-space metrics and LATENT_DEMAND", () => {
     conf: 1,
     reason: null,
     demandPct: 1 - i / 20,
+    raw: null,
+    rawPct: null,
+    standing: null,
   }));
   const supply = new Map<string, AreaSupply>(
     areas.map((a, i) => {

@@ -1,9 +1,11 @@
 import { expect, expectAnswer, MAP_SAMPLE, open, shot, test } from "./support";
 
-// The site_selection map card on the synthetic answer: the server paints the map's schematic, and the
-// browser mounts the MapLibre WebGL map over it once the card nears the viewport, with the Austin
-// gazetteer outlines (/api/geo/austin) and the OpenFreeMap basemap, which needs the internet. The card's
-// "Extra interest" disclosure switches the layer (LIFT) to "All interest" (RAW) and back.
+// The map cards on the synthetic answers (app/dev/brief/job-runs.ts, invented entities): the server paints
+// each map's schematic, and the browser mounts the MapLibre WebGL map over it once the card nears the
+// viewport, with the city's gazetteer outlines (/api/geo/<metro>) and the OpenFreeMap basemap, which needs
+// the internet. The site_selection lift map (Austin) switches its layer; the area maps mount for East
+// Nashville (tenant_mix, with the corner pin) and Holly, Austin (area_profile). Every other map city's
+// outlines are read over HTTP below: no sample answer draws a third city's map yet.
 
 test("the Austin map card mounts and switches Extra interest / All interest", async ({ page }, testInfo) => {
   // WebGL runs on the CPU here (SwiftShader), and a dev server compiles the map's chunk on first use.
@@ -30,6 +32,27 @@ test("the Austin map card mounts and switches Extra interest / All interest", as
 
   await shot(card, testInfo, "map-card");
 });
+
+const AREA_MAPS = [
+  { job: "tenant_mix", metro: "nashville" },
+  { job: "area_profile", metro: "austin" },
+] as const;
+for (const { job, metro } of AREA_MAPS) {
+  test(`the ${job} area map mounts over its ${metro} outline`, async ({ page }, testInfo) => {
+    test.setTimeout(60_000);
+    await open(page, `/dev/brief?job=${job}`);
+    await expectAnswer(page);
+    const card = page.locator("[data-area-map]").first();
+    await card.scrollIntoViewIfNeeded();
+    // The static outline draws first from /api/geo/<metro>; "No map for this area" or "Map could not load" fails here.
+    await expect(card.locator("[data-area-schematic]")).toBeAttached({ timeout: 20_000 });
+    await expect(card.locator("canvas.maplibregl-canvas")).toBeAttached({ timeout: 20_000 });
+    await expect(card.locator('[data-map-loaded="true"]'), "the OpenFreeMap basemap did not load (it needs the internet)").toBeVisible({
+      timeout: 40_000,
+    });
+    await shot(card, testInfo, `area-map-${job}`);
+  });
+}
 
 // Only Austin's lift map has a sample answer (job-runs.ts builds it), so every map city's gazetteer is read
 // over HTTP. The metros are MetroId's (@ct/contracts), written out: the specs import no workspace package.

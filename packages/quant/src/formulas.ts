@@ -42,6 +42,7 @@ export const FORMULA_IDS = [
   "lift.area",
   "lift.confidence",
   "lift.white_space",
+  "lift.area_popularity",
   // S7 Block DNA and S8 Tenant fit
   "block.rank_delta",
   "block.new_tag",
@@ -72,6 +73,15 @@ export const FORMULA_IDS = [
   "econ.count",
   "econ.median",
   "econ.share",
+  // S15 Local supply (OpenStreetMap, Part 11)
+  "osm.count",
+  "osm.density",
+  "osm.density_index",
+  "osm.activity_density",
+  // Brand screener and Category Taste Map (Part 10)
+  "screen.universe",
+  "screen.under_the_radar",
+  "taste_map_mds",
   // Report-level (§6.4)
   "confidence.run",
   "confidence.metric",
@@ -102,6 +112,9 @@ const VENUE_GOERS = "Taste signals of venue-goers, not residents or census data.
 const REPORTED = "As reported in the company's SEC filings (XBRL company facts), in US dollars; not advice.";
 const COMPANY_WIDE = "Company-level: a brand inside a larger company is not broken out.";
 const ACS = "US Census ACS 5-year survey estimates for residents, with sampling error; not customers, visitors or spending.";
+const OSM_FLOOR = "OpenStreetMap is mapped by volunteers: counts are a floor, not a census.";
+const OSM_NOT_DEMAND = "A count of mapped places, not sales, rents, foot traffic or how busy the places are.";
+const OSM_CITY = "The city reference is the county or counties around the city (approximate), so an index compares an area with that whole area.";
 
 type FormulaBody = Omit<Formula, "id">;
 
@@ -385,6 +398,17 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
       "A quadrant needs enough venues: at least 10 counted in at least three compared areas, never an area with none in a capped sample, and at least 3 in the area for either group with many rivals. Otherwise the area reads Not enough venue data.",
     ],
   },
+  "lift.area_popularity": {
+    name: "Where it is already popular",
+    formula_tex: String.raw`\mathrm{raw}_N = \frac{1}{n_N} \sum_{c \in N} u_c, \quad \mathrm{rawPct}_N = \text{percentile of } \mathrm{raw}_N \text{ among the areas with one}`,
+    plain_english:
+      "How strong the concept's own heat is in a neighbourhood, before comparing with the baseline: the mean of its cells' concept percentiles u, then ranked among the areas (needs at least three). An area is popular when it is in the top quarter here; a hidden pocket is in the top quarter for lift but the bottom half here, so it stands out for its size rather than being where the crowd already is. Both stand on the map side by side.",
+    caveats: [
+      "Relative within the metro and within one call.",
+      "Popular means the concept's taste signal is strong there, not sales, footfall or rents.",
+      "A hidden pocket is never called the best area on its own: popular areas are shown next to it.",
+    ],
+  },
   "block.rank_delta": {
     name: "Block rank delta",
     formula_tex: String.raw`\Delta_t = \mathrm{rank}_{\text{city}}(t) - \mathrm{rank}_{\text{area}}(t), \quad \text{a missing rank counts as } N+1`,
@@ -595,11 +619,74 @@ const BODIES: Readonly<Record<FormulaId, FormulaBody>> = {
       "The share of an area's resident workers who usually drive alone, take public transit, walk, cycle or work from home.",
     caveats: [ACS, "About how residents get to work, not about who visits the area."],
   },
+  "osm.count": {
+    name: "Places counted (OpenStreetMap)",
+    formula_tex: String.raw`N_{A,t} = \#\{\, e \in \mathrm{OSM} : e \text{ matches type } t,\ e \text{ inside area } A \,\}`,
+    plain_english:
+      "How many places of a type (such as cafés) are mapped in OpenStreetMap inside a neighbourhood outline, or within 5 km of a market's centre. Nodes, ways and relations all count; the tags each type matches are listed in the method's tag table.",
+    caveats: [OSM_FLOOR, OSM_NOT_DEMAND, "A place mapped twice (as a point and as a building) can count twice; this is rare."],
+  },
+  "osm.density": {
+    name: "Places per square kilometre",
+    formula_tex: String.raw`D_{A,t} = N_{A,t} / \mathrm{km}^2_A`,
+    plain_english:
+      "The count divided by the area's land size, so areas of different sizes compare fairly. A market's area is the circle of its 5 km radius.",
+    caveats: [OSM_FLOOR, "Neighbourhood sizes come from our gazetteer outlines and are approximate."],
+  },
+  "osm.density_index": {
+    name: "Against the city",
+    formula_tex: String.raw`I_{A,t} = D_{A,t} / D_{\text{city},t}, \quad \text{about the city's level when } 0.8 \le I \le 1.25`,
+    plain_english:
+      "An area's density of a place type divided by its city's: 1 is the city's level, 2 is twice as dense. Between 0.8 and 1.25 it reads about the city's level. At 1.5 or more with at least 5 places, and at least 1.25 times the area's street-activity index (so the type is a larger share of its shops and food and drink places than in the city, not just part of a denser street), the area has more of that type than its city (oversupplied); at 0.5 or less while the city has some, and below 0.8 times its street-activity index, it has less (undersupplied).",
+    caveats: [OSM_FLOOR, OSM_CITY, "Mapping completeness differs between areas, which moves the index too."],
+  },
+  "osm.activity_density": {
+    name: "Street activity",
+    formula_tex: String.raw`S_A = \frac{\#\{\text{shops, food and drink places in } A\}}{\mathrm{km}^2_A}`,
+    plain_english:
+      "All mapped shops and food and drink places per square kilometre: a rough measure of how much street-level commerce an area has. Below 0.3 of the city's level the area reads low street activity.",
+    caveats: [OSM_FLOOR, OSM_NOT_DEMAND],
+  },
+  "screen.universe": {
+    name: "Screened set",
+    formula_tex: String.raw`U = \text{the first } n \text{ brands of the discovery call for the category tag or the seed brand}, \quad n \le 25`,
+    plain_english:
+      "The brands a screen ranks: the top results Qloo returns for brands with the category's tag, or for brands whose audience taste is near the seed brand. Every column then reads this same set, so ranks and percentiles compare these brands only.",
+    caveats: [
+      "Brands outside the first results are not screened; a brand missing from Qloo's dataset cannot appear.",
+      "A different category tag or seed gives a different set.",
+      NOT_SALES,
+    ],
+  },
+  "screen.under_the_radar": {
+    name: "UNDER-THE-RADAR (screener)",
+    formula_tex: String.raw`U_j = \mathrm{FIT}_j - p_j, \quad \text{flag} \iff \mathrm{FIT}_j \ge \operatorname{median}(\mathrm{FIT}) \ \wedge\ p_j < \min(\operatorname{median}(p),\, 0.85)`,
+    plain_english:
+      "Fit minus popularity for each screened brand: high when the category's (or the seed's) taste points strongly to a brand that is not yet widely popular. A brand is flagged under the radar when its fit is at or above the set's median fit while its popularity is below the set's median and below 0.85, so a mass-market name is never flagged.",
+    caveats: [
+      NO_PRICE,
+      "It subtracts a global popularity from a within-call percentile, so read it as an ordering inside this screen.",
+      "The medians are relative to this set: a flagged brand is less popular than most of the set, not obscure.",
+      "A brand the scoring call did not score has no value, never 0.",
+    ],
+  },
+  taste_map_mds: {
+    name: "Category Taste Map (classical MDS)",
+    formula_tex: String.raw`d_{ij} = 1 - \mathrm{sim}_{ij}, \quad B = -\tfrac{1}{2} J D^{(2)} J, \quad X = V_2 \Lambda_2^{1/2}, \quad \text{stress} = \sqrt{\frac{\sum_{i<j} (d_{ij} - \lVert x_i - x_j \rVert)^2}{\sum_{i<j} d_{ij}^2}}`,
+    plain_english:
+      "Places up to 14 entities on a flat map so that the distance between two points approximates how different their audiences' taste is (one minus their pairwise similarity). It is classical multidimensional scaling: the two largest eigenvectors of the double-centred squared distances. Pairs Qloo did not score are set to the largest scored distance, and the map lists them. Stress says how well the flat map keeps the distances: 0 is exact, above 0.2 reads as a poor fit and the map says so.",
+    caveats: [
+      "Only distances between points mean anything; the axes, the rotation and the scale do not.",
+      "Audience taste similarity, not switching, share or sales.",
+      PEER_SET,
+      "Two dimensions cannot keep every distance; read close pairs, not exact positions.",
+    ],
+  },
   "confidence.run": {
     name: "Run confidence",
-    formula_tex: String.raw`C = \max\!\big(0,\ 100 - 15\,n_{\text{dropped}} - 10\,n_{\text{fallback}} - 10\,[\text{coarse}] - 20\,[\text{stale momentum cited}] - 10\,n_{\text{thin}} - 5\,n_{\text{gate}} - 5\,n_{\text{warn}} - 5\,[\text{read as nearest job}] - 30\,[\text{concept partly tested}]\big)`,
+    formula_tex: String.raw`C = \min\!\Big(\max\!\big(0,\ 100 - 15\,n_{\text{dropped}} - 10\,n_{\text{fallback}} - 10\,[\text{coarse}] - 20\,[\text{stale momentum cited}] - 10\,n_{\text{thin}} - 5\,n_{\text{gate}} - 5\,n_{\text{warn}} - 60\,[\text{insufficient}] - 5\,[\text{nearest job}]\big),\ \min_{r \text{ fired}} \mathrm{cap}_r\Big)`,
     plain_english:
-      "Starts at 100 and loses points for each weakness: 15 per dropped or unresolved secondary entity, 10 per code fallback, 10 for a coarse map, 20 when stale-only momentum is cited, 10 per thin result (fewer than 5 rows), 5 per quality-gate drop, 5 per CHECKER warning, 5 when the question was read as the closest kind of question Culture Terminal answers, and 30 once when part of the concept was not tested (a tag search for it came back empty, or no call used its tags), so a partly tested concept is never HIGH. HIGH is 75 or more, MED 50 to 74, LOW below 50. The breakdown shows on hover.",
+      "Starts at 100 and loses points for each weakness: 15 per dropped or unresolved secondary entity, 10 per code fallback, 10 for a coarse map, 20 when stale-only momentum is cited, 10 per thin result (fewer than 5 rows), 5 per quality-gate drop, 5 per CHECKER warning, 60 when there is too little evidence to read a signal, and 5 when the question was read as the closest kind of question Culture Terminal answers. Then caps tie it to the strength of the signal: a mixed signal caps it at 70 (never HIGH), a weak signal at 45 (LOW), a headline resting on a small sample at 70, a concept read only at its broader category at 60, and a partly tested concept at 70. HIGH is 75 or more, MED 50 to 74, LOW below 50. The breakdown shows on hover.",
     caveats: [
       "Measures the completeness and quality of this run's evidence, not the probability that the conclusion is right.",
       "Computed by code from the run's flags; the model cannot change it.",
@@ -624,4 +711,100 @@ export const FORMULAS: Readonly<Record<FormulaId, Formula>> = Object.freeze(
 
 export function isFormulaId(value: string): value is FormulaId {
   return (FORMULA_IDS as readonly string[]).includes(value);
+}
+
+
+// Thresholds that live in one place (Part 11, DESIGN 1.7) ----------------------------------------------
+
+/**
+ * When a value rests on a thin sample (Metric.thin, R1): a one-scale ranked, slate, creator or partner set
+ * of fewer than 5 rows; a share or pair percentile from a 2-entity set; an area lift with confidence below
+ * 0.5 or fewer than 12 gated cells; a Block DNA area list of fewer than 20 tags; fewer than 4 scored
+ * concept analogs; a twin correlation on fewer than 12 shared tags. A thin metric behind the headline caps
+ * confidence at MED (thin_sample).
+ */
+export const THIN_SAMPLE = {
+  rankedRows: 5,
+  pairEntities: 2,
+  liftConf: 0.5,
+  liftCells: 12,
+  blockTags: 20,
+  conceptAnalogs: 4,
+  twinSharedTags: 12,
+} as const;
+
+/**
+ * The about-level band (Metric.level, V13): differences this small read "about average" / "about level",
+ * never "leans", "wins" or "gains", and cannot lead an answer. A rank gain of at most
+ * max(2, ceil(5% of the list)) places is about level, so "+1 of 50" and "+2 of 50" never read as a win.
+ */
+export const ABOUT_LEVEL = {
+  audienceIndex: 0.1,
+  youthTilt: 0.1,
+  pctDelta: 0.05,
+  rankGainMinPlaces: 2,
+  rankGainShare: 0.05,
+  densityIndexLow: 0.8,
+  densityIndexHigh: 1.25,
+} as const;
+
+/** Area standing (R7, D50): top quarter and bottom half of the within-call percentiles. */
+export const STANDING = { top: 0.75, low: 0.5 } as const;
+
+/** OpenStreetMap supply findings (R6): over/under the city's density and low street activity. */
+/**
+ * Supply labels (R6). A dense commercial core is denser than its city in nearly every type, so a type is
+ * "more of than the city" only when its index also beats the area's street-activity index by `beyondActivity`
+ * (a larger share of the area's shops and food and drink places than in the city), and "less of" only when it
+ * falls below it by `belowActivity`. Without a street-activity reading the plain index rule applies.
+ */
+export const SUPPLY = { overIndex: 1.5, underIndex: 0.5, minCount: 5, lowActivityShare: 0.3, beyondActivity: 1.25, belowActivity: 0.8 } as const;
+
+const LEVEL_EPS = 1e-9;
+const isNum = (x: number | null | undefined): x is number => typeof x === "number" && Number.isFinite(x);
+
+/** |audience index| or |index delta| inside the about-level band (−1..1 scale). */
+export function isAboutLevelIndex(value: number | null | undefined): boolean {
+  return isNum(value) && Math.abs(value) < ABOUT_LEVEL.audienceIndex - LEVEL_EPS;
+}
+
+/** |youth tilt| inside the about-level band. */
+export function isAboutLevelTilt(value: number | null | undefined): boolean {
+  return isNum(value) && Math.abs(value) < ABOUT_LEVEL.youthTilt - LEVEL_EPS;
+}
+
+/** |percentile delta| inside the about-level band. */
+export function isAboutLevelPctDelta(value: number | null | undefined): boolean {
+  return isNum(value) && Math.abs(value) < ABOUT_LEVEL.pctDelta - LEVEL_EPS;
+}
+
+/** The most places a rank may move and still read about level, for a list of `listLength` rows. */
+export function aboutLevelRankPlaces(listLength: number): number {
+  const n = Number.isFinite(listLength) && listLength > 0 ? listLength : 0;
+  return Math.max(ABOUT_LEVEL.rankGainMinPlaces, Math.ceil(ABOUT_LEVEL.rankGainShare * n - LEVEL_EPS));
+}
+
+/** A rank gain or loss of at most aboutLevelRankPlaces(listLength) places ("+1 of 50" is about level). */
+export function isAboutLevelRankGain(places: number | null | undefined, listLength: number): boolean {
+  return isNum(places) && Math.abs(places) <= aboutLevelRankPlaces(listLength);
+}
+
+/** An OSM density index inside [0.8, 1.25]: about the city's level. */
+export function isAboutLevelDensityIndex(value: number | null | undefined): boolean {
+  return isNum(value) && value >= ABOUT_LEVEL.densityIndexLow - LEVEL_EPS && value <= ABOUT_LEVEL.densityIndexHigh + LEVEL_EPS;
+}
+
+/**
+ * Area standing from the raw-popularity percentile and the lift (demand) percentile: popular = top quarter
+ * of raw popularity without top-quarter lift; hidden = top-quarter lift and bottom-half popularity;
+ * popular_distinct = top quarter on both; else null (also when the raw percentile is unknown).
+ */
+export function areaStanding(rawPct: number | null, demandPct: number | null): "popular" | "hidden" | "popular_distinct" | null {
+  if (!isNum(rawPct)) return null;
+  const highRaw = rawPct >= STANDING.top - LEVEL_EPS;
+  const highDemand = isNum(demandPct) && demandPct >= STANDING.top - LEVEL_EPS;
+  if (highRaw && highDemand) return "popular_distinct";
+  if (highRaw) return "popular";
+  if (highDemand && rawPct < STANDING.low - LEVEL_EPS) return "hidden";
+  return null;
 }

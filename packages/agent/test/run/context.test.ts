@@ -211,7 +211,7 @@ describe("buildRunContext: the Part 9 jobs", () => {
 
   it("tells the model which tools still answer when Qloo is off and a public-data client is on", () => {
     const text = buildRunContext(input({ qlooEnabled: false, publicData: true, scan: { plan: emptyScan(), estimates: new Map() } }));
-    expect(text).toContain("Every Qloo tool answers with no data, so the note can only be insufficient_evidence. Only company_financials and area_economics still read SEC and Census data.");
+    expect(text).toContain("Every Qloo tool answers with no data, so the note can only be insufficient_evidence. Only company_financials, area_economics and local_supply still read SEC, Census and OpenStreetMap data.");
   });
 });
 

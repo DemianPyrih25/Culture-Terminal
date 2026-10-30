@@ -19,6 +19,8 @@ import {
   similarityMap,
   sponsorQuadrant,
   sponsorSlate,
+  supplyAreas,
+  tasteMap,
   tastePosition,
   tenantSlope,
 } from "../../components/figures/fixtures";
@@ -132,6 +134,8 @@ describe("Exhibit", () => {
     ["GeoLift", austinLiftMap, 'data-schematic="LIFT"'],
     ["Momentum", momentumStrip, 'data-badge="STALE"'],
     ["Position", tastePosition, 'data-axis="next_gen_tilt"'],
+    ["TasteMap", tasteMap, 'data-tone="target"'],
+    ["Supply", supplyAreas, 'data-supply-scope="areas"'],
   ] as const)("renders a %s envelope with its family", (_, dataset, marker) => {
     const html = render(<Exhibit dataset={dataset} display={{ Ranked: { variant: dataset === domainLists ? "lists" : "lollipop" } }} />);
     expect(html).toContain(marker);
@@ -141,9 +145,9 @@ describe("Exhibit", () => {
   });
 
   it("has a family for every dataset kind", () => {
-    const shown = new Set([similarityMap, sponsorQuadrant, blockDna, tenantSlope, austinLiftMap, nearestAudiences, sponsorSlate, momentumStrip, priorsScorecard, tastePosition].map((d) => d.kind));
+    const shown = new Set([similarityMap, sponsorQuadrant, blockDna, tenantSlope, austinLiftMap, nearestAudiences, sponsorSlate, momentumStrip, priorsScorecard, tastePosition, tasteMap, supplyAreas].map((d) => d.kind));
     expect([...shown].sort()).toEqual([...DatasetKind.options].sort());
-    expect(new Set(Object.values(VIZ_COMPAT)).size).toBe(9);
+    expect(new Set(Object.values(VIZ_COMPAT)).size).toBe(11);
   });
 
   it("frames an empty momentum strip without failing", () => {

@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import {
+  CONFIDENCE_CAP,
   CONFIDENCE_PENALTY,
   compileMnemonic,
   confidenceBand,
@@ -363,7 +364,8 @@ describe("Report", () => {
     expect([100, 75, 74, 50, 49, 0].map(confidenceBand)).toEqual(["HIGH", "HIGH", "MED", "MED", "LOW", "LOW"]);
   });
 
-  it("keeps a partly tested concept out of the HIGH band on its own (D2)", () => {
-    expect(confidenceBand(100 - CONFIDENCE_PENALTY.concept_partly_tagged)).toBe("MED");
+  it("keeps a partly tested concept out of the HIGH band on its own (D2): now a cap, not points", () => {
+    expect(CONFIDENCE_PENALTY.concept_partly_tagged).toBe(0);
+    expect(confidenceBand(CONFIDENCE_CAP.concept_partly_tagged ?? 100)).toBe("MED");
   });
 });

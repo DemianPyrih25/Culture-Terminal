@@ -21,12 +21,15 @@ function primaryKeyOf(name: string): string[] {
 }
 
 describe("schema", () => {
-  it("defines exactly the 14 tables of PLAN §3.2 (public_cache and public_calls from Part 9)", () => {
+  it("defines exactly the 17 tables of PLAN §3.2 (public data from Part 9, follows from Part 10, context_cache and feature_uses from Part 11)", () => {
     expect([...byName.keys()].sort()).toEqual(
       [
+        "context_cache",
         "datasets",
         "evidence",
+        "feature_uses",
         "findings",
+        "follows",
         "ip_usage",
         "kv",
         "metrics",
@@ -56,6 +59,7 @@ describe("schema", () => {
     expect(primaryKeyOf("ip_usage")).toEqual(["day", "ip_hash"]);
     expect(primaryKeyOf("kv")).toEqual(["key"]);
     expect(primaryKeyOf("showcase_pins")).toEqual(["slug", "mention"]);
+    expect(primaryKeyOf("follows")).toEqual(["id"]);
   });
 
   it("indexes the answer cache, cache expiry and the call log", () => {

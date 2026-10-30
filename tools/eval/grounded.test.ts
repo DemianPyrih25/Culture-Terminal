@@ -1,7 +1,7 @@
 // The grounded arm's record from a run's result and events, and the options it hands runAgent. A
 // scripted agent stands in for runAgent: no model, no Qloo, no network (D29: invented names only).
 import type { AgentRunOptions, AgentRunResult, AnthropicLike } from "@ct/agent";
-import { DEFAULT_RUN_LIMITS, type EventInput, type Intent } from "@ct/contracts";
+import { DEFAULT_RUN_LIMITS, EMPTY_CANDIDATES, type EventInput, type Intent } from "@ct/contracts";
 import type { QlooClient } from "@ct/qloo";
 import { describe, expect, it } from "vitest";
 import { syntheticResult } from "../dev/cli/fixtures";
@@ -17,6 +17,7 @@ function intent(overrides: { safety?: Partial<Intent["safety"]>; mentions?: Inte
     constraints: { concepts: [], sponsor_categories: [], domains: [], ages: [], notes: [], concept_description: null },
     safety: { allowed: true, category: null, reframe: null, ...overrides.safety },
     read_as: { nearest: false, not_covered: [] },
+    candidates: EMPTY_CANDIDATES,
     assumptions: [],
     mnemonic: "BRAND ALPHA VS <B>",
   };

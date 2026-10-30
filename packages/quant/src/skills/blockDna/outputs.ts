@@ -33,6 +33,7 @@ import {
   type BlockNewTagsFamily,
   type FindingDraft,
 } from "../../findings";
+import { isAboutLevelRankGain, THIN_SAMPLE } from "../../formulas";
 import { addSkillMetric, registerEntity, type MetricSpec } from "../common";
 import { skillResult, type DigestTarget } from "../digest";
 import { safeFullName, safeName } from "../format";
@@ -293,26 +294,33 @@ function addTagMetric(run: BlockRun, frame: BlockFrame, fam: FamilyResult, c: Co
   const ref = registerTag(run, c);
   const delta = c.delta as number;
   const gain = delta > 0;
+  // V13: a move of a place or two in a top-50 list is about level, never a gain ("+1 of 50").
+  const level = !c.isNew && isAboutLevelRankGain(delta, TAG_TAKE);
   const metric = addSkillMetric(run.ctx.ledger, {
     key: "block.rank_delta",
-    label: `rank ${gain ? "gain" : "loss"} vs ${cityOf(frame)}: ${safeName(c.item.name)} (${TAG_NOUN[fam.family]}, ${areaName(frame)})`,
+    label: `rank ${level ? "about level" : gain ? "gain" : "loss"} vs ${cityOf(frame)}: ${safeName(c.item.name)} (${TAG_NOUN[fam.family]}, ${areaName(frame)})`,
     subjectRefs: [ref, frame.area.subject, ...frame.base.refs],
     value: delta,
     reason: "not_scored",
     // " · " pieces, as the brief splits a display (apps/web key figures).
-    display: gain
-      ? c.isNew
-        ? `${plus(delta)} · new ${frame.base.here}`
-        : plus(delta)
-      : c.areaRank === null
-        ? `${minus(delta)} · outside the top ${TAG_TAKE} ${frame.base.here}`
-        : minus(delta),
+    display: level
+      ? `${gain ? plus(delta) : minus(delta)} · about level`
+      : gain
+        ? c.isNew
+          ? `${plus(delta)} · new ${frame.base.here}`
+          : plus(delta)
+        : c.areaRank === null
+          ? `${minus(delta)} · outside the top ${TAG_TAKE} ${frame.base.here}`
+          : minus(delta),
     unit: "delta",
     badge: "DERIVED",
     formulaId: "block.rank_delta",
     evidenceIds: fam.evidenceIds,
     n: fam.areaSize,
     comparator: frame.base.comparator,
+    aboutLevel: level,
+    // R1: an area list of fewer than 20 tags is a thin sample.
+    thin: fam.areaSize < THIN_SAMPLE.blockTags,
   });
   run.metrics.push(metric);
   return { compared: c, family: fam.family, ref, metric };
@@ -571,22 +579,26 @@ export function addBrandMetrics(run: BlockRun, frame: BlockFrame, brands: BrandR
       const reg = registerEntity(run.ctx.registry, draftFromInsight(raw));
       if (reg.isNew) run.registered.push(reg.entity);
       const delta = c.delta as number;
+      const level = isAboutLevelRankGain(delta, BRAND_TAKE);
       const metric = addSkillMetric(ledger, {
         key: "block.rank_delta",
-        label: `rank gain vs ${city}: ${safeName(c.item.name)} (brand favoured in ${area})`,
+        label: `rank ${level ? "about level" : "gain"} vs ${city}: ${safeName(c.item.name)} (brand favoured in ${area})`,
         subjectRefs: [reg.entity.ref, frame.area.subject, ...frame.base.refs],
         value: delta,
         reason: "not_scored",
         display:
           c.cityRank === null
             ? `${plus(delta)} · ${frame.base.comparator === "CITY" ? `not in the ${city} top ${BRAND_TAKE}` : `outside the top ${BRAND_TAKE} of ${city}`}`
-            : plus(delta),
+            : level
+              ? `${plus(delta)} · about level`
+              : plus(delta),
         unit: "delta",
         badge: "DERIVED",
         formulaId: "block.rank_delta",
         evidenceIds: brands.evidenceIds,
         n: brands.areaSize,
         comparator: frame.base.comparator,
+        aboutLevel: c.cityRank !== null && level,
       });
       run.metrics.push(metric);
       return [{ compared: c, entity: reg.entity, metric }];

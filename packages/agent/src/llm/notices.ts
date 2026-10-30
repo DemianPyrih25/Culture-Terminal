@@ -69,6 +69,9 @@ const FINDING_KIND_WORDS: Readonly<Record<FindingKind, string>> = {
   ANALOG_VETOED: "analog vetoed",
   TASTE_FINANCIALS_SPLIT: "taste and financials split",
   PARTNERS_ONE_CATEGORY: "partners in one category",
+  OVERSUPPLIED: "oversupplied",
+  UNDERSUPPLIED: "undersupplied",
+  LOW_STREET_ACTIVITY: "low street activity",
 };
 
 /**

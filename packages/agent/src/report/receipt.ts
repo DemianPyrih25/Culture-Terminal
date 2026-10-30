@@ -50,6 +50,8 @@ export function buildReceipt(args: {
   numbersTraced: NumbersTraced;
   models: Receipt["models"];
   economy: boolean;
+  /** What the side context calls cost (R4, R5); null or absent when none ran. Their spend is in usage.llmUsd. */
+  context?: { aiUsd: number; webUsd: number; webSearches: number } | null;
 }): Receipt {
   const calls = [...new Map(args.calls.map((c) => [c.qlooCallId, c])).values()];
   const counts = { network: 0, cached: 0, reused: 0 };
@@ -73,6 +75,7 @@ export function buildReceipt(args: {
     numbersTraced: args.numbersTraced,
     models: args.models,
     economy: args.economy,
+    ...(args.context ? { context: { aiUsd: Math.max(0, args.context.aiUsd), webUsd: Math.max(0, args.context.webUsd), webSearches: Math.max(0, Math.round(args.context.webSearches)) } } : {}),
   };
 }
 

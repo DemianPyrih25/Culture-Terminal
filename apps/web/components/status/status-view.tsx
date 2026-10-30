@@ -16,6 +16,8 @@ import {
   LANE_LABEL,
   laneView,
   leadSentence,
+  queueReading,
+  queueText,
   utcShort,
   utcTime,
 } from "./format";
@@ -29,6 +31,7 @@ export const STATUS_SECTIONS: readonly { id: string; label: string }[] = [
   { id: "spend", label: "LLM spend" },
   { id: "runs", label: "Runs" },
   { id: "qloo", label: "Qloo" },
+  { id: "today", label: "Shared use" },
   { id: "system", label: "System" },
 ];
 
@@ -169,6 +172,29 @@ function HourRow({ label, hour }: { label: string; hour: HourCount }) {
   );
 }
 
+/** Runs waiting for a slot in the global queue (D24), against how many may wait. */
+function QueueRow({ runs }: { runs: StatusReport["runs"] }) {
+  const queue = queueReading(runs);
+  if (queue === null) return null;
+  const text = queueText(queue);
+  return (
+    <StatusRow label="Waiting for a slot" note="this server">
+      {queue.max > 0 ? (
+        <UsageMeter
+          value={queue.waiting}
+          max={queue.max}
+          label="Runs waiting for a slot"
+          valueText={queue.waiting === null ? undefined : `${queue.waiting} of ${queue.max}`}
+          tripped={queue.waiting !== null && queue.waiting >= queue.max}
+        />
+      ) : null}
+      <span data-queue={queue.max === 0 ? "off" : (queue.waiting ?? "unread")}>
+        {queue.waiting === null && queue.max > 0 ? <NotRead /> : <Amount used={text.used} of={text.of} />}
+      </span>
+    </StatusRow>
+  );
+}
+
 function RunsSection({ report }: StatusViewProps) {
   const { runs } = report;
   const recentRow = (name: string, recent: StatusReport["runs"]["recent"]["live"]) => (
@@ -201,6 +227,7 @@ function RunsSection({ report }: StatusViewProps) {
             />
           )}
         </StatusRow>
+        <QueueRow runs={runs} />
         {recentRow(`Last ${runs.recentLimit} live runs`, runs.recent.live)}
         {recentRow(`Last ${runs.recentLimit} test runs`, runs.recent.test)}
       </StatusRows>
@@ -360,6 +387,46 @@ function LocalitiesRow({ pins }: { pins: StatusReport["localities"] }) {
   );
 }
 
+/**
+ * Today's use of what answers share outside their own Qloo calls (Part 11): brand screens, the side
+ * context calls ("What AI knows", "From the web") and OpenStreetMap requests against the daily cap.
+ * Counts and spend only. A reading from a server before Part 11 has none, and the section is left out.
+ */
+function TodaySection({ report }: StatusViewProps) {
+  const today = report.today;
+  if (!today) return null;
+  const { context, osm } = today;
+  const usd = (v: number) => formatUsd(v);
+  const contextText =
+    context.aiUsd === null && context.webUsd === null
+      ? null
+      : `AI ${context.aiUsd === null ? "not read" : usd(context.aiUsd)} · web ${context.webUsd === null ? "not read" : usd(context.webUsd)}`;
+  return (
+    <Section id="today" title="Shared use" aside="Today, UTC">
+      <StatusRows label="Shared use">
+        <StatusRow label="Brand screens" note="all servers">
+          {today.screens === null ? <NotRead /> : <Amount used={count(today.screens)} of={today.screens === 1 ? "screen today" : "screens today"} />}
+        </StatusRow>
+        <StatusRow label="Context calls" note={context.webSearches === null ? undefined : `${count(context.webSearches)} ${context.webSearches === 1 ? "search" : "searches"}`}>
+          {contextText === null ? <NotRead /> : <Amount used={contextText} of="spent today, part of the LLM spend" wrap />}
+        </StatusRow>
+        <StatusRow label="OpenStreetMap requests" note={osm.configured ? "resets 00:00 UTC" : undefined}>
+          {!osm.configured ? (
+            <span className="text-ink-2">Not configured: place counts need OSM_USER_AGENT.</span>
+          ) : osm.requests === null ? (
+            <NotRead />
+          ) : (
+            <>
+              <UsageMeter value={osm.requests} max={Math.max(1, osm.dailyMax)} label="OpenStreetMap requests today" valueText={`${count(osm.requests)} of ${count(osm.dailyMax)}`} />
+              <Amount used={count(osm.requests)} of={`of ${count(osm.dailyMax)}`} />
+            </>
+          )}
+        </StatusRow>
+      </StatusRows>
+    </Section>
+  );
+}
+
 function SystemSection({ report }: StatusViewProps) {
   const { db, migrations } = report;
   return (
@@ -431,6 +498,7 @@ export function StatusView({ report }: StatusViewProps) {
       <SpendSection report={report} />
       <RunsSection report={report} />
       <QlooSection report={report} />
+      <TodaySection report={report} />
       <SystemSection report={report} />
     </div>
   );

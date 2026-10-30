@@ -1,15 +1,5 @@
-import {
-  METRO_LABEL,
-  type BarsPayload,
-  type DatasetEnvelope,
-  type GeoLiftPayload,
-  type Job,
-  type MatrixPayload,
-  type MetricUnit,
-  type RankedPayload,
-  type SlatePayload,
-  type SlopePayload,
-} from "@ct/contracts";
+import type { BarsPayload, DatasetEnvelope, GeoLiftPayload, Job, MatrixPayload, MetricUnit, RankedPayload, SlatePayload, SlopePayload } from "@ct/contracts";
+import { METRO_LABEL } from "@ct/contracts/values";
 import { DEFAULT_DES_TYPE, desHref, isDesType } from "../../components/des/des-href";
 import { scoreLabelParts } from "../../components/figures/format";
 import { fewRivals, supplyUnknown } from "../../components/figures/lift-scale";
@@ -549,7 +539,12 @@ function shapeRanked(dataset: Extract<DatasetEnvelope, { kind: "Ranked" }>, ctx:
   if (isVerdicts(dataset)) {
     const { body, table, counts } = verdictGroups(p);
     const checked = counts.keep + counts.veto;
-    const sample = checked > 0 ? ` ${checked} AI ${checked === 1 ? "guess was" : "guesses were"} checked.` : " No AI guess could be checked, so only the data's own results are listed.";
+    const sample =
+      counts.category > 0 && checked === 0
+        ? " The data has no tag for the concept itself, so each name is measured against its broader category only: no keep or veto is given."
+        : checked > 0
+          ? ` ${checked} AI ${checked === 1 ? "guess was" : "guesses were"} checked.`
+          : " No AI guess could be checked, so only the data's own results are listed.";
     return { kind: CHART_COPY.verdicts.kind, caption: `${CHART_COPY.verdicts.caption}${sample}`, table, body, stacked: true };
   }
   if (isTwins(dataset)) {
@@ -709,6 +704,8 @@ const GLYPH: Readonly<Record<DatasetEnvelope["kind"], MoreChart["glyph"]>> = {
   Slope: "columns",
   Quadrant: "dots",
   GeoLift: "dots",
+  TasteMap: "dots",
+  Supply: "bars",
 };
 
 /** A short name for a chart the page links to under "More charts" (G-A5), by its family. */
@@ -745,6 +742,10 @@ export function moreChartName(figure: BriefFigure, dataset: DatasetEnvelope | nu
       return "Where interest is highest";
     case "Scorecard":
       return "Our guesses, scored";
+    case "TasteMap":
+      return "Taste map of the peers";
+    case "Supply":
+      return dataset.payload.mix ? "What the area has more and less of" : "Places already there";
   }
 }
 

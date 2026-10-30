@@ -15,17 +15,20 @@ import { test as base, expect, type Locator, type Page, type TestInfo } from "@p
 const DEV_REFRESH_RACE = "Internal Next.js error: Router action dispatched before initialization.";
 
 /**
- * The two requests that spend: POST /api/preview reads the question with CLERK (a model call), and
- * POST /api/runs starts a run (a live one costs model turns and Qloo calls). Matched in full, so the
- * stream, the datasets and a cancel under /api/runs/[id] pass.
+ * The three requests that spend: POST /api/preview reads the question with CLERK (a model call),
+ * POST /api/runs starts a run (a live one costs model turns and Qloo calls), and POST /api/screener
+ * runs a screen (Qloo calls). Matched in full, so the stream, the datasets and a cancel under
+ * /api/runs/[id] pass.
  */
-const SPEND_URL = /\/api\/(?:preview|runs)(?:\?.*)?$/;
+const SPEND_URL = /\/api\/(?:preview|runs|screener)(?:\?.*)?$/;
 
 interface SmokeOptions {
   /** Lets the page send POST /api/preview: only the opt-in fail-closed spec asks a question. */
   allowPreview: boolean;
   /** Lets the page send POST /api/runs: the test run (run.spec) and the opt-in fail-closed spec. */
   allowRun: boolean;
+  /** Lets the page send POST /api/screener: the screener spec, on a mock server only (liveServer). */
+  allowScreener: boolean;
 }
 
 /**
@@ -36,20 +39,21 @@ interface SmokeOptions {
 export const test = base.extend<SmokeOptions & { spendGuard: void; pageErrors: void }>({
   allowPreview: [false, { option: true }],
   allowRun: [false, { option: true }],
+  allowScreener: [false, { option: true }],
   // Blocks the request before it reaches the server, so a regression (a page that previews or runs on
   // its own) costs nothing even on a server with live keys, then fails the test that saw it.
   spendGuard: [
-    async ({ page, allowPreview, allowRun }, provide) => {
+    async ({ page, allowPreview, allowRun, allowScreener }, provide) => {
       const blocked: string[] = [];
       await page.route(SPEND_URL, (route, request) => {
         const path = new URL(request.url()).pathname;
-        const allowed = path === "/api/preview" ? allowPreview : allowRun;
+        const allowed = path === "/api/preview" ? allowPreview : path === "/api/screener" ? allowScreener : allowRun;
         if (request.method() !== "POST" || allowed) return route.fallback();
         blocked.push(`POST ${path} from ${page.url()}`);
         return route.abort("blockedbyclient");
       });
       await provide();
-      expect(blocked, "a page sent a preview or a run the test does not allow (blocked before the server)").toEqual([]);
+      expect(blocked, "a page sent a preview, a run or a screen the test does not allow (blocked before the server)").toEqual([]);
     },
     { auto: true },
   ],
@@ -119,6 +123,28 @@ export async function databaseDown(page: Page): Promise<string | null> {
   const body = (await res.json().catch(() => null)) as { db?: { ok?: boolean } } | null;
   return body?.db?.ok === true ? null : "the server's database is not reachable (pnpm db:up)";
 }
+
+/**
+ * Whether the server runs on synthetic data with no model: GET /api/health's qloo.env is "mock" and
+ * llm.configured is false (the server the smoke starts, playwright.config.ts). The specs that make Qloo
+ * calls the spend guard cannot block (a screen, a profile, a request sent by the test itself) skip on
+ * any other server with this reason, so a smoke pointed at a live server spends nothing.
+ */
+export async function liveServer(page: Page): Promise<string | null> {
+  const res = await page.request.get("/api/health");
+  const body = (await res.json().catch(() => null)) as { qloo?: { env?: string } | null; llm?: { configured?: boolean } } | null;
+  if (body?.qloo?.env === "mock" && body.llm?.configured === false) return null;
+  return "the server is not in mock mode (QLOO_MOCK=1 with blank QLOO_API_KEY and ANTHROPIC_API_KEY): this check would make live calls";
+}
+
+/** Following's API (packages/contracts/src/follows.ts): GET lists, POST adds, PATCH points at a run, DELETE removes. */
+export const FOLLOWS_API = "/api/follows";
+
+/** The brand screener's API (packages/contracts/src/screener.ts): POST a ScreenerRequest, answered with a ScreenerAnswer. */
+export const SCREENER_API = "/api/screener";
+
+/** An invented brand: the mock Qloo transport answers any name from its hash (no Qloo value, D29). */
+export const INVENTED_BRAND = "Juniper Cola";
 
 /**
  * The owner's rule for the redesign: no examples anywhere. No showcase or example surface, no "Try"

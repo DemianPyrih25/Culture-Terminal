@@ -209,7 +209,8 @@ async function runAreaEconomics(input: EconInput, ctx: SkillCtx): Promise<SkillR
   });
   if (subjects.length === 0) return skillErrorResult(out, [...notices, "No area maps to Census units."].join(" "));
   // A city clipped from border ZIPs is read as those whole ZIPs: its row says so instead of "All of".
-  const cityRowName = cityUnits.some((u) => u.kind === "zcta" && u.clipped) ? `${city} ZIP areas (whole ZIPs)` : `All of ${city}`;
+  // ANSWER_QUALITY §5: a city read from whole border ZIP areas says it is approximate, in the table and every metric label.
+  const cityRowName = cityUnits.some((u) => u.kind === "zcta" && u.clipped) ? `ZIP areas touching ${city} (approximate: whole ZIP areas, not the city itself)` : `All of ${city}`;
   subjects.push({ key: metro, name: cityRowName, ref: metro, units: cityUnits, isCity: true });
 
   // One request per geography the city's units need; the areas' units are a subset.
@@ -272,7 +273,7 @@ async function runAreaEconomics(input: EconInput, ctx: SkillCtx): Promise<SkillR
       const badge = approx ? "ESTIMATED" : r.found === 1 && !isCommute(f) ? "MEASURED" : "DERIVED";
       const m = addSkillMetric(ctx.ledger, {
         key: FIELD_KEY[f],
-        label: `${FIELD_LABEL[f]}, ${safeName(s.name)}`,
+        label: `${FIELD_LABEL[f]}, ${s.isCity ? safeFullName(s.name) : safeName(s.name)}`,
         subjectRefs: [s.ref, metro],
         value: v,
         reason: r.found === 0 ? (failure === null ? "not_measured" : failure === "not_configured" ? "not_configured" : "unavailable") : "suppressed",

@@ -16,6 +16,7 @@ COPY packages/quant/package.json packages/quant/
 COPY packages/geo/package.json packages/geo/
 COPY packages/agent/package.json packages/agent/
 COPY packages/db/package.json packages/db/
+COPY packages/publicdata/package.json packages/publicdata/
 # corepack installs the pnpm version pinned in package.json's packageManager field.
 RUN corepack enable && corepack install && pnpm install --frozen-lockfile
 

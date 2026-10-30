@@ -1,4 +1,5 @@
-import type { ConfidenceBand, DatasetEnvelope, DatasetId, GeoLiftPayload, GhostPickCategory, Job, Metric, MetroId, ResolvedMention, RunState } from "@ct/contracts";
+import type { ConfidenceBand, DatasetEnvelope, DatasetId, GeoLiftPayload, GhostPickCategory, Job, Metric, MetroId, ResolvedMention, RunState, SupplyPayload } from "@ct/contracts";
+import type { AnswerContext } from "./context";
 import type { IconName } from "../../components/ui/icons";
 import type { BriefArgument, BriefNextMove, Inline } from "../brief";
 import type { AnswerTopic } from "./copy";
@@ -11,7 +12,7 @@ import type { AnswerTopic } from "./copy";
 
 /** What buildAnswerModel reads from the run besides the brief model. */
 export type AnswerRun = Pick<RunState, "resolves"> &
-  Partial<Pick<RunState, "ghost" | "report" | "intent" | "evidence">> & {
+  Partial<Pick<RunState, "ghost" | "report" | "intent" | "evidence" | "aiContext" | "webContext">> & {
     /** The run's metrics by id (the raw values behind the key numbers). */
     metrics?: Readonly<Record<string, Metric>>;
   };
@@ -52,6 +53,11 @@ export interface AnswerVerdict {
   confidence: AnswerConfidence | null;
   /** What lowered the confidence, in a reader's words. */
   lowered: string[];
+  /**
+   * The cap that sets the band (R1, D47) in plain words, "Medium: the signal is mixed"; null when no cap
+   * binds (the score is set by penalties alone) or there is no score.
+   */
+  capLine: string | null;
   /** "Taste signals, not buy or sell advice." on the investment desk; null elsewhere. */
   advice: string | null;
   /** "All 28 numbers checked against Qloo data" (or "Qloo and SEC data"); `ok` false prints the caution form. */
@@ -107,6 +113,8 @@ export interface BarRowData {
   display: string;
   tone: BarTone;
   tag: KeyNumberTag | null;
+  /** Chips beside the tag: "You named", "Expected" (R3), "Already there (AI knowledge, not verified)" (R4). */
+  marks?: string[];
 }
 
 export interface WinnerRowData {
@@ -148,6 +156,7 @@ export interface SlateRowData {
   gem: boolean;
   /** Why the category has no best fit. */
   missing: string | null;
+  marks?: string[];
 }
 
 export interface ListItemData {
@@ -156,6 +165,7 @@ export interface ListItemData {
   gem: boolean;
   /** The name's profile page, when its type has one. */
   href: string | null;
+  marks?: string[];
 }
 
 export interface DivergingRowData {
@@ -171,10 +181,11 @@ export interface RankTrackRowData {
   of: number;
   display: string;
   gem: boolean;
+  marks?: string[];
 }
 
 /** A concept check's verdict on one name (S12): kept, found in the data, dropped, or not scored. */
-export type VerdictKind = "keep" | "add" | "veto" | "unscored";
+export type VerdictKind = "keep" | "add" | "veto" | "unscored" | "category";
 
 export interface VerdictRowData {
   label: string;
@@ -294,6 +305,12 @@ export interface AnswerModel {
    * page, before the verdict. Null when every concept had a tag of its own.
    */
   concept: string | null;
+  /**
+   * How the concept note reads (R2, D48): `category` when only the concept's broader category was read
+   * (CATEGORY_LEVEL_READ: no winner, keep or veto for the concept itself), `missing` when the concept is
+   * not in the data; null without a note.
+   */
+  conceptLevel: "category" | "missing" | null;
   /** The "Read as" chip and what the answer does not cover; null when the question fit its job. */
   readAs: AnswerReadAs | null;
   verdict: AnswerVerdict;
@@ -320,6 +337,12 @@ export interface AnswerModel {
   ghostSpan: 3 | 4;
   changes: string[];
   why: AnswerWhy;
+  /** "What AI knows (not verified)" and "From the web" (R4, R5), after Why; null blocks draw nothing. */
+  context: AnswerContext;
+  /** R7: the lift map's popular and hidden areas with their table, under the map; null without R7 data. */
+  standing: { datasetId: DatasetId; data: GeoLiftPayload; supply: SupplyPayload | null } | null;
+  /** R6: OpenStreetMap supply reads (SupplyTable), each on its own row; empty without one. */
+  supply: AnswerSupply[];
   more: MoreChart[];
   ask: { moves: BriefNextMove[]; placeholder: string };
 }
@@ -331,4 +354,13 @@ export type AnswerDatasets = Readonly<Record<string, DatasetEnvelope | null | un
 export interface AnswerSubjects {
   primary: ResolvedMention | null;
   second: ResolvedMention | null;
+}
+
+/** One OpenStreetMap supply read the answer draws (R6, D46). */
+export interface AnswerSupply {
+  datasetId: DatasetId;
+  footnote: number;
+  title: string;
+  formulaId: string | null;
+  data: SupplyPayload;
 }

@@ -24,6 +24,7 @@ import {
 } from "@ct/agent";
 import {
   DEFAULT_RUN_LIMITS,
+  EMPTY_CANDIDATES,
   RunEvent,
   stampEvent,
   type DigestRow,
@@ -35,6 +36,7 @@ import {
   type ReportDraftShape,
   type SubmitPlanInputShape,
 } from "@ct/contracts";
+import { sampleAiContext, sampleWebContext } from "../../apps/web/server/samples/context";
 import {
   canonicalize,
   createMemoryQlooStore,
@@ -643,6 +645,7 @@ const INTENT: Intent = {
     reframe: "How distinct and how central Juniper Cola's audience taste is among the brands it shares taste with",
   },
   read_as: { nearest: false, not_covered: [] },
+  candidates: EMPTY_CANDIDATES,
   assumptions: ["US taste data", "Moat read as a distinct audience taste, not as market share"],
   mnemonic: "JUNIPER COLA <BRAND> HLTH",
 };
@@ -1053,15 +1056,67 @@ async function record(clock: VirtualClock, qloo: QlooClient, scene: Scene): Prom
       limits: DEFAULT_RUN_LIMITS,
       signal: new AbortController().signal,
       now: clock.now,
+      // No side context call: the scripted model answers only CLERK and the ANALYST. The sample carries
+      // invented blocks instead (withSampleContext).
+      ...({ sideConfig: SIDE_CALLS_OFF } as object),
     }),
   );
   // The run manager writes run.end once the run's rows are stored.
   stamped.push({ input: { type: "run.end", status: result.status, elapsedMs: result.elapsedMs, reason: result.reason }, at: clock.now() + 38 });
+  const withContext = withSampleContext(stamped);
+  stamped.splice(0, stamped.length, ...withContext);
   const inputs = stableCallIds(scene.runId, labelSynthetic(stamped.map((s) => s.input)));
   const events = inputs.map((input, i) =>
     RunEvent.parse(stampEvent(input, { seq: i + 1, ts: new Date(stamped[i]?.at ?? clock.now()).toISOString(), runId: scene.runId })),
   );
   return { events, result };
+}
+
+/** The side context calls turned off for a scripted run (the sample's blocks are invented instead). */
+const SIDE_CALLS_OFF = { aiEnabled: false, webEnabled: false, webMaxUses: 1, aiTimeoutMs: 1, webTimeoutMs: 1 };
+
+/**
+ * The run's events with the invented "What AI knows" and "From the web" blocks (R4, R5;
+ * apps/web/server/samples/context.ts) right after the plan, as a live run's side calls settle while the
+ * ANALYST works, any side event the agent emitted replaced, and the finished report carrying both blocks
+ * at no cost. A run that ends before its plan (the picker) gets none, as a live one would not show them.
+ */
+export function withSampleContext(stamped: readonly { input: EventInput; at: number }[]): { input: EventInput; at: number }[] {
+  const kept = stamped.filter((s) => s.input.type !== "context.ai" && s.input.type !== "context.web");
+  const plan = kept.findIndex((s) => s.input.type === "plan");
+  if (plan < 0) return kept;
+  // At the plan's own time: the next event may share it, and replay times never run backwards.
+  const at = kept[plan]?.at ?? 0;
+  const iso = new Date(at).toISOString();
+  const ai = sampleAiContext(iso);
+  const web = sampleWebContext(iso);
+  const out = kept.map((s) => {
+    if (s.input.type !== "report.final") return s;
+    const { report } = s.input;
+    return {
+      ...s,
+      input: {
+        ...s.input,
+        report: {
+          ...report,
+          aiContext: ai,
+          webContext: web,
+          receipt: {
+            ...report.receipt,
+            models: { ...report.receipt.models, context: null, web: null },
+            context: { aiUsd: 0, webUsd: 0, webSearches: 0 },
+          },
+        },
+      },
+    };
+  });
+  out.splice(
+    plan + 1,
+    0,
+    { input: { type: "context.ai", block: ai, usd: 0, ms: 0 }, at },
+    { input: { type: "context.web", block: web, usd: 0, ms: 0 }, at },
+  );
+  return out;
 }
 
 /** The data line every sample report closes its disclaimers with, in place of the agent's. */

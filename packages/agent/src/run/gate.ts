@@ -1,4 +1,5 @@
 import {
+  entityTypeUrn,
   placeSearchMarket,
   type EntityRegistry,
   type EventInputOf,
@@ -11,8 +12,10 @@ import {
   type QlooSearchEntity,
   type RegisteredEntity,
   type ResolvedMention,
+  type RunCandidates,
 } from "@ct/contracts";
 import { classifyMatches, normaliseName, searchParams, unmatchedLimitation, type MatchAlternative } from "@ct/quant";
+import { aliasMatch, BRAND_ALIASES, leadingNameMatch, type BrandAlias } from "./aliases";
 import { pickerKey } from "./picker";
 
 /**
@@ -23,6 +26,13 @@ import { pickerKey } from "./picker";
  * call and the receipt counts them from the call log; they become evidence only when a mention was
  * dropped (gateEvidence), so the report carries SECONDARY_ENTITY_DROPPED as resolve_entities would,
  * or when the Taste Position card cites the primary's popularity as its reach (recordPosition).
+ *
+ * Part 11 (R3, D49): the obvious candidates CLERK listed (intent.candidates.obvious_entities) are looked
+ * up the same way, in parallel, exact only, and registered as `obvious`; the question's own mentions are
+ * registered as `user_named`. An obvious name with no exact match is left out quietly (no drop, no
+ * penalty) and named once in the EXPECTED_CANDIDATE_MISSING limitation. A verified known alias
+ * (config/brand_aliases.json) lets a mention apply the result its own search returned under the official
+ * name ("Read 'KFC' as 'Kentucky Fried Chicken'"); the resolve event carries it.
  */
 
 export interface GateInput {
@@ -32,6 +42,8 @@ export interface GateInput {
   registry: EntityRegistry;
   /** Qloo entity ids keyed by normaliseName(mention text). */
   pins: Readonly<Record<string, string>>;
+  /** The verified known aliases; defaults to config/brand_aliases.json's. */
+  aliases?: readonly BrandAlias[];
 }
 
 export interface GateResolved {
@@ -49,6 +61,14 @@ export interface GateResolved {
   calls: QlooCallMeta[];
   /** The calls that resolved the primary target; the Taste Position card cites them for its reach. */
   primaryCalls: QlooCallMeta[];
+  /** The obvious candidates CLERK listed that matched exactly, registered as `obvious`, in CLERK's order. */
+  obvious: RegisteredEntity[];
+  /** The run's candidate entities (R3): the question's other exact mentions, then the obvious ones. */
+  candidates: RunCandidates["entities"];
+  /** Obvious names with no exact match under that name (EXPECTED_CANDIDATE_MISSING). */
+  expectedMissing: string[];
+  /** Obvious names whose lookup failed in this run (named in the same limitation, apart). */
+  expectedFailed: string[];
 }
 
 export interface GateNeedsInput {
@@ -77,25 +97,46 @@ const clip = (s: string): string => (s.length <= MENTION_MAX ? s.trim() : `${s.s
 interface Target {
   mention: Mention;
   isPrimary: boolean;
+  /** An obvious candidate CLERK listed, not a name the question gave. */
+  obvious: boolean;
   params: QlooParams;
   pin: string | null;
 }
 
+/** An empty resolution: the gate's outcome when Qloo is disabled or nothing was named. */
+export const EMPTY_GATE: GateResolved = {
+  kind: "resolved",
+  entities: [],
+  primary: null,
+  peers: [],
+  dropped: 0,
+  limitations: [],
+  calls: [],
+  primaryCalls: [],
+  obvious: [],
+  candidates: [],
+  expectedMissing: [],
+  expectedFailed: [],
+};
+
 type Miss = Exclude<ResolvedMention["match"], "exact">;
 
-/** An applied entity, or the miss class with the candidates to offer. */
+/** An applied entity (with the official name a known alias resolved to), or the miss class with the candidates to offer. */
 type Resolution =
-  | { applied: QlooSearchEntity; alternatives: readonly MatchAlternative[] }
+  | { applied: QlooSearchEntity; alternatives: readonly MatchAlternative[]; alias?: string }
   | { applied: null; match: Miss; alternatives: readonly MatchAlternative[] };
 
-function classify(mention: Mention, results: readonly QlooSearchEntity[]): Resolution {
+function classify(mention: Mention, results: readonly QlooSearchEntity[], aliases: readonly BrandAlias[]): Resolution {
   const c = classifyMatches({ text: mention.text, type: mention.entity_type }, results);
   const applied = c.matchClass === "exact" ? c.exact[0] : undefined;
   if (applied !== undefined) return { applied, alternatives: c.alternatives };
+  // A verified alias accepts the result the search returned under the official name, never anything else.
+  const aliased = aliasMatch(mention, results, aliases);
+  if (aliased !== null) return { applied: aliased, alternatives: c.alternatives, alias: aliased.name };
   return { applied: null, match: c.matchClass === "ambiguous" ? "ambiguous" : "not_found", alternatives: c.alternatives };
 }
 
-function draftOf(r: QlooSearchEntity, mention: Mention): Omit<RegisteredEntity, "ref"> {
+function draftOf(r: QlooSearchEntity, mention: Mention, obvious: boolean): Omit<RegisteredEntity, "ref"> {
   return {
     entityId: r.entity_id,
     name: r.name,
@@ -103,6 +144,7 @@ function draftOf(r: QlooSearchEntity, mention: Mention): Omit<RegisteredEntity, 
     popularity: r.popularity ?? null,
     disambiguation: r.disambiguation ?? null,
     tags: (r.tags ?? []).map((t) => ({ tagId: t.tag_id, name: t.name, type: t.type })),
+    candidate: obvious ? "obvious" : "user_named",
   };
 }
 
@@ -209,7 +251,22 @@ export async function runResolutionGate(input: GateInput): Promise<GateOutcome> 
       drop(`'${clip(mention.text)}' was not looked up: a question is resolved for at most ${GATE_SEARCH_MAX} named entities.`);
       continue;
     }
-    targets.push({ mention, isPrimary, params, pin: pinOf(input.pins, key) });
+    targets.push({ mention, isPrimary, obvious: false, params, pin: pinOf(input.pins, key) });
+  }
+
+  // The obvious candidates: searched like secondary mentions, never a private person, exact only (or a
+  // unique top result that only adds a word or two to the name: leadingNameMatch).
+  const privates = privatePersonNames(intent);
+  for (const o of intent.candidates.obvious_entities) {
+    const key = normaliseName(o.text);
+    const dedupe = `${o.entity_type}|${key}`;
+    if (key === "" || seen.has(dedupe) || privates.has(key)) continue;
+    seen.add(dedupe);
+    const mention: Mention = { text: o.text, entity_type: o.entity_type, role: "secondary", public_figure: true };
+    const metro = o.entity_type === "place" ? placeSearchMarket(intent.geo) : null;
+    const params = searchParams({ text: o.text, type: o.entity_type, metro });
+    if (params === null) continue;
+    targets.push({ mention, isPrimary: false, obvious: true, params, pin: null });
   }
 
   // In parallel even when the primary will need a picker: the answers are cached, so the rerun with
@@ -221,6 +278,10 @@ export async function runResolutionGate(input: GateInput): Promise<GateOutcome> 
   let primaryMiss: { mention: Mention; match: Miss; alternatives: readonly MatchAlternative[] } | null = null;
   let primaryCalls: QlooCallMeta[] = [];
   const peers: RegisteredEntity[] = [];
+  const obvious: RegisteredEntity[] = [];
+  const named: RegisteredEntity[] = [];
+  const expectedMissing: string[] = [];
+  const expectedFailed: string[] = [];
 
   for (const [i, target] of targets.entries()) {
     const { mention } = target;
@@ -232,14 +293,52 @@ export async function runResolutionGate(input: GateInput): Promise<GateOutcome> 
       if (settled.status === "rejected" && target.pin === null) throw settled.reason;
       if (settled.status === "fulfilled") calls.push(settled.value.meta);
       const results = settled.status === "fulfilled" ? settled.value.data.results : [];
-      resolution = target.pin !== null ? await resolvePinned(input, target.pin, results, calls) : classify(mention, results);
+      resolution =
+        target.pin !== null ? await resolvePinned(input, target.pin, results, calls) : classify(mention, results, input.aliases ?? BRAND_ALIASES);
+      // An expected name CLERK wrote loosely ("Health-Ade") may take the top result that only adds a word or
+      // two ("Health-Ade Kombucha"); the reading is shown like an alias's.
+      if (target.obvious && resolution.applied === null && resolution.match === "not_found") {
+        const lead = leadingNameMatch(mention, results, entityTypeUrn(mention.entity_type));
+        if (lead !== null) resolution = { applied: lead, alternatives: [], alias: lead.name };
+      }
     } catch (error) {
       if (target.isPrimary) return { kind: "failed", error };
-      drop(`'${clip(mention.text)}' could not be looked up in Qloo for this run.`);
+      // An obvious candidate is CLERK's expectation, not the question's: its failure costs nothing.
+      if (target.obvious) expectedFailed.push(clip(mention.text));
+      else drop(`'${clip(mention.text)}' could not be looked up in Qloo for this run.`);
       continue;
     }
 
-    const registered = resolution.applied === null ? null : registry.registerEntity(draftOf(resolution.applied, mention));
+    if (target.obvious) {
+      // Exact only (a verified alias counts as exact), and quietly: a name CLERK expected that the data does
+      // not hold under it is listed once.
+      if (resolution.applied === null) {
+        expectedMissing.push(clip(mention.text));
+        continue;
+      }
+      const known = registry.byEntityId(resolution.applied.entity_id);
+      const registered = registry.registerEntity(draftOf(resolution.applied, mention, true));
+      // The question already names this entity: it stays the user's own.
+      if (known !== null && known.candidate === "user_named") continue;
+      if (!obvious.includes(registered)) obvious.push(registered);
+      entities.push({
+        mention: mention.text,
+        role: mention.role,
+        entityType: mention.entity_type,
+        match: "exact",
+        ref: registered.ref,
+        name: registered.name,
+        popularity: registered.popularity,
+        disambiguation: registered.disambiguation,
+        alternatives: [],
+        source: "gate",
+        candidate: "obvious",
+        ...(resolution.alias !== undefined ? { alias: resolution.alias } : {}),
+      });
+      continue;
+    }
+
+    const registered = resolution.applied === null ? null : registry.registerEntity(draftOf(resolution.applied, mention, false));
     entities.push({
       mention: mention.text,
       role: mention.role,
@@ -251,6 +350,8 @@ export async function runResolutionGate(input: GateInput): Promise<GateOutcome> 
       disambiguation: registered?.disambiguation ?? null,
       alternatives: resolution.alternatives.map((a) => ({ name: a.name, disambiguation: a.disambiguation, popularity: a.popularity })),
       source: "gate",
+      ...(registered === null ? {} : { candidate: "user_named" as const }),
+      ...(resolution.applied !== null && resolution.alias !== undefined ? { alias: resolution.alias } : {}),
     });
 
     if (resolution.applied === null) {
@@ -259,8 +360,9 @@ export async function runResolutionGate(input: GateInput): Promise<GateOutcome> 
     } else if (target.isPrimary) {
       primary = registered;
       primaryCalls = calls.slice(callsBefore);
-    } else if (mention.role === "peer" && registered !== null) {
-      peers.push(registered);
+    } else if (registered !== null) {
+      if (!named.includes(registered)) named.push(registered);
+      if (mention.role === "peer") peers.push(registered);
     }
   }
 
@@ -273,7 +375,45 @@ export async function runResolutionGate(input: GateInput): Promise<GateOutcome> 
     const { mention, match, alternatives } = primaryMiss;
     return { kind: "needs_input", entities, reason: notExactReason(mention, match), picker: picker(mention, match, alternatives) };
   }
-  return { kind: "resolved", entities, primary, peers, dropped, limitations, calls, primaryCalls };
+  const userNamed = named.filter((e) => e !== primary);
+  const expected = obvious.filter((e) => e !== primary && !userNamed.includes(e));
+  const candidates: RunCandidates["entities"] = [
+    ...userNamed.map((e) => ({ ref: e.ref, source: "user_named" as const })),
+    ...expected.map((e) => ({ ref: e.ref, source: "obvious" as const })),
+  ];
+  return {
+    kind: "resolved",
+    entities,
+    primary,
+    peers,
+    dropped,
+    limitations,
+    calls,
+    primaryCalls,
+    obvious: expected,
+    candidates,
+    expectedMissing,
+    expectedFailed,
+  };
+}
+
+/**
+ * The EXPECTED_CANDIDATE_MISSING limitation text (R3): the obvious names the data does not hold under that
+ * name, and apart the ones whose lookup failed; null when every obvious name resolved.
+ */
+export function expectedMissingText(gate: Pick<GateResolved, "expectedMissing" | "expectedFailed">): string | null {
+  const list = (xs: readonly string[]) =>
+    xs
+      .map((x) => x.replace(/[\p{Cc}\p{Cf}]/gu, " ").trim())
+      .filter((x) => x !== "")
+      .join(", ");
+  const missing = list(gate.expectedMissing);
+  const failed = list(gate.expectedFailed);
+  const parts = [
+    ...(missing === "" ? [] : [`Expected names not found under that name in the data: ${missing}.`]),
+    ...(failed === "" ? [] : [`Expected names that could not be looked up in this run: ${failed}.`]),
+  ];
+  return parts.length === 0 ? null : parts.join(" ");
 }
 
 /**

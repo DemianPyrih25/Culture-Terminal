@@ -144,9 +144,19 @@ const SponsorCategories = z.strictObject({
   ),
 });
 
-const ExpectedGeo = z.strictObject({ metro: MetroId.nullable(), area: text.nullable() });
+const ExpectedGeo = z.strictObject({
+  metro: MetroId.nullable(),
+  area: text.nullable(),
+  /** taste_twins only: the city whose twins are found. */
+  target_metro: MetroId.optional(),
+  /** city_compare only: the compared cities as market ids, first named first. */
+  cities: z.array(MarketId).min(2).max(4).optional(),
+});
+/** Only what the question itself names (R3): the obvious candidates CLERK adds are model judgement, not fixed here. */
+const ExpectedCandidates = z.strictObject({ named_areas: z.array(text), named_markets: z.array(MarketId) });
+const SHOWCASE_CODE = /^S(?:[1-9]|1[0-3])$/;
 const Showcase = z.strictObject({
-  code: z.string().regex(/^S[1-7]$/),
+  code: z.string().regex(SHOWCASE_CODE),
   slug: z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   desk: Pillar,
   judge: text,
@@ -158,6 +168,7 @@ const Showcase = z.strictObject({
     ),
     geo: ExpectedGeo,
     concepts: z.array(text),
+    candidates: ExpectedCandidates,
     safety: z.strictObject({ allowed: z.literal(true), category: z.null() }),
   }),
   extra_pins: z.array(z.strictObject({ text, entity_type: EntityType })),
@@ -165,7 +176,7 @@ const Showcase = z.strictObject({
 });
 const Showcases = z.strictObject({
   $comment: comment,
-  showcases: z.array(Showcase).length(7),
+  showcases: z.array(Showcase).length(13),
   chain: z.strictObject({
     slug: text,
     title: text,
@@ -175,7 +186,7 @@ const Showcases = z.strictObject({
       .array(
         z.strictObject({
           step: z.int().positive(),
-          from: z.string().regex(/^S[1-7]$/).nullable(),
+          from: z.string().regex(SHOWCASE_CODE).nullable(),
           question: text.max(QUESTION_MAX_CHARS),
           expected: z.strictObject({ job: Job, geo: ExpectedGeo }),
           why: text,
@@ -332,11 +343,36 @@ describe("config/sponsor_categories.json", () => {
 describe("config/showcases.json", () => {
   const showcases = Showcases.parse(readConfig("showcases.json").json);
 
-  it("holds S1 to S7 in order with unique slugs, each on its job's desk", () => {
-    expect(showcases.showcases.map((s) => s.code)).toEqual(["S1", "S2", "S3", "S4", "S5", "S6", "S7"]);
+  it("holds S1 to S13 in order with unique slugs and questions, each on its job's desk", () => {
+    expect(showcases.showcases.map((s) => s.code)).toEqual(Array.from({ length: 13 }, (_, i) => `S${i + 1}`));
     const slugs = [...showcases.showcases.map((s) => s.slug), showcases.chain.slug, showcases.trust.slug];
     expect(new Set(slugs).size).toBe(slugs.length);
+    const questions = showcases.showcases.map((s) => s.question.toLowerCase());
+    expect(new Set(questions).size).toBe(questions.length);
     for (const s of showcases.showcases) expect(s.desk, s.code).toBe(JOB_PILLAR[s.expected.job]);
+  });
+
+  it("adds a showcase for each Part 9 job in S8 to S13, the Concept Vector one (launch_test) included", () => {
+    const added = new Set(showcases.showcases.slice(7).map((s) => s.expected.job));
+    for (const job of ["taste_twins", "launch_test", "brand_collab", "creator_fit", "city_compare"] as const) expect(added.has(job), job).toBe(true);
+    expect(showcases.showcases.find((s) => s.code === "S9")?.expected.job).toBe("launch_test");
+  });
+
+  it("fills the job-specific geography and the named candidates only where the question gives them", () => {
+    for (const s of showcases.showcases) {
+      const { geo, job, candidates } = s.expected;
+      expect(geo.target_metro !== undefined, s.code).toBe(job === "taste_twins");
+      if (geo.target_metro !== undefined) expect(geo.target_metro, s.code).not.toBe(geo.metro);
+      expect(geo.cities !== undefined, s.code).toBe(job === "city_compare");
+      if (geo.cities !== undefined) expect(geo.metro, s.code).toBe(geo.cities[0]);
+      // city_compare keeps its cities in geo.cities, never also as named markets (clerk.md, Candidates).
+      if (job === "city_compare") expect(candidates.named_markets, s.code).toEqual([]);
+      for (const area of candidates.named_areas) expect(s.question, s.code).toContain(area);
+    }
+  });
+
+  it("writes why for S8 to S13 as what the showcase tests, never a presumed result", () => {
+    for (const s of showcases.showcases.slice(7)) expect(s.why, s.code).toMatch(/^Tests /);
   });
 
   it("covers every desk", () => {

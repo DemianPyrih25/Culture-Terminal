@@ -118,7 +118,11 @@ describe.skipIf(pending.length > 0)("skills against the real QUANT seams", () =>
     // Rows may be cut to fit, never metrics: every member's numbers stay citable.
     expect(result.forModel.metrics.map((m) => m.id)).toEqual(run.ledger.metrics.map((m) => m.id));
     const kept = result.forModel.top_rows.length;
-    if (kept < 7) expect(result.forModel.notices[0]).toBe(`${7 - kept} of 7 rows left out to fit this result; the full table is in D1.`);
+    if (kept < 7) expect(result.forModel.notices[0]).toBe(`${7 - kept} of 7 rows left out to fit this result; the full table is in D1, D2.`);
+    // The taste map places all seven from the same matrix: no extra call, the target oriented first.
+    const map = run.ledger.datasets.find((d) => d.kind === "TasteMap");
+    expect(map?.kind === "TasteMap" && map.payload).toMatchObject({ source: "substitution_map", k: 7, imputedPairs: [], omitted: [] });
+    expect(map?.kind === "TasteMap" && map.payload.points[0]).toMatchObject({ key: "R1", target: true });
   });
 
   it("suggests adding an outside-category neighbour that has no slot in the map", async () => {

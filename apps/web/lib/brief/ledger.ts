@@ -1,4 +1,4 @@
-import { isQlooProvenanceRequest, METRO_LABEL, PUBLIC_ENDPOINTS, PUBLIC_SOURCE_LABEL } from "@ct/contracts";
+import { isQlooProvenanceRequest, METRO_LABEL, PUBLIC_ENDPOINTS, PUBLIC_SOURCE_LABEL } from "@ct/contracts/values";
 import type {
   CacheStatus,
   EvidenceId,
@@ -299,7 +299,10 @@ export function metricView(metric: Metric, window: TrendWindow | null): MetricVi
     reasonLabel: unavailable ? (metric.reason ? NO_VALUE_LABEL[metric.reason] : "not measured") : null,
     comparator: metric.comparator,
     comparatorLabel: metric.comparator ? COMPARATOR_TEXT[metric.comparator] : null,
-    direction: unavailable ? null : metricDirection(metric),
+    // An about-level value (R1, V13) has no over or under: a small difference is not a lead.
+    direction: unavailable || metric.level === "about_level" ? null : metricDirection(metric),
+    ...(metric.level === "about_level" ? { aboutLevel: true } : {}),
+    ...(metric.thin ? { thin: true } : {}),
     unit: metric.unit,
     formulaId: metric.formulaId,
     derived: metric.badge === "DERIVED",
@@ -349,6 +352,7 @@ export function publicEndpointOf(path: string): SourceEndpoint | null {
   if (path === "/files/company_tickers.json") return "/files/company_tickers.json";
   if (path.startsWith("/api/xbrl/companyfacts")) return "/api/xbrl/companyfacts";
   if (path === "/data/acs/acs5" || /^\/data\/\d{4}\/acs\/acs5$/.test(path)) return "/data/acs/acs5";
+  if (path === "/api/interpreter") return "/api/interpreter";
   return null;
 }
 

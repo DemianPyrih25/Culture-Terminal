@@ -445,9 +445,9 @@ describe("runAgent: fail-closed and stop paths", () => {
     const report = Report.parse(result.report);
     expect(report).toMatchObject({ incomplete: true, arguments: [] });
     expect(report.verdict).toMatchObject({ headline: INCOMPLETE_HEADLINE, signal: "insufficient_evidence" });
-    // The brand_health scan: travel taste (Quadrant), the Substitution Map (Matrix), Audience DNA (Bars,
-    // Ranked), after the Scorecard and the Taste Position card.
-    expect(report.exhibits.map((x) => x.kind)).toEqual(["Scorecard", "Position", "Quadrant", "Matrix", "Bars", "Ranked"]);
+    // The brand_health scan: travel taste (Quadrant), the Substitution Map (Matrix) and its Category Taste
+    // Map, Audience DNA (Bars, Ranked), after the Scorecard and the Taste Position card.
+    expect(report.exhibits.map((x) => x.kind)).toEqual(["Scorecard", "Position", "Quadrant", "Matrix", "TasteMap", "Bars", "Ranked"]);
     expect(report.limitations.some((l) => l.flag === "INCOMPLETE_RUN")).toBe(true);
     expect(typesOf(events).slice(-2)).toEqual(["report.final", "usage"]);
     parseAll(events);

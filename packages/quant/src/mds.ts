@@ -5,6 +5,7 @@
  * Jacobi rotations in a fixed order, and each axis is oriented by the first point (the subject), so
  * the same matrix always draws the same map and a small change in it never mirrors the map.
  */
+import { TASTE_MAP_MAX_K, TASTE_MAP_MIN_K, TasteMapPayload, type EntityRef, type NoValueReason } from "@ct/contracts";
 
 export interface MdsResult {
   /** n × dims coordinates, centred on the origin; distances approximate the input dissimilarities. */
@@ -136,15 +137,23 @@ export function classicalMds(dissimilarity: readonly (readonly number[])[], dims
 /**
  * Kruskal's stress-1 (1964): √( Σ_{i<j} (δ_ij − d_ij)² / Σ_{i<j} δ_ij² ) between the input
  * dissimilarities δ and the map distances d. 0 is a perfect map; Kruskal read 0.05 as good, 0.1 as
- * fair and 0.2 as poor. 0 when every dissimilarity is 0.
+ * fair and 0.2 as poor. 0 when every dissimilarity is 0. Pairs in `skip` (either order) are left out
+ * of both sums: the taste map passes its imputed pairs, so the fit it reports covers measured
+ * distances only.
  */
-export function kruskalStress(dissimilarity: readonly (readonly number[])[], coords: readonly (readonly number[])[]): number {
+export function kruskalStress(
+  dissimilarity: readonly (readonly number[])[],
+  coords: readonly (readonly number[])[],
+  skip: readonly (readonly [number, number])[] = [],
+): number {
   const n = dissimilarity.length;
   if (coords.length !== n) throw new RangeError(`kruskalStress: ${coords.length} points for a ${n}×${n} matrix`);
+  const skipped = new Set(skip.map(([a, b]) => pairKey(a, b)));
   let residual = 0;
   let total = 0;
   for (let i = 0; i < n; i++) {
     for (let j = i + 1; j < n; j++) {
+      if (skipped.has(pairKey(i, j))) continue;
       const delta = dissimilarity[i]![j]!;
       const d = distance(coords[i]!, coords[j]!);
       residual += (delta - d) ** 2;
@@ -218,6 +227,136 @@ function oriented(vector: readonly number[], sign: -1 | 1): number[] {
   if (top === 0) return [...vector];
   const lead = vector.findIndex((x) => Math.abs(x) > top * SIGN_TIE);
   return Math.sign(vector[lead]!) !== sign ? vector.map((x) => (x === 0 ? 0 : -x)) : [...vector];
+}
+
+// Category Taste Map payload ----------------------------------------------------------------------------
+
+/**
+ * Fewest entities a taste map is drawn for. Three points always fit a flat map exactly, so the map
+ * would show nothing their three similarities do not; the figure lists them instead.
+ */
+export const TASTE_MAP_DRAW_MIN_K = 4;
+/** Above this share of unscored pairs the map would mostly draw the fill distance, so none is built. */
+export const TASTE_MAP_MAX_IMPUTED_SHARE = 0.5;
+
+/** One entity offered to the taste map, in the order the map orients by: the subject (or seed) first. */
+export interface TasteMapMember {
+  key: string;
+  label: string;
+  ref: EntityRef | null;
+  /** FORMULAS subs.hub when measured; null otherwise. */
+  hub: number | null;
+  target: boolean;
+}
+
+export type TasteMapBuild =
+  | { ok: true; payload: TasteMapPayload }
+  | { ok: false; reason: NoValueReason; message: string };
+
+/**
+ * The Category Taste Map from a pairwise similarity matrix over the members (either triangle may
+ * carry a pair, as triangularCalls fills it): the note passes its Substitution Map's matrix (no extra
+ * call), the screener its k − 1 triangular calls over the top k ≤ TASTE_MAP_MAX_K brands. A member
+ * with no scored pair at all cannot be placed and is listed as omitted. Every other unscored pair is
+ * set to the largest scored distance (tasteDistances), listed in imputedPairs, and left out of the
+ * stress, so the fit the map reports covers measured pairs only. Fewer than TASTE_MAP_MIN_K placeable
+ * members, or more than TASTE_MAP_MAX_IMPUTED_SHARE of the pairs unscored, builds no map and says why.
+ */
+export function buildTasteMap(args: {
+  source: TasteMapPayload["source"];
+  members: readonly TasteMapMember[];
+  sim: readonly (readonly (number | null)[])[];
+  /** Entities the caller already left out (e.g. dropped from a scoring call), kept in the payload. */
+  omitted?: TasteMapPayload["omitted"];
+}): TasteMapBuild {
+  const { members, sim } = args;
+  const n = members.length;
+  if (sim.length !== n || sim.some((row) => row.length !== n)) throw new RangeError(`buildTasteMap: sim must be ${n}×${n}`);
+  if (n > TASTE_MAP_MAX_K) throw new RangeError(`buildTasteMap: at most ${TASTE_MAP_MAX_K} members, got ${n}`);
+  const scored = (i: number, j: number) => [sim[i]![j], sim[j]![i]].some((v) => typeof v === "number" && Number.isFinite(v));
+
+  // A member with no scored pair adds none to anyone else's count, so one pass finds them all.
+  const kept: number[] = [];
+  const omitted = [...(args.omitted ?? [])];
+  members.forEach((m, i) => {
+    if (members.some((_, j) => j !== i && scored(i, j))) kept.push(i);
+    else omitted.push({ label: m.label, ref: m.ref, reason: "not_scored" });
+  });
+  if (kept.length < TASTE_MAP_MIN_K) {
+    return {
+      ok: false,
+      reason: "insufficient_n",
+      message: `A taste map needs at least ${TASTE_MAP_MIN_K} entities with a scored pair; ${kept.length === 0 ? "none" : `only ${kept.length}`} had one.`,
+    };
+  }
+
+  const k = kept.length;
+  const { d, imputed } = tasteDistances(kept.map((i) => kept.map((j) => sim[i]![j] ?? null)));
+  const pairs = (k * (k - 1)) / 2;
+  if (imputed.length > TASTE_MAP_MAX_IMPUTED_SHARE * pairs) {
+    return {
+      ok: false,
+      reason: "not_scored",
+      message: `Qloo scored ${pairs - imputed.length} of ${pairs} pairs; a taste map needs at least half of them measured.`,
+    };
+  }
+
+  const mds = classicalMds(d);
+  const placed = kept.map((i) => members[i]!);
+  const filled = imputed.length;
+  const payload = TasteMapPayload.parse({
+    source: args.source,
+    points: placed.map((m, p) => ({
+      key: m.key,
+      label: m.label,
+      ref: m.ref,
+      x: round(mds.coords[p]![0]!),
+      y: round(mds.coords[p]![1]!),
+      hub: m.hub,
+      target: m.target,
+    })),
+    k,
+    stress: round(kruskalStress(d, mds.coords, imputed)),
+    explained: round(mds.explained),
+    imputedPairs: imputed.map(([a, b]) => [placed[a]!.key, placed[b]!.key]),
+    omitted,
+    method:
+      `Classical MDS of 1 − audience taste similarity over ${k} entities` +
+      (filled > 0 ? `; ${filled} unscored pair${filled === 1 ? "" : "s"} set to the largest scored distance` : "") +
+      ". Nearby points share audience taste; the axes have no meaning.",
+  });
+  return { ok: true, payload };
+}
+
+/**
+ * The screener's taste map from its triangular calls (quant screener.ts ScreenerMapInput, matched by
+ * shape): the members in plan order, the seed marked as the target, sim over the members. A screen
+ * that lost a triangular call builds no map, since its missing pairs are unknown rather than "no
+ * relationship"; the message says so, for the screen's limitations line.
+ */
+export function tasteMapFromScreen(input: {
+  members: readonly { key: string; label: string; target: boolean; hub: number | null }[];
+  sim: readonly (readonly (number | null)[])[];
+  complete: boolean;
+}): TasteMapBuild {
+  if (!input.complete) {
+    return { ok: false, reason: "error", message: "Not every similarity call returned, so the taste map is not drawn; the table is unaffected." };
+  }
+  return buildTasteMap({
+    source: "screener",
+    members: input.members.map((m) => ({ key: m.key, label: m.label, ref: null, hub: m.hub, target: m.target })),
+    sim: input.sim,
+  });
+}
+
+/** Four decimals: well below anything the map can show, and stable to store and compare. */
+function round(x: number): number {
+  const r = Math.round(x * 1e4) / 1e4;
+  return r === 0 ? 0 : r;
+}
+
+function pairKey(a: number, b: number): string {
+  return a < b ? `${a}:${b}` : `${b}:${a}`;
 }
 
 function distance(a: readonly number[], b: readonly number[]): number {

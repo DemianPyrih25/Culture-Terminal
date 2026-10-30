@@ -337,7 +337,7 @@ describe("geo_lift: the lift map", () => {
 
     const d = liftMap(run);
     expect(d.title).toBe("Lift Map · Wine Bar in Austin");
-    expect(d.formulaIds).toEqual(["lift.cell", "lift.area", "lift.confidence", "lift.white_space"]);
+    expect(d.formulaIds).toEqual(["lift.cell", "lift.area", "lift.confidence", "lift.white_space", "lift.area_popularity"]);
     expect(d.payload).toMatchObject({ metro: "austin", precision: 7, precisionFactor: 1, coarse: false, boundarySource: "Synthetic test boundaries" });
     expect(d.payload.baseline).toEqual({ label: "Restaurants", tag: HEATMAP_BASELINE.tagId });
     const birch = d.payload.neighbourhoods.find((n) => n.id === "birch_hollow");
@@ -602,7 +602,7 @@ describe("geo_lift: the lift map", () => {
     expect(supply[0]?.label).toMatch(/^similar venues in Birch Hollow: unknown, not 0 \(not enough venue data\)\. None of the venues in Qloo's capped sample/);
     const digest = ModelDigest.parse(result.forModel);
     expect(digest.top_rows[0]?.values).toMatchObject({ area: "birch_hollow", quadrant: THIN_SUPPLY_LABEL });
-    expect(digest.notices.find((n) => n.includes("the area the question names"))).toContain(`Its competition reads "${THIN_SUPPLY_LABEL}"`);
+    expect(digest.notices.find((n) => n.includes("(birch_hollow), "))).toContain(`Its competition reads "${THIN_SUPPLY_LABEL}"`);
     // No area of the map is called crowded or saturated from fewer venues than the rule asks.
     for (const n of map.neighbourhoods) {
       if (n.quadrant === "PROVEN_CROWDED" || n.quadrant === "SATURATED") expect(n.supplyCount ?? 0).toBeGreaterThanOrEqual(MIN_BUSY_AREA_VENUES);
@@ -615,7 +615,7 @@ describe("geo_lift: the lift map", () => {
     expect(result.status).toBe("ok");
     expect(result.flags).toEqual([]);
     expect(run.calls).toHaveLength(2);
-    expect(liftMap(run).formulaIds).toEqual(["lift.cell", "lift.area", "lift.confidence"]);
+    expect(liftMap(run).formulaIds).toEqual(["lift.cell", "lift.area", "lift.confidence", "lift.area_popularity"]);
   });
 
   it("keeps a metro of many long-named neighbourhoods within the digest budget", async () => {
@@ -630,7 +630,8 @@ describe("geo_lift: the lift map", () => {
     const run = setup({ boxes });
     const result = await geoLiftSkill.run(input(), run.ctx);
     expect(digestFits(ModelDigest.parse(result.forModel), { tool: "geo_lift", step: "S2" })).toBe(true);
-    expect(run.ledger.metrics.length).toBeLessThanOrEqual(13);
+    // 13 lift metrics plus up to 3 lift.area_popularity (R7).
+    expect(run.ledger.metrics.length).toBeLessThanOrEqual(16);
     expect(result.forModel.metrics.map((m) => m.id)).toEqual(run.ledger.metrics.map((m) => m.id));
     expect(liftMap(run).payload.neighbourhoods).toHaveLength(36);
   });
@@ -653,6 +654,26 @@ describe("geo_lift: the areas the question names", () => {
   // Finer maps, so most of the 36 small areas reach the five gated cells a lift needs.
   const fine = (): World => ({ concept: rows(8, conceptAffinity), baseline: rows(8, baselineAffinity) });
 
+  /** Marks areas as named in the question (R3 user_named), as the run does for the question's own areas. */
+  function namedInQuestion(run: ReturnType<typeof setup>, ids: readonly string[], source: "user_named" | "obvious" = "user_named"): void {
+    const ctx = run.ctx as { candidates: typeof run.ctx.candidates };
+    ctx.candidates = { ...ctx.candidates, areas: ids.map((id) => ({ metro: "austin" as const, id, source })) };
+  }
+
+  it("calls an expected area expected, never named in the question (R3)", async () => {
+    const boxes = grid36();
+    const ranked = await rankedIds(boxes);
+    const expected = ranked[7] as string;
+    const run = setup({ boxes, world: fine() });
+    namedInQuestion(run, [expected], "obvious");
+    const result = await geoLiftSkill.run(input({ focus_areas: [expected] }), run.ctx);
+    const label = metricsOf(run, "lift.area").find((m) => m.subjectRefs[0] === expected)?.label;
+    expect(label).toMatch(/\(expected, not named in the question\)$/);
+    expect(result.forModel.top_rows[0]?.values).toMatchObject({ area: expected, named: "expected" });
+    expect(result.forModel.notices.join(" ")).not.toContain("the area the question names");
+    expect(result.forModel.notices.join(" ")).toContain("an expected area the question did not name");
+  });
+
   /** The ids of the areas with a lift, highest first, from a run without focus areas. */
   async function rankedIds(boxes: Box[]): Promise<string[]> {
     const run = setup({ boxes, world: fine() });
@@ -666,6 +687,7 @@ describe("geo_lift: the areas the question names", () => {
     expect(ranked.length).toBeGreaterThan(8);
     const named = ranked[7] as string;
     const run = setup({ boxes, world: fine() });
+    namedInQuestion(run, [named]);
     const result = await geoLiftSkill.run(input({ focus_areas: [named] }), run.ctx);
     const about = (key: string) => metricsOf(run, key).filter((m) => m.subjectRefs[0] === named);
 
@@ -708,6 +730,7 @@ describe("geo_lift: the areas the question names", () => {
     // A tiny invented corner, listed first so its cells are located there: too small for five gated cells.
     const corner: Box = { id: "fig_corner", name: "Fig Corner", minLat: 30.2645, maxLat: 30.2655, minLon: -97.7455, maxLon: -97.7445 };
     const run = setup({ boxes: [corner, ...QUADRANTS] });
+    namedInQuestion(run, ["fig_corner"]);
     const result = await geoLiftSkill.run(input({ focus_areas: ["fig_corner"] }), run.ctx);
     const area = metricsOf(run, "lift.area").find((m) => m.subjectRefs[0] === "fig_corner");
     expect(area).toMatchObject({ value: null, reason: "insufficient_n", badge: "UNAVAILABLE" });
@@ -730,6 +753,7 @@ describe("geo_lift: the areas the question names", () => {
     const ranked = await rankedIds(boxes);
     const named = [ranked[6], ranked[9], ranked[ranked.length - 2]] as string[];
     const run = setup({ boxes, world: fine() });
+    namedInQuestion(run, named);
     const result = await geoLiftSkill.run(input({ focus_areas: named }), run.ctx);
     const digest = ModelDigest.parse(result.forModel);
     expect(digestFits(digest, { tool: "geo_lift", step: "S2" })).toBe(true);
@@ -772,7 +796,7 @@ describe("geo_lift: budget and failures", () => {
     expect(d.payload.neighbourhoods.some((n) => n.lift !== null)).toBe(true);
     expect(d.payload.neighbourhoods.every((n) => n.supplyCount === null && n.supplyPct === null && n.whiteSpace === null)).toBe(true);
     expect(d.payload.supply).toBeNull();
-    expect(d.formulaIds).toEqual(["lift.cell", "lift.area", "lift.confidence"]);
+    expect(d.formulaIds).toEqual(["lift.cell", "lift.area", "lift.confidence", "lift.area_popularity"]);
     expect(metricsOf(run, "lift.white_space")).toEqual([]);
     expect(run.ledger.findings.some((f) => f.kind === "LATENT_DEMAND")).toBe(false);
     expect(result.forModel.notices).toContain("The budget stopped the supply sample, so there is no white space.");

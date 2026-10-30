@@ -1,8 +1,12 @@
 import { z } from "zod";
 import { CacheStatus, IsoDateTime, PublicSource } from "./enums";
+import { PUBLIC_DATA_ERROR_CODE_VALUES, PUBLIC_ENDPOINT_VALUES } from "./values/public-data";
+
+export * from "./values/public-data";
 
 /**
- * Public data (PLAN §5.2, Part 9): SEC EDGAR filings and US Census ACS estimates, read through
+ * Public data (PLAN §5.2, Part 9, Part 11): SEC EDGAR filings, US Census ACS estimates and OpenStreetMap
+ * places (Overpass API), read through
  * @ct/publicdata with the Qloo client's shape (canonical key, cache, single-flight, retries, a call row
  * and a `public` event per call). These calls cost no Qloo calls. Skills see them only through
  * `SkillCtx.publicdata` and get parsed values, never raw responses.
@@ -10,34 +14,9 @@ import { CacheStatus, IsoDateTime, PublicSource } from "./enums";
 
 // Endpoints ---------------------------------------------------------------------------------------------
 
-/**
- * Endpoint templates, as receipts, events and the sources tab name them. The concrete path of a call
- * (e.g. `/api/xbrl/companyfacts/CIK0000000001.json` or `/data/2023/acs/acs5`) is in its provenance.
- */
-export const PublicEndpoint = z.enum(["/files/company_tickers.json", "/api/xbrl/companyfacts", "/data/acs/acs5"]);
+/** Endpoint templates (PUBLIC_ENDPOINT_VALUES, with PUBLIC_ENDPOINTS, in ./values/public-data.ts). */
+export const PublicEndpoint = z.enum(PUBLIC_ENDPOINT_VALUES);
 export type PublicEndpoint = z.infer<typeof PublicEndpoint>;
-
-export const PUBLIC_ENDPOINTS: Readonly<Record<PublicEndpoint, { source: PublicSource; host: string; label: string }>> = {
-  "/files/company_tickers.json": { source: "sec", host: "www.sec.gov", label: "SEC EDGAR company tickers" },
-  "/api/xbrl/companyfacts": { source: "sec", host: "data.sec.gov", label: "SEC EDGAR XBRL company facts" },
-  "/data/acs/acs5": { source: "census", host: "api.census.gov", label: "US Census ACS 5-year" },
-};
-
-export const PUBLIC_SOURCE_LABEL: Readonly<Record<PublicSource, string>> = {
-  sec: "SEC EDGAR",
-  census: "US Census Bureau",
-};
-
-/**
- * The exact reason a public source cannot be read on this server (D7 of the Part 9 close-out). When a
- * source is not configured, code does not plan or run its tool in the opening scan, adds the
- * SEC_NOT_CONFIGURED / CENSUS_NOT_CONFIGURED limitation with this text, and refuses an ANALYST call to
- * the tool with this text. Nothing paraphrases it.
- */
-export const PUBLIC_NOT_CONFIGURED_REASON: Readonly<Record<PublicSource, string>> = {
-  sec: "SEC EDGAR is not configured on this server",
-  census: "Census ACS is not configured on this server",
-};
 
 // Call metadata ---------------------------------------------------------------------------------------------
 
@@ -52,7 +31,8 @@ export const PublicCallMeta = z.object({
   /**
    * What a reader can trace the response to, in place of Qloo's request id: for SEC company facts
    * `CIK##########`, for the SEC ticker map `company_tickers.json`, for Census the dataset, vintage and
-   * geography (e.g. `acs5 2023 zcta 37206,37207`), and `mock-<hash>` under the mock transport. Filing
+   * geography (e.g. `acs5 2023 zcta 37206,37207`), for OpenStreetMap `osm-<osm_base timestamp>`, and
+   * `mock-<hash>` under the mock transport. Filing
    * accession numbers travel on each fact point and in metric labels. Never contains an API key.
    */
   reference: z.string().min(1),
@@ -75,29 +55,15 @@ export interface PublicResult<T> {
  * Why a public-data call failed. The client throws an error whose `name` is "PublicDataError" and whose
  * `code` is one of these, so skills can map it to UNAVAILABLE with a plain reason without importing the
  * client (see publicDataErrorCode).
- * - not_configured: live SEC needs SEC_USER_AGENT, live Census needs CENSUS_API_KEY, and it is not set
+ * - not_configured: live SEC needs SEC_USER_AGENT, live Census needs CENSUS_API_KEY, live OpenStreetMap
+ *   needs OSM_USER_AGENT, and it is not set
  * - not_found: unknown ticker or CIK, or no Census row for the geography
  * - rate_limited: 429 after retries; unavailable: network, 5xx or a 403 block after retries
  * - bad_request: other 4xx (e.g. an unknown Census variable); invalid_response: the body failed to parse
  */
-export const PublicDataErrorCode = z.enum([
-  "not_configured",
-  "not_found",
-  "rate_limited",
-  "unavailable",
-  "bad_request",
-  "invalid_response",
-]);
+export const PublicDataErrorCode = z.enum(PUBLIC_DATA_ERROR_CODE_VALUES);
 export type PublicDataErrorCode = z.infer<typeof PublicDataErrorCode>;
 
-/** The code of a public-data client error, or null for any other value. */
-export function publicDataErrorCode(err: unknown): PublicDataErrorCode | null {
-  if (typeof err !== "object" || err === null) return null;
-  const e = err as { name?: unknown; code?: unknown };
-  if (e.name !== "PublicDataError") return null;
-  const code = PublicDataErrorCode.safeParse(e.code);
-  return code.success ? code.data : null;
-}
 
 // SEC EDGAR ------------------------------------------------------------------------------------------------
 
@@ -207,11 +173,54 @@ export interface CensusAcsData {
   rows: CensusRow[];
 }
 
+// OpenStreetMap (Overpass API, D46) -----------------------------------------------------------------------
+
+/** One tag filter: `key=value` (eq), `key~value` (regex) or `key` present (exists, value null). */
+export type OsmFilter = { key: string; value: string | null; op: "eq" | "regex" | "exists" };
+/** One place type: OR over groups, AND inside a group (config/osm_tags.json). */
+export type OsmTypeQuery = { key: string; groups: OsmFilter[][] };
+/**
+ * Where to count: a gazetteer outline (`poly`, [lat, lon] pairs, at most 48 vertices), a circle around a
+ * market centre (`around`), or a metro's county boundaries by Wikidata id (`admin`, the city reference).
+ */
+export type OsmShape =
+  | { kind: "poly"; id: string; ring: readonly [number, number][] }
+  | { kind: "around"; id: string; lat: number; lon: number; radiusM: number }
+  | { kind: "admin"; id: string; wikidata: readonly string[] };
+/** One counts request: at most 8 shapes × 24 types, answered in one Overpass request. */
+export interface OsmCountQuery {
+  shapes: readonly OsmShape[];
+  types: readonly OsmTypeQuery[];
+}
+/** counts[shape id][type key] = elements matched; osmBase is Overpass `osm3s.timestamp_osm_base`. */
+export interface OsmCounts {
+  counts: Record<string, Record<string, number>>;
+  osmBase: string | null;
+}
+/** One names request: named places of at most 4 types in one shape, at most 80. */
+export interface OsmPlacesQuery {
+  shape: OsmShape;
+  types: readonly OsmTypeQuery[];
+  limit: number;
+}
+export interface OsmPlace {
+  name: string;
+  brand: string | null;
+  lat: number;
+  lon: number;
+  typeKey: string;
+  osmType: "node" | "way" | "relation";
+  osmId: number;
+}
+
+/** Limits of one Overpass request (§3.1 of the Part 11 design). */
+export const OSM_QUERY_LIMITS = { shapes: 8, types: 24, placeTypes: 4, places: 80, polyVertices: 48 } as const;
+
 // The API skills see ----------------------------------------------------------------------------------------
 
 /**
- * Public data as skills see it (SkillCtx.publicdata): GET-only, cached, rate-limited, and attributed to
- * the current tool call. Every method returns parsed data with its call metadata, for the ledger.
+ * Public data as skills see it (SkillCtx.publicdata): read-only (GET, and the Overpass POST that only
+ * reads), cached, rate-limited, and attributed to the current tool call. Every method returns parsed data with its call metadata, for the ledger.
  * Failures throw a PublicDataError (publicDataErrorCode).
  */
 export interface PublicDataApi {
@@ -221,4 +230,8 @@ export interface PublicDataApi {
   secCompanyFacts(cik: string): Promise<PublicResult<SecCompanyFacts>>;
   /** The fixed ACS 5-year field set for a geography, from the latest vintage that answers (pinned per vintage). */
   censusAcs(geo: CensusGeo): Promise<PublicResult<CensusAcsData>>;
+  /** OpenStreetMap counts per shape and type (cached 30 days); the city reference is one `admin` shape. */
+  osmCounts(q: OsmCountQuery): Promise<PublicResult<OsmCounts>>;
+  /** Named OpenStreetMap places of the given types in one shape (cached 30 days). */
+  osmPlaces(q: OsmPlacesQuery): Promise<PublicResult<OsmPlace[]>>;
 }

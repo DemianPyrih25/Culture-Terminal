@@ -43,19 +43,19 @@ describe("fake run limits from the environment", () => {
 });
 
 describe("agent run limits from the environment", () => {
-  it("defaults to 20 agent runs an hour and a 1.40 USD daily LLM cap, also for empty values", () => {
-    expect(agentRunHourlyCapFromEnv(env())).toBe(20);
-    expect(agentRunHourlyCapFromEnv(env({ AGENT_RUN_HOURLY_CAP: "" }))).toBe(20);
-    expect(agentRunMaxActiveFromEnv(env())).toBe(3);
-    expect(agentRunMaxActiveFromEnv(env({ AGENT_RUN_MAX_ACTIVE: " " }))).toBe(3);
-    expect(llmDailyUsdCapFromEnv(env())).toBe(1.4);
-    expect(llmDailyUsdCapFromEnv(env({ LLM_DAILY_USD_CAP: " " }))).toBe(1.4);
+  it("defaults to D24: 120 agent runs an hour and an 8 USD daily LLM cap, also for empty values", () => {
+    expect(agentRunHourlyCapFromEnv(env())).toBe(120);
+    expect(agentRunHourlyCapFromEnv(env({ AGENT_RUN_HOURLY_CAP: "" }))).toBe(120);
+    expect(agentRunMaxActiveFromEnv(env())).toBe(6);
+    expect(agentRunMaxActiveFromEnv(env({ AGENT_RUN_MAX_ACTIVE: " " }))).toBe(6);
+    expect(llmDailyUsdCapFromEnv(env())).toBe(8);
+    expect(llmDailyUsdCapFromEnv(env({ LLM_DAILY_USD_CAP: " " }))).toBe(8);
   });
 
   it("reads and clamps the values", () => {
     expect(agentRunHourlyCapFromEnv(env({ AGENT_RUN_HOURLY_CAP: "5" }))).toBe(5);
     expect(agentRunHourlyCapFromEnv(env({ AGENT_RUN_HOURLY_CAP: "0" }))).toBe(1);
-    expect(agentRunHourlyCapFromEnv(env({ AGENT_RUN_HOURLY_CAP: "many" }))).toBe(20);
+    expect(agentRunHourlyCapFromEnv(env({ AGENT_RUN_HOURLY_CAP: "many" }))).toBe(120);
     expect(agentRunMaxActiveFromEnv(env({ AGENT_RUN_MAX_ACTIVE: "5" }))).toBe(5);
     expect(agentRunMaxActiveFromEnv(env({ AGENT_RUN_MAX_ACTIVE: "0" }))).toBe(1);
     expect(llmDailyUsdCapFromEnv(env({ LLM_DAILY_USD_CAP: "2.5" }))).toBe(2.5);
@@ -102,19 +102,19 @@ describe("preview settings from the environment", () => {
 });
 
 describe("lanes and breakers from the environment", () => {
-  it("defaults to SPEC §4.2 and §10.4: economy at $1.00, 40% for judges, 20 judge runs an hour on one slot", () => {
-    expect(llmEconomyUsdFromEnv(env())).toBe(1);
+  it("defaults to D24: economy at $6, 40% for judges, 30 judge runs an hour on two slots", () => {
+    expect(llmEconomyUsdFromEnv(env())).toBe(6);
     expect(llmJudgeShareFromEnv(env())).toBe(0.4);
-    expect(judgeRunHourlyCapFromEnv(env())).toBe(20);
-    expect(judgeRunMaxActiveFromEnv(env())).toBe(1);
+    expect(judgeRunHourlyCapFromEnv(env())).toBe(30);
+    expect(judgeRunMaxActiveFromEnv(env())).toBe(2);
     expect(modeOverrideFromEnv(env())).toBeNull();
   });
 
-  it("defaults to SPEC §10.4's daily caps: 60 judge runs and 200 live runs in all, also for empty values", () => {
-    expect(judgeRunDailyCapFromEnv(env())).toBe(60);
-    expect(judgeRunDailyCapFromEnv(env({ JUDGE_RUN_DAILY_CAP: " " }))).toBe(60);
-    expect(agentRunDailyCapFromEnv(env())).toBe(200);
-    expect(agentRunDailyCapFromEnv(env({ AGENT_RUN_DAILY_CAP: "" }))).toBe(200);
+  it("defaults to D24's daily caps: 120 judge runs and 500 live runs in all, also for empty values", () => {
+    expect(judgeRunDailyCapFromEnv(env())).toBe(120);
+    expect(judgeRunDailyCapFromEnv(env({ JUDGE_RUN_DAILY_CAP: " " }))).toBe(120);
+    expect(agentRunDailyCapFromEnv(env())).toBe(500);
+    expect(agentRunDailyCapFromEnv(env({ AGENT_RUN_DAILY_CAP: "" }))).toBe(500);
     expect(judgeRunDailyCapFromEnv(env({ JUDGE_RUN_DAILY_CAP: "0" }))).toBe(1);
     expect(agentRunDailyCapFromEnv(env({ AGENT_RUN_DAILY_CAP: "50" }))).toBe(50);
   });

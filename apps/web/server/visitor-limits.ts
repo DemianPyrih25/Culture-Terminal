@@ -3,12 +3,15 @@ import { countRunsSince, RUN_AGES_MAX, runAgesSince, type CountRunsSinceOptions,
 import { QUESTION_HASH_PREFIX } from "./question-hash";
 
 /**
- * SPEC §10.4's public lane, per visitor: one live run at a time, 3 an hour and 8 a day, keyed by the
- * visitor's salted address hash (client-ip.ts), which every run records in runs.ip_hash. The hour and
- * the day are counted in the database, so a restart forgets none of them while IP_HASH_SALT stays the
- * same (without it the keys, and so the counts, start over on a restart). Runs at once are counted by
- * the run manager in the process that holds them, which is the whole deploy. Past the day a hash
- * counts toward nothing, and the run manager clears it (VISITOR_HASH_RETENTION_MS).
+ * D24's public lane, per visitor: 2 live runs at a time, 10 an hour and 30 a day (VISITOR_MAX_ACTIVE,
+ * VISITOR_HOURLY_CAP, VISITOR_DAILY_CAP; config.ts visitorLimitsFromEnv), keyed by the visitor's salted
+ * address hash (client-ip.ts), which every run records in runs.ip_hash. The hour and the day are counted
+ * in the database, so a restart forgets none of them while IP_HASH_SALT stays the same (without it the
+ * keys, and so the counts, start over on a restart). Only runs that started count: one that never left
+ * the queue (queue timeout, cancel or shutdown while queued) spent nothing (runs.started_at null). Runs
+ * at once are counted by the run manager in the process that holds them, which is the whole deploy,
+ * queued runs included. Past the day a hash counts toward nothing, and the run manager clears it
+ * (VISITOR_HASH_RETENTION_MS).
  */
 export interface VisitorLimits {
   /** Live runs one visitor holds at once. */
@@ -19,7 +22,7 @@ export interface VisitorLimits {
   perDay: number;
 }
 
-export const DEFAULT_VISITOR_LIMITS: VisitorLimits = { maxActive: 1, perHour: 3, perDay: 8 };
+export const DEFAULT_VISITOR_LIMITS: VisitorLimits = { maxActive: 2, perHour: 10, perDay: 30 };
 
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
@@ -35,11 +38,15 @@ export interface VisitorWait {
 
 const seconds = (ms: number): number => Math.max(1, Math.ceil(ms / 1000));
 
-/** The runs that count against a visitor: its public-lane agent runs (judge runs are the lane's to limit). */
+/**
+ * The runs that count against a visitor: its public-lane agent runs that started (judge runs are the
+ * lane's to limit; a run that never left the queue spent nothing).
+ */
 const visitorScope = (visitor: string): Omit<CountRunsSinceOptions, "sinceMs"> => ({
   hashPrefix: QUESTION_HASH_PREFIX,
   ipHash: visitor,
   lane: "public",
+  startedOnly: true,
 });
 
 /** Null while the window has room for a start; else when the start that frees one leaves the window. */

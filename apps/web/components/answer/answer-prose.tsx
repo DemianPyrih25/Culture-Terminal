@@ -13,11 +13,17 @@ export function AnswerProse({ inlines }: { inlines: readonly Inline[] | null }) 
   const how = useHowWeKnow();
   if (!inlines) return null;
   const out: ReactNode[] = [];
+  // Punctuation that touches a metric ("(" before it, ")" or "," after it) stays on the metric's line: a
+  // number button never wraps inside, so without this a lone "(" ends one line on a phone.
+  const glued = gluedPunctuation(inlines);
   inlines.forEach((piece, i) => {
     switch (piece.kind) {
-      case "text":
-        out.push(<Fragment key={i}>{piece.text}</Fragment>);
+      case "text": {
+        const { lead, tail } = glued.get(i) ?? { lead: 0, tail: 0 };
+        const body = piece.text.slice(lead, piece.text.length - tail);
+        if (body !== "") out.push(<Fragment key={i}>{body}</Fragment>);
         return;
+      }
       case "window":
         out.push(
           <span key={i} data-window="true">
@@ -43,29 +49,64 @@ export function AnswerProse({ inlines }: { inlines: readonly Inline[] | null }) 
         const { metric, footnote } = piece;
         // A public value's known absence prints its reason ("not reported in filings"); any other gap reads "No data".
         const text = metric.unavailable ? (isKnownAbsence(metric.reason) ? metric.text : "No data") : metric.text;
+        const before = glued.get(i - 1);
+        const after = glued.get(i + 1);
+        const open = before && before.tail > 0 ? (inlines[i - 1] as { text: string }).text.slice(-before.tail) : "";
+        const close = after && after.lead > 0 ? (inlines[i + 1] as { text: string }).text.slice(0, after.lead) : "";
+        const wrap = (node: ReactNode) =>
+          open || close ? (
+            <span key={i} className="whitespace-nowrap">
+              {open}
+              {node}
+              {close}
+            </span>
+          ) : (
+            node
+          );
         if (!how.available) {
           out.push(
-            <span key={i} data-metric={metric.id} className="tabular-nums">
-              {text}
-            </span>,
+            wrap(
+              <span key={i} data-metric={metric.id} className="tabular-nums">
+                {text}
+              </span>,
+            ),
           );
           return;
         }
         out.push(
-          <button
-            key={i}
-            type="button"
-            data-metric={metric.id}
-            onClick={() => how.open({ tab: "numbers", footnote })}
-            aria-label={`${text}: how we know this number`}
-            className="inline cursor-pointer rounded-sm p-0 text-left tabular-nums decoration-dotted underline-offset-4 hover:underline focus-visible:underline"
-          >
-            {text}
-          </button>,
+          wrap(
+            <button
+              key={i}
+              type="button"
+              data-metric={metric.id}
+              onClick={() => how.open({ tab: "numbers", footnote })}
+              aria-label={`${text}: how we know this number`}
+              className="inline cursor-pointer rounded-sm p-0 text-left tabular-nums decoration-dotted underline-offset-4 hover:underline focus-visible:underline"
+            >
+              {text}
+            </button>,
+          ),
         );
         return;
       }
     }
+  });
+  return out;
+}
+
+const OPENING = /[(\[\u201c"\u2018]+$/;
+const CLOSING = /^[)\]\u201d"\u2019,.;:!?]+/;
+
+/** For each text piece next to a metric: how many characters at its start (lead) and end (tail) glue to it. */
+function gluedPunctuation(inlines: readonly Inline[]): Map<number, { lead: number; tail: number }> {
+  const out = new Map<number, { lead: number; tail: number }>();
+  inlines.forEach((piece, i) => {
+    if (piece.kind !== "text") return;
+    const tail = inlines[i + 1]?.kind === "metric" ? (OPENING.exec(piece.text)?.[0].length ?? 0) : 0;
+    const lead = inlines[i - 1]?.kind === "metric" ? (CLOSING.exec(piece.text)?.[0].length ?? 0) : 0;
+    // A text piece shorter than its glue on both sides (")(") keeps its characters once.
+    if (lead + tail > piece.text.length) out.set(i, { lead, tail: Math.max(0, piece.text.length - lead) });
+    else if (lead > 0 || tail > 0) out.set(i, { lead, tail });
   });
   return out;
 }

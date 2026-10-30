@@ -206,8 +206,8 @@ describe("GET /api/health without a database", () => {
       ok: false,
       mode: "live",
       db: { ok: false, latency_ms: null },
-      qloo: { env: "mock", month_remaining: null, today_network: 0, floor: 38_000, last_success: null, auth_errors: 0 },
-      llm: { today_usd: null, cap: 1.4, configured: false },
+      qloo: { env: "mock", month_remaining: null, today_network: 0, floor: 32_000, last_success: null, auth_errors: 0 },
+      llm: { today_usd: null, cap: 8, configured: false },
     });
   });
 });

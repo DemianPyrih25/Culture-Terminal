@@ -6,6 +6,7 @@ import type { Intent } from "./intent";
 import type { DatasetEnvelope, Evidence, Finding, Metric } from "./ledger";
 import type { RunLimits } from "./limits";
 import type {
+  AiContextBlock,
   GhostAnswer,
   GhostDiff,
   NumbersTraced,
@@ -14,7 +15,11 @@ import type {
   SubmitPlanInputShape,
   TokenUsage,
   ValidationIssue,
+  WebContextBlock,
 } from "./report";
+
+/** Events that leave a run waiting in the queue: every other event starts it. */
+const QUEUE_EVENTS: ReadonlySet<RunEventType> = new Set(["run.created", "run.queued"]);
 
 /**
  * The client- and server-side view of one run, rebuilt purely from its events. Live streams, 8×
@@ -109,6 +114,8 @@ export interface RunState {
   limits: RunLimits | null;
   parentRunId: string | null;
   model: string | null;
+  /** The run's place in the global queue while it waits (run.queued); null once it starts or ends. */
+  queue: { position: number; ahead: number; waitSMax: number; at: string } | null;
 
   intent: Intent | null;
   clerkMs: number | null;
@@ -132,6 +139,10 @@ export interface RunState {
   validation: { ok: boolean; attempt: number; issues: ValidationIssue[]; numbersTraced: NumbersTraced; adviceTerms: number } | null;
   report: Report | null;
   ghost: { answer: GhostAnswer; diff: GhostDiff } | null;
+  /** "What AI knows (not verified)" (R4), from the context.ai event; null until it settles or when it never ran. */
+  aiContext: AiContextBlock | null;
+  /** "From the web" (R5), from the context.web event; null until it settles or when it never ran. */
+  webContext: WebContextBlock | null;
   usage: { llmUsd: number; tokens: TokenUsage; qloo: { network: number; cached: number; reused: number }; elapsedMs: number } | null;
   errors: Stamped<"error">[];
   ended: { status: EventOf<"run.end">["status"]; elapsedMs: number; reason: string | null } | null;
@@ -153,6 +164,7 @@ export function initialRunState(runId: string): RunState {
     limits: null,
     parentRunId: null,
     model: null,
+    queue: null,
     intent: null,
     clerkMs: null,
     resolves: [],
@@ -185,6 +197,8 @@ export function initialRunState(runId: string): RunState {
     validation: null,
     report: null,
     ghost: null,
+    aiContext: null,
+    webContext: null,
     usage: null,
     errors: [],
     ended: null,
@@ -288,7 +302,9 @@ export function applyEvent(state: RunState, event: RunEvent): RunState {
     createdAt: state.createdAt ?? event.ts,
     updatedAt: event.ts,
     // A run leaves the queue with its first working event; a terminal status only comes from run.end.
-    status: state.ended === null && state.status === "queued" && event.type !== "run.created" ? "running" : state.status,
+    status: state.ended === null && state.status === "queued" && !QUEUE_EVENTS.has(event.type) ? "running" : state.status,
+    // Only run.queued keeps the place: the agent's own run.created at start already ends the wait.
+    queue: event.type === "run.queued" ? state.queue : null,
     timeline: [...state.timeline, { seq: event.seq, ts: event.ts, type: event.type, key: timelineKey(event) }],
   };
 
@@ -303,6 +319,10 @@ export function applyEvent(state: RunState, event: RunEvent): RunState {
         parentRunId: event.parentRunId,
         model: event.model,
       };
+    case "run.queued":
+      // A late queue event (the run already started or ended) changes nothing.
+      if (s.status !== "queued" || s.ended !== null) return { ...s, queue: null };
+      return { ...s, queue: { position: event.position, ahead: event.ahead, waitSMax: event.waitSMax, at: event.ts } };
     case "clerk":
       return { ...s, intent: event.intent, clerkMs: event.ms };
     case "resolve":
@@ -441,6 +461,10 @@ export function applyEvent(state: RunState, event: RunEvent): RunState {
       return { ...s, report: event.report };
     case "ghost":
       return { ...s, ghost: { answer: event.answer, diff: event.diff } };
+    case "context.ai":
+      return { ...s, aiContext: event.block };
+    case "context.web":
+      return { ...s, webContext: event.block };
     case "usage":
       return {
         ...s,

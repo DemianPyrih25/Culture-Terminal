@@ -18,6 +18,7 @@ import type {
   QlooTagsResponse,
   QlooTrendingResponse,
   RunLimits,
+  SkillId,
 } from "@ct/contracts";
 import pLimit, { type LimitFunction } from "p-limit";
 import type { QlooPath } from "./allowlist";
@@ -25,6 +26,7 @@ import {
   BudgetGates,
   type BudgetScope,
   DEFAULT_DAILY_FRESH_CAP,
+  type FollowupReserve,
   monthFloorFor,
   type QlooBudgetWarning,
   type Reservation,
@@ -76,12 +78,17 @@ export interface QlooClientOptions {
   store: QlooStore;
   /** Prod fresh-call cap per UTC day, split 60/40 between the public and judge lanes. */
   dailyFreshCap?: number;
+  /**
+   * The last judging day (JUDGING_END_DATE, YYYY-MM-DD): until then the prod daily cap is recomputed each
+   * UTC day from the month's remaining calls (dailyFreshCapFor). Null or absent: the static cap only.
+   */
+  judgingEndDate?: string | null;
   /** Metro locality ids whose urn:tag fingerprints are pinned (D25). */
   pinnedLocalities?: ReadonlySet<string>;
   /** Called with "replay_only" after three straight 401/403, or when prod drops below its month floor. */
   onModeChange?: (mode: Mode) => void;
   logger?: QlooLogger;
-  /** Overrides the month floor (default: prod 2,000, dev and mock 38,000). */
+  /** Overrides the month floor (default: prod 2,000, dev and mock 32,000). */
   monthFloor?: number;
   /** Global requests in flight (default 6). */
   concurrency?: number;
@@ -104,6 +111,11 @@ export interface RunScope {
   onCall?: (record: QlooCallRecord) => void;
   onWarn?: (warning: QlooBudgetWarning) => void;
   signal?: AbortSignal;
+  /**
+   * Follow-up calls held for a claimant tool (D24: the concept test's 3). The tool of a call is the one
+   * given to `forTool(toolCallId, tool)`; a call made without one is no claimant.
+   */
+  reserve?: FollowupReserve;
 }
 
 export interface StandaloneOptions {
@@ -117,8 +129,11 @@ export interface StandaloneOptions {
 export type QlooTool = QlooApi & CacheProbe;
 
 export interface RunQloo {
-  /** Calls made through the returned API are attributed to this tool call (null for bookkeeping calls). */
-  forTool(toolCallId: string | null): QlooTool;
+  /**
+   * Calls made through the returned API are attributed to this tool call (null for bookkeeping calls).
+   * `tool` names the skill, for the run's follow-up reserve (RunScope.reserve).
+   */
+  forTool(toolCallId: string | null, tool?: SkillId | null): QlooTool;
   /** Network calls charged to this run so far. */
   networkUsed(): number;
   /** Network calls made in the follow-up phase. */
@@ -131,6 +146,11 @@ export interface QlooClient {
   readonly env: QlooEnv;
   readonly baseUrl: string;
   readonly monthFloor: number;
+  /**
+   * Today's prod fresh-call cap as the budget gates apply it (the judging window's dynamic cap, else the
+   * static one). Optional so test doubles need not implement it.
+   */
+  dailyFreshCap?(): number;
   forRun(scope: RunScope): RunQloo;
   standalone(options?: StandaloneOptions): RunQloo;
   quota(): QuotaSnapshot;
@@ -288,6 +308,7 @@ class QlooClientImpl implements QlooClient {
       tag: options.tag,
       tagCap: options.tagCap,
       dailyFreshCap: options.dailyFreshCap ?? DEFAULT_DAILY_FRESH_CAP,
+      judgingEndDate: options.judgingEndDate ?? null,
       monthFloor: this.monthFloor,
       store: this.store,
       quota: this.quotaTracker,
@@ -311,8 +332,13 @@ class QlooClientImpl implements QlooClient {
         onCall: scope.onCall,
         onWarn: scope.onWarn,
         signal: scope.signal,
+        ...(scope.reserve ? { reserve: scope.reserve } : {}),
       }),
     );
+  }
+
+  dailyFreshCap(): number {
+    return this.budget.dailyCap();
   }
 
   standalone(options: StandaloneOptions = {}): RunQloo {
@@ -377,6 +403,7 @@ class QlooClientImpl implements QlooClient {
     onCall: ((record: QlooCallRecord) => void) | undefined;
     onWarn: ((warning: QlooBudgetWarning) => void) | undefined;
     signal: AbortSignal | undefined;
+    reserve?: FollowupReserve;
   }): ScopeState {
     return {
       ...init,
@@ -390,7 +417,7 @@ class QlooClientImpl implements QlooClient {
 
   private runQloo(scope: ScopeState): RunQloo {
     return {
-      forTool: (toolCallId) => this.tool(scope, toolCallId),
+      forTool: (toolCallId, tool = null) => this.tool(scope, toolCallId, tool),
       networkUsed: () => scope.network,
       followupNetworkUsed: () => scope.followup,
       provenance: (qlooCallId) => {
@@ -401,12 +428,13 @@ class QlooClientImpl implements QlooClient {
     };
   }
 
-  private tool(scope: ScopeState, toolCallId: string | null): QlooTool {
+  private tool(scope: ScopeState, toolCallId: string | null, skill: SkillId | null): QlooTool {
+    const call = <T>(path: QlooPath, params: QlooParams) => this.call<T>(scope, toolCallId, path, params, skill);
     return {
-      search: (params) => this.call<QlooSearchResponse>(scope, toolCallId, "/search", params),
-      entities: (entityIds) => this.call<QlooEntitiesResponse>(scope, toolCallId, "/entities", { entity_ids: entityIds }),
-      tags: (params) => this.call<QlooTagsResponse>(scope, toolCallId, "/v2/tags", params),
-      audiences: (params) => this.call<QlooAudiencesResponse>(scope, toolCallId, "/v2/audiences", params),
+      search: (params) => call<QlooSearchResponse>("/search", params),
+      entities: (entityIds) => call<QlooEntitiesResponse>("/entities", { entity_ids: entityIds }),
+      tags: (params) => call<QlooTagsResponse>("/v2/tags", params),
+      audiences: (params) => call<QlooAudiencesResponse>("/v2/audiences", params),
       insights: async <F extends InsightsFilterType>(
         filterType: F,
         params: QlooParams,
@@ -414,9 +442,9 @@ class QlooClientImpl implements QlooClient {
         if (Object.hasOwn(params, "filter.type")) {
           throw new QlooParamError("filter.type is the first argument of insights() and must not be repeated in params", "filter.type");
         }
-        return this.call<InsightsResponse<F>>(scope, toolCallId, "/v2/insights", { ...params, "filter.type": filterType });
+        return call<InsightsResponse<F>>("/v2/insights", { ...params, "filter.type": filterType });
       },
-      trending: (params) => this.call<QlooTrendingResponse>(scope, toolCallId, "/v2/trending", params),
+      trending: (params) => call<QlooTrendingResponse>("/v2/trending", params),
       has: (path, params) => this.has(scope, path, params),
     };
   }
@@ -435,6 +463,7 @@ class QlooClientImpl implements QlooClient {
     toolCallId: string | null,
     path: QlooPath,
     params: QlooParams,
+    skill: SkillId | null = null,
   ): Promise<QlooResult<T>> {
     scope.signal?.throwIfAborted();
     validateRequest(path, params, { pillar: scope.pillar });
@@ -447,7 +476,7 @@ class QlooClientImpl implements QlooClient {
       let outcome: Outcome;
       try {
         // A waiter's own cancellation ends its wait; the leader's request carries on for the others.
-        outcome = await (lead ? this.startFlight(scope, request) : untilAborted(existing, scope.signal));
+        outcome = await (lead ? this.startFlight(scope, request, skill) : untilAborted(existing, scope.signal));
       } catch (err) {
         const failure = err instanceof FlightFailure ? err : new FlightFailure(err, false, null, null, null, false);
         if (!lead) {
@@ -465,8 +494,8 @@ class QlooClientImpl implements QlooClient {
   }
 
   /** Registers the flight before its first await, so a concurrent identical request always joins it. */
-  private startFlight(scope: ScopeState, request: CanonicalRequest): Promise<Outcome> {
-    const flight = this.runFlight(scope, request);
+  private startFlight(scope: ScopeState, request: CanonicalRequest, skill: SkillId | null): Promise<Outcome> {
+    const flight = this.runFlight(scope, request, skill);
     this.flights.set(request.key, flight);
     const clear = () => {
       if (this.flights.get(request.key) === flight) this.flights.delete(request.key);
@@ -475,16 +504,16 @@ class QlooClientImpl implements QlooClient {
     return flight;
   }
 
-  private async runFlight(scope: ScopeState, request: CanonicalRequest): Promise<Outcome> {
+  private async runFlight(scope: ScopeState, request: CanonicalRequest, skill: SkillId | null): Promise<Outcome> {
     const found = await this.cache.lookup(request.key);
     if (found.fresh) return { kind: "cache", entry: found.fresh };
-    return this.fetchFresh(scope, request, found.expired);
+    return this.fetchFresh(scope, request, found.expired, skill);
   }
 
-  private async fetchFresh(scope: ScopeState, request: CanonicalRequest, expired: CacheEntry | null): Promise<Outcome> {
+  private async fetchFresh(scope: ScopeState, request: CanonicalRequest, expired: CacheEntry | null, skill: SkillId | null): Promise<Outcome> {
     let reservation: Reservation;
     try {
-      reservation = await this.budget.reserve(scope);
+      reservation = await this.budget.reserve(scope, skill);
     } catch (err) {
       throw new FlightFailure(err, false, null, null, null, scope.signal?.aborted === true);
     }

@@ -36,6 +36,7 @@ const P0_TOOLS = [
   "concept_vector",
   "company_financials",
   "area_economics",
+  "local_supply",
   "submit_report",
 ];
 
@@ -57,15 +58,15 @@ function nodes(schema: unknown, path = "#"): [string, JsonSchema][] {
 describe("ANALYST tools", () => {
   const tools = toAnthropicTools();
 
-  it("is exactly the 18 tools, unique and sorted by name", () => {
+  it("is exactly the 19 tools, unique and sorted by name", () => {
     const names = tools.map((t) => t.name);
-    expect(names).toHaveLength(18);
-    expect(new Set(names).size).toBe(18);
+    expect(names).toHaveLength(19);
+    expect(new Set(names).size).toBe(19);
     expect([...names].sort()).toEqual([...P0_TOOLS].sort());
     expect(names).toEqual([...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
     expect(ANALYST_TOOL_NAMES).toEqual(names);
     expect(Object.keys(ANALYST_TOOLS).sort()).toEqual([...ToolName.options].sort());
-    expect(SkillId.options).toHaveLength(16);
+    expect(SkillId.options).toHaveLength(17);
   });
 
   it("returns identical content on every call, as fresh copies", () => {

@@ -41,9 +41,9 @@ describe("the frozen prompts", () => {
     }
   });
 
-  it("use the 18 real tools, sorted by name", () => {
+  it("use the 19 real tools, sorted by name", () => {
     const tools = analystPrefix().tools.map((t) => ("name" in t ? t.name : ""));
-    expect(tools).toHaveLength(18);
+    expect(tools).toHaveLength(19);
     expect(tools).toEqual([...ANALYST_TOOL_NAMES]);
     expect(tools).toEqual([...tools].sort());
   });

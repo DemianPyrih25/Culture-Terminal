@@ -10,10 +10,11 @@ import {
   type MetricId,
   type MetroId,
   type NoValueReason,
+  type ConceptMatch,
   type SkillCtx,
 } from "@ct/contracts";
 import { isLatentDemand, latentDemandFinding, type FindingDraft } from "../../findings";
-import type { FormulaId } from "../../formulas";
+import { THIN_SAMPLE, type FormulaId } from "../../formulas";
 import { addSkillMetric } from "../common";
 import { fixed2, safeFullName, safeName } from "../format";
 import { HEATMAP_BASELINE } from "../findTags/curated";
@@ -38,6 +39,8 @@ import {
 export interface LiftRun {
   ctx: SkillCtx;
   metro: MetroId;
+  /** R2: the weakest concept match among the concept tags the maps used (conceptReadOf); undefined when none. */
+  conceptRead?: ConceptMatch;
   flags: Set<Flag>;
   evidenceIds: EvidenceId[];
   metrics: Metric[];
@@ -128,6 +131,72 @@ export interface LiftMetrics {
   rank: Map<string, Metric>;
   /** lift.supply by neighbourhood id (sampled similar venues), plus the metro-wide UNAVAILABLE one under the metro id. */
   supply: Map<string, Metric>;
+  /** R7: lift.area_popularity by neighbourhood id (the popular areas). */
+  popularity?: Map<string, Metric>;
+}
+
+/** Digest words for an area's standing (R7): short, so a metro of many areas still fits. */
+const STANDING_WORD = { popular: "popular", hidden: "hidden", popular_distinct: "popular" } as const;
+
+/** R1: an area lift with confidence below 0.5 or fewer than 12 gated cells rests on a thin sample. */
+export function isThinLift(a: Pick<AreaLift, "lift" | "conf" | "n">): boolean {
+  return a.lift !== null && ((a.conf ?? 0) < THIN_SAMPLE.liftConf || a.n < THIN_SAMPLE.liftCells);
+}
+
+/** R7: the top 3 popular areas (by rawPct) and the top 3 hidden pockets (by Demand_pct). */
+export function areaStandings(areas: readonly AreaLift[]): { popular: AreaLift[]; hidden: AreaLift[] } {
+  const popular = areas
+    .filter((a) => a.standing === "popular" || a.standing === "popular_distinct")
+    .sort((a, b) => (b.rawPct ?? 0) - (a.rawPct ?? 0) || (a.id < b.id ? -1 : 1))
+    .slice(0, 3);
+  const hidden = areas
+    .filter((a) => a.standing === "hidden")
+    .sort((a, b) => (b.demandPct ?? 0) - (a.demandPct ?? 0) || (a.id < b.id ? -1 : 1))
+    .slice(0, 3);
+  return { popular, hidden };
+}
+
+/**
+ * R7 (D50): one lift.area_popularity metric per popular area (at most 3), so the prose can name where the
+ * concept is already popular next to a hidden pocket (V12c). Written after the lift metrics, only when the
+ * map has a hidden pocket; the map and its table show every area's standing either way.
+ */
+export function addPopularityMetrics(
+  run: LiftRun,
+  areas: readonly AreaLift[],
+  conceptRefs: readonly string[],
+  evidence: LiftEvidence,
+  focusCount = 0,
+): Map<string, Metric> {
+  const out = new Map<string, Metric>();
+  const { popular, hidden } = areaStandings(areas);
+  // Written when a hidden pocket needs popular areas beside it (V12c); with named areas, which carry four
+  // metrics each, one popular area is enough to keep the digest within its budget.
+  if (hidden.length === 0) return out;
+  for (const a of popular.slice(0, focusCount > 0 ? 1 : 3)) {
+    out.set(
+      a.id,
+      push(
+        run,
+        addSkillMetric(run.ctx.ledger, {
+          key: "lift.area_popularity",
+          label: `popularity of the concept in ${safeName(a.name)} (its own heat, percentile)`,
+          subjectRefs: [a.id, ...conceptRefs],
+          value: a.rawPct,
+          reason: "not_measured",
+          display: a.rawPct === null ? "" : `${fixed2(a.rawPct)} · ${a.standing === "popular_distinct" ? "popular, stands out" : "popular"}`,
+          unit: "pct",
+          badge: "DERIVED",
+          formulaId: "lift.area_popularity",
+          evidenceIds: evidence.maps,
+          n: a.covered,
+          comparator: null,
+          conceptRead: run.conceptRead,
+        }),
+      ),
+    );
+  }
+  return out;
 }
 
 /** Why a named area has no lift, in a reader's words. */
@@ -196,6 +265,7 @@ export function addLiftMetrics(
         evidenceIds: evidence.maps,
         n: grid.cells.length,
         comparator: null,
+        conceptRead: run.conceptRead,
       }),
     );
   }
@@ -224,6 +294,7 @@ export function addLiftMetrics(
           evidenceIds: evidence.maps,
           n: null,
           comparator: null,
+          conceptRead: run.conceptRead,
         }),
       ),
     );
@@ -251,6 +322,7 @@ export function addLiftMetrics(
           evidenceIds: evidence.maps,
           n: a.n,
           comparator: "BASELINE",
+          conceptRead: run.conceptRead,
         }),
       ),
     );
@@ -273,6 +345,7 @@ export function addLiftMetrics(
           evidenceIds: evidence.maps,
           n: null,
           comparator: "BASELINE",
+          conceptRead: run.conceptRead,
         }),
       ),
     );
@@ -286,6 +359,18 @@ export function addLiftMetrics(
   }
   return out;
 }
+
+/** Where a focus area came from (R3): the question, a local's expected pick, or the analyst's own choice. */
+export function focusWhy(source: string | undefined): { label: string; digest: string; notice: string; lead: string } {
+  if (source === "user_named") return { label: "named in the question", digest: "in the question", notice: "the area the question names", lead: "lead with it, then the top areas" };
+  if (source === "obvious") {
+    return { label: "expected, not named in the question", digest: "expected", notice: "an expected area the question did not name", lead: "compare it with the top areas, and never say the question named it" };
+  }
+  return { label: "chosen, not named in the question", digest: "chosen", notice: "an area chosen for a closer look, not named in the question", lead: "compare it with the top areas, and never say the question named it" };
+}
+
+export const areaSourceOf = (run: Pick<LiftRun, "ctx" | "metro">, id: string): string | undefined =>
+  run.ctx.candidates.areas.find((c) => c.metro === run.metro && c.id === id)?.source;
 
 /**
  * A named area's numbers: its lift (or UNAVAILABLE with why, e.g. too few gated cells), and with a
@@ -319,7 +404,7 @@ function addFocusMetrics(
         label:
           a.lift === null
             ? `lift of ${name} vs the restaurant baseline: not measured, ${noLiftWhy(a)}`
-            : `lift of ${name} vs the restaurant baseline (named in the question)`,
+            : `lift of ${name} vs the restaurant baseline (${focusWhy(areaSourceOf(run, a.id)).label})`,
         subjectRefs: [a.id, ...conceptRefs],
         value: a.lift,
         reason: a.reason ?? "insufficient_n",
@@ -329,7 +414,9 @@ function addFocusMetrics(
         formulaId: "lift.area",
         evidenceIds: evidence.maps,
         n: a.n,
+        thin: isThinLift(a),
         comparator: "BASELINE",
+        conceptRead: run.conceptRead,
       }),
     ),
   );
@@ -352,6 +439,7 @@ function addFocusMetrics(
         evidenceIds: evidence.maps,
         n: ranked.length,
         comparator: null,
+        conceptRead: run.conceptRead,
       }),
     ),
   );
@@ -374,6 +462,7 @@ function focusSupplyMetric(run: LiftRun, a: AreaLift, s: AreaSupply & { count: n
     evidenceIds: evidence.supply,
     n: null,
     comparator: null,
+    conceptRead: run.conceptRead,
   } as const;
   if (capped && s.count === 0) {
     return addSkillMetric(run.ctx.ledger, {
@@ -425,6 +514,7 @@ function confidenceMetric(run: LiftRun, a: AreaLift, evidence: LiftEvidence): Me
     evidenceIds: evidence.maps,
     n: a.n,
     comparator: null,
+    conceptRead: run.conceptRead,
   });
 }
 
@@ -442,6 +532,7 @@ function whiteSpaceMetric(run: LiftRun, o: OpenArea, conceptRefs: readonly strin
     evidenceIds: [...evidence.maps, ...evidence.supply],
     n,
     comparator: null,
+    conceptRead: run.conceptRead,
   });
 }
 
@@ -494,6 +585,8 @@ export function addLiftMap(
   const coarse = grid.precision <= NO_CLAIM_PRECISION;
   const metro = METRO_LABEL[run.metro];
   const ordered = [...byLift(areas), ...areas.filter((a) => a.lift === null)];
+  const sourceOf = (id: string) => run.ctx.candidates.areas.find((c) => c.metro === run.metro && c.id === id)?.source;
+  const standings = areaStandings(areas);
   const payload: GeoLiftPayload = {
     metro: run.metro,
     precision: grid.precision,
@@ -525,6 +618,10 @@ export function addLiftMap(
         whiteSpace: s?.whiteSpace ?? null,
         quadrant: s?.quadrant ?? null,
         reason: a.reason,
+        ...(sourceOf(a.id) === undefined ? {} : { source: sourceOf(a.id) }),
+        raw: a.raw,
+        rawPct: a.rawPct,
+        standing: a.standing,
       };
     }),
     supply: points === null ? null : { source: "places_sample", capped, points: points.map((p) => ({ ...p, ref: null })) },
@@ -536,12 +633,18 @@ export function addLiftMap(
       (supplyGap === null ? "" : " · similar venues: unknown"),
     ...(focus.length > 0 ? { focusAreas: [...focus] } : {}),
     ...(supplyGap === null ? {} : { supplyGap: supplyGap.text }),
+    popular: standings.popular.map((a) => a.id),
+    hidden: standings.hidden.map((a) => a.id),
   };
   const dataset = run.ctx.ledger.addDataset({
     kind: "GeoLift",
     title: `Lift Map · ${safeName(concept.label)} in ${metro}`,
     evidenceIds: [...args.evidenceIds],
-    formulaIds: [...LIFT_FORMULA_IDS, ...(points === null ? [] : (["lift.white_space"] as const))],
+    formulaIds: [
+      ...LIFT_FORMULA_IDS,
+      ...(points === null ? [] : (["lift.white_space"] as const)),
+      ...(standings.popular.length + standings.hidden.length > 0 ? (["lift.area_popularity"] as const) : []),
+    ],
     payload,
   });
   run.datasetIds.push(dataset.id);
@@ -558,6 +661,7 @@ export function liftDigestRows(
   supply: ReadonlyMap<string, AreaSupply>,
   metrics: LiftMetrics,
   focus: readonly AreaLift[] = [],
+  sourceOf: (id: string) => string | undefined = () => "user_named",
 ): DigestRow[] {
   const ranked = byLift(areas);
   const named = new Set(focus.map((a) => a.id));
@@ -567,7 +671,7 @@ export function liftDigestRows(
   return [...focus, ...ranked.filter((a) => !named.has(a.id)), ...rest].map((a) => {
     const s = supply.get(a.id);
     const values: DigestRow["values"] = { area: a.id };
-    if (named.has(a.id)) values.named = "in the question";
+    if (named.has(a.id)) values.named = focusWhy(sourceOf(a.id)).digest;
     if (a.lift !== null) {
       values.lift_rank = ranked.indexOf(a) + 1;
       if (named.has(a.id)) values.ranked_of = ranked.length;
@@ -584,6 +688,7 @@ export function liftDigestRows(
     if (venues !== undefined) values.supply_metric = venues.id;
     const ws = metrics.whiteSpace.get(a.id);
     if (ws !== undefined) values.white_space_metric = ws.id;
+    if (a.standing !== null) values.standing = STANDING_WORD[a.standing];
     if (s?.quadrant) values.quadrant = QUADRANT_LABEL[s.quadrant];
     else if (s?.thin) values.quadrant = THIN_SUPPLY_LABEL;
     return { ref: null, name: safeName(a.name), values };

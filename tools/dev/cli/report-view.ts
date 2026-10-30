@@ -46,6 +46,10 @@ function renderNote(report: Report, result: AgentRunResult): string[] {
     lines.push("", `CHECKER WARNINGS (${report.warnings.length})`);
     for (const w of report.warnings) lines.push(`  ${w.rule} ${w.action}: ${w.message}`);
   }
+  // The answer-quality audit (docs/ANSWER_QUALITY.md automated checks): empty on a clean run.
+  const audit = report.audit ?? [];
+  lines.push("", audit.length === 0 ? "ANSWER-QUALITY AUDIT: clean" : `ANSWER-QUALITY AUDIT (${audit.length})`);
+  for (const a of audit) lines.push(`  - ${a}`);
   const endpoints = receipt.endpoints.map((e) => `${e.path}${e.filterType === null ? "" : ` ${shortFilterType(e.filterType)}`} ×${e.calls}`);
   lines.push(
     "",

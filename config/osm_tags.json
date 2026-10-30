@@ -1,0 +1,1102 @@
+{
+  "$comment": "OpenStreetMap place types for local_supply (Part 11 design §3.2, D46). Read through @ct/publicdata (osmTags). A place type is listed only when every tag in it has an OSM wiki page and at least 10,000 uses on taginfo; `pnpm exec tsx tools/dev/osm-tags.ts check --write` checks each tag live (free; no Qloo) and writes verified_by, and an entry that fails is left out, never marked. groups: OR over groups, AND inside a group (eq, regex or exists). cuisine and sport values can be lists (\"pizza;italian\"), so their filters match one item of the list. group: tenant types are the storefronts mix:true counts (at most 22); specialty types are read only when asked. concepts: config/categories.json keys a type answers for; concept_notes say plainly when the count is broader than the concept. activity: shops plus food and drink places, the street-activity measure. metros: the counties each map city's city-level reference is counted over (their OSM admin_level=6 boundaries by Wikidata id, checked to resolve to exactly one boundary) and their land area from the Census 2020 Gazetteer (ALAND), so the city density divides the counties' counts by the counties' own land area. Map data © OpenStreetMap contributors, ODbL 1.0.",
+  "attribution": "© OpenStreetMap contributors",
+  "licence": "ODbL-1.0",
+  "activity": {
+    "key": "activity",
+    "label": "Shops, food and drink places",
+    "groups": [
+      [
+        {
+          "key": "amenity",
+          "value": "^(restaurant|cafe|bar|pub|fast_food|ice_cream|nightclub|biergarten|food_court)$",
+          "op": "regex"
+        }
+      ],
+      [
+        {
+          "key": "shop",
+          "value": null,
+          "op": "exists"
+        }
+      ]
+    ],
+    "status": "verified",
+    "verified_by": "taginfo 2026-10-30: amenity=restaurant 1,628,887 uses; amenity=cafe 655,520 uses; amenity=bar 246,716 uses; amenity=pub 200,351 uses; amenity=fast_food 669,575 uses; amenity=ice_cream 67,461 uses; amenity=nightclub 24,384 uses; amenity=biergarten 10,356 uses; amenity=food_court 17,654 uses; shop=* 7,276,688 uses; wiki pages present"
+  },
+  "place_types": [
+    {
+      "key": "cafe",
+      "label": "Cafés and coffee shops",
+      "aliases": [
+        "coffee shop",
+        "coffee bar",
+        "espresso bar",
+        "café"
+      ],
+      "concepts": [
+        "cafe"
+      ],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "amenity",
+            "value": "cafe",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: amenity=cafe 655,520 uses; wiki pages present"
+    },
+    {
+      "key": "bar",
+      "label": "Bars and pubs",
+      "aliases": [
+        "pub",
+        "tavern",
+        "cocktail bar",
+        "wine bar"
+      ],
+      "concepts": [
+        "bar",
+        "wine_bar"
+      ],
+      "concept_notes": {
+        "wine_bar": "OpenStreetMap does not mark wine bars reliably: all bars are counted"
+      },
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "amenity",
+            "value": "bar",
+            "op": "eq"
+          }
+        ],
+        [
+          {
+            "key": "amenity",
+            "value": "pub",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: amenity=bar 246,716 uses; amenity=pub 200,351 uses; wiki pages present"
+    },
+    {
+      "key": "restaurant",
+      "label": "Restaurants",
+      "aliases": [
+        "eatery",
+        "dining"
+      ],
+      "concepts": [
+        "restaurant"
+      ],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "amenity",
+            "value": "restaurant",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: amenity=restaurant 1,628,887 uses; wiki pages present"
+    },
+    {
+      "key": "fast_food",
+      "label": "Fast-food places",
+      "aliases": [
+        "fast food",
+        "quick service",
+        "takeaway"
+      ],
+      "concepts": [],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "amenity",
+            "value": "fast_food",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: amenity=fast_food 669,575 uses; wiki pages present"
+    },
+    {
+      "key": "pizza",
+      "label": "Pizza places",
+      "aliases": [
+        "pizzeria"
+      ],
+      "concepts": [
+        "pizza"
+      ],
+      "group": "specialty",
+      "groups": [
+        [
+          {
+            "key": "amenity",
+            "value": "^(restaurant|fast_food)$",
+            "op": "regex"
+          },
+          {
+            "key": "cuisine",
+            "value": "(^|;) *(pizza) *(;|$)",
+            "op": "regex"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: amenity=restaurant 1,628,887 uses; amenity=fast_food 669,575 uses; cuisine=pizza 139,434 uses; wiki pages present"
+    },
+    {
+      "key": "burger",
+      "label": "Burger places",
+      "aliases": [
+        "burger joint",
+        "hamburger"
+      ],
+      "concepts": [
+        "burger"
+      ],
+      "group": "specialty",
+      "groups": [
+        [
+          {
+            "key": "amenity",
+            "value": "^(restaurant|fast_food)$",
+            "op": "regex"
+          },
+          {
+            "key": "cuisine",
+            "value": "(^|;) *(burger) *(;|$)",
+            "op": "regex"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: amenity=restaurant 1,628,887 uses; amenity=fast_food 669,575 uses; cuisine=burger 114,812 uses; wiki pages present"
+    },
+    {
+      "key": "sushi",
+      "label": "Sushi restaurants",
+      "aliases": [
+        "sushi bar"
+      ],
+      "concepts": [
+        "sushi"
+      ],
+      "group": "specialty",
+      "groups": [
+        [
+          {
+            "key": "amenity",
+            "value": "^(restaurant|fast_food)$",
+            "op": "regex"
+          },
+          {
+            "key": "cuisine",
+            "value": "(^|;) *(sushi) *(;|$)",
+            "op": "regex"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: amenity=restaurant 1,628,887 uses; amenity=fast_food 669,575 uses; cuisine=sushi 25,951 uses; wiki pages present"
+    },
+    {
+      "key": "bakery",
+      "label": "Bakeries",
+      "aliases": [
+        "patisserie",
+        "bake shop"
+      ],
+      "concepts": [
+        "bakery"
+      ],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "bakery",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=bakery 256,415 uses; wiki pages present"
+    },
+    {
+      "key": "brewery",
+      "label": "Breweries",
+      "aliases": [
+        "brewpub",
+        "taproom",
+        "craft brewery"
+      ],
+      "concepts": [
+        "brewery"
+      ],
+      "group": "specialty",
+      "groups": [
+        [
+          {
+            "key": "craft",
+            "value": "brewery",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: craft=brewery 11,648 uses; wiki pages present"
+    },
+    {
+      "key": "bookstore",
+      "label": "Bookshops",
+      "aliases": [
+        "bookshop",
+        "book store"
+      ],
+      "concepts": [
+        "bookstore"
+      ],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "books",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=books 58,858 uses; wiki pages present"
+    },
+    {
+      "key": "clothing_store",
+      "label": "Clothing shops",
+      "aliases": [
+        "clothes shop",
+        "apparel store",
+        "boutique",
+        "fashion store"
+      ],
+      "concepts": [
+        "clothing_store"
+      ],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "clothes",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=clothes 468,374 uses; wiki pages present"
+    },
+    {
+      "key": "shoes",
+      "label": "Shoe shops",
+      "aliases": [
+        "shoe store",
+        "sneaker store",
+        "footwear store"
+      ],
+      "concepts": [],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "shoes",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=shoes 83,275 uses; wiki pages present"
+    },
+    {
+      "key": "gym",
+      "label": "Gyms and fitness centres",
+      "aliases": [
+        "fitness centre",
+        "fitness center",
+        "health club"
+      ],
+      "concepts": [
+        "gym",
+        "fitness_studio"
+      ],
+      "concept_notes": {
+        "fitness_studio": "OpenStreetMap has no tag for boutique fitness studios: all gyms and fitness centres are counted"
+      },
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "leisure",
+            "value": "fitness_centre",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: leisure=fitness_centre 109,701 uses; wiki pages present"
+    },
+    {
+      "key": "climbing",
+      "label": "Climbing gyms",
+      "aliases": [
+        "climbing gym",
+        "bouldering gym"
+      ],
+      "concepts": [],
+      "group": "specialty",
+      "groups": [
+        [
+          {
+            "key": "sport",
+            "value": "(^|;) *(climbing) *(;|$)",
+            "op": "regex"
+          },
+          {
+            "key": "leisure",
+            "value": "^(sports_centre|fitness_centre)$",
+            "op": "regex"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: sport=climbing 89,479 uses; leisure=sports_centre 270,189 uses; leisure=fitness_centre 109,701 uses; wiki pages present"
+    },
+    {
+      "key": "beauty_salon",
+      "label": "Beauty and hair salons",
+      "aliases": [
+        "beauty salon",
+        "hair salon",
+        "barber",
+        "nail salon",
+        "spa"
+      ],
+      "concepts": [
+        "beauty_salon"
+      ],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "beauty",
+            "op": "eq"
+          }
+        ],
+        [
+          {
+            "key": "shop",
+            "value": "hairdresser",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=beauty 192,895 uses; shop=hairdresser 417,562 uses; wiki pages present"
+    },
+    {
+      "key": "nightclub",
+      "label": "Nightclubs",
+      "aliases": [
+        "night club",
+        "dance club"
+      ],
+      "concepts": [],
+      "group": "specialty",
+      "groups": [
+        [
+          {
+            "key": "amenity",
+            "value": "nightclub",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: amenity=nightclub 24,384 uses; wiki pages present"
+    },
+    {
+      "key": "ice_cream",
+      "label": "Ice-cream shops",
+      "aliases": [
+        "ice cream shop",
+        "gelato",
+        "frozen yogurt"
+      ],
+      "concepts": [],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "amenity",
+            "value": "ice_cream",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: amenity=ice_cream 67,461 uses; wiki pages present"
+    },
+    {
+      "key": "wine_shop",
+      "label": "Wine shops",
+      "aliases": [
+        "wine store",
+        "bottle shop"
+      ],
+      "concepts": [],
+      "group": "specialty",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "wine",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=wine 22,359 uses; wiki pages present"
+    },
+    {
+      "key": "liquor",
+      "label": "Liquor stores",
+      "aliases": [
+        "liquor store",
+        "off-licence",
+        "package store"
+      ],
+      "concepts": [],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "alcohol",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=alcohol 93,265 uses; wiki pages present"
+    },
+    {
+      "key": "convenience",
+      "label": "Convenience stores",
+      "aliases": [
+        "convenience store",
+        "corner shop",
+        "bodega"
+      ],
+      "concepts": [],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "convenience",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=convenience 846,935 uses; wiki pages present"
+    },
+    {
+      "key": "supermarket",
+      "label": "Supermarkets",
+      "aliases": [
+        "grocery store",
+        "grocery"
+      ],
+      "concepts": [],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "supermarket",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=supermarket 496,483 uses; wiki pages present"
+    },
+    {
+      "key": "cinema",
+      "label": "Cinemas",
+      "aliases": [
+        "movie theater",
+        "movie theatre"
+      ],
+      "concepts": [],
+      "group": "specialty",
+      "groups": [
+        [
+          {
+            "key": "amenity",
+            "value": "cinema",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: amenity=cinema 31,653 uses; wiki pages present"
+    },
+    {
+      "key": "theatre",
+      "label": "Theatres",
+      "aliases": [
+        "theater",
+        "playhouse",
+        "performing arts venue"
+      ],
+      "concepts": [],
+      "group": "specialty",
+      "groups": [
+        [
+          {
+            "key": "amenity",
+            "value": "theatre",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: amenity=theatre 53,636 uses; wiki pages present"
+    },
+    {
+      "key": "art_gallery",
+      "label": "Art galleries",
+      "aliases": [
+        "gallery",
+        "art shop"
+      ],
+      "concepts": [],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "art",
+            "op": "eq"
+          }
+        ],
+        [
+          {
+            "key": "tourism",
+            "value": "gallery",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=art 17,319 uses; tourism=gallery 22,687 uses; wiki pages present"
+    },
+    {
+      "key": "outdoor",
+      "label": "Outdoor-gear shops",
+      "aliases": [
+        "outdoor store",
+        "camping store"
+      ],
+      "concepts": [],
+      "group": "specialty",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "outdoor",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=outdoor 15,171 uses; wiki pages present"
+    },
+    {
+      "key": "sports",
+      "label": "Sports shops",
+      "aliases": [
+        "sporting goods store",
+        "sports store"
+      ],
+      "concepts": [],
+      "group": "specialty",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "sports",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=sports 46,606 uses; wiki pages present"
+    },
+    {
+      "key": "bicycle",
+      "label": "Bike shops",
+      "aliases": [
+        "bike shop",
+        "bicycle shop",
+        "cycle shop"
+      ],
+      "concepts": [],
+      "group": "specialty",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "bicycle",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=bicycle 57,247 uses; wiki pages present"
+    },
+    {
+      "key": "cosmetics",
+      "label": "Cosmetics shops",
+      "aliases": [
+        "cosmetics store",
+        "beauty store",
+        "makeup store"
+      ],
+      "concepts": [],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "cosmetics",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=cosmetics 39,950 uses; wiki pages present"
+    },
+    {
+      "key": "jewelry",
+      "label": "Jewellery shops",
+      "aliases": [
+        "jewelry store",
+        "jeweller",
+        "jeweler"
+      ],
+      "concepts": [],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "jewelry",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=jewelry 84,457 uses; wiki pages present"
+    },
+    {
+      "key": "florist",
+      "label": "Florists",
+      "aliases": [
+        "flower shop"
+      ],
+      "concepts": [],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "florist",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=florist 88,449 uses; wiki pages present"
+    },
+    {
+      "key": "pet",
+      "label": "Pet shops",
+      "aliases": [
+        "pet store",
+        "pet supply store"
+      ],
+      "concepts": [],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "pet",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=pet 50,835 uses; wiki pages present"
+    },
+    {
+      "key": "second_hand",
+      "label": "Second-hand shops",
+      "aliases": [
+        "thrift store",
+        "vintage shop",
+        "charity shop",
+        "consignment store"
+      ],
+      "concepts": [],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "second_hand",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=second_hand 20,548 uses; wiki pages present"
+    },
+    {
+      "key": "gift",
+      "label": "Gift shops",
+      "aliases": [
+        "gift store",
+        "souvenir shop"
+      ],
+      "concepts": [],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "gift",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=gift 74,835 uses; wiki pages present"
+    },
+    {
+      "key": "furniture",
+      "label": "Furniture shops",
+      "aliases": [
+        "furniture store",
+        "home furnishings store"
+      ],
+      "concepts": [],
+      "group": "tenant",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "furniture",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=furniture 102,133 uses; wiki pages present"
+    },
+    {
+      "key": "tattoo",
+      "label": "Tattoo studios",
+      "aliases": [
+        "tattoo parlour",
+        "tattoo parlor",
+        "tattoo shop"
+      ],
+      "concepts": [],
+      "group": "specialty",
+      "groups": [
+        [
+          {
+            "key": "shop",
+            "value": "tattoo",
+            "op": "eq"
+          }
+        ]
+      ],
+      "status": "verified",
+      "verified_by": "taginfo 2026-10-30: shop=tattoo 22,359 uses; wiki pages present"
+    }
+  ],
+  "metros": {
+    "nashville": {
+      "counties": [
+        {
+          "name": "Davidson County, Tennessee",
+          "fips": "47037",
+          "wikidata": "Q1177705",
+          "land_km2": 1304.56
+        }
+      ],
+      "wikidata": [
+        "Q1177705"
+      ],
+      "land_km2": 1304.56,
+      "status": "verified",
+      "verified_by": "overpass 2026-10-30: admin_level=6 boundary, one area each: Q1177705 relation 1847619 \"Davidson County\""
+    },
+    "austin": {
+      "counties": [
+        {
+          "name": "Travis County, Texas",
+          "fips": "48453",
+          "wikidata": "Q110426",
+          "land_km2": 2574.58
+        }
+      ],
+      "wikidata": [
+        "Q110426"
+      ],
+      "land_km2": 2574.58,
+      "status": "verified",
+      "verified_by": "overpass 2026-10-30: admin_level=6 boundary, one area each: Q110426 relation 91939 \"Travis County\""
+    },
+    "nyc": {
+      "counties": [
+        {
+          "name": "New York County (Manhattan), New York",
+          "fips": "36061",
+          "wikidata": "Q500416",
+          "land_km2": 58.68
+        },
+        {
+          "name": "Kings County (Brooklyn), New York",
+          "fips": "36047",
+          "wikidata": "Q11980692",
+          "land_km2": 179.68
+        },
+        {
+          "name": "Queens County, New York",
+          "fips": "36081",
+          "wikidata": "Q5142559",
+          "land_km2": 281.59
+        },
+        {
+          "name": "Bronx County, New York",
+          "fips": "36005",
+          "wikidata": "Q855974",
+          "land_km2": 109.22
+        },
+        {
+          "name": "Richmond County (Staten Island), New York",
+          "fips": "36085",
+          "wikidata": "Q11997784",
+          "land_km2": 148.98
+        }
+      ],
+      "wikidata": [
+        "Q500416",
+        "Q11980692",
+        "Q5142559",
+        "Q855974",
+        "Q11997784"
+      ],
+      "land_km2": 778.15,
+      "status": "verified",
+      "verified_by": "overpass 2026-10-30: admin_level=6 boundary, one area each: Q500416 relation 2552485 \"New York County\"; Q11980692 relation 369518 \"Kings County\"; Q5142559 relation 369519 \"Queens County\"; Q855974 relation 2552450 \"Bronx County\"; Q11997784 relation 962876 \"Richmond County\""
+    },
+    "los_angeles": {
+      "counties": [
+        {
+          "name": "Los Angeles County, California",
+          "fips": "06037",
+          "wikidata": "Q104994",
+          "land_km2": 10513.49
+        }
+      ],
+      "wikidata": [
+        "Q104994"
+      ],
+      "land_km2": 10513.49,
+      "status": "verified",
+      "verified_by": "overpass 2026-10-30: admin_level=6 boundary, one area each: Q104994 relation 396479 \"Los Angeles County\""
+    },
+    "chicago": {
+      "counties": [
+        {
+          "name": "Cook County, Illinois",
+          "fips": "17031",
+          "wikidata": "Q108418",
+          "land_km2": 2447.35
+        }
+      ],
+      "wikidata": [
+        "Q108418"
+      ],
+      "land_km2": 2447.35,
+      "status": "verified",
+      "verified_by": "overpass 2026-10-30: admin_level=6 boundary, one area each: Q108418 relation 122576 \"Cook County\""
+    },
+    "miami": {
+      "counties": [
+        {
+          "name": "Miami-Dade County, Florida",
+          "fips": "12086",
+          "wikidata": "Q468557",
+          "land_km2": 4920.73
+        }
+      ],
+      "wikidata": [
+        "Q468557"
+      ],
+      "land_km2": 4920.73,
+      "status": "verified",
+      "verified_by": "overpass 2026-10-30: admin_level=6 boundary, one area each: Q468557 relation 1210692 \"Miami-Dade County\""
+    },
+    "san_francisco": {
+      "counties": [
+        {
+          "name": "City and County of San Francisco, California",
+          "fips": "06075",
+          "wikidata": "Q62",
+          "land_km2": 121.51
+        }
+      ],
+      "wikidata": [
+        "Q62"
+      ],
+      "land_km2": 121.51,
+      "status": "verified",
+      "verified_by": "overpass 2026-10-30: admin_level=6 boundary, one area each: Q62 relation 111968 \"San Francisco\""
+    },
+    "seattle": {
+      "counties": [
+        {
+          "name": "King County, Washington",
+          "fips": "53033",
+          "wikidata": "Q108861",
+          "land_km2": 5478.42
+        }
+      ],
+      "wikidata": [
+        "Q108861"
+      ],
+      "land_km2": 5478.42,
+      "status": "verified",
+      "verified_by": "overpass 2026-10-30: admin_level=6 boundary, one area each: Q108861 relation 1153346 \"King County\""
+    },
+    "boston": {
+      "counties": [
+        {
+          "name": "Suffolk County, Massachusetts",
+          "fips": "25025",
+          "wikidata": "Q54072",
+          "land_km2": 150.88
+        }
+      ],
+      "wikidata": [
+        "Q54072"
+      ],
+      "land_km2": 150.88,
+      "status": "verified",
+      "verified_by": "overpass 2026-10-30: admin_level=6 boundary, one area each: Q54072 relation 2298154 \"Suffolk County\""
+    },
+    "denver": {
+      "counties": [
+        {
+          "name": "City and County of Denver, Colorado",
+          "fips": "08031",
+          "wikidata": "Q16554",
+          "land_km2": 396.46
+        }
+      ],
+      "wikidata": [
+        "Q16554"
+      ],
+      "land_km2": 396.46,
+      "status": "verified",
+      "verified_by": "overpass 2026-10-30: admin_level=6 boundary, one area each: Q16554 relation 1411339 \"Denver\""
+    },
+    "atlanta": {
+      "counties": [
+        {
+          "name": "Fulton County, Georgia",
+          "fips": "13121",
+          "wikidata": "Q486633",
+          "land_km2": 1364.13
+        },
+        {
+          "name": "DeKalb County, Georgia",
+          "fips": "13089",
+          "wikidata": "Q486398",
+          "land_km2": 693.44
+        }
+      ],
+      "wikidata": [
+        "Q486633",
+        "Q486398"
+      ],
+      "land_km2": 2057.57,
+      "status": "verified",
+      "verified_by": "overpass 2026-10-30: admin_level=6 boundary, one area each: Q486633 relation 975368 \"Fulton County\"; Q486398 relation 964801 \"DeKalb County\""
+    },
+    "houston": {
+      "counties": [
+        {
+          "name": "Harris County, Texas",
+          "fips": "48201",
+          "wikidata": "Q26676",
+          "land_km2": 4421.02
+        }
+      ],
+      "wikidata": [
+        "Q26676"
+      ],
+      "land_km2": 4421.02,
+      "status": "verified",
+      "verified_by": "overpass 2026-10-30: admin_level=6 boundary, one area each: Q26676 relation 1560395 \"Harris County\""
+    },
+    "dallas": {
+      "counties": [
+        {
+          "name": "Dallas County, Texas",
+          "fips": "48113",
+          "wikidata": "Q111168",
+          "land_km2": 2261.2
+        }
+      ],
+      "wikidata": [
+        "Q111168"
+      ],
+      "land_km2": 2261.2,
+      "status": "verified",
+      "verified_by": "overpass 2026-10-30: admin_level=6 boundary, one area each: Q111168 relation 1837698 \"Dallas County\""
+    }
+  }
+}

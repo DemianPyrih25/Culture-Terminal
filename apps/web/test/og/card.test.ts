@@ -37,6 +37,8 @@ const VIZ_KIND: Readonly<Record<DatasetKind, MiniViz["kind"] | null>> = {
   Slope: "lines",
   Momentum: "lines",
   Scorecard: null,
+  TasteMap: null,
+  Supply: null,
 };
 
 /** The trust example: a question CLERK refused before any data, ended as refused. */

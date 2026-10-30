@@ -45,6 +45,8 @@ import {
   similarityMap,
   sponsorQuadrant,
   sponsorSlate,
+  tasteMap,
+  tasteMapThree,
   tastePosition,
   tastePositionNoSignal,
   tenantSlope,
@@ -481,6 +483,7 @@ export default function FiguresGallery() {
         <Column>
           <Exhibit dataset={sponsorSlate} id="fig-17" title="A Slate envelope through Exhibit" display={{ Slate: { tick: 0.7 } }} />
           <FigurePending id="fig-18" title="A figure still computing" note="Plot · computing in QUANT" />
+          <Exhibit dataset={tasteMapThree} id="fig-90" title="Three screened brands: listed, not mapped" />
           {EXHIBIT_KINDS.map((dataset, i) => (
             <Exhibit key={dataset.id} dataset={dataset} id={`fig-${35 + i}`} display={{ GeoLift: { interactive: false } }} />
           ))}
@@ -502,6 +505,7 @@ const EXHIBIT_KINDS = [
   momentumStrip,
   priorsScorecard,
   tastePosition,
+  tasteMap,
 ] as const;
 
 function Section({ id, title, note, children }: { id: string; title: string; note: string; children: ReactNode }) {

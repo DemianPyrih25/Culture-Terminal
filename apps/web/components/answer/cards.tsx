@@ -33,9 +33,14 @@ export function VerdictCard({ verdict, topic, className }: { verdict: AnswerVerd
           </p>
         ) : null}
       </div>
-      {verdict.confidence || verdict.advice ? (
+      {verdict.confidence || verdict.advice || verdict.capLine ? (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           {verdict.confidence ? <ConfidenceChip level={verdict.confidence} lowered={verdict.lowered} onFullBreakdown={method} /> : null}
+          {verdict.capLine ? (
+            <p className="type-label text-ink" data-confidence-cap="true">
+              {verdict.capLine}
+            </p>
+          ) : null}
           {verdict.advice ? <p className="type-label text-ink-2">{verdict.advice}</p> : null}
         </div>
       ) : null}
@@ -255,22 +260,46 @@ export function GroupLabel({ icon, children }: { icon: IconName; children: React
 }
 
 /**
- * The concept note (the owner's o03 decision): the product or concept asked about is not in the data, so
- * the answer says first, before the verdict, which category was tested instead, or that it could not be
- * tested. A note strip like the nearest-job one: one chip and the agent's plain sentence.
+ * The concept note (the owner's o03 decision; R2, D48): the product or concept asked about is not in the
+ * data, so the answer says first, before the verdict, which category was read instead ("Category-level
+ * read": no winner, keep or veto for the concept itself), or that it could not be tested. A note strip
+ * like the nearest-job one: one chip and the agent's plain sentence.
  */
-export function ConceptNote({ text, className }: { text: string; className?: string }) {
+export function ConceptNote({ text, level = null, className }: { text: string; level?: "category" | "missing" | null; className?: string }) {
   return (
     <section
       aria-label="What was tested"
-      data-concept-note="true"
+      data-concept-note={level ?? "true"}
       className={cx("flex flex-wrap items-center gap-x-3 gap-y-2 rounded-card bg-caution-soft px-4 py-3", className)}
     >
       <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-chip bg-surface px-2.5 text-[13px] leading-[18px] font-semibold text-ink">
         <Icon name="corner-down-right" size={14} className="text-ink-2" />
-        Not in the data
+        {level === "category" ? "Category-level read" : "Not in the data"}
       </span>
       <p className="min-w-0 flex-1 type-body text-caution-ink [overflow-wrap:anywhere]">{text}</p>
+    </section>
+  );
+}
+
+/** The unlisted note's sentence (D31): who can open a reader's own answer, and what a shared link shows. */
+export const UNLISTED_TEXT = "Only people with this link can open this answer. Search engines don't list it, and a shared link shows no preview image.";
+
+/**
+ * A reader's own answer, not a curated showcase (D31): a note strip under the page head that says the
+ * page is unlisted. One chip and one plain sentence, as the read-as note.
+ */
+export function UnlistedNote({ className }: { className?: string }) {
+  return (
+    <section
+      aria-label="Unlisted answer"
+      data-unlisted="true"
+      className={cx("flex flex-wrap items-center gap-x-3 gap-y-2 rounded-card bg-sunken px-4 py-3", className)}
+    >
+      <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-chip bg-surface px-2.5 text-[13px] leading-[18px] font-semibold text-ink">
+        <Icon name="link" size={14} className="text-ink-2" />
+        Unlisted · user question
+      </span>
+      <p className="min-w-0 flex-1 type-body text-ink-2 [overflow-wrap:anywhere]">{UNLISTED_TEXT}</p>
     </section>
   );
 }

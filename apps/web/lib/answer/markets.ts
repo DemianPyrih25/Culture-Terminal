@@ -52,3 +52,9 @@ export function marketLabel(id: string): string {
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
 }
+
+/** The market id a row key names ("metro:austin" or "austin"), or null when it names no listed market. */
+export function marketIdOf(key: string): string | null {
+  const id = key.replace(/^metro:/, "");
+  return LABEL_BY_ID.has(id) ? id : null;
+}

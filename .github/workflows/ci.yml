@@ -81,6 +81,20 @@ jobs:
       - name: Guard client bundle
         run: pnpm guard --bundle
 
+      # The smoke starts its own dev server in mock mode (playwright.config.ts): synthetic Qloo and public
+      # data, blank model and Qloo keys, so nothing live is called. The map cards need the internet for
+      # the OpenFreeMap basemap. It runs every Playwright project, the 390 px phone check included
+      # (phone-iphone and phone-android: Chromium with each phone's user agent, viewport and pixel ratio).
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Smoke (mock mode)
+        run: pnpm smoke
+        env:
+          QLOO_MOCK: "1"
+          QLOO_API_KEY: ""
+          ANTHROPIC_API_KEY: ""
+
   gitleaks:
     name: gitleaks
     runs-on: ubuntu-24.04
@@ -107,5 +121,7 @@ jobs:
           echo "${GITLEAKS_SHA256}  ${archive}" | sha256sum --check --strict -
           tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
 
+      # The default rules plus .gitleaks.toml's narrow allowlists (each with its reason); .gitleaksignore
+      # holds the fingerprints of synthetic fixtures already in history.
       - name: Scan full history
-        run: '"$RUNNER_TEMP/gitleaks" git --redact --verbose --no-banner --log-opts="--all" .'
+        run: '"$RUNNER_TEMP/gitleaks" git --redact --verbose --no-banner --config .gitleaks.toml --log-opts="--all" .'

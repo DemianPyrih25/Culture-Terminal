@@ -9,6 +9,7 @@ import {
   HypothesisVerdict,
   IsoDateTime,
   Job,
+  MarketId,
   Mode,
   Pillar,
   Priority,
@@ -29,7 +30,22 @@ import {
 import { QUESTION_MAX_CHARS } from "./limits";
 import { PublicEndpoint } from "./public-data";
 import { QlooPath } from "./qloo-types";
+import {
+  AI_CONTEXT_KIND_VALUES,
+  AI_CONTEXT_LIMITS,
+  CONFIDENCE_RULE_VALUES,
+  CONTEXT_STATUS_VALUES,
+  GHOST_HONESTY_LINE,
+  GHOST_PICK_CATEGORY_VALUES,
+  REPORT_LIMITS,
+  VALIDATION_RULE_VALUES,
+  WEB_CONTEXT_LIMITS,
+  verdictTagProblems,
+} from "./values/report";
 import { VizComponent } from "./viz-compat";
+
+/** Report limits, the verdict-tag rule, confidence tables and fixed text are zod-free in ./values/report.ts. */
+export * from "./values/report";
 
 /**
  * Model-facing schemas (snake_case) for the two strict submit tools, and the code-assembled Report.
@@ -88,55 +104,6 @@ export type PlanHypothesis = SubmitPlanInput["hypotheses"][number];
 export type PlanStep = SubmitPlanInput["steps"][number];
 
 // submit_report (PLAN §7, SPEC §7.1) ------------------------------------------------------------------
-
-export const REPORT_LIMITS = {
-  headline: 120,
-  thesis: 600,
-  part: 400,
-  note: 300,
-  argumentsMin: 3,
-  argumentsMax: 5,
-  hypothesisVerdictsMax: 4,
-  bearCaseMax: 3,
-  nextMovesMin: 2,
-  nextMovesMax: 4,
-  recommendationsMax: 5,
-  exhibitsMax: 10,
-  openQuestionsMax: 5,
-} as const;
-
-/** The verdict tag (Report.verdict.tag): two to five words, at most 32 characters, no digits or tokens (CHECKER V9). */
-export const VERDICT_TAG_LIMITS = { wordsMin: 2, wordsMax: 5, chars: 32 } as const;
-
-/** The words of a verdict tag: runs of non-space characters. */
-export function verdictTagWords(tag: string): string[] {
-  return tag.split(/\s+/).filter((w) => w !== "");
-}
-
-/**
- * How a verdict tag breaks its rule, one predicate per problem ("has 7 words, not 2 to 5"); empty when
- * it keeps it. Surrounding spaces do not count.
- */
-export function verdictTagProblems(tag: string): string[] {
-  const L = VERDICT_TAG_LIMITS;
-  const trimmed = tag.trim();
-  if (trimmed === "") return ["is empty"];
-  const out: string[] = [];
-  const words = verdictTagWords(trimmed).length;
-  if (words < L.wordsMin || words > L.wordsMax) {
-    out.push(`has ${words} ${words === 1 ? "word" : "words"}, not ${L.wordsMin} to ${L.wordsMax}`);
-  }
-  if (trimmed.length > L.chars) out.push(`has ${trimmed.length} characters, more than ${L.chars}`);
-  if (/\d/.test(trimmed)) out.push("contains digits");
-  // {{WINDOW}} has no digits; a list row or the running head would print any token raw.
-  if (/[{}[\]]/.test(trimmed)) out.push("contains tokens");
-  return out;
-}
-
-/** True when the tag keeps its rule, so a list row or the running head may print it. */
-export function isVerdictTag(tag: unknown): tag is string {
-  return typeof tag === "string" && verdictTagProblems(tag).length === 0;
-}
 
 const VERDICT_TAG_DESCRIPTION =
   "The verdict in two to five words, at most 32 characters, no digits or tokens: the finding a reader " +
@@ -280,10 +247,8 @@ export const StoredGhostAnswer = z.preprocess((raw) => {
   return { ...raw, picks: { ...picks, creators: [] } };
 }, GhostAnswer);
 
-export const GhostPickCategory = z.enum(["competitors", "markets", "neighbourhoods", "tenants", "partners", "creators"]);
+export const GhostPickCategory = z.enum(GHOST_PICK_CATEGORY_VALUES);
 export type GhostPickCategory = z.infer<typeof GhostPickCategory>;
-
-export const GHOST_HONESTY_LINE = "Agreement is measured against Qloo's taste graph, not outcomes.";
 
 export const GhostDiff = z.object({
   items: z.array(
@@ -307,11 +272,8 @@ export type GhostDiff = z.infer<typeof GhostDiff>;
 
 // CHECKER (§6.2) ----------------------------------------------------------------------------------------
 
-/**
- * V11 (Part 9): every SEC or Census metric appears with its period or vintage token (PERIOD_TOKEN), and
- * no prose links a financial figure to a taste metric causally.
- */
-export const ValidationRule = z.enum(["V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10", "V11"]);
+/** The CHECKER rules (VALIDATION_RULE_VALUES in ./values/report.ts says what V11 to V13 check). */
+export const ValidationRule = z.enum(VALIDATION_RULE_VALUES);
 export type ValidationRule = z.infer<typeof ValidationRule>;
 
 export const ValidationIssue = z.object({
@@ -336,84 +298,30 @@ export type NumbersTraced = z.infer<typeof NumbersTraced>;
 
 // Confidence (§6.4) -------------------------------------------------------------------------------------
 
-export const ConfidenceRule = z.enum([
-  "dropped_entity",
-  "code_fallback",
-  "coarse_geohash",
-  "stale_momentum",
-  "thin_result",
-  "quality_gate_drop",
-  "checker_warning",
-  "insufficient_evidence",
-  "read_as_nearest_job",
-  "concept_partly_tagged",
-]);
+export const ConfidenceRule = z.enum(CONFIDENCE_RULE_VALUES);
 export type ConfidenceRule = z.infer<typeof ConfidenceRule>;
 
-/**
- * Points subtracted from 100 per occurrence (coarse_geohash, stale_momentum, insufficient_evidence,
- * read_as_nearest_job and concept_partly_tagged count once). insufficient_evidence alone puts a note in the
- * LOW band: V7 left no reading to trust.
- *
- * concept_partly_tagged (D2 of the Part 9 close-out): part of the question's concept was never tested,
- * because a find_tags search for it came back EMPTY_RESULT or a concept part got no tag and no analog that
- * any call used. It alone caps the note at MED (70): an answer that tested only part of the concept is
- * never HIGH.
- */
-export const CONFIDENCE_PENALTY: Readonly<Record<ConfidenceRule, number>> = {
-  dropped_entity: 15,
-  code_fallback: 10,
-  coarse_geohash: 10,
-  stale_momentum: 20,
-  thin_result: 10,
-  quality_gate_drop: 5,
-  checker_warning: 5,
-  insufficient_evidence: 60,
-  read_as_nearest_job: 5,
-  concept_partly_tagged: 30,
-};
-
-export function confidenceBand(score: number): ConfidenceBand {
-  if (score >= 75) return "HIGH";
-  if (score >= 50) return "MED";
-  return "LOW";
-}
+/** CONFIDENCE_PENALTY, CONFIDENCE_CAP and confidenceBand are in ./values/report.ts (R1, D47). */
 
 export const Confidence = z.object({
-  /** 100 minus penalties, floored at 0. Computed by code; the model never chooses it (D9). */
+  /**
+   * min(100 minus penalties floored at 0, the lowest fired CONFIDENCE_CAP). Computed by code; the model
+   * never chooses it (D9, D47).
+   */
   score: z.int().min(0).max(100),
   band: ConfidenceBand,
   breakdown: z.array(
-    z.object({ rule: ConfidenceRule, label: z.string(), count: z.int().positive(), points: z.int().nonpositive() }),
+    z.object({
+      rule: ConfidenceRule,
+      label: z.string(),
+      count: z.int().positive(),
+      points: z.int().nonpositive(),
+      /** The ceiling a cap rule sets (CONFIDENCE_CAP); absent for a penalty-only rule and in stored reports. */
+      cap: z.int().min(0).max(100).optional(),
+    }),
   ),
 });
 export type Confidence = z.infer<typeof Confidence>;
-
-// Fixed text (§6.3) ---------------------------------------------------------------------------------------
-
-export const FIXED_DISCLAIMERS = [
-  "Analytics, not financial advice.",
-  "Aggregated group-level taste signals; no individual-level inference.",
-  "Affinity ≠ sales, share or causation.",
-] as const;
-
-/**
- * Source lines for public data (PLAN §6), added to the disclaimers only when the note used that source.
- * `period` names the fiscal periods shown (e.g. "FY2022 to FY2024 and the latest quarter"); `vintage`
- * the ACS release (e.g. "2019-2023").
- */
-export function secDisclaimer(period: string): string {
-  return `Financial figures: SEC EDGAR filings as reported, ${period}.`;
-}
-export function censusDisclaimer(vintage: string): string {
-  return `Area figures: US Census ACS 5-year estimates, ${vintage}.`;
-}
-
-/** The data line closing every disclaimer list; `window` is shown only when the note used trending. */
-export function dataDisclaimer(fetchedAt: string, window: TrendWindow | null): string {
-  const w = window ? `; trending window ${window.start}..${window.end}` : "";
-  return `Data: Qloo hackathon dataset, fetched ${fetchedAt}${w}.`;
-}
 
 // Assembled Report (code-built, PLAN §7) ------------------------------------------------------------------
 
@@ -461,6 +369,82 @@ export const TokenUsage = z.object({
 });
 export type TokenUsage = z.infer<typeof TokenUsage>;
 
+// Context blocks (R4, R5, D45) -----------------------------------------------------------------------------
+
+/** What an AI-context item is about (labels: AI_CONTEXT_KIND_LABEL). */
+export const AiContextKind = z.enum(AI_CONTEXT_KIND_VALUES);
+export type AiContextKind = z.infer<typeof AiContextKind>;
+
+/** How a context block settled (CONTEXT_STATUS_VALUES). */
+export const ContextStatus = z.enum(CONTEXT_STATUS_VALUES);
+export type ContextStatus = z.infer<typeof ContextStatus>;
+
+/**
+ * One "What AI knows (not verified)" item: model knowledge, never measured. The text carries no digit and
+ * no spelled number (the agent's side/numbers.ts rule, checked again on parse); an item that broke it was
+ * dropped, never cut.
+ */
+const noDigits = (t: string) => !/[\p{Nd}%$€£¥]/u.test(t);
+const NO_DIGITS = { message: "states no number: no digits, %, or currency signs" };
+
+export const AiContextItem = z.object({
+  topic: z.string().min(1).max(AI_CONTEXT_LIMITS.topic).refine(noDigits, NO_DIGITS),
+  text: z.string().min(1).max(AI_CONTEXT_LIMITS.text).refine(noDigits, NO_DIGITS),
+  kind: AiContextKind,
+});
+export type AiContextItem = z.infer<typeof AiContextItem>;
+
+/** The AI-context block (R4): shown apart from the measured answer, never fed to the ANALYST except presence ids. */
+export const AiContextBlock = z.object({
+  status: ContextStatus,
+  items: z.array(AiContextItem).max(AI_CONTEXT_LIMITS.items),
+  /** Validated market ids where the subject is reported to operate (AI knowledge, not verified). */
+  presenceMarkets: z.array(MarketId).max(AI_CONTEXT_LIMITS.presence),
+  model: z.string().nullable(),
+  generatedAt: IsoDateTime.nullable(),
+  cached: z.boolean(),
+  /** Reader words for off / timed_out / failed / empty, e.g. "AI context is off on this server." */
+  note: z.string().nullable(),
+  /** Items removed because they stated a number. */
+  droppedForNumbers: z.int().nonnegative(),
+});
+export type AiContextBlock = z.infer<typeof AiContextBlock>;
+
+/** One "From the web" item: a model-written sentence over a real search citation, with its link and dates. */
+export const WebContextItem = z.object({
+  claim: z.string().min(1).max(WEB_CONTEXT_LIMITS.claim),
+  url: z
+    .string()
+    .url()
+    .refine((u) => /^https?:\/\//i.test(u), { message: "an http(s) link" }),
+  title: z.string().max(WEB_CONTEXT_LIMITS.title),
+  /** URL hostname without "www.", shown as the publisher. */
+  publisher: z.string().min(1),
+  /** page_age exactly as the search returned it ("April 30, 2025"), null when absent. */
+  published: z.string().nullable(),
+  /** published parsed to a date when unambiguous, else null. */
+  publishedIso: z.iso.date().nullable(),
+  retrievedAt: IsoDateTime,
+  /** The cited passage (at most 150 characters from the API, 160 stored). Every number in `claim` appears in it. */
+  citedText: z.string().max(WEB_CONTEXT_LIMITS.citedText),
+});
+export type WebContextItem = z.infer<typeof WebContextItem>;
+
+/** The web-context block (R5): untrusted page text, displayed escaped with its link, never sent to any model. */
+export const WebContextBlock = z.object({
+  status: ContextStatus,
+  items: z.array(WebContextItem).max(WEB_CONTEXT_LIMITS.items),
+  model: z.string().nullable(),
+  /** Billed web searches. */
+  searches: z.int().nonnegative(),
+  retrievedAt: IsoDateTime.nullable(),
+  cached: z.boolean(),
+  note: z.string().nullable(),
+  /** Items removed because a number in the claim was not in its cited text. */
+  droppedForNumbers: z.int().nonnegative(),
+});
+export type WebContextBlock = z.infer<typeof WebContextBlock>;
+
 export const Receipt = z.object({
   qlooNetwork: z.int().nonnegative(),
   qlooCached: z.int().nonnegative(),
@@ -474,9 +458,25 @@ export const Receipt = z.object({
   usd: z.number().nonnegative(),
   tokens: TokenUsage,
   numbersTraced: NumbersTraced,
-  /** Model ids per LLM role; economy runs show the economy ANALYST. */
-  models: z.object({ clerk: z.string().nullable(), analyst: z.string().nullable(), ghost: z.string().nullable() }),
+  /**
+   * Model ids per LLM role; economy runs show the economy ANALYST. `context` and `web` are the side calls'
+   * models (R4, R5), absent in reports stored before Part 11.
+   */
+  models: z.object({
+    clerk: z.string().nullable(),
+    analyst: z.string().nullable(),
+    ghost: z.string().nullable(),
+    context: z.string().nullable().optional(),
+    web: z.string().nullable().optional(),
+  }),
   economy: z.boolean(),
+  /**
+   * The side calls' spend (R4, R5): AI context USD, web USD (tokens plus search fees) and billed searches.
+   * `usd` above already includes it. Absent in reports stored before Part 11 and when no side call ran.
+   */
+  context: z
+    .object({ aiUsd: z.number().nonnegative(), webUsd: z.number().nonnegative(), webSearches: z.int().nonnegative() })
+    .optional(),
 });
 export type Receipt = z.infer<typeof Receipt>;
 
@@ -525,5 +525,11 @@ export const Report = z.object({
   /** CHECKER warnings the report was accepted with. */
   warnings: z.array(ValidationIssue),
   receipt: Receipt,
+  /** "What AI knows (not verified)" (R4). Null when it did not run; absent in reports stored before Part 11. */
+  aiContext: AiContextBlock.nullable().optional(),
+  /** "From the web" (R5). Null when it did not run; absent in reports stored before Part 11. */
+  webContext: WebContextBlock.nullable().optional(),
+  /** The answer-quality audit's issues (agent report/audit.ts); empty on a clean run, absent before Part 11. */
+  audit: z.array(z.string()).optional(),
 });
 export type Report = z.infer<typeof Report>;

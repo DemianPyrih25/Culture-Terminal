@@ -5,6 +5,7 @@ import { Button, ButtonLink } from "../ui/button";
 import { ChartCard } from "../ui/chart-card";
 import { Hatch } from "../ui/skeleton";
 import { KeyNumber } from "../ui/key-number";
+import { FollowButton, profileFollowOption } from "../following";
 import { Monogram } from "../ui/monogram";
 import { useToast } from "../ui/toast";
 import { LookUpAnother } from "./look-up";
@@ -45,6 +46,7 @@ function EntityHeader({ profile, onHow }: { profile: ProfileModel; onHow: () => 
             Ask about {profile.name}
           </ButtonLink>
           <LookUpAnother type={profile.type} />
+          {profile.type === "brand" ? <FollowButton option={profileFollowOption(profile.name)} /> : null}
           <Button variant="quiet" icon="shield-check" onClick={onHow}>
             How we know
           </Button>

@@ -1,6 +1,6 @@
 // ASSEMBLE with SEC and Census evidence (PLAN §6, D40) and a question read as its nearest job (D41).
 // Invented ledger and figures (D29).
-import { censusDisclaimer, CONFIDENCE_PENALTY, FIXED_DISCLAIMERS, PUBLIC_NOT_CONFIGURED_REASON, Report, secDisclaimer } from "@ct/contracts";
+import { censusDisclaimer, CONFIDENCE_CAP, CONFIDENCE_PENALTY, FIXED_DISCLAIMERS, PUBLIC_NOT_CONFIGURED_REASON, Report, secDisclaimer } from "@ct/contracts";
 import { DESK_LIMITATIONS, SKILL_LIMITATIONS } from "@ct/quant";
 import { describe, expect, it } from "vitest";
 import { assembleReport, type ReportContext } from "../../src/assemble";
@@ -73,7 +73,9 @@ describe("a question read as its nearest job (D41)", () => {
       flag: "READ_AS_NEAREST_JOB",
       text: "Read as brand health: the data does not cover sales, rents and foot traffic, so the note answers the nearest question the data can measure.",
     });
-    expect(read.verdict.confidence.score).toBe(plain.verdict.confidence.score - CONFIDENCE_PENALTY.read_as_nearest_job);
+    // Penalty lines only: the fixture's mixed signal also caps both scores at 70 (R1).
+    const penalties = (c: typeof plain.verdict.confidence) => c.breakdown.filter((l) => l.cap === undefined).reduce((t, l) => t + l.points, 0);
+    expect(penalties(read.verdict.confidence)).toBe(penalties(plain.verdict.confidence) - CONFIDENCE_PENALTY.read_as_nearest_job);
     expect(read.verdict.confidence.breakdown.filter((l) => l.rule === "read_as_nearest_job")).toEqual([
       expect.objectContaining({ count: 1, points: -CONFIDENCE_PENALTY.read_as_nearest_job }),
     ]);
@@ -94,7 +96,7 @@ describe("a concept that is not in the data (the owner's o03 decision)", () => {
     const plain = assemble();
     const substitutes = [{ concept: "fizzy kelp tonic", scope: "brand", categories: ["Sea Snacks"] }];
     const report = assemble({ conceptSubstitutes: substitutes, readAs: { notCovered: ["prices"] } });
-    const sentence = 'The exact product, "fizzy kelp tonic", is not in the data, so the category "Sea Snacks" was tested instead.';
+    const sentence = "'fizzy kelp tonic' is not in Qloo's data, so this answer reads its broader category, 'Sea Snacks'. It gives no winner, keep or veto for 'fizzy kelp tonic' itself.";
     expect(report.verdict.thesis).toBe(`${sentence} ${plain.verdict.thesis}`);
     expect(report.limitations[0]).toEqual({ source: "flag", flag: "CONCEPT_NOT_IN_DATA", text: sentence });
     expect(report.limitations[1]?.flag).toBe("READ_AS_NEAREST_JOB");
@@ -115,13 +117,13 @@ describe("Part 9 close-out: run flags, partly tested concepts and desk bullets",
     expect(assemble().limitations.some((l) => l.flag === "SEC_NOT_CONFIGURED")).toBe(false);
   });
 
-  it("takes 30 points once for a partly tested concept, so the note is never HIGH (D2)", () => {
+  it("caps a partly tested concept at its ceiling once, so the note is never HIGH (D2, R1)", () => {
     const plain = assemble();
     const partly = assemble({ conceptPartlyTagged: true });
-    expect(partly.verdict.confidence.score).toBe(Math.max(0, plain.verdict.confidence.score - CONFIDENCE_PENALTY.concept_partly_tagged));
-    expect(partly.verdict.confidence.breakdown.filter((l) => l.rule === "concept_partly_tagged")).toEqual([
-      expect.objectContaining({ count: 1, points: -CONFIDENCE_PENALTY.concept_partly_tagged }),
-    ]);
+    const cap = CONFIDENCE_CAP.concept_partly_tagged!;
+    expect(CONFIDENCE_PENALTY.concept_partly_tagged).toBe(0);
+    expect(partly.verdict.confidence.score).toBe(Math.min(plain.verdict.confidence.score, cap));
+    expect(partly.verdict.confidence.breakdown.filter((l) => l.rule === "concept_partly_tagged")).toEqual([expect.objectContaining({ count: 1, cap })]);
     expect(partly.verdict.confidence.band).not.toBe("HIGH");
     expect(plain.verdict.confidence.breakdown.some((l) => l.rule === "concept_partly_tagged")).toBe(false);
   });

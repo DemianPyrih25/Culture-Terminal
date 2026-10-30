@@ -9,8 +9,8 @@ import {
   type Metric,
   type NoValueReason,
 } from "@ct/contracts";
+import { isAboutLevelTilt, THIN_SAMPLE, type FormulaId } from "../../formulas";
 import { emptyResultFinding, generationalSplitFinding, metroOutlierFinding } from "../../findings";
-import type { FormulaId } from "../../formulas";
 import { addSkillEvidence, addSkillMetric } from "../common";
 import { fixed2, rankText, safeFullName, safeName } from "../format";
 import type { ContextGroup } from "../rankCandidates/contexts";
@@ -178,6 +178,8 @@ export function addShareMetrics(run: RankRun, grid: ScoreGrid, m: ShareMeasures,
         evidenceIds: evidenceFor(evidence, group),
         n: row.scored,
         comparator: "WITHIN_CALL",
+        // R1: a share percentile from a 2-entity set is a thin sample.
+        thin: row.scored <= THIN_SAMPLE.pairEntities,
       }),
     );
   }
@@ -197,13 +199,14 @@ export function addShareMetrics(run: RankRun, grid: ScoreGrid, m: ShareMeasures,
         subjectRefs: [c.ref, ...[...t.young, ...t.old].flatMap((r) => (r.spec.subject === null ? [] : [r.spec.subject]))],
         value,
         reason: t.reasons[j] ?? "not_scored",
-        display: value === null ? "" : `${signed2(value)} · rank ${rank === null ? "–" : rankText(rank, tiltRanked)}`,
+        display: value === null ? "" : `${signed2(value)}${isAboutLevelTilt(value) ? " · about level" : ""} · rank ${rank === null ? "–" : rankText(rank, tiltRanked)}`,
         unit: "delta",
         badge: "DERIVED",
         formulaId: "share.youth_tilt",
         evidenceIds: evidenceFor(evidence, "AGE"),
         n: t.young.length + t.old.length,
         comparator: "PEERS",
+        aboutLevel: isAboutLevelTilt(value),
       }),
     );
   };

@@ -94,7 +94,9 @@ describe("run-agent", () => {
     const agent = scriptedAgent((o) => syntheticResult(o.runId));
     const { code, out, keys } = await cli([QUESTION, "--yes"], { runAgent: agent.run });
     expect(code).toBe(0);
-    expect(out).toContain("worst case $0.60 (per-run hard cap)");
+    // The ANALYST's hard stop ($0.60) plus both side calls at their caps ($0.02 + $0.08).
+    expect(out).toContain("side calls: AI context on, web on");
+    expect(out).toContain("worst case $0.70 (per-run hard cap)");
     expect(out).toContain("run cli-20261022T031522123Z · Qloo mock");
     expect(out).toMatch(/RUN {6}claude-sonnet-5-5 · live · lane public/);
     expect(out).toMatch(/▶ resolve_entities S1 \[wave1\] · est 1 calls/);
@@ -147,10 +149,23 @@ describe("run-agent", () => {
 
   it("refuses a run whose worst case would pass LLM_DEV_USD_CAP", async () => {
     const agent = scriptedAgent((o) => syntheticResult(o.runId));
-    const { code, err } = await cli([QUESTION, "--yes"], { runAgent: agent.run, spendFile: spendFile(14.9) });
+    const { code, err } = await cli([QUESTION, "--yes"], { runAgent: agent.run, spendFile: spendFile(44.9) });
     expect(code).toBe(1);
-    expect(err).toContain("Refusing to start: $14.90 spent plus up to $0.60 for this run would pass LLM_DEV_USD_CAP ($15.00).");
+    expect(err).toContain("Refusing to start: $44.90 spent plus up to $0.70 for this run would pass LLM_DEV_USD_CAP ($45.00).");
     expect(agent.seen).toHaveLength(0);
+  });
+
+  it("turns the side context calls off with --no-ai-context and --no-web, and books only what may run", async () => {
+    const agent = scriptedAgent((o) => syntheticResult(o.runId));
+    const { out } = await cli([QUESTION, "--yes", "--no-ai-context", "--no-web"], { runAgent: agent.run });
+    expect(out).toContain("side calls: AI context off, web off");
+    expect(out).toContain("worst case $0.60 (per-run hard cap)");
+    const seen = agent.seen[0] as unknown as { sideConfig?: { aiEnabled: boolean; webEnabled: boolean; webMaxUses: number } };
+    expect(seen.sideConfig).toMatchObject({ aiEnabled: false, webEnabled: false, webMaxUses: 3 });
+    // The environment can turn one off too, and economy runs no web search.
+    const env = await cli([QUESTION, "--yes", "--economy"], { runAgent: agent.run, env: { ...ENV, AI_CONTEXT_ENABLED: "0", WEB_SEARCH_MAX_USES: "9" } });
+    expect(env.out).toContain("side calls: AI context off, web off");
+    expect((agent.seen[1] as unknown as { sideConfig?: { webMaxUses: number } }).sideConfig?.webMaxUses).toBe(5);
   });
 
   it("adds the run's spend to the local tally", async () => {
@@ -211,7 +226,7 @@ describe("run-agent", () => {
     expect(code).toBe(1);
     expect(err).toContain("run-agent failed: boom");
     // Its spend is unknown, so the tally takes the run's worst case.
-    expect(err).toContain("counted at its worst case $0.60; run-agent spend now $1.60 over 4 run(s)");
+    expect(err).toContain("counted at its worst case $0.70; run-agent spend now $1.70 over 4 run(s)");
   });
 
   it("books the run's worst case before it starts and settles a cancelled run to its measured spend", async () => {
@@ -227,7 +242,7 @@ describe("run-agent", () => {
     });
     const { code, out } = await cli([QUESTION, "--yes"], { runAgent: agent.run, spendFile: file, signal: controller.signal });
     expect(agent.seen[0]?.signal).toBe(controller.signal);
-    expect(duringRun).toMatchObject({ usd: 1.6, runs: 4 });
+    expect(duringRun).toMatchObject({ usd: 1.7, runs: 4 });
     expect(code).toBe(1);
     expect(out).toContain("RUN cancelled: Cancelled from the terminal.");
     expect(out).toContain("run-agent spend now $1.12 over 4 run(s)");

@@ -1,4 +1,5 @@
-import { Pillar } from "@ct/contracts";
+import type { Pillar } from "@ct/contracts";
+import { PILLAR_VALUES } from "@ct/contracts/values";
 import { parseCommand } from "../grammar/parse";
 import { DESK_LABEL } from "./format";
 import type { BriefNextMove } from "./types";
@@ -41,8 +42,8 @@ const DESK_WORDS: ReadonlyArray<{ pillar: Pillar; words: RegExp }> = [
 export function nextMoveDesk(move: { label: string; question: string }, fallback: Pillar): Pillar {
   const command = parseCommand(move.question);
   if (command) return command.pillar;
-  const named = Pillar.safeParse(DESK_PREFIX.exec(move.label)?.[1]?.toLowerCase());
-  if (named.success) return named.data;
+  const named = DESK_PREFIX.exec(move.label)?.[1]?.toLowerCase();
+  if (named !== undefined && (PILLAR_VALUES as readonly string[]).includes(named)) return named as Pillar;
   for (const text of [move.label, move.question]) {
     const hit = DESK_WORDS.find((d) => d.words.test(text));
     if (hit) return hit.pillar;

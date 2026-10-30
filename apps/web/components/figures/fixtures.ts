@@ -2,10 +2,12 @@ import type { AxisItem, DatasetOf, MatrixCell, NoValueReason, QuadrantName, Quad
 import type { FigureSource } from "./figure-frame";
 import { marketSlope, momentumStrip, tastePosition, tastePositionNoSignal, tenantSlope } from "./fixtures-desks";
 import { austinLiftMap, coarseLiftMap } from "./fixtures-geo";
+import { standingLiftMap, supplyAreas } from "./fixtures-part11";
 import type { ProseBindings } from "./prose";
 
 export { MOMENTUM_WINDOW, marketSlope, momentumStrip, tastePosition, tastePositionNoSignal, tenantSlope } from "./fixtures-desks";
 export { austinLiftMap, coarseLiftMap } from "./fixtures-geo";
+export { standingLiftMap, supplyAreas } from "./fixtures-part11";
 
 /**
  * Invented figure fixtures for the /dev/figures gallery and the figure tests (D29: no Qloo values,
@@ -861,6 +863,54 @@ export const SCORECARD_BINDINGS: ProseBindings = {
   window: "Mar–Aug 2026",
 };
 
+// TasteMap · Category Taste Map (classical MDS of the Substitution Map) ----------------------------------
+
+const TASTE_POINT = (key: string, label: string, x: number, y: number, hub: number | null, target = false) =>
+  ({ key, label, ref: key, x, y, hub, target }) as DatasetOf<"TasteMap">["payload"]["points"][number];
+
+export const tasteMap: DatasetOf<"TasteMap"> = {
+  id: "D30",
+  kind: "TasteMap",
+  title: "Category Taste Map · Juniper Cola",
+  evidenceIds: ["E1"],
+  formulaIds: ["taste_map_mds", "subs.similarity", "subs.hub"],
+  payload: {
+    source: "substitution_map",
+    points: [
+      TASTE_POINT("R1", "Juniper Cola", -0.21, 0.08, null, true),
+      TASTE_POINT("R2", "Brand Alpha", -0.12, 0.11, 0.8),
+      TASTE_POINT("R3", "Brand Beta", -0.09, -0.02, 0.65),
+      TASTE_POINT("R4", "Saltmarsh Seltzer", 0.14, 0.12, 0.35),
+      TASTE_POINT("R5", "Kettle Ridge Tonic", 0.1, -0.13, 0.5),
+      TASTE_POINT("R6", "Granite Hollow Ale", 0.18, -0.16, 0.2),
+    ],
+    k: 6,
+    stress: 0.07,
+    explained: 0.82,
+    imputedPairs: [["R4", "R6"]],
+    omitted: [{ label: "Brand Kappa", ref: null, reason: "dropped" }],
+    method:
+      "Classical MDS of 1 − audience taste similarity over 6 entities; 1 unscored pair set to the largest scored distance. Nearby points share audience taste; the axes have no meaning.",
+  },
+};
+
+/** Three entities: listed, never drawn as a map. */
+export const tasteMapThree: DatasetOf<"TasteMap"> = {
+  ...tasteMap,
+  id: "D31",
+  payload: {
+    ...tasteMap.payload,
+    source: "screener",
+    points: tasteMap.payload.points.slice(0, 3).map((p) => ({ ...p, ref: null })),
+    k: 3,
+    stress: 0,
+    explained: 1,
+    imputedPairs: [],
+    omitted: [],
+    method: "Classical MDS of 1 − audience taste similarity over 3 entities. Nearby points share audience taste; the axes have no meaning.",
+  },
+};
+
 /**
  * Invented source lines. The request ids are plainly synthetic counters ("0001…f001"), so no
  * abbreviation can match a Qloo request id or one shown in the design exports.
@@ -899,6 +949,7 @@ export const FIXTURE_SOURCES: Readonly<Record<string, FigureSource>> = {
     href: null,
   },
   priors: { text: "Source: the AI's expectations, recorded before any data", requestId: null, href: null },
+  tasteMap: { text: "Source: Qloo /v2/insights · 5 requests · map computed in code", requestId: "0001aaaa0000f001", href: null },
 };
 
 /** Every fixture envelope, for schema tests. */
@@ -929,4 +980,8 @@ export const ALL_FIXTURES = [
   metroSplitSelfDescribed,
   ageDumbbellSelfDescribed,
   neighbourhood,
+  tasteMap,
+  tasteMapThree,
+  standingLiftMap,
+  supplyAreas,
 ] as const;

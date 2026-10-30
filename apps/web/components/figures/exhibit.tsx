@@ -10,6 +10,8 @@ import { QuadrantScatter, type QuadrantScatterOptions } from "./quadrant-scatter
 import { RankedTable, slateToRanked, type RankedTableOptions } from "./ranked-table";
 import { ScorecardTable, type ScorecardOptions } from "./scorecard-table";
 import { SlopeChart, type SlopeChartOptions } from "./slope-chart";
+import { SupplyTable, type SupplyTableOptions } from "./supply-table";
+import { TasteMap, type TasteMapOptions } from "./taste-map";
 
 /**
  * One exhibit from its dataset envelope: code picks the family by VIZ_COMPAT[kind] (PLAN §10.1),
@@ -29,6 +31,8 @@ export interface ExhibitDisplay {
   GeoLift?: LiftMapOptions;
   Momentum?: MomentumStripOptions;
   Position?: PositionCardOptions;
+  TasteMap?: TasteMapOptions;
+  Supply?: SupplyTableOptions;
 }
 
 export type ExhibitProps = Omit<FigureMeta, "title"> & {
@@ -74,6 +78,10 @@ export function Exhibit({ dataset, display = {}, ...rest }: ExhibitProps) {
       return <MomentumStrip {...meta} {...display.Momentum} data={dataset.payload} />;
     case "Position":
       return <PositionCard {...meta} {...display.Position} data={dataset.payload} />;
+    case "TasteMap":
+      return <TasteMap {...meta} {...display.TasteMap} data={dataset.payload} />;
+    case "Supply":
+      return <SupplyTable {...meta} {...display.Supply} data={dataset.payload} />;
     default: {
       // Exhaustive: a new DatasetKind fails the type check here. At run time (a newer server) it frames a note.
       const unknown: never = dataset;

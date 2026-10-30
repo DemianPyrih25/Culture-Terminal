@@ -1,5 +1,6 @@
 import { LocationMethod, UNDER_THE_RADAR_MAX_POPULARITY, type AgeBucket, type FindingKind, type FindingSuggestion, type Severity, type SkillId, type SponsorCategory } from "@ct/contracts";
 import { quantile, spearman } from "./stats";
+import { SUPPLY } from "./formulas";
 import { TASTE_ISLAND_LAST_SHARE, TASTE_ISLAND_MIN_ROWS } from "./subs";
 
 /**
@@ -49,6 +50,9 @@ export const FINDING_SUGGESTION: Readonly<Record<FindingKind, SkillId | null>> =
   ANALOG_VETOED: "rank_candidates",
   TASTE_FINANCIALS_SPLIT: null,
   PARTNERS_ONE_CATEGORY: "sponsor_slate",
+  OVERSUPPLIED: "block_dna",
+  UNDERSUPPLIED: "block_dna",
+  LOW_STREET_ACTIVITY: null,
 };
 
 /**
@@ -75,6 +79,9 @@ export const FINDING_SEVERITY: Readonly<Record<FindingKind, Severity>> = {
   ANALOG_VETOED: "medium",
   TASTE_FINANCIALS_SPLIT: "medium",
   PARTNERS_ONE_CATEGORY: "medium",
+  OVERSUPPLIED: "medium",
+  UNDERSUPPLIED: "medium",
+  LOW_STREET_ACTIVITY: "low",
 };
 
 // Thresholds (SPEC §4.4) --------------------------------------------------------------------------
@@ -797,6 +804,88 @@ export function tasteFinancialsSplitFinding(args: {
   return draft(
     "TASTE_FINANCIALS_SPLIT",
     `${args.brandName}'s taste momentum ${taste} in ${args.momentumWindow}, while ${args.companyName}'s reported revenue ${revenue} in ${args.revenuePeriod}: the two point different ways. Note it in the bear case; neither explains the other.`,
+    null,
+  );
+}
+
+
+// S15 Local supply (OpenStreetMap) ----------------------------------------------------------------------
+
+export interface SupplyCandidate {
+  /** Area (or market) name. */
+  area: string;
+  /** Place type label, e.g. "Cafés and coffee shops". */
+  typeLabel: string;
+  count: number | null;
+  /** Area density ÷ city density; null without a city reference. */
+  index: number | null;
+  /** The city's density of this type (per km²); null without a reference. */
+  cityPerKm2: number | null;
+  /** The area's street activity per km² ÷ the city's; null or absent when either was not counted. */
+  activityIndex?: number | null;
+}
+
+/** The index against the area's own street activity: above 1, a larger share of its places than in the city. */
+const shareOf = (c: Pick<SupplyCandidate, "index" | "activityIndex">): number | null =>
+  finite(c.index) && finite(c.activityIndex) && (c.activityIndex as number) > 0 ? (c.index as number) / (c.activityIndex as number) : null;
+
+/** The OVERSUPPLIED rule: index ≥ 1.5 with at least 5 places counted. */
+export function isOversupplied(c: Pick<SupplyCandidate, "count" | "index" | "activityIndex">): boolean {
+  if (!(finite(c.index) && finite(c.count) && atLeast(c.index, SUPPLY.overIndex) && c.count >= SUPPLY.minCount)) return false;
+  const share = shareOf(c);
+  return share === null || atLeast(share, SUPPLY.beyondActivity);
+}
+
+/** The UNDERSUPPLIED rule: index ≤ 0.5 while the city has some of the type. */
+export function isUndersupplied(c: Pick<SupplyCandidate, "index" | "cityPerKm2" | "activityIndex">): boolean {
+  if (!(finite(c.index) && finite(c.cityPerKm2) && c.cityPerKm2 > 0 && atMost(c.index, SUPPLY.underIndex))) return false;
+  const share = shareOf(c);
+  return share === null || atMost(share, SUPPLY.belowActivity);
+}
+
+const timesWord = (index: number): string => `${(Math.round(index * 10) / 10).toFixed(1)} times`;
+const typed = (c: SupplyCandidate): string => `${c.area} (${c.typeLabel.toLowerCase()})`;
+
+/** OVERSUPPLIED: areas that already have clearly more of a place type than their city (suggests block_dna). */
+export function oversuppliedFinding(args: { cityLabel: string; candidates: readonly SupplyCandidate[] }): FindingDraft | null {
+  const over = args.candidates.filter(isOversupplied).sort((a, b) => (b.index ?? 0) - (a.index ?? 0));
+  const top = over[0];
+  if (top === undefined || top.index === null) return null;
+  const names = distinctNames(over.map(typed));
+  return draft(
+    "OVERSUPPLIED",
+    `${capitalise(listNames(names))} ${names.length === 1 ? "has" : "have"} clearly more mapped places than ${args.cityLabel} for ${names.length === 1 ? "its" : "their"} size, led by ${top.area} at ${timesWord(top.index)} the city's density${finite(top.activityIndex) ? ` against ${timesWord(top.activityIndex as number)} for all its shops and food and drink places` : ""} (OpenStreetMap counts are a floor).`,
+    `Profile the Block DNA of ${top.area} to see whether its venue-goers favour something the block lacks.`,
+  );
+}
+
+/** UNDERSUPPLIED: areas with clearly fewer places of a type than their city (suggests block_dna). */
+export function undersuppliedFinding(args: { cityLabel: string; candidates: readonly SupplyCandidate[] }): FindingDraft | null {
+  const under = args.candidates.filter(isUndersupplied).sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
+  const top = under[0];
+  if (top === undefined) return null;
+  const names = distinctNames(under.map(typed));
+  return draft(
+    "UNDERSUPPLIED",
+    `${capitalise(listNames(names))} ${names.length === 1 ? "has" : "have"} clearly fewer mapped places than ${args.cityLabel} for ${names.length === 1 ? "its" : "their"} size (half the city's density or less; OpenStreetMap counts are a floor): a possible gap, or a kind of place the area does not draw.`,
+    `Profile the Block DNA of ${top.area} to see whether its venue-goers favour this kind of place.`,
+  );
+}
+
+/** LOW_STREET_ACTIVITY: areas whose shops, food and drink places per km² sit below 0.3 of the city's. */
+export function lowStreetActivityFinding(args: {
+  cityLabel: string;
+  areas: readonly { area: string; activityPerKm2: number | null }[];
+  cityActivityPerKm2: number | null;
+}): FindingDraft | null {
+  const city = args.cityActivityPerKm2;
+  if (!finite(city) || city <= 0) return null;
+  const low = args.areas.filter((a) => finite(a.activityPerKm2) && a.activityPerKm2 < SUPPLY.lowActivityShare * city);
+  const names = distinctNames(low.map((a) => a.area));
+  if (names.length === 0) return null;
+  return draft(
+    "LOW_STREET_ACTIVITY",
+    `${listNames(names)} ${names.length === 1 ? "has" : "have"} little street-level commerce: under a third of ${args.cityLabel}'s mapped shops, food and drink places per square kilometre (OpenStreetMap counts are a floor).`,
     null,
   );
 }

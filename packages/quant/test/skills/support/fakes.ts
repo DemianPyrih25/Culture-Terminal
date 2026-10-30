@@ -8,6 +8,9 @@ import {
   Finding,
   makeId,
   Metric,
+  NO_RUN_CANDIDATES,
+  strongerCandidate,
+  strongerConceptMatch,
   PublicCallMeta,
   QlooCallMeta,
   type CacheProbe,
@@ -175,14 +178,28 @@ export class FakeRegistry implements EntityRegistry {
 
   registerEntity(entity: Omit<RegisteredEntity, "ref">): RegisteredEntity {
     const known = this.byEntityId(entity.entityId);
-    if (known !== null) return known;
+    if (known !== null) {
+      // As the real registry: re-registering keeps the strongest candidate source (R3).
+      const candidate = strongerCandidate(known.candidate, entity.candidate);
+      if (candidate === "data") return known;
+      const kept = { ...known, candidate };
+      this.byRef.set(kept.ref, kept);
+      return kept;
+    }
     const registered = { ...entity, ref: makeId("R", this.byRef.size + 1) };
     this.byRef.set(registered.ref, registered);
     return registered;
   }
   registerTag(tag: Omit<RegisteredTag, "ref">): RegisteredTag {
     const known = this.byTagId(tag.tagId);
-    if (known !== null) return known;
+    if (known !== null) {
+      // As the real registry: re-registering keeps the strongest concept match (R2).
+      const conceptMatch = strongerConceptMatch(known.conceptMatch, tag.conceptMatch);
+      if (conceptMatch === known.conceptMatch) return known;
+      const kept = { ...known, ...(conceptMatch === undefined ? {} : { conceptMatch }) };
+      this.tagsByRef.set(kept.ref, kept);
+      return kept;
+    }
     const registered = { ...tag, ref: makeId("T", this.tagsByRef.size + 1) };
     this.tagsByRef.set(registered.ref, registered);
     return registered;
@@ -254,6 +271,8 @@ export function fakeRun(qloo: QlooApi, registry = new FakeRegistry()): FakeRun {
     pillar: "investment",
     phase: "wave1",
     toolCallId: "toolu_synthetic_1",
+    concepts: [],
+    candidates: NO_RUN_CANDIDATES,
   };
   return { ctx, ledger, registry, events };
 }

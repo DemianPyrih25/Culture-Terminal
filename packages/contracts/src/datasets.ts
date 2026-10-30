@@ -1,7 +1,9 @@
 import { z } from "zod";
 import {
+  AreaStanding,
   Badge,
   BlockFamily,
+  CandidateSource,
   Comparator,
   EntityType,
   LocationMethod,
@@ -12,11 +14,13 @@ import {
   NoValueReason,
   PositionAxis,
   QuadrantName,
+  IsoDateTime,
   ScorecardVerdict,
   SkillId,
   SponsorCategory,
   WhiteSpaceQuadrant,
 } from "./enums";
+import { DATASET_KIND_VALUES, ROW_FLAG_VALUES, SUPPLY_PLACES_MAX, TASTE_MAP_MAX_K, TASTE_MAP_MIN_K } from "./values/datasets";
 import {
   DatasetIdSchema,
   EntityRefSchema,
@@ -29,21 +33,12 @@ import {
 /**
  * Dataset payloads: the full data behind each exhibit (PLAN §5.3, §7, §8.4). They go to the UI
  * through `dataset.ready` and the database, never to the model. A missing value is always
- * `value: null` plus a NoValueReason, never 0, so UNAVAILABLE can never render as a number.
+ * `value: null` plus a NoValueReason, never 0, so UNAVAILABLE can never render as a number. Kind names,
+ * row flags and display constants are zod-free in ./values/datasets.ts.
  */
+export * from "./values/datasets";
 
-export const DatasetKind = z.enum([
-  "Matrix",
-  "Quadrant",
-  "Bars",
-  "Slope",
-  "GeoLift",
-  "Ranked",
-  "Slate",
-  "Momentum",
-  "Scorecard",
-  "Position",
-]);
+export const DatasetKind = z.enum(DATASET_KIND_VALUES);
 export type DatasetKind = z.infer<typeof DatasetKind>;
 
 // Shared atoms ---------------------------------------------------------------------------------------
@@ -77,6 +72,8 @@ export const AxisItem = z.object({
   group: z.string().nullable(),
   /** Short code for compact axes (MatrixGrid), e.g. "JC"; the reader derives one when absent. */
   code: z.string().min(1).max(4).optional(),
+  /** Where the item came from (R3): "You named" or "Expected" chips; absent = found by the data. */
+  source: CandidateSource.optional(),
 });
 export type AxisItem = z.infer<typeof AxisItem>;
 
@@ -301,6 +298,16 @@ export const GeoLiftNeighbourhood = z
     quadrant: WhiteSpaceQuadrant.nullable(),
     /** Why lift is missing (insufficient_n, coarse); null when lift is present. */
     reason: NoValueReason.nullable(),
+    /** Where the area came from (R3): named in the question, a local's obvious pick, or found by the data (absent). */
+    source: CandidateSource.optional(),
+    /**
+     * R7 popularity (absent in runs stored before Part 11): mean raw concept affinity u over the area's
+     * covered cells (null when none), its within-call percentile among the areas with one (null under 3
+     * areas), and the area's standing (STANDING thresholds in quant formulas.ts; null when neither).
+     */
+    raw: z.number().nullable().optional(),
+    rawPct: z.number().nullable().optional(),
+    standing: AreaStanding.nullable().optional(),
   })
   .refine((n) => (n.lift === null) === (n.reason !== null), valueRuleMessage);
 export type GeoLiftNeighbourhood = z.infer<typeof GeoLiftNeighbourhood>;
@@ -346,6 +353,12 @@ export const GeoLiftPayload = z.object({
    * "unknown", never 0 (PLAN §8.3). Absent or null when a sample was counted or none was asked for.
    */
   supplyGap: z.string().min(1).nullable().optional(),
+  /**
+   * R7: the top 3 area ids by rawPct (POPULAR_AREAS_LABEL) and the top 3 hidden area ids by demandPct
+   * (HIDDEN_AREAS_LABEL). Absent in runs stored before Part 11.
+   */
+  popular: z.array(z.string().min(1)).optional(),
+  hidden: z.array(z.string().min(1)).optional(),
 });
 export type GeoLiftPayload = z.infer<typeof GeoLiftPayload>;
 
@@ -359,11 +372,8 @@ export const RankedColumn = z.object({
 });
 export type RankedColumn = z.infer<typeof RankedColumn>;
 
-/**
- * Row flags. KEEP, VETO and ADD are the concept-vector verdicts (S12): an analog the concept's taste
- * keeps, one it vetoes (never a recommendation), and an open-call result the analogs missed.
- */
-export const RowFlag = z.enum(["UTR", "NEW", "LOCAL", "TARGET", "GHOST_PICK", "KEEP", "VETO", "ADD"]);
+/** Row flags (ROW_FLAG_VALUES in ./values/datasets.ts documents each, CATEGORY included). */
+export const RowFlag = z.enum(ROW_FLAG_VALUES);
 export type RowFlag = z.infer<typeof RowFlag>;
 
 export const RankedRow = z.object({
@@ -386,6 +396,8 @@ export const RankedRow = z.object({
   shares: z.array(z.object({ seedRef: EntityRefSchema, share: z.number() })).optional(),
   /** A row shown for contrast, e.g. a rival the priors expected; drawn in the comparison colour. */
   comparison: z.boolean().optional(),
+  /** Where the row came from (R3): "You named" or "Expected" chips; absent = found by the data. */
+  source: CandidateSource.optional(),
 });
 export type RankedRow = z.infer<typeof RankedRow>;
 
@@ -403,15 +415,6 @@ export type RankedPayload = z.infer<typeof RankedPayload>;
 
 // Slate: S10 sponsor slate (RankedTable) -------------------------------------------------------------------
 
-/**
- * The absolute popularity ceiling of every "under the radar" or "hidden pocket" label (D3 of the Part 9
- * close-out): at or above it a name is mass-market and never flagged, however low the set's median
- * popularity falls. It applies to the UNDER-THE-RADAR flag and pick (S9 cross_domain, S10 sponsor_slate,
- * creator_fit) and to the HIDDEN_POCKET finding (S3 destination_affinity). The quadrant geometry itself
- * stays split at the within-set medians (D17).
- */
-export const UNDER_THE_RADAR_MAX_POPULARITY = 0.85;
-
 export const SlateEntry = z.object({
   ref: EntityRefSchema,
   label: z.string(),
@@ -421,6 +424,8 @@ export const SlateEntry = z.object({
   utr: z.boolean(),
   /** The two markets where this brand gains most vs its national fit (Δ_jm). */
   topMarkets: z.array(z.object({ market: MarketId, label: z.string(), delta: z.number() })).max(2),
+  /** Where the brand came from (R3): the question's shortlist, an obvious sponsor, or discovery (absent). */
+  source: CandidateSource.optional(),
 });
 export type SlateEntry = z.infer<typeof SlateEntry>;
 
@@ -432,6 +437,8 @@ export const SlateRow = z
     runnerUp: SlateEntry.nullable(),
     /** Why the category has no best fit (empty discovery, budget). */
     reason: NoValueReason.nullable(),
+    /** Where the row's best fit came from (R3); absent = found by the data. */
+    source: CandidateSource.optional(),
   })
   .refine((r) => (r.best === null) === (r.reason !== null), { message: "best is null exactly when a reason is given" });
 export type SlateRow = z.infer<typeof SlateRow>;
@@ -545,6 +552,126 @@ export const PositionPayload = z
   });
 export type PositionPayload = z.infer<typeof PositionPayload>;
 
+// TasteMap: Category Taste Map, classical MDS of the S1 similarities (TasteMap) --------------------------
+
+export const TasteMapPoint = z.object({
+  key: z.string().min(1),
+  label: z.string(),
+  /** The run's entity ref on a note; null on the screener, which is not a run. */
+  ref: EntityRefSchema.nullable(),
+  /** Map coordinates, centred on 0. Only distances between points mean anything; the axes do not. */
+  x: z.number(),
+  y: z.number(),
+  /** Hub score (FORMULAS subs.hub) when measured; null otherwise. Drawn as point size, never as a score. */
+  hub: z.number().nullable(),
+  /** The subject (or the screener's seed brand): highlighted. */
+  target: z.boolean(),
+});
+export type TasteMapPoint = z.infer<typeof TasteMapPoint>;
+
+export const TasteMapPayload = z
+  .object({
+    /** Where the similarities came from: a note's Substitution Map (no extra calls) or the screener (≤ 13). */
+    source: z.enum(["substitution_map", "screener"]),
+    points: z.array(TasteMapPoint).min(TASTE_MAP_MIN_K).max(TASTE_MAP_MAX_K),
+    /** Entities placed; equals points.length. */
+    k: z.int().min(TASTE_MAP_MIN_K).max(TASTE_MAP_MAX_K),
+    /** Kruskal stress-1 of the map against 1 − similarity (quant mds.ts): 0 is exact; above 0.2 reads as a poor fit. */
+    stress: z.number().nonnegative(),
+    /** Mardia's fit of the two kept axes, 0–1 (quant mds.ts `explained`). */
+    explained: z.number().min(0).max(1),
+    /** Pairs (by point key) Qloo did not score: set to the largest scored distance before scaling. */
+    imputedPairs: z.array(z.tuple([z.string().min(1), z.string().min(1)])),
+    /** Entities that could not be placed, with the reason. */
+    omitted: z.array(z.object({ label: z.string(), ref: EntityRefSchema.nullable(), reason: NoValueReason })),
+    /** The method line under the map, e.g. "Classical MDS of 1 − taste similarity; nearby means similar audience taste; axes have no meaning." */
+    method: z.string().min(1),
+  })
+  .refine((m) => m.k === m.points.length, { message: "k must equal the number of points" })
+  .refine((m) => uniqueKeys(m.points), { message: "point keys must be unique" })
+  .refine((m) => m.points.filter((p) => p.target).length <= 1, { message: "at most one target point" })
+  .refine(
+    (m) => {
+      const keys = new Set(m.points.map((p) => p.key));
+      return m.imputedPairs.every(([a, b]) => a !== b && keys.has(a) && keys.has(b));
+    },
+    { message: "imputed pairs must name two different points" },
+  );
+export type TasteMapPayload = z.infer<typeof TasteMapPayload>;
+
+// Supply: OpenStreetMap places and street activity (SupplyTable, R6, D46) -------------------------------
+
+/** One place type counted, e.g. key "cafe", label "Cafés and coffee shops", tags ["amenity=cafe"]. */
+export const SupplyType = z.object({ key: z.string().min(1), label: z.string(), tags: z.array(z.string()) });
+export type SupplyType = z.infer<typeof SupplyType>;
+
+/** One area (or the market as a whole): counts, densities and index per type key, and street activity. */
+export const SupplyRow = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  areaKm2: z.number().positive(),
+  /** Where the area came from (R3); absent = found by the data. */
+  source: CandidateSource.optional(),
+  /** Places per type key; null when that count failed. */
+  counts: z.record(z.string(), z.int().nonnegative().nullable()),
+  perKm2: z.record(z.string(), z.number().nullable()),
+  /** Area density divided by city density per type (1 = the city's level); null without a city reference. */
+  index: z.record(z.string(), z.number().nullable()),
+  /** Shops plus food and drink places. */
+  activity: z.int().nonnegative().nullable(),
+  activityPerKm2: z.number().nullable(),
+});
+export type SupplyRow = z.infer<typeof SupplyRow>;
+
+const SupplyMixItem = z.object({ typeKey: z.string(), index: z.number(), count: z.int().nonnegative() });
+
+export const SupplyPayload = z.object({
+  source: z.literal("osm"),
+  attribution: z.literal("© OpenStreetMap contributors"),
+  licence: z.literal("ODbL-1.0"),
+  licenceUrl: z.literal("https://www.openstreetmap.org/copyright"),
+  /** Overpass osm3s.timestamp_osm_base: the date of the data; null when unknown. */
+  osmBase: IsoDateTime.nullable(),
+  /** areas: neighbourhoods of a map city; market: a circle around a market's centre. */
+  scope: z.enum(["areas", "market"]),
+  metro: MetroId.nullable(),
+  market: MarketId.nullable(),
+  radiusKm: z.number().positive().nullable(),
+  types: z.array(SupplyType),
+  rows: z.array(SupplyRow),
+  /** The city reference (the metro's counties); its area is approximate (the sum of the gazetteer areas). */
+  city: z
+    .object({
+      label: z.string(),
+      areaKm2: z.number().positive(),
+      approximate: z.literal(true),
+      counts: z.record(z.string(), z.int().nonnegative().nullable()),
+      perKm2: z.record(z.string(), z.number().nullable()),
+      activityPerKm2: z.number().nullable(),
+    })
+    .nullable(),
+  /** What the first area has more and less of than its city (mix: true), at most 5 each; null otherwise. */
+  mix: z.object({ over: z.array(SupplyMixItem), under: z.array(SupplyMixItem) }).nullable(),
+  /** Named places of the requested types in the first area (or the market), for the list and the map layer. */
+  places: z
+    .array(
+      z.object({
+        name: z.string(),
+        brand: z.string().nullable(),
+        lat: z.number(),
+        lon: z.number(),
+        typeKey: z.string(),
+        area: z.string().nullable(),
+        osmUrl: z.string().url(),
+      }),
+    )
+    .max(SUPPLY_PLACES_MAX),
+  /** OSM_COMPLETENESS: "OpenStreetMap is mapped by volunteers: counts are a floor, not a census." */
+  completeness: z.string(),
+  caption: z.string(),
+});
+export type SupplyPayload = z.infer<typeof SupplyPayload>;
+
 /** Payload schema per dataset kind. */
 export const DATASET_PAYLOADS = {
   Matrix: MatrixPayload,
@@ -557,6 +684,8 @@ export const DATASET_PAYLOADS = {
   Momentum: MomentumPayload,
   Scorecard: ScorecardPayload,
   Position: PositionPayload,
+  TasteMap: TasteMapPayload,
+  Supply: SupplyPayload,
 } as const satisfies Record<DatasetKind, z.ZodType>;
 
 export type DatasetPayload<K extends DatasetKind = DatasetKind> = z.infer<(typeof DATASET_PAYLOADS)[K]>;

@@ -1,7 +1,7 @@
 // Stand-ins for the preview service: the agent tests' scripted fake Anthropic answers CLERK, and a
 // Qloo client on the mock transport and a memory store answers the gate (no key, no network, no
 // database). Every entity is invented (D29).
-import type { Intent } from "@ct/contracts";
+import { EMPTY_CANDIDATES, type Intent } from "@ct/contracts";
 import { createMemoryQlooStore, createMockTransport, createQlooClient, type QlooClient } from "@ct/qloo";
 import type { AlreadyHave, PreviewDeps } from "../../server/preview";
 import { FakeAnthropic, fakeGaMessage, type CreateScript } from "../../../../packages/agent/test/support/fake-anthropic";
@@ -32,6 +32,7 @@ export function testIntent(partial: Partial<Intent> = {}): Intent {
     read_as: { nearest: false, not_covered: [] },
     assumptions: ["US geography"],
     mnemonic: "JUNIPER COLA <BRAND> HLTH",
+    candidates: EMPTY_CANDIDATES,
     ...partial,
   };
 }

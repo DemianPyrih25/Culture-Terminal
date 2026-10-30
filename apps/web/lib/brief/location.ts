@@ -1,5 +1,10 @@
-import { LocationMethod, METRO_LABEL, MetroId, type DatasetId, type RunState, type ToolCallState } from "@ct/contracts";
+import type { DatasetId, LocationMethod, MetroId, RunState, ToolCallState } from "@ct/contracts";
+import { LOCATION_METHOD_VALUES, METRO_ID_VALUES, METRO_LABEL } from "@ct/contracts/values";
+
 import type { BriefArea, BriefLocation } from "./types";
+
+/** A closed-list check without zod (the client bundle split): the value is one of `values`. */
+const isOneOf = <T extends string>(values: readonly T[], v: unknown): v is T => typeof v === "string" && (values as readonly string[]).includes(v);
 
 /**
  * Where a location brief stands (SPEC §8: the area name and the location method). A Block DNA call
@@ -30,8 +35,7 @@ const FINGERPRINT = /^Tag fingerprint of (.+) by (POLYGON|POINT|QUERY)\b/;
 const BLOCK_TITLE = /^Block DNA · (.+) vs .+$/;
 
 function metroOf(value: unknown): MetroId | null {
-  const parsed = MetroId.safeParse(value);
-  return parsed.success ? parsed.data : null;
+  return isOneOf(METRO_ID_VALUES, value) ? value : null;
 }
 
 /** The metro a location tool call names: geo_lift's `metro`, block_dna's `area.metro`. */
@@ -57,9 +61,9 @@ export function areaReads(state: RunState): AreaRead[] {
       const lastStep = fallbacks.length > 0 ? state.fallbacks[fallbacks.at(-1) as number]?.to : undefined;
       const method =
         payload?.method ??
-        LocationMethod.safeParse(fingerprint?.[2]).data ??
+        (isOneOf(LOCATION_METHOD_VALUES, fingerprint?.[2]) ? (fingerprint?.[2] as LocationMethod) : undefined) ??
         // Without a figure or a fingerprint yet, the last step down is where the ladder stands.
-        LocationMethod.safeParse(lastStep).data ??
+        (isOneOf(LOCATION_METHOD_VALUES, lastStep) ? (lastStep as LocationMethod) : undefined) ??
         null;
       const name = payload?.series[0]?.label ?? (bars ? BLOCK_TITLE.exec(bars.title)?.[1] : undefined) ?? fingerprint?.[1] ?? null;
       return { toolCallId: call.toolCallId, name, metro: argMetro(call), method, datasetIds: call.datasetIds, fallbacks };

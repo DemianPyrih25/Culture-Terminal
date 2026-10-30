@@ -1,4 +1,5 @@
-import { isPublicDataTool, tokenizeProse, type Phase, type RunState, type ToolCallState } from "@ct/contracts";
+import type { Phase, RunState, ToolCallState } from "@ct/contracts";
+import { isPublicDataTool, tokenizeProse } from "@ct/contracts/values";
 import { filterLabel, formatClock, formatUsd, formatUtcDateTime, formatUtcTime, plural, TOOL_DATA_LABEL } from "./format";
 import { lastTs, refText, refsForCalls, refsIn, requestRef, sourceName, type Ledger, type LedgerCall } from "./ledger";
 import type { BriefLive, IncomingRequest, Meter, StageRole, StageState, StageView, TraceNote } from "./types";
@@ -198,8 +199,12 @@ export function progressFraction(ledger: Ledger): number {
 /** Run time so far: the recorded elapsed time once ended, else the wall clock since the first event. */
 export function elapsedMs(state: RunState, now: number): number {
   if (state.ended) return state.ended.elapsedMs;
-  if (state.createdAt === null) return 0;
-  return Math.max(0, now - Date.parse(state.createdAt));
+  // A queued run's time starts with the agent's own run.created, after its run.queued events (D24),
+  // as run.end's elapsedMs does.
+  const q = state.timeline.findIndex((t) => t.type === "run.queued");
+  const start = q === -1 ? state.createdAt : (state.timeline.slice(q).find((t) => t.type === "run.created")?.ts ?? null);
+  if (start === null) return 0;
+  return Math.max(0, now - Date.parse(start));
 }
 
 function meter(label: string, used: number, limit: number | null, text: string, warnAt: number | null): Meter {

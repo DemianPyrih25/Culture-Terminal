@@ -8,7 +8,7 @@ import { ANSWER_SAMPLE, databaseDown, expect, open, test } from "./support";
 // states (app/dev/working), the dev galleries, the How we know drawer open, an unknown URL and a profile
 // (the mock DES, which needs the server's database).
 
-const PAGES = ["/", "/ask", "/briefs", "/how-it-works", "/method", "/status", "/d"] as const;
+const PAGES = ["/", "/ask", "/briefs", "/how-it-works", "/method", "/status", "/d", "/following", "/screener"] as const;
 
 const JOBS = [
   "brand_health",
@@ -44,13 +44,17 @@ const WIDTHS = [
 
 /**
  * Waits for the page's own measuring: a chart's scroll box (ScrollRegion) becomes a focusable region only
- * once the client sees it overflow, after hydration, and axe must not read it before then.
+ * once the client sees it overflow, after hydration, and axe must not read it before then. It also waits
+ * for running colour transitions (a control turning enabled once its data loads), which axe would read
+ * half-way.
  */
 async function measured(page: Page): Promise<void> {
   // A string expression, as support.ts does: the page's own document, not Node's.
   await page.waitForFunction(
     `Array.from(document.querySelectorAll(".overflow-x-auto[data-view]")).every((el) => el.scrollWidth <= el.clientWidth + 1 || el.hasAttribute("data-scrolls"))`,
   );
+  // Transitions only: spinners and skeletons loop for as long as they show.
+  await page.waitForFunction(`document.getAnimations().every((a) => !(a instanceof CSSTransition) || a.playState !== "running")`);
 }
 
 async function expectNoSeriousViolation(page: Page, label: string): Promise<void> {
@@ -97,6 +101,9 @@ for (const { name, width, height } of WIDTHS) {
       test.skip(down !== null, down ?? "");
       await open(page, PROFILE);
       await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible();
+      // A brand's Follow turns enabled once this browser's follows are read.
+      const follow = page.locator("[data-follow] button");
+      if ((await follow.count()) > 0) await expect(follow.first()).toBeEnabled();
       await expectNoSeriousViolation(page, `${PROFILE} at ${name}`);
     });
   });

@@ -299,6 +299,9 @@ importers:
       '@ct/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@ct/publicdata':
+        specifier: workspace:*
+        version: link:../publicdata
       ngeohash:
         specifier: 0.6.4
         version: 0.6.4
@@ -306,9 +309,6 @@ importers:
         specifier: 4.6.5
         version: 4.6.5
     devDependencies:
-      '@ct/publicdata':
-        specifier: workspace:*
-        version: link:../publicdata
       '@ct/qloo':
         specifier: workspace:*
         version: link:../qloo

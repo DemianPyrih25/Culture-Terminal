@@ -1,6 +1,6 @@
 // The command grammar (PLAN §8.2): mnemonics compile in the browser; natural language is left to CLERK.
 // Invented entities only.
-import { compileMnemonic, type Intent } from "@ct/contracts";
+import { compileMnemonic, EMPTY_CANDIDATES, type Intent } from "@ct/contracts";
 import { describe, expect, it } from "vitest";
 import { parseCommand } from "../../lib/grammar/parse";
 
@@ -54,6 +54,7 @@ describe("parseCommand", () => {
       read_as: { nearest: false, not_covered: [] },
       assumptions: [],
       mnemonic: "",
+      candidates: EMPTY_CANDIDATES,
       ...over,
     });
     const brand = (text: string, role: "primary" | "peer") => ({ text, entity_type: "brand" as const, role, public_figure: false });

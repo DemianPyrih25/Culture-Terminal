@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyEvent, applyEvents, initialRunState, reduceRunEvents, stampEvent, type RunEvent } from "../src/index";
-import { RUN_ID, deepFreeze, fullRunInputs, needsInputInput, stampAll, ts } from "./fixtures";
+import { applyEvent, applyEvents, initialRunState, queueTimeoutReason, reduceRunEvents, stampEvent, type RunEvent } from "../src/index";
+import { RUN_ID, deepFreeze, fullRunInputs, needsInputInput, queuedInput, stampAll, ts } from "./fixtures";
 
 const events = stampAll(fullRunInputs);
 
@@ -107,6 +107,40 @@ describe("applyEvent", () => {
   it("produces plain JSON state", () => {
     const s = reduceRunEvents(RUN_ID, events);
     expect(JSON.parse(JSON.stringify(s))).toEqual(s);
+  });
+
+  it("stays queued with its place while it waits, and drops the place when it starts", () => {
+    const seq = stampAll([
+      fullRunInputs[0]!,
+      queuedInput,
+      { type: "run.queued", position: 1, ahead: 0, waitSMax: 90 },
+      fullRunInputs[1]!,
+      { type: "run.queued", position: 1, ahead: 0, waitSMax: 80 },
+    ]);
+    const states = seq.reduce<ReturnType<typeof initialRunState>[]>(
+      (acc, e) => [...acc, applyEvent(acc[acc.length - 1] ?? initialRunState(RUN_ID), e)],
+      [],
+    );
+    expect(states.map((s) => s.status)).toEqual(["queued", "queued", "queued", "running", "running"]);
+    expect(states[1]?.queue).toEqual({ position: 2, ahead: 1, waitSMax: 120, at: ts(2) });
+    expect(states[2]?.queue).toMatchObject({ position: 1, waitSMax: 90 });
+    expect(states[3]?.queue).toBeNull();
+    expect(states[4]?.queue).toBeNull();
+  });
+
+  it("ends a run that timed out in the queue without ever running", () => {
+    const s = reduceRunEvents(
+      RUN_ID,
+      stampAll([
+        fullRunInputs[0]!,
+        queuedInput,
+        { type: "error", code: "queue_timeout", message: "No slot came free.", retryable: true },
+        { type: "run.end", status: "failed", elapsedMs: 120_000, reason: queueTimeoutReason(120) },
+      ]),
+    );
+    expect(s.status).toBe("failed");
+    expect(s.queue).toBeNull();
+    expect(s.ended?.reason).toContain("120 s");
   });
 
   it("moves queued → running → needs_input and ends with run.end", () => {

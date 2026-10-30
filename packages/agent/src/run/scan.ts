@@ -5,6 +5,7 @@ import {
   PUBLIC_NOT_CONFIGURED_REASON,
   SponsorCategory,
   type AgeBucket,
+  type DatasetEnvelope,
   type DigestRow,
   type EntityRegistry,
   type Flag,
@@ -18,13 +19,17 @@ import {
   type ModelDigest,
   type RegisteredEntity,
   type RegisteredTag,
+  type RunCandidates,
   type SkillId,
   type ToolInput,
 } from "@ct/contracts";
 import { listedCompanyOf, NEAREST_SEPARATOR } from "@ct/quant";
 import { AREA_ALSO_NAMED } from "./areaMentions";
 import { isSkillAvailable, toolLabel } from "./catalogue";
+import { questionConcepts } from "./conceptCoverage";
 import { gazetteer } from "./gazetteer";
+import { listedRelationOf, notSeparatelyReported } from "./listedBrands";
+import { noOsmTagText, supplyTypesForConcepts } from "./osmTypes";
 import { NOT_CONFIGURED_FLAG, unconfiguredSource, type PublicConfigured } from "./publicConfig";
 import { askedTier, compareCities, isGazetteerMetro, MARKET_CATALOGUE, marketTier, namedMarkets, type RunMarket } from "./markets";
 
@@ -56,10 +61,25 @@ export interface ScanContext {
    * when it would have run, the plan carries the source's not-configured flag. Absent: every source.
    */
   publicConfigured?: PublicConfigured;
+  /**
+   * The run's candidates (R3, D49): the entities the question names besides the primary and the obvious
+   * ones the gate resolved exactly (registered records, user-named first), and the candidate areas and
+   * markets. One-scale scoring sets, area sets and market sets take them first. Absent: none.
+   */
+  candidates?: ScanCandidates;
 }
 
-/** What a builder reads: the scan context with its gazetteer and markets settled. */
-type ScanInputs = ScanContext & { geo: GeoApi; markets: readonly RunMarket[] };
+/** The run's candidates as the scan reads them: registered entities, and RunCandidates' areas and markets. */
+export interface ScanCandidates {
+  entities: readonly RegisteredEntity[];
+  areas: RunCandidates["areas"];
+  markets: RunCandidates["markets"];
+}
+
+const NO_SCAN_CANDIDATES: ScanCandidates = { entities: [], areas: [], markets: [] };
+
+/** What a builder reads: the scan context with its gazetteer, markets and candidates settled. */
+type ScanInputs = ScanContext & { geo: GeoApi; markets: readonly RunMarket[]; candidates: ScanCandidates };
 
 /** A gazetteer area a scan step's rows name, in row order. */
 export interface ScanArea {
@@ -77,6 +97,8 @@ export interface ChainFeed {
   entities: readonly RegisteredEntity[];
   areas: readonly ScanArea[];
   rows?: readonly DigestRow[];
+  /** The datasets the step made (the run adds them): local_supply reads a lift map's popular areas (R7). */
+  datasets?: readonly DatasetEnvelope[];
 }
 
 /** What chainFeed needs to read a step's digests back into registry records and gazetteer areas. */
@@ -208,6 +230,31 @@ const SCAN_POPULARITY_MAX = 1;
 
 const distinctRefs = (entities: readonly RegisteredEntity[]) => [...new Set(entities.map((e) => e.ref))];
 
+/** A one-scale scoring set's largest size (rank_candidates' maximum). */
+const SCORING_SET_MAX = 50;
+
+/**
+ * `set` with every candidate entity of `type` it lacks appended (R3): a scored set always holds what the
+ * question names and what a specialist would check first, whatever the data found. `except` (the subject)
+ * is never added; at most SCORING_SET_MAX.
+ */
+function withCandidates(
+  set: readonly RegisteredEntity["ref"][],
+  { candidates }: Pick<ScanInputs, "candidates">,
+  type: RegisteredEntity["type"],
+  except: RegisteredEntity["ref"] | null,
+  max = SCORING_SET_MAX,
+): RegisteredEntity["ref"][] {
+  const extra = candidates.entities.filter((e) => e.type === type && e.ref !== except).map((e) => e.ref);
+  return [...new Set([...set, ...extra])].slice(0, max);
+}
+
+/** The candidate area ids of one map city, user-named first (R3). */
+const candidateAreaIds = ({ candidates }: Pick<ScanInputs, "candidates">, metro: MetroId): string[] => [
+  ...candidates.areas.filter((a) => a.metro === metro && a.source === "user_named").map((a) => a.id),
+  ...candidates.areas.filter((a) => a.metro === metro && a.source === "obvious").map((a) => a.id),
+];
+
 /** The primary first, then the peers of the same type: a set to rank against one another. */
 function sameTypeSet({ primary, peers }: ScanInputs, max: number): RegisteredEntity["ref"][] {
   if (primary === null) return [];
@@ -258,7 +305,9 @@ function pairRank(ctx: ScanInputs): ToolInput<"rank_candidates"> | null {
   const pair = sameTypeSet(ctx, 2);
   const metro = ctx.intent.geo.metro;
   if (ctx.primary === null || pair.length < 2 || metro === null) return null;
-  return { type: ctx.primary.type, candidates: pair, signal_entities: [], signal_tags: [], contexts: [{ kind: "metro", market: metro }], ...NO_STEP };
+  // The pair, then the expected rivals of its type (R3), so the metro scale is not a set of two.
+  const set = withCandidates(pair, ctx, ctx.primary.type, null);
+  return { type: ctx.primary.type, candidates: set, signal_entities: [], signal_tags: [], contexts: [{ kind: "metro", market: metro }], ...NO_STEP };
 }
 
 /**
@@ -267,8 +316,11 @@ function pairRank(ctx: ScanInputs): ToolInput<"rank_candidates"> | null {
  * the rest, at most `max`. Past the named ones each group takes one market per state before a
  * second, in catalogue order, so a grid of eight is not three Texas cities among the first majors.
  */
-function scanMarkets({ intent, markets }: ScanInputs, max: number): MarketId[] {
-  const named = namedMarkets(intent, markets);
+function scanMarkets({ intent, markets, candidates }: ScanInputs, max: number): MarketId[] {
+  // The markets the question names, then its candidate markets (named first, then obvious; R3).
+  const named = [...new Set([...namedMarkets(intent, markets), ...candidates.markets.map((m) => m.id)])].filter((id) =>
+    markets.some((m) => m.id === id),
+  );
   const rest = markets.filter((m) => !named.includes(m.id));
   const tier = askedTier(intent);
   const asked = rest.filter((m) => tier !== null && marketTier(m.id) === tier);
@@ -337,11 +389,13 @@ function blockArea({ intent, geo }: ScanInputs): ToolInput<"block_dna"> | null {
  * as the shortlist, and the tour or launch markets it names (else the gazetteer metros among MARKETS),
  * so the slate's market alignment points the way to a block.
  */
-function slate({ intent, primary, peers, markets }: ScanInputs): ToolInput<"sponsor_slate"> | null {
+function slate(ctx: ScanInputs): ToolInput<"sponsor_slate"> | null {
+  const { intent, primary, peers, markets, candidates } = ctx;
   if (primary === null || (primary.type !== "artist" && primary.type !== "person")) return null;
   const categories = intent.constraints.sponsor_categories.length > 0 ? intent.constraints.sponsor_categories : SCAN_SPONSOR_CATEGORIES;
-  const shortlist = distinctRefs(peers.filter((p) => p.type === "brand")).slice(0, 10);
-  const named = namedMarkets(intent, markets);
+  // The brands the question names, then the expected sponsors (R3), scored with the discovered ones.
+  const shortlist = withCandidates(distinctRefs(peers.filter((p) => p.type === "brand")), ctx, "brand", primary.ref, 10);
+  const named = [...new Set([...namedMarkets(intent, markets), ...candidates.markets.map((m) => m.id)])];
   const tour = (named.length > 0 ? named : markets.map((m) => m.id).filter(isGazetteerMetro)).slice(0, SLATE_MARKETS_MAX);
   return { seed: primary.ref, categories: [...new Set(categories)].slice(0, 6), shortlist, markets: tour, ...NO_STEP };
 }
@@ -375,10 +429,12 @@ export function namedAreaIds(intent: Intent, geo: Pick<GeoApi, "matchNeighbourho
  * is about competition, and without a verified category tag geo_lift says the competitor count is
  * unknown and why, rather than nothing. The areas the question names get their own numbers.
  */
-function liftFromTags({ intent, geo }: ScanInputs): ChainBuild<"geo_lift"> | null {
+function liftFromTags(ctx: ScanInputs): ChainBuild<"geo_lift"> | null {
+  const { intent, geo } = ctx;
   const metro = intent.geo.metro;
   if (metro === null || intent.constraints.concepts.length === 0) return null;
-  const focus = namedAreaIds(intent, geo);
+  // The question's areas, then the candidate areas a local would check first (R3).
+  const focus = [...new Set([...namedAreaIds(intent, geo), ...candidateAreaIds(ctx, metro)])].slice(0, FOCUS_AREAS_MAX);
   return {
     after: "find_tags",
     estimate: SCAN_LIFT_ESTIMATE,
@@ -530,7 +586,28 @@ function econLift(ctx: ScanInputs): ChainBuild<"area_economics"> | null {
  */
 function financials({ intent, primary, publicData }: ScanInputs): ToolInput<"company_financials"> | null {
   if (publicData !== true || primary === null || primary.type !== "brand" || !namesPrimary(intent)) return null;
+  // A brand inside a larger company has no figures of its own (financialsNote says so instead).
+  if (listedRelationOf(primary.name).kind !== "self") return null;
   return listedCompanyOf(primary.name) === null ? null : { brand: primary.ref, ...NO_STEP };
+}
+
+/** The jobs whose scan reads company_financials. */
+const FINANCIALS_JOBS: ReadonlySet<Job> = new Set(["brand_health", "head_to_head", "launch_test"]);
+
+/**
+ * Why a primary brand's financials are not read, so it is never silent (Part 9 open issue 6): a brand inside
+ * a larger listed company gets NOT_SEPARATELY_REPORTED naming the parent; a brand with no entry at all gets
+ * NOT_A_LISTED_COMPANY. Null when its financials are read, or the job, data or primary does not call for
+ * them (no public data, SEC not configured, no brand subject).
+ */
+export function financialsNote(job: Job, ctx: Pick<ScanContext, "intent" | "primary" | "publicData" | "publicConfigured">): { flag: Flag; text: string | null } | null {
+  const { intent, primary } = ctx;
+  if (!FINANCIALS_JOBS.has(job) || ctx.publicData !== true || ctx.publicConfigured?.sec === false) return null;
+  if (primary === null || primary.type !== "brand" || !namesPrimary(intent)) return null;
+  const relation = listedRelationOf(primary.name);
+  if (relation.kind === "parent") return { flag: "NOT_SEPARATELY_REPORTED", text: notSeparatelyReported(primary.name, relation.parent) };
+  if (relation.kind === "unlisted" || listedCompanyOf(primary.name) === null) return { flag: "NOT_A_LISTED_COMPANY", text: null };
+  return null;
 }
 
 /**
@@ -548,7 +625,8 @@ const ECON_WHY = "needs an area of a map city in the question, and public data o
  * Scores compare within the type only.
  */
 function scoreDiscovered(type: "brand" | "artist" | "podcast"): (ctx: ScanInputs) => ChainBuild<"rank_candidates"> | null {
-  return ({ primary, peers }) => {
+  return (ctx) => {
+    const { primary, peers } = ctx;
     if (primary === null) return null;
     const named = peers.filter((p) => p.type === type && p.ref !== primary.ref);
     const also = named.length > 0 ? ` with ${distinctRefs(named).join(", ")}` : "";
@@ -558,7 +636,8 @@ function scoreDiscovered(type: "brand" | "artist" | "podcast"): (ctx: ScanInputs
       describe: `on one scale from ${primary.ref}'s taste: the ${type} rows cross_domain returns${also}`,
       input: ({ entities }) => {
         const found = entities.filter((e) => e.type === type && e.ref !== primary.ref);
-        const candidates = distinctRefs([...named, ...found]).slice(0, SCORE_CANDIDATES_MAX);
+        // The expected partners or creators of this type join whatever the data discovered (R3).
+        const candidates = withCandidates(distinctRefs([...named, ...found]).slice(0, SCORE_CANDIDATES_MAX), ctx, type, primary.ref);
         if (candidates.length < 2) return null;
         return { type, candidates, signal_entities: [primary.ref], signal_tags: [], contexts: [{ kind: "none" }], ...NO_STEP };
       },
@@ -667,10 +746,13 @@ const CNPT_ANALOGS_MAX = 8;
  * in turn 2; with none, it is the open call alone (the ADD list), and the analogs your priors expect
  * are scored as a turn-2 step, since the concept's tags exist only once this scan returns.
  */
-function conceptVector({ intent, primary, peers }: ScanInputs): ChainBuild<"concept_vector"> {
+function conceptVector(ctx: ScanInputs): ChainBuild<"concept_vector"> {
+  const { intent, primary, peers } = ctx;
   // With no subject marked, the gate's stand-in primary is the first analog the question names.
   const mentioned = namesPrimary(intent) || primary === null ? peers : [primary, ...peers];
-  const analogs = distinctRefs(mentioned.filter((p) => p.type === "brand")).slice(0, CNPT_ANALOGS_MAX);
+  // The analogs the question names, then the real analogs a specialist expects (R3).
+  const subject = namesPrimary(intent) ? (primary?.ref ?? null) : null;
+  const analogs = withCandidates(distinctRefs(mentioned.filter((p) => p.type === "brand")), ctx, "brand", subject, CNPT_ANALOGS_MAX);
   const named = analogs.length > 0 ? `, the question's analogs ${analogs.join(", ")} kept or vetoed` : ", no analogs: the ADD list";
   return {
     after: "find_tags",
@@ -792,6 +874,103 @@ function liftInCity(index: number): (ctx: ScanInputs) => ChainBuild<"geo_lift"> 
   };
 }
 
+// OpenStreetMap supply (R6, D46, PLAN §5.2): real places of the concept's type and street activity -----------
+
+/** local_supply's area maximum. */
+const SUPPLY_AREAS_MAX = 8;
+/** site_selection's supply read: the top lift areas and the top popular areas beside the question's own. */
+const SUPPLY_LIFT_TOP = 3;
+const SUPPLY_POPULAR_TOP = 2;
+/** Twins taste_twins' supply read counts in the target city. */
+const SUPPLY_TWINS = 5;
+
+/** The place types the question's concept maps to (config/osm_tags.json), at most four. */
+const conceptSupplyTypes = (intent: Intent): string[] => supplyTypesForConcepts(questionConcepts(intent)).keys;
+
+/** What a supply step counts, for the run context. */
+const supplyWhat = (keys: readonly string[]): string => (keys.length > 0 ? `${keys.join(", ")} places and street activity` : "street activity only (no OpenStreetMap tag for the concept)");
+
+/**
+ * site_selection: local_supply chained after geo_lift (PLAN §5.2, D46): the concept's place types in the
+ * question's and candidate areas, the top lift areas and the top popular areas (R7), at most eight, so
+ * the reader sees real competitors beside each area's lift. The first area is the question's, else the
+ * top lift area, and it lists the named places. Without a mapped type it counts street activity only.
+ */
+function supplyAfterLift(ctx: ScanInputs): ChainBuild<"local_supply"> | null {
+  const metro = ctx.intent.geo.metro;
+  if (ctx.publicData !== true || metro === null || ctx.intent.constraints.concepts.length === 0) return null;
+  const keys = conceptSupplyTypes(ctx.intent);
+  const user = ctx.candidates.areas.filter((a) => a.metro === metro && a.source === "user_named").map((a) => a.id);
+  const named = [...new Set([...namedAreaIds(ctx.intent, ctx.geo), ...user])];
+  const obvious = ctx.candidates.areas.filter((a) => a.metro === metro && a.source === "obvious").map((a) => a.id);
+  return {
+    after: "geo_lift",
+    estimate: 0,
+    describe: `in ${metro}: ${supplyWhat(keys)} in the question's and candidate areas, the top lift areas and the top popular areas (OpenStreetMap, 0 Qloo calls)`,
+    input: ({ areas, datasets = [] }) => {
+      const lift = areas.filter((a) => a.metro === metro).map((a) => a.id).slice(0, SUPPLY_LIFT_TOP);
+      const popular = datasets.flatMap((d) => (d.kind === "GeoLift" && d.payload.metro === metro ? (d.payload.popular ?? []) : [])).slice(0, SUPPLY_POPULAR_TOP);
+      const ids = [...new Set([...named, ...lift, ...obvious, ...popular])].slice(0, SUPPLY_AREAS_MAX);
+      if (ids.length === 0) return null;
+      return { metro, areas: ids, market: null, place_types: keys, mix: false, list_places: keys.length > 0, ...NO_STEP };
+    },
+  };
+}
+
+/**
+ * tenant_mix and area_profile: the question's area against its city on every storefront type (`mix`), so
+ * "what does the block already have too much of" is answered from counts; tenant_mix also lists the named
+ * places.
+ */
+function supplyMix(listPlaces: boolean): (ctx: ScanInputs) => ToolInput<"local_supply"> | null {
+  return (ctx) => {
+    const metro = ctx.intent.geo.metro;
+    if (ctx.publicData !== true || metro === null) return null;
+    const [area] = namedAreaIds(ctx.intent, ctx.geo);
+    if (area === undefined) return null;
+    return { metro, areas: [area], market: null, place_types: [], mix: true, list_places: listPlaces, ...NO_STEP };
+  };
+}
+
+/** taste_twins: the source area's supply in its own city (the twins' is read in the target city after taste_twins). */
+function supplyTwinSource(ctx: ScanInputs): ToolInput<"local_supply"> | null {
+  const sides = twinSides(ctx);
+  if (ctx.publicData !== true || sides === null) return null;
+  return { metro: sides.source.metro, areas: [sides.source.ref], market: null, place_types: conceptSupplyTypes(ctx.intent), mix: false, list_places: false, ...NO_STEP };
+}
+
+/** taste_twins: local_supply chained after taste_twins, for the top twins in the target city. */
+function supplyTwins(ctx: ScanInputs): ChainBuild<"local_supply"> | null {
+  const sides = twinSides(ctx);
+  if (ctx.publicData !== true || sides === null) return null;
+  const keys = conceptSupplyTypes(ctx.intent);
+  return {
+    after: "taste_twins",
+    estimate: 0,
+    describe: `in ${sides.target}: ${supplyWhat(keys)} in the top ${SUPPLY_TWINS} twins taste_twins returns (OpenStreetMap, 0 Qloo calls)`,
+    input: ({ areas }) => {
+      const twins = [...new Set(areas.filter((a) => a.metro === sides.target).map((a) => a.id))].slice(0, SUPPLY_TWINS);
+      return twins.length === 0 ? null : { metro: sides.target, areas: twins, market: null, place_types: keys, mix: false, list_places: false, ...NO_STEP };
+    },
+  };
+}
+
+/** city_compare: the concept's places around the `index`-th compared city's centre, when the concept maps to a type. */
+function supplyInCity(index: number): (ctx: ScanInputs) => ToolInput<"local_supply"> | null {
+  return (ctx) => {
+    const cities = scanCities(ctx);
+    const city = cities[index];
+    if (ctx.publicData !== true || cities.length < 2 || city === undefined) return null;
+    const keys = conceptSupplyTypes(ctx.intent);
+    if (keys.length === 0) return null;
+    return { metro: null, areas: [], market: city, place_types: keys, mix: false, list_places: false, ...NO_STEP };
+  };
+}
+
+const SUPPLY_WHY = "needs an area of a map city in the question, and OpenStreetMap on this server";
+const SUPPLY_LIFT_WHY = "needs a concept and a map city in the question, and OpenStreetMap on this server";
+const SUPPLY_CITY_WHY = "needs two cities from MARKETS and a concept OpenStreetMap has a place type for";
+
 const CITIES_WHY = "needs two to four cities from the MARKETS list in the question";
 const CITY_LIFT_WHY = "needs a concept in the question and a compared city that is one of the 13 map cities";
 const TWINS_WHY = "needs a source area from the AREAS list and another map city to look in";
@@ -847,14 +1026,17 @@ export const SCAN_TABLE: Readonly<Record<Job, readonly ScanEntry[]>> = {
     { tool: "find_tags", chain: categoryRetry(conceptTags), why: CATEGORY_RETRY_WHY, unused: retryUnused },
     { tool: "geo_lift", chain: liftFromTags, why: LIFT_WHY },
     { tool: "area_economics", chain: econLift, why: ECON_WHY },
+    { tool: "local_supply", chain: supplyAfterLift, why: SUPPLY_LIFT_WHY },
   ],
   area_profile: [
     { tool: "block_dna", build: blockArea, why: "needs a neighbourhood from the AREAS list in a gazetteer metro" },
     { tool: "area_economics", build: econNamed, why: ECON_WHY },
+    { tool: "local_supply", build: supplyMix(false), why: SUPPLY_WHY },
   ],
   tenant_mix: [
     { tool: "block_dna", build: blockArea, why: "needs a neighbourhood from the AREAS list in a gazetteer metro" },
     { tool: "area_economics", build: econNamed, why: ECON_WHY },
+    { tool: "local_supply", build: supplyMix(true), why: SUPPLY_WHY },
   ],
   sponsorship: [
     { tool: "sponsor_slate", build: slate, why: "needs an artist or person as the primary target" },
@@ -875,6 +1057,8 @@ export const SCAN_TABLE: Readonly<Record<Job, readonly ScanEntry[]>> = {
     { tool: "taste_twins", build: twinsByArea, chain: twinsFromTags, why: TWINS_WHY },
     { tool: "area_economics", build: econNamed, why: ECON_WHY },
     { tool: "area_economics", chain: econTwins, why: "needs twins from taste_twins, and public data on this server" },
+    { tool: "local_supply", build: supplyTwinSource, why: SUPPLY_WHY },
+    { tool: "local_supply", chain: supplyTwins, why: "needs twins from taste_twins, and OpenStreetMap on this server" },
   ],
   brand_collab: [
     { tool: "cross_domain", build: neighbourhood(SCAN_COLLAB_DOMAINS, false), why: PRIMARY_WHY },
@@ -903,6 +1087,7 @@ export const SCAN_TABLE: Readonly<Record<Job, readonly ScanEntry[]>> = {
     ),
     ...Array.from({ length: CITIES_MAX }, (_, i): ScanEntry => ({ tool: "geo_lift", chain: liftInCity(i), why: CITY_LIFT_WHY })),
     { tool: "share_of_taste", build: shareAcrossCities, defer: shareCitiesAfterWave1, why: "needs a brand or person primary and two cities from MARKETS" },
+    ...Array.from({ length: CITIES_MAX }, (_, i): ScanEntry => ({ tool: "local_supply", build: supplyInCity(i), unused: citySlotUnused(i), why: SUPPLY_CITY_WHY })),
   ],
 };
 
@@ -960,13 +1145,20 @@ export interface ScanPlan {
   skipped: { tool: SkillId; reason: string }[];
   /**
    * Run-level limitation flags the plan raises: SEC_NOT_CONFIGURED / CENSUS_NOT_CONFIGURED when a
-   * public-data step would have run for this question but its source is not configured (D7).
+   * public-data step would have run for this question but its source is not configured (D7), and
+   * NOT_A_LISTED_COMPANY for a primary brand with no listed company (financialsNote).
    */
   flags: Flag[];
+  /**
+   * Limitations with their own text that the plan raises: NOT_SEPARATELY_REPORTED naming the parent of a
+   * primary sub-brand (flag set), and "No OpenStreetMap tag" for a concept the supply read cannot count
+   * (no flag: a plain line).
+   */
+  limitations: { flag: Flag | null; text: string }[];
 }
 
 /** The plan of a run that scans nothing (Qloo disabled). */
-export const emptyScan = (): ScanPlan => ({ steps: [], chained: [], deferred: [], unavailable: [], skipped: [], flags: [] });
+export const emptyScan = (): ScanPlan => ({ steps: [], chained: [], deferred: [], unavailable: [], skipped: [], flags: [], limitations: [] });
 
 /**
  * True when a scan entry would make a step for this question: its build parses, its chain follows a
@@ -992,7 +1184,7 @@ export function planScan(job: Job, ctx: ScanContext): ScanPlan {
   const geo = ctx.geo ?? gazetteer();
   const metros: readonly string[] = geo.metros();
   const markets = ctx.markets ?? MARKET_CATALOGUE.filter((m) => metros.includes(m.id));
-  const inputs: ScanInputs = { ...ctx, geo, markets };
+  const inputs: ScanInputs = { ...ctx, geo, markets, candidates: ctx.candidates ?? NO_SCAN_CANDIDATES };
   const why = (entry: ScanEntry) => entry.why ?? "its default arguments do not fit this question";
   // One line per tool and reason: per-item slots (a fingerprint or lift map per city) share theirs.
   const skip = (entry: ScanEntry, reason = why(entry)) => {
@@ -1072,6 +1264,13 @@ export function planScan(job: Job, ctx: ScanContext): ScanPlan {
         return checked?.success ? checked.data : null;
       },
     });
+  }
+  // Never silent about financials (Part 9 open issue 6), nor about a concept the supply read cannot count.
+  const fin = financialsNote(job, ctx);
+  if (fin !== null && fin.text === null && !plan.flags.includes(fin.flag)) plan.flags.push(fin.flag);
+  if (fin !== null && fin.text !== null) plan.limitations.push({ flag: fin.flag, text: fin.text });
+  if ([...plan.steps, ...plan.chained].some((s) => s.tool === "local_supply")) {
+    for (const concept of supplyTypesForConcepts(questionConcepts(ctx.intent)).unmapped) plan.limitations.push({ flag: null, text: noOsmTagText(concept) });
   }
   return dropIdleRetries(plan);
 }
@@ -1157,6 +1356,12 @@ export function describeScanStep(step: ScanStep): string {
     case "area_economics": {
       const i = step.input as ToolInput<"area_economics">;
       return `${label} for ${i.areas.join(", ")} (${i.metro}; US Census, 0 Qloo calls)`;
+    }
+    case "local_supply": {
+      const i = step.input as ToolInput<"local_supply">;
+      const where = i.market !== null ? `around ${i.market}` : `in ${i.areas.join(", ")} (${i.metro ?? ""})`;
+      const what = i.mix ? "every storefront type against the city (mix)" : supplyWhat(i.place_types);
+      return `${label} ${where}: ${what}${i.list_places ? ", with named places" : ""} (OpenStreetMap, 0 Qloo calls)`;
     }
     default:
       return label;

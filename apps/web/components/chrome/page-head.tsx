@@ -52,8 +52,8 @@ export function PageHead({
           ) : (
             <Skeleton className="size-6 max-md:size-5" />
           )}
-          <span className={cx("min-w-0 truncate md:max-[900px]:whitespace-normal", mobileEyebrow !== undefined && "max-md:hidden")}>{eyebrow}</span>
-          {mobileEyebrow !== undefined ? <span className="min-w-0 truncate md:hidden">{mobileEyebrow}</span> : null}
+          <span className={cx("min-w-0 [overflow-wrap:anywhere]", mobileEyebrow !== undefined && "max-md:hidden")}>{eyebrow}</span>
+          {mobileEyebrow !== undefined ? <span className="min-w-0 [overflow-wrap:anywhere] md:hidden">{mobileEyebrow}</span> : null}
         </p>
         {actions ? <div className="flex shrink-0 items-center gap-3 max-md:hidden">{actions}</div> : null}
         {mobileActions ? <div className="flex shrink-0 items-center gap-2 md:hidden">{mobileActions}</div> : null}

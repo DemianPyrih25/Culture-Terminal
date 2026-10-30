@@ -1,5 +1,6 @@
-import { RunStatus } from "@ct/contracts";
-import { z } from "zod";
+import type { RunStatus } from "@ct/contracts";
+import { RUN_STATUS_VALUES } from "@ct/contracts/values";
+import { object, oneOf, readAs, str, type Read } from "../../lib/read";
 import { isRunId } from "../../lib/run-id";
 import { BriefsError, fetchBriefs, type BriefSummary } from "./briefs-client";
 import { verdictText } from "./format";
@@ -55,10 +56,15 @@ export function answerFromSummary(brief: BriefSummary): AnswerItem {
 }
 
 /** The part of GET /api/runs/[id] a row reads. */
-export const RunRowSchema = z.object({
-  run: z.object({ id: z.string(), status: RunStatus, question: z.string(), createdAt: z.string() }),
+export interface RunRow {
+  id: string;
+  status: RunStatus;
+  question: string;
+  createdAt: string;
+}
+export const RunRowSchema: Read<{ run: RunRow }> = object({
+  run: object({ id: str, status: oneOf(RUN_STATUS_VALUES), question: str, createdAt: str }),
 });
-export type RunRow = z.infer<typeof RunRowSchema>["run"];
 
 /** A run read on its own, by its status. */
 export function answerFromRun(run: RunRow): AnswerItem {
@@ -80,7 +86,7 @@ async function readRun(id: string, doFetch: typeof fetch, signal?: AbortSignal):
   try {
     const res = await doFetch(`/api/runs/${encodeURIComponent(id)}`, { signal, headers: { accept: "application/json" } });
     if (!res.ok) return null;
-    const parsed = RunRowSchema.safeParse(await res.json());
+    const parsed = readAs(RunRowSchema, await res.json());
     return parsed.success && parsed.data.run.id === id ? parsed.data.run : null;
   } catch (err) {
     if (signal?.aborted) throw err;

@@ -1,7 +1,17 @@
-import { ConfidenceBand, EntityType, Job, MatchClass, MentionRole, Pillar, SafetyCategory, Signal } from "@ct/contracts";
-import { z } from "zod";
+import type { Job, SafetyCategory } from "@ct/contracts";
+import {
+  CONFIDENCE_BAND_VALUES,
+  ENTITY_TYPE_VALUES,
+  JOB_VALUES,
+  MATCH_CLASS_VALUES,
+  MENTION_ROLE_VALUES,
+  PILLAR_VALUES,
+  SAFETY_CATEGORY_VALUES,
+  SIGNAL_VALUES,
+} from "@ct/contracts/values";
 import { MAP_CITIES, wordList } from "../../lib/answer/copy";
-// Types only: erased from the browser bundle, and they keep the schema below in step with the server.
+import { array, isRecord, nullable, num, object, oneOf, optional, readAs, str, withDefault, type Read } from "../../lib/read";
+// Types only: erased from the browser bundle, and they keep the readers below in step with the server.
 import type { AlreadyHave, PreviewResponse } from "../../server/preview";
 
 export type { AlreadyHave, PreviewResponse };
@@ -17,53 +27,46 @@ export type { AlreadyHave, PreviewResponse };
  *   server's word while it waits) → failed (or the page moves to the run)
  */
 
-// The preview answer, as the browser reads it ---------------------------------------------------------
+// The preview answer, as the browser reads it (plain checks: no zod in the page) ------------------------
 
-const AlreadyHaveSchema = z.object({
-  runId: z.string(),
-  question: z.string(),
-  createdAt: z.string(),
-  signal: Signal.nullable(),
-  confidence: z.object({ score: z.number(), band: ConfidenceBand }).nullable(),
-}) satisfies z.ZodType<AlreadyHave>;
+const AlreadyHaveSchema: Read<AlreadyHave> = object({
+  runId: str,
+  question: str,
+  createdAt: str,
+  signal: nullable(oneOf(SIGNAL_VALUES)),
+  confidence: nullable(object({ score: num, band: oneOf(CONFIDENCE_BAND_VALUES) })),
+});
 
-const PreviewSchema = z.object({
-  token: z.string().nullable(),
-  expiresAt: z.string(),
-  understood: z
-    .object({
-      pillar: Pillar,
-      job: Job,
-      jobLabel: z.string(),
-      mnemonic: z.string(),
-      mentions: z.array(
-        z.object({
-          text: z.string(),
-          type: EntityType,
-          role: MentionRole,
-          match: MatchClass.nullable(),
-          name: z.string().nullable(),
+const PreviewSchema: Read<PreviewResponse> = object({
+  token: nullable(str),
+  expiresAt: str,
+  understood: nullable(
+    object({
+      pillar: oneOf(PILLAR_VALUES),
+      job: oneOf(JOB_VALUES),
+      jobLabel: str,
+      mnemonic: str,
+      mentions: array(
+        object({
+          text: str,
+          type: oneOf(ENTITY_TYPE_VALUES),
+          role: oneOf(MENTION_ROLE_VALUES),
+          match: nullable(oneOf(MATCH_CLASS_VALUES)),
+          name: nullable(str),
         }),
       ),
-      metros: z.array(z.string()),
-      scope: z.string(),
-      lens: z.string(),
-    })
-    .nullable(),
-  refusal: z
-    .object({ category: SafetyCategory.nullable(), reason: z.string(), reframe: z.string().nullable() })
-    .optional(),
-  alreadyHave: AlreadyHaveSchema.nullable(),
-  estimate: z.object({
-    networkCalls: z.number(),
-    cachedCalls: z.number(),
-    seconds: z.number(),
-    quotaShare: z.number(),
-  }),
+      metros: array(str),
+      scope: str,
+      lens: str,
+    }),
+  ),
+  refusal: optional(object({ category: nullable(oneOf(SAFETY_CATEGORY_VALUES)), reason: str, reframe: nullable(str) })),
+  alreadyHave: nullable(AlreadyHaveSchema),
+  estimate: object({ networkCalls: num, cachedCalls: num, seconds: num, quotaShare: num }),
   // A server from before the economy breaker sends neither: live, no note.
-  mode: z.enum(["live", "economy"]).default("live"),
-  modeNote: z.string().nullable().default(null),
-}) satisfies z.ZodType<PreviewResponse, unknown>;
+  mode: withDefault(oneOf(["live", "economy"] as const), "live"),
+  modeNote: withDefault(nullable(str), null),
+});
 
 /** How a preview request ended. */
 export type PreviewOutcome =
@@ -84,8 +87,8 @@ function stringField(body: unknown, key: string): string | null {
 }
 
 function alreadyHaveOf(body: unknown): AlreadyHave | null {
-  const value = typeof body === "object" && body !== null ? (body as Record<string, unknown>).alreadyHave : null;
-  const parsed = AlreadyHaveSchema.safeParse(value);
+  const value = isRecord(body) ? body.alreadyHave : null;
+  const parsed = readAs(AlreadyHaveSchema, value);
   return parsed.success ? parsed.data : null;
 }
 
@@ -98,7 +101,7 @@ export function readPreviewResponse(status: number | null, body: unknown, retryA
   const message = stringField(body, "error");
   const retry = typeof body === "object" && body !== null && (body as { retry?: unknown }).retry === true;
   if (status === 200) {
-    const parsed = PreviewSchema.safeParse(body);
+    const parsed = readAs(PreviewSchema, body);
     return parsed.success ? { kind: "ok", preview: parsed.data } : { kind: "error", message: UNREADABLE, retry: true };
   }
   if (status === 429) {

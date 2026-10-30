@@ -25,9 +25,10 @@ const decide = (lane: Lane, partial: Partial<Inputs> = {}, policy = DEFAULT_SPEN
 
 describe("laneBudget", () => {
   it("gives the judge lane the whole budget and the public lane what the judge reserve leaves", () => {
-    expect(laneBudget("judge", DEFAULT_SPEND_POLICY)).toEqual({ economyAt: 1, replayAt: 1.35, cap: 1.4 });
-    // 60% of $1.40 is $0.84; economy starts where a live run's $0.35 reserve stops fitting.
-    expect(laneBudget("public", DEFAULT_SPEND_POLICY)).toEqual({ economyAt: 0.49, replayAt: 0.79, cap: 0.84 });
+    // D24: $8 a day, economy from $6; replay once an economy run's $0.06 reserve no longer fits.
+    expect(laneBudget("judge", DEFAULT_SPEND_POLICY)).toEqual({ economyAt: 6, replayAt: 7.94, cap: 8 });
+    // 60% of $8 is $4.80 and 60% of $6 is $3.60.
+    expect(laneBudget("public", DEFAULT_SPEND_POLICY)).toEqual({ economyAt: 3.6, replayAt: 4.74, cap: 4.8 });
   });
 
   it("never lets a live run's reserve or an economy run's reserve overrun the lane's cap", () => {
@@ -49,8 +50,8 @@ describe("laneBudget", () => {
 
 describe("decideMode: the LLM spend breaker", () => {
   it("steps the public lane live → economy → replay only as today's spend crosses its thresholds", () => {
-    expect(decide("public", { todayUsd: 0.48 })).toMatchObject({ mode: "live", breaker: null, message: null, until: null });
-    expect(decide("public", { todayUsd: 0.49 })).toEqual({
+    expect(decide("public", { todayUsd: 3.59 })).toMatchObject({ mode: "live", breaker: null, message: null, until: null });
+    expect(decide("public", { todayUsd: 3.6 })).toEqual({
       lane: "public",
       mode: "economy",
       breaker: "llm_spend",
@@ -58,7 +59,7 @@ describe("decideMode: the LLM spend breaker", () => {
       message: "Live answers run on the economy analyst until 00:00 UTC: today's live budget is nearly used.",
       until: MIDNIGHT,
     });
-    expect(decide("public", { todayUsd: 0.79 })).toEqual({
+    expect(decide("public", { todayUsd: 4.74 })).toEqual({
       lane: "public",
       mode: "replay_only",
       breaker: "llm_spend",
@@ -68,17 +69,17 @@ describe("decideMode: the LLM spend breaker", () => {
     });
   });
 
-  it("steps the judge lane at $1.00 and $1.35, while the public lane is already paused", () => {
-    expect(decide("judge", { todayUsd: 0.99 }).mode).toBe("live");
-    expect(decide("judge", { todayUsd: 1 }).mode).toBe("economy");
-    expect(decide("judge", { todayUsd: 1.34 }).mode).toBe("economy");
-    expect(decide("judge", { todayUsd: 1.35 }).mode).toBe("replay_only");
-    expect(decide("public", { todayUsd: 1 }).mode).toBe("replay_only");
+  it("steps the judge lane at $6.00 and $7.94, while the public lane is already paused", () => {
+    expect(decide("judge", { todayUsd: 5.99 }).mode).toBe("live");
+    expect(decide("judge", { todayUsd: 6 }).mode).toBe("economy");
+    expect(decide("judge", { todayUsd: 7.93 }).mode).toBe("economy");
+    expect(decide("judge", { todayUsd: 7.94 }).mode).toBe("replay_only");
+    expect(decide("public", { todayUsd: 6 }).mode).toBe("replay_only");
   });
 
   it("never steps the judge lane down before the public lane, at any spend", () => {
     const rank = { live: 2, economy: 1, replay_only: 0 } as const;
-    for (let cents = 0; cents <= 200; cents++) {
+    for (let cents = 0; cents <= 1000; cents++) {
       const todayUsd = cents / 100;
       expect(rank[decide("judge", { todayUsd }).mode]).toBeGreaterThanOrEqual(rank[decide("public", { todayUsd }).mode]);
     }
@@ -147,10 +148,10 @@ describe("decideMode: the stored mode and the override", () => {
   });
 
   it("names the first breaker to reach the lowest mode", () => {
-    const both = { stored: storedMode("replay_only", "qloo"), todayUsd: 2 };
+    const both = { stored: storedMode("replay_only", "qloo"), todayUsd: 10 };
     expect(decide("public", both).breaker).toBe("stored");
     // A lower mode wins over an earlier, milder one.
-    expect(decide("public", { stored: storedMode("economy"), todayUsd: 2 }).breaker).toBe("llm_spend");
+    expect(decide("public", { stored: storedMode("economy"), todayUsd: 10 }).breaker).toBe("llm_spend");
   });
 
   it("forces the given mode on every lane with MODE_OVERRIDE, whatever the breakers say", () => {
@@ -172,9 +173,9 @@ describe("ModeService", () => {
     const state = { todayUsd: 0, now: BREAKER_NOW };
     const modes = testModes(state);
     expect((await modes.decide("public")).mode).toBe("live");
-    state.todayUsd = 0.6;
+    state.todayUsd = 3.7;
     expect((await modes.decide("public")).mode).toBe("economy");
-    state.todayUsd = 0.9;
+    state.todayUsd = 4.8;
     const paused = await modes.decideAll();
     expect(paused.public.mode).toBe("replay_only");
     expect(paused.judge.mode).toBe("live");

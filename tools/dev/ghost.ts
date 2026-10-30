@@ -71,7 +71,7 @@ export const GHOST_USAGE = [
   "  --memory           cache Qloo answers in memory instead of the shared Postgres cache (with --mock-qloo only)",
   "  --tag T            QLOO_TAG for the call log and the per-tag network cap",
   "  -h, --help         this text",
-  "env: DATABASE_URL (the run's database), ANTHROPIC_API_KEY, LLM_DEV_USD_CAP (default 15), QLOO_* as for the app",
+  "env: DATABASE_URL (the run's database), ANTHROPIC_API_KEY, LLM_DEV_USD_CAP (default 45, cumulative), QLOO_* as for the app",
   "exit codes: 0 attached, 1 refused or failed, 2 bad arguments or no --yes",
 ].join("\n");
 

@@ -2,9 +2,9 @@
 // being made, and the cards a run that ended early shows. The answer page uses GuessesCard and StateCard.
 export { GUESS_CAPTION, GuessRow, GuessesCard, guessOf, guessStatement } from "./guesses";
 export type { Guess, GuessState, GuessesCardProps } from "./guesses";
-export { NotFoundCard, ProgressCard, ProgressTrack, StepList, editQuestionHref } from "./progress-card";
+export { NotFoundCard, ProgressCard, ProgressTrack, QueuedCard, StepList, editQuestionHref } from "./progress-card";
 export type { ProgressCardProps } from "./progress-card";
-export { FailedCard, FailedInline, PartialCard, ReconnectingState, RefusedCard, StateCard, StoppedCard, runAgain } from "./state-cards";
+export { FailedCard, FailedInline, NotStartedCard, PartialCard, ReconnectingState, RefusedCard, StateCard, StoppedCard, runAgain } from "./state-cards";
 export type { RunAgainDeps, StateCardProps } from "./state-cards";
 export { WhichOneCard, pickCandidate, reachWord } from "./which-one";
 export type { PickDeps, WhichOneProps } from "./which-one";

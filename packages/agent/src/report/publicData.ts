@@ -1,5 +1,6 @@
 import {
   censusDisclaimer,
+  osmDisclaimer,
   secDisclaimer,
   type EvidenceSource,
   type Job,
@@ -36,6 +37,7 @@ export function metricPublicSource(metric: Pick<Metric, "evidenceIds">, ledger: 
 export const PUBLIC_FIGURES: Readonly<Record<PublicSource, string>> = {
   sec: "SEC EDGAR financial figure",
   census: "US Census area figure",
+  osm: "OpenStreetMap place count",
 };
 
 /** The leading label of a period ("FY2024" of "FY2024, 10-K filed 2025-02-14"). */
@@ -52,7 +54,8 @@ function span(periods: readonly string[]): string {
 
 /**
  * The public-data disclaimers of a note (PLAN §6), one per source its metrics come from: the SEC line
- * names the periods shown, the Census line the ACS release. A source with no metric adds nothing.
+ * names the periods shown, the Census line the ACS release, the OpenStreetMap line its attribution and the
+ * latest data date ("OpenStreetMap data as of 2026-10-01"). A source with no metric adds nothing.
  */
 export function publicDisclaimers(metrics: readonly Metric[], ledger: Pick<LedgerLookup, "evidence">): string[] {
   const of = (source: PublicSource) =>
@@ -64,6 +67,11 @@ export function publicDisclaimers(metrics: readonly Metric[], ledger: Pick<Ledge
   if (census.length > 0) {
     const vintages = distinct(census.flatMap((p) => p.match(/\b\d{4}-\d{4}\b/g) ?? []));
     out.push(censusDisclaimer(vintages.length > 0 ? vintages.join(" and ") : distinct(census.map(periodHead)).join(" and ")));
+  }
+  const osm = of("osm");
+  if (osm.length > 0) {
+    const dates = distinct(osm.flatMap((p) => p.match(/\b\d{4}-\d{2}-\d{2}\b/g) ?? [])).sort();
+    out.push(osmDisclaimer(dates.at(-1) ?? null));
   }
   return out;
 }

@@ -44,6 +44,7 @@ describe("readStatus", () => {
     expect(report.runs).toMatchObject({
       accepting: true,
       activeHere: 1,
+      queue: { waiting: 2, max: 12, waitS: 120 },
       slots: { public: 3, judge: 1 },
       recentLimit: 20,
       lanes: { public: { lastHour: 4, hourlyCap: 20 }, judge: { lastHour: 1, hourlyCap: 20 } },
@@ -101,9 +102,9 @@ describe("readStatus", () => {
         storedMode: async () => with_({ mode: "economy" as const, reason: "admin", since: null }),
         decide: async () => ({ public: with_(decision("public")), judge: with_(decision("judge")) }),
         budget: (lane) => with_(BUDGETS[lane]),
-        runManager: () => with_({ activeCount: () => 1, isAccepting: () => true }),
+        runManager: () => with_({ activeCount: () => 1, queuedCount: () => 2, isAccepting: () => true }),
         migrations: () => with_({ applied: true, skipped: false, journal: with_({ count: 2, latest: "0001_invented_step" }) }),
-        limits: () => with_({ ...LIMITS, slots: with_(LIMITS.slots) }),
+        limits: () => with_({ ...LIMITS, slots: with_(LIMITS.slots), queue: with_(LIMITS.queue) }),
         qlooCache: async () => with_({ total: 4, served: 3, sampled: false }),
         qloo: async () => {
           const view = qlooView();
@@ -124,7 +125,7 @@ describe("readStatus", () => {
         now: () => (clock += 1),
         runManager: () => {
           clock += 40;
-          return { activeCount: () => 0, isAccepting: () => true };
+          return { activeCount: () => 0, queuedCount: () => 0, isAccepting: () => true };
         },
       }),
     );
@@ -225,6 +226,7 @@ describe("readStatus", () => {
       }),
     );
     expect(report.runs.activeHere).toBeNull();
+    expect(report.runs.queue?.waiting).toBeNull();
     expect(report.runs.accepting).toBeNull();
     expect(level(report, "draining")).toBe("unknown");
   });

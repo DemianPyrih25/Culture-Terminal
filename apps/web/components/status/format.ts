@@ -16,6 +16,31 @@ export const utcTime = (iso: string): string => `${formatUtcTime(iso)} UTC`;
 /** "22 Oct, 19:04 UTC". */
 export const utcShort = (iso: string): string => `${formatUtcShortDateTime(iso)} UTC`;
 
+/**
+ * The global run queue as /status reads it (D24): runs waiting for a slot now (null when not read), how
+ * many may wait (0 turns the queue off) and how long one waits before it is turned away.
+ */
+export interface QueueReading {
+  waiting: number | null;
+  max: number;
+  waitS: number;
+}
+
+/**
+ * runs.queue from the reading, or null on a server whose reading carries none (server/status.ts adds it
+ * with the run queue), so the row is left out rather than shown as empty.
+ */
+export function queueReading(runs: StatusReport["runs"]): QueueReading | null {
+  const queue = (runs as StatusReport["runs"] & { queue?: QueueReading | null }).queue;
+  return queue ?? null;
+}
+
+/** The queue row's words: "2 of 12 waiting", "Queue off", with the wait. */
+export function queueText(queue: QueueReading): { used: string; of: string } {
+  if (queue.max === 0) return { used: "Queue off", of: "· a run that finds every slot busy is turned away" };
+  return { used: queue.waiting === null ? "–" : count(queue.waiting), of: `of ${count(queue.max)} waiting · each for up to ${count(queue.waitS)} s` };
+}
+
 /** Uptime: "40 s", "6 min", "3 h 12 min", "2 d 4 h". */
 export function formatUptime(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));

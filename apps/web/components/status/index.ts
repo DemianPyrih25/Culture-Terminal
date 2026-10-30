@@ -14,12 +14,14 @@ export {
   MODE_NAME,
   MODE_TAG,
   outcomesText,
+  queueReading,
+  queueText,
   STATUS_ORDER,
   STATUS_WORD,
   statusCounts,
   UNAVAILABLE_TAG,
 } from "./format";
-export type { LaneView, Tag, TagTone } from "./format";
+export type { LaneView, QueueReading, Tag, TagTone } from "./format";
 export { RunStrip, STATUS_CELL } from "./run-strip";
 export type { RunStripProps } from "./run-strip";
 export { Amount, LevelTag, StateTag, StatusRow, StatusRows } from "./status-rows";

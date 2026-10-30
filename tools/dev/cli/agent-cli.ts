@@ -8,13 +8,16 @@ import {
   createAnthropic,
   findPickerChoice,
   runAgent,
+  SIDE_TIMEOUTS,
   type AgentRunOptions,
   type AgentRunResult,
   type AnalystMode,
   type AnthropicLike,
+  type ContextCache,
+  type SideConfig,
 } from "@ct/agent";
 import { DEFAULT_RUN_LIMITS, Lane, placeSearchMarket, QUESTION_MAX_CHARS, type EventInput, type EventInputOf, type LocalityApi, type MarketId } from "@ct/contracts";
-import { closeDb, getDb, type Queryable } from "@ct/db";
+import { closeDb, getContext, getDb, putContext, type Queryable } from "@ct/db";
 import type { QlooClient, QlooStore } from "@ct/qloo";
 import { searchParams } from "@ct/quant";
 import { choiceOption, parseCli, pinsOption, UsageError } from "./args";
@@ -38,8 +41,11 @@ export const RUN_AGENT_USAGE = [
   "  --tag T            QLOO_TAG for the call log and the per-tag network cap",
   "  --memory           cache Qloo answers in memory instead of the shared Postgres cache (with --mock-qloo only)",
   "  --persist          store the run and its events in Postgres (runs, run_events)",
+  "  --no-ai-context    skip the \"What AI knows (not verified)\" side call",
+  "  --no-web           skip the \"From the web\" side call (web search)",
   "  -h, --help         this text",
-  "env: ANTHROPIC_API_KEY (required), LLM_DEV_USD_CAP (default 15), QLOO_* as for the app,",
+  "env: ANTHROPIC_API_KEY (required), LLM_DEV_USD_CAP (default 45, cumulative), QLOO_* as for the app,",
+  "     AI_CONTEXT_ENABLED / WEB_SEARCH_ENABLED (0 turns a side call off), WEB_SEARCH_MAX_USES (default 3),",
   "     SEC_USER_AGENT (live SEC filings) and CENSUS_API_KEY (live Census figures); QLOO_MOCK=1 mocks both",
   "Ctrl+C cancels the run; the spend tally holds the run's worst case until it returns.",
   "exit codes: 0 completed, 1 failed or not completed, 2 bad arguments or no --yes, 3 needs a choice",
@@ -54,6 +60,9 @@ const OPTIONS = {
   tag: { type: "string" },
   memory: { type: "boolean" },
   persist: { type: "boolean" },
+  // On by default; parseCli's allowNegative reads --no-ai-context and --no-web as false.
+  "ai-context": { type: "boolean" },
+  web: { type: "boolean" },
   help: { type: "boolean", short: "h" },
 } as const;
 
@@ -66,6 +75,10 @@ export interface AgentArgs {
   tag: string | null;
   memory: boolean;
   persist: boolean;
+  /** False with --no-ai-context. */
+  aiContext: boolean;
+  /** False with --no-web. */
+  web: boolean;
   yes: boolean;
 }
 
@@ -86,7 +99,47 @@ export function parseAgentArgs(argv: readonly string[]): AgentArgs | null {
     tag,
     memory: options.memory === true,
     persist: options.persist === true,
+    aiContext: options["ai-context"] !== false,
+    web: options.web !== false,
     yes: options.yes === true,
+  };
+}
+
+/** The most each side context call may cost (D24: AI context $0.02, web $0.08 at 3 searches), booked in the worst case. */
+export const SIDE_WORST_USD = { ai: 0.02, web: 0.08 } as const;
+
+const envSwitch = (raw: string | undefined): boolean => raw?.trim() !== "0";
+
+/**
+ * The side context calls for a CLI run (R4, R5): on unless the flag or the environment
+ * (AI_CONTEXT_ENABLED=0, WEB_SEARCH_ENABLED=0) turns one off; economy runs no web search (the agent).
+ */
+export function cliSideConfig(args: Pick<AgentArgs, "aiContext" | "web">, env: NodeJS.ProcessEnv): SideConfig {
+  const uses = Number(env.WEB_SEARCH_MAX_USES?.trim() || "3");
+  return {
+    aiEnabled: args.aiContext && envSwitch(env.AI_CONTEXT_ENABLED),
+    webEnabled: args.web && envSwitch(env.WEB_SEARCH_ENABLED),
+    webMaxUses: Number.isFinite(uses) ? Math.min(5, Math.max(1, Math.round(uses))) : 3,
+    aiTimeoutMs: SIDE_TIMEOUTS.aiMs,
+    webTimeoutMs: SIDE_TIMEOUTS.webMs,
+  };
+}
+
+/** The worst case of one run: the ANALYST's hard stop plus each side call that may run. */
+export function worstCaseUsd(usdHard: number, side: SideConfig, mode: AnalystMode): number {
+  return usdHard + (side.aiEnabled ? SIDE_WORST_USD.ai : 0) + (side.webEnabled && mode === "live" ? SIDE_WORST_USD.web : 0);
+}
+
+/** The shared context_cache (as the web app's), so CLI runs reuse blocks inside their lifetime. */
+function pgContextCache(db: Queryable): ContextCache {
+  return {
+    get: async (key) => {
+      const row = await getContext(db, key, new Date());
+      return row ? { body: row.body, createdAt: row.createdAt.toISOString() } : null;
+    },
+    put: async (row) => {
+      await putContext(db, { key: row.key, kind: row.kind, model: row.model, body: row.body, usd: row.usd, expiresAt: new Date(Date.now() + row.ttlMs) });
+    },
   };
 }
 
@@ -229,11 +282,14 @@ export async function runAgentCommand(argv: readonly string[], deps: AgentCliDep
     io.err(`Refusing to start: ${errorText(err)}`);
     return EXIT.failed;
   }
-  // The run stops itself at usdHard, so that is its worst case.
-  const check = checkSpend(capUsd, spent, limits.usdHard);
+  // The run stops itself at usdHard; the side calls add at most their own caps on top.
+  const side = cliSideConfig(args, env);
+  const worstUsd = worstCaseUsd(limits.usdHard, side, args.mode);
+  const check = checkSpend(capUsd, spent, worstUsd);
   const config = ANALYST_CONFIGS[args.mode];
   io.out(
-    `run-agent · ANALYST ${config.model} (${args.mode}) · worst case ${formatUsd(check.estimateUsd)} (per-run hard cap) · ` +
+    `run-agent · ANALYST ${config.model} (${args.mode}) · side calls: AI context ${side.aiEnabled ? "on" : "off"}, web ${side.webEnabled && args.mode === "live" ? "on" : "off"} · ` +
+      `worst case ${formatUsd(check.estimateUsd)} (per-run hard cap) · ` +
       `run-agent spend so far ${formatUsd(spent)} of LLM_DEV_USD_CAP ${formatUsd(capUsd)}`,
   );
   const overCap = (spentUsd: number): string =>
@@ -292,7 +348,7 @@ export async function runAgentCommand(argv: readonly string[], deps: AgentCliDep
   if (spendFile !== null) {
     let refusal: string | null;
     try {
-      const reserved = reserveSpend(spendFile, capUsd, limits.usdHard, now());
+      const reserved = reserveSpend(spendFile, capUsd, worstUsd, now());
       refusal = reserved.check.ok ? null : overCap(reserved.check.spentUsd);
     } catch (err) {
       refusal = `Refusing to start: could not book the run's worst case in the spend tally: ${errorText(err)}`;
@@ -341,11 +397,13 @@ export async function runAgentCommand(argv: readonly string[], deps: AgentCliDep
       pins,
       parent: null,
       localities,
+      // The side context calls (R4, R5); the agent reads these two (see the ops handoff).
+      ...({ sideConfig: side, contextCache: qloo.storeLabel.startsWith("postgres") && deps.store === undefined ? pgContextCache(getDb()) : null } as object),
     });
   } catch (err) {
     io.err(`run-agent failed: ${errorText(err)}`);
     // What a run that throws spent is unknown, so the booked worst case stands.
-    settle(0, io.err, `counted at its worst case ${formatUsd(limits.usdHard)}; `);
+    settle(0, io.err, `counted at its worst case ${formatUsd(worstUsd)}; `);
     await persistence?.fail(errorText(err), now().getTime() - startedAt).catch((e: unknown) => io.err(`--persist: ${errorText(e)}`));
     await closeAll();
     return EXIT.failed;
@@ -354,7 +412,7 @@ export async function runAgentCommand(argv: readonly string[], deps: AgentCliDep
   const picker = trace.needsInput();
   const answers = picker === null ? new Map<string, string>() : await pickerPins(qloo.client, picker, result.intent ? placeSearchMarket(result.intent.geo) : null);
   for (const line of renderAgentResult(result, picker, answers)) io.out(line);
-  settle(result.usd - limits.usdHard, io.out, "  ");
+  settle(result.usd - worstUsd, io.out, "  ");
   if (persistence !== null) {
     try {
       await persistence.finish(result);

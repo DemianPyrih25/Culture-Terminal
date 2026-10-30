@@ -1,4 +1,5 @@
-import { GHOST_HONESTY_LINE, GhostPickCategory, type GhostDiff, type Report, type RunState } from "@ct/contracts";
+import type { GhostDiff, GhostPickCategory, Report, RunState } from "@ct/contracts";
+import { GHOST_HONESTY_LINE, GHOST_PICK_CATEGORY_VALUES } from "@ct/contracts/values";
 
 /**
  * The GHOST column (SPEC §6.6, PLAN Part 7): what the same model said with no tools, beside what this
@@ -234,7 +235,7 @@ export function markClaims(headline: string, claims: readonly string[]): GhostHe
 export function buildGhostView(ghost: GhostRun | null): GhostView | null {
   if (!ghost) return null;
   const { answer, diff } = ghost;
-  const categories = GhostPickCategory.options
+  const categories = GHOST_PICK_CATEGORY_VALUES
     .map((category) => buildCategory(category, answer.picks[category], diff.items))
     .filter((c): c is GhostCategory => c !== null);
   return {

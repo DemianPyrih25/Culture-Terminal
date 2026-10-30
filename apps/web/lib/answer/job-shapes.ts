@@ -23,7 +23,7 @@ const ofFamily = (d: DatasetEnvelope, family: string) => d.formulaIds.some((id) 
 
 const rowsOf = (p: RankedPayload): RankedRow[] => p.groups.flatMap((g) => g.rows);
 
-const VERDICT_FLAGS: ReadonlySet<RowFlag> = new Set<RowFlag>(["KEEP", "VETO", "ADD"]);
+const VERDICT_FLAGS: ReadonlySet<RowFlag> = new Set<RowFlag>(["KEEP", "VETO", "ADD", "CATEGORY"]);
 
 /** A rank change in places: "+31", "−17" (whole numbers stay whole). */
 const places = (v: number) => (Number.isInteger(v) ? (v > 0 ? `+${v}` : v < 0 ? `−${Math.abs(v)}` : "0") : signed(v));
@@ -134,11 +134,21 @@ export function unitText(value: number, unit: MetricUnit): string {
 /** A comparator row: flagged as one, or in the whole city's group (area_economics puts the city in group "city"). */
 const COMPARISON_GROUPS: ReadonlySet<string> = new Set(["city", "metro", "comparison"]);
 
+/**
+ * The whole-city comparison row of area economics when it is built from whole ZIP areas (ANSWER_QUALITY
+ * §5): "ZIP areas touching Nashville (approximate: whole ZIP areas, not the city itself)". Runs stored
+ * before the label changed ("Nashville ZIP areas (whole ZIPs)") read the same; any other label stays.
+ */
+export function zipCityLabel(label: string): string {
+  const old = /^(.+?) ZIP areas \(whole ZIPs\)$/.exec(label.trim());
+  return old ? `ZIP areas touching ${old[1]} (approximate: whole ZIP areas, not the city itself)` : label;
+}
+
 export function dataRows(p: RankedPayload): { body: Extract<ChartBody, { type: "rows" }>; table: ChartTableData; comparisons: number } {
   const tagged = p.groups.flatMap((g) => g.rows.map((r) => ({ r, comparison: r.comparison === true || COMPARISON_GROUPS.has(g.key) })));
   const ordered = [...tagged.filter((x) => !x.comparison), ...tagged.filter((x) => x.comparison)];
   const shaped: DataRowData[] = ordered.map(({ r, comparison }) => ({
-    label: r.label,
+    label: comparison ? zipCityLabel(r.label) : r.label,
     sublabel: r.sublabel,
     comparison,
     cells: p.columns.map((col, c) => {
@@ -256,11 +266,14 @@ const VERDICT_TITLE: Readonly<Record<VerdictKind, string>> = {
   add: "Found in the data, not guessed",
   veto: "Dropped: the data does not back these",
   unscored: "Not scored",
+  category: "Measured against the category only: no keep or veto",
 };
 
-const VERDICT_ORDER: readonly VerdictKind[] = ["keep", "add", "veto", "unscored"];
+const VERDICT_ORDER: readonly VerdictKind[] = ["keep", "add", "veto", "category", "unscored"];
 
-const verdictOf = (r: RankedRow): VerdictKind => (r.flags.includes("KEEP") ? "keep" : r.flags.includes("VETO") ? "veto" : r.flags.includes("ADD") ? "add" : "unscored");
+/** A CATEGORY row (R2) is never kept or dropped, whatever else it carries. */
+const verdictOf = (r: RankedRow): VerdictKind =>
+  r.flags.includes("CATEGORY") ? "category" : r.flags.includes("KEEP") ? "keep" : r.flags.includes("VETO") ? "veto" : r.flags.includes("ADD") ? "add" : "unscored";
 
 const profile = (r: RankedRow) => (r.type !== null && isDesType(r.type) && r.label.trim() !== "" ? desHref({ name: r.label, type: r.type }) : null);
 
@@ -274,6 +287,7 @@ export function verdictGroups(p: RankedPayload): { body: ChartBody; table: Chart
     const gap = gapAt >= 0 ? (r.cells[gapAt]?.value ?? null) : null;
     if (gap !== null && (kind === "keep" || kind === "veto")) return `${Math.abs(gap).toFixed(2)} ${kind === "keep" ? "above" : "below"} the bar`;
     const rank = rankAt >= 0 ? (r.cells[rankAt]?.value ?? null) : null;
+    if (kind === "category") return rank !== null ? `#${Math.round(rank)} for the category` : "fit with the category, not the concept";
     if (rank !== null && kind !== "veto") return `#${Math.round(rank)} for the concept`;
     if (kind === "add" && r.rank !== null) return `#${r.rank} for the concept`;
     const said = r.sublabel?.trim();
@@ -287,7 +301,7 @@ export function verdictGroups(p: RankedPayload): { body: ChartBody; table: Chart
       .filter((r) => verdictOf(r) === verdict)
       .map((r) => ({ label: r.label, display: display(r, verdict), href: verdict === "veto" ? null : profile(r) })),
   })).filter((g) => g.rows.length > 0);
-  const counts = { keep: 0, add: 0, veto: 0, unscored: 0 } as Record<VerdictKind, number>;
+  const counts = { keep: 0, add: 0, veto: 0, unscored: 0, category: 0 } as Record<VerdictKind, number>;
   for (const r of rows) counts[verdictOf(r)] += 1;
   return {
     body: { type: "verdicts", groups },

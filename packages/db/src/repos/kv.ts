@@ -36,3 +36,23 @@ export async function deleteKv(db: Queryable, key: string): Promise<boolean> {
   const rows = await db.delete(kv).where(eq(kv.key, key)).returning({ key: kv.key });
   return rows.length > 0;
 }
+
+/**
+ * Adds `by` to a numeric counter at `key` (absent or non-numeric reads as 0) in one statement and returns
+ * the new value: daily counters such as `screener.count.YYYY-MM-DD` and `osm.count.YYYY-MM-DD`.
+ */
+export async function incrementKvCounter(db: Queryable, key: string, by = 1): Promise<number> {
+  if (!Number.isFinite(by)) throw new RangeError(`incrementKvCounter: by must be a finite number, got ${by}`);
+  const [row] = await db
+    .insert(kv)
+    .values({ key, value: by })
+    .onConflictDoUpdate({
+      target: kv.key,
+      set: {
+        value: sql`to_jsonb((case when jsonb_typeof(${kv.value}) = 'number' then (${kv.value} #>> '{}')::numeric else 0 end) + ${by})`,
+        updatedAt: sql`now()`,
+      },
+    })
+    .returning({ value: kv.value });
+  return Number(row?.value ?? 0);
+}

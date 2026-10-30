@@ -1,4 +1,5 @@
 import type { MetricUnit, RankedPayload, RankedRow, RowFlag, SlatePayload } from "@ct/contracts";
+import { CANDIDATE_SOURCE_LABEL } from "@ct/contracts/values";
 import { FigureFrame, figureLabel, type FigureMeta } from "./figure-frame";
 import { FigureTable, type TableColumn, type TableRow } from "./figure-table";
 import { COMPARATOR_PHRASE, cellText, formatNumber, formatTick, reasonLabel, sentenceCase, type NumberStyle } from "./format";
@@ -61,10 +62,32 @@ export const FLAG_LABEL: Readonly<Record<RowFlag, string>> = {
   KEEP: "AI guess kept",
   VETO: "AI guess dropped",
   ADD: "Found in the data",
+  CATEGORY: "Measured against the category only",
 };
 
+/** "You named" or "Expected" for a row the question gave or a specialist would check first (R3); null otherwise. */
+export function sourceWord(row: Pick<RankedRow, "source">): string | null {
+  return row.source ? CANDIDATE_SOURCE_LABEL[row.source] : null;
+}
+
+/** The R3 chip after a row's name in the HTML variants. */
+function SourceChip({ row }: { row: Pick<RankedRow, "source"> }) {
+  const word = sourceWord(row);
+  return word ? (
+    <span className="ml-1.5 inline-flex rounded-chip bg-sunken px-1.5 text-[11px] leading-4 font-medium whitespace-nowrap text-ink-2" data-candidate={row.source}>
+      {word}
+    </span>
+  ) : null;
+}
+
+/** The flags a row shows: never TARGET (the highlight says it), and no keep, veto or add beside CATEGORY (R2). */
+export function displayFlags(flags: readonly RowFlag[]): RowFlag[] {
+  const category = flags.includes("CATEGORY");
+  return flags.filter((f) => f !== "TARGET" && !(category && (f === "KEEP" || f === "VETO" || f === "ADD")));
+}
+
 /** A row the concept check dropped: the AI guessed it, the data did not back it. */
-export const isVetoed = (row: { flags: readonly RowFlag[] }) => row.flags.includes("VETO");
+export const isVetoed = (row: { flags: readonly RowFlag[] }) => row.flags.includes("VETO") && !row.flags.includes("CATEGORY");
 
 const UNIT_INTERVAL: ReadonlySet<MetricUnit> = new Set(["similarity", "pct", "popularity", "affinity"]);
 /** Units whose bars mark 1 by default, when every value is positive. */
@@ -129,6 +152,7 @@ export function slateToRanked(slate: SlatePayload): RankedPayload {
           cells: [row.best ? row.best.fit : { value: null, reason: row.reason ?? "not_measured" }],
           flags: row.best?.utr ? ["UTR"] : [],
           explain: [],
+          ...((row.best?.source ?? row.source) ? { source: row.best?.source ?? row.source } : {}),
         })),
       },
     ],
@@ -258,7 +282,7 @@ function Lollipop(props: RankedTableProps & { label: string; style: NumberStyle 
           const text = cell?.value == null ? null : formatNumber(cell.value, unit, style);
           return (
             <g key={`r-${row.key}`} data-row={row.key} data-tone={strong ? "highlight" : grey ? "comparison" : "default"} data-veto={vetoed || undefined}>
-              <title>{`${row.label}${vetoed ? ` (${FLAG_LABEL.VETO})` : ""}: ${text ?? reasonLabel(cell?.reason ?? null)}`}</title>
+              <title>{`${row.label}${sourceWord(row) ? ` (${sourceWord(row)})` : ""}${vetoed ? ` (${FLAG_LABEL.VETO})` : ""}: ${text ?? reasonLabel(cell?.reason ?? null)}`}</title>
               <text x={0} y={px(line.y + 12.5)} fontSize={12} className="fill-ink-2 font-mono">
                 {row.rank ?? ""}
               </text>
@@ -389,6 +413,7 @@ function SlateStyleTable(props: RankedTableProps & { style: NumberStyle }) {
                   className={`px-2 text-left text-[13px] ${vetoed ? "text-ink-2 line-through" : "text-ink"} ${strong ? "font-semibold" : "font-medium"}`}
                 >
                   {row.label}
+                  <SourceChip row={row} />
                 </th>
                 <td className="px-2">
                   {cell?.value == null ? (
@@ -433,8 +458,7 @@ function SlateStyleTable(props: RankedTableProps & { style: NumberStyle }) {
                 {withFlags ? (
                   <td className="px-2">
                     <span className="flex flex-wrap gap-x-2">
-                      {row.flags
-                        .filter((f) => f !== "TARGET")
+                      {displayFlags(row.flags)
                         .map((f) => (
                           <span key={f} className={`text-[12px] font-medium whitespace-nowrap ${f === "VETO" ? "text-ink-2" : "text-accent-ink"}`}>
                             {FLAG_LABEL[f]}
@@ -498,10 +522,11 @@ function RankedLists(props: RankedTableProps & { style: NumberStyle }) {
                   <td className="text-[12px] text-ink-2 tabular-nums">{row.rank ?? ""}</td>
                   <th
                     scope="row"
-                    className={`truncate text-left text-[13px] ${grey ? "font-normal text-ink-2" : first ? "font-medium text-ink" : "font-normal text-ink-2"}`}
+                    className={`text-left text-[13px] [overflow-wrap:anywhere] ${grey ? "font-normal text-ink-2" : first ? "font-medium text-ink" : "font-normal text-ink-2"}`}
                     title={row.label}
                   >
                     {row.label}
+                    <SourceChip row={row} />
                     {missing ? (
                       <span className="pl-1.5 text-[12px] font-normal text-ink-2 italic" data-missing="true">
                         {reasonLabel(cell?.reason ?? null)}
@@ -626,7 +651,11 @@ export function rankedTableSpec(
   opts: Pick<RankedTableOptions, "labelHeader" | "sublabelHeader" | "comparisonKeys"> = {},
 ) {
   const expected = comparisonSet(data, opts.comparisonKeys);
-  const flagsOf = (row: RankedRow) => [...(expected.has(row.key) ? ["expected"] : []), ...row.flags.map((f) => FLAG_LABEL[f])];
+  const flagsOf = (row: RankedRow) => [
+    ...(expected.has(row.key) ? ["expected"] : []),
+    ...(sourceWord(row) ? [sourceWord(row) as string] : []),
+    ...displayFlags(row.flags).map((f) => FLAG_LABEL[f]),
+  ];
   const withSub = data.groups.some((g) => g.rows.some((r) => r.sublabel !== null));
   const withFlags = data.groups.some((g) => g.rows.some((r) => flagsOf(r).length > 0));
   const columns: TableColumn[] = [

@@ -2,7 +2,17 @@
 // fit of configurations no flat map can hold, the orientation by the first point (no mirroring under
 // a near-tie), and taste distances from a similarity matrix with unscored pairs.
 import { describe, expect, it } from "vitest";
-import { classicalMds, kruskalStress, symmetricEigen, tasteDistances } from "../src/mds";
+import { TasteMapPayload } from "@ct/contracts";
+import {
+  TASTE_MAP_DRAW_MIN_K,
+  buildTasteMap,
+  classicalMds,
+  kruskalStress,
+  symmetricEigen,
+  tasteDistances,
+  tasteMapFromScreen,
+  type TasteMapMember,
+} from "../src/mds";
 import { createRng } from "../src/stats";
 
 type Point = readonly number[];
@@ -294,5 +304,153 @@ describe("tasteDistances", () => {
     const pairs = [[0, 1], [0, 2], [0, 3], [1, 2], [1, 3], [2, 3]] as const;
     const closest = pairs.reduce((best, p) => (map[p[0]]![p[1]]! < map[best[0]]![best[1]]! ? p : best));
     expect(closest).toEqual([0, 1]);
+  });
+});
+
+describe("kruskalStress: skipped pairs", () => {
+  it("leaves skipped pairs out of both sums, in either order", () => {
+    const d = [
+      [0, 1, 2],
+      [1, 0, 1],
+      [2, 1, 0],
+    ];
+    const coords = [[0], [1], [5]];
+    expect(kruskalStress(d, coords)).toBeGreaterThan(0.5);
+    // Only 0–1 is left once 0–2 and 1–2 are skipped, and the map keeps it exactly.
+    expect(kruskalStress(d, coords, [[2, 0], [1, 2]])).toBe(0);
+  });
+});
+
+describe("buildTasteMap", () => {
+  const member = (i: number, target = false): TasteMapMember => ({
+    key: `R${i + 1}`,
+    label: `Brand ${String.fromCharCode(65 + i)}`,
+    ref: `R${i + 1}` as TasteMapMember["ref"],
+    hub: target ? null : 0.5,
+    target,
+  });
+  const members = (n: number) => Array.from({ length: n }, (_, i) => member(i, i === 0));
+  /** Similarities whose distances 1 − sim are exactly the planar distances of `points` (all ≤ 1). */
+  const simOf = (points: readonly Point[]): (number | null)[][] =>
+    distances(points).map((row, i) => row.map((x, j) => (i === j ? null : 1 - x)));
+  // A unit-free square plus its centre, small enough that every distance stays below 1.
+  const square: Point[] = [[0, 0], [0.4, 0], [0.4, 0.4], [0, 0.4], [0.2, 0.2]];
+
+  it("recovers a planar configuration up to rotation and reflection, with stress ~0", () => {
+    const built = buildTasteMap({ source: "screener", members: members(5), sim: simOf(square) });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const p = built.payload;
+    expect(() => TasteMapPayload.parse(p)).not.toThrow();
+    expect(p).toMatchObject({ source: "screener", k: 5, imputedPairs: [], omitted: [] });
+    expect(p.stress).toBeLessThan(1e-3);
+    expect(p.explained).toBeCloseTo(1, 3);
+    expectDistancesKept(distances(square), p.points.map((q) => [q.x, q.y]), 3);
+    expect(p.points[0]).toMatchObject({ key: "R1", target: true, hub: null });
+    expect(p.points[0]!.x).toBeLessThanOrEqual(0);
+    expect(p.method).toContain("over 5 entities");
+  });
+
+  it("is deterministic for the same matrix", () => {
+    const a = buildTasteMap({ source: "screener", members: members(5), sim: simOf(square) });
+    const b = buildTasteMap({ source: "screener", members: members(5), sim: simOf(square) });
+    expect(a).toEqual(b);
+  });
+
+  it("imputes an unscored pair, lists it by key and keeps it out of the stress", () => {
+    const sim = simOf(square);
+    sim[1]![3] = null;
+    sim[3]![1] = null;
+    const built = buildTasteMap({ source: "substitution_map", members: members(5), sim });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.payload.imputedPairs).toEqual([["R2", "R4"]]);
+    expect(built.payload.method).toContain("1 unscored pair set to the largest scored distance");
+    const { d, imputed } = tasteDistances(sim);
+    const coords = built.payload.points.map((q) => [q.x, q.y]);
+    expect(built.payload.stress).toBeCloseTo(kruskalStress(d, coords, imputed), 3);
+  });
+
+  it("reads one triangle only, as the triangular calls fill it", () => {
+    const full = simOf(square);
+    const upper = full.map((row, i) => row.map((v, j) => (j > i ? v : null)));
+    const a = buildTasteMap({ source: "screener", members: members(5), sim: full });
+    const b = buildTasteMap({ source: "screener", members: members(5), sim: upper });
+    expect(b).toEqual(a);
+  });
+
+  it("omits a member with no scored pair and keeps the caller's omissions", () => {
+    const sim = simOf([...square, [0.1, 0.1]]);
+    for (let j = 0; j < 6; j++) {
+      sim[5]![j] = null;
+      sim[j]![5] = null;
+    }
+    const built = buildTasteMap({
+      source: "substitution_map",
+      members: members(6),
+      sim,
+      omitted: [{ label: "Brand Z", ref: null, reason: "dropped" }],
+    });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.payload.k).toBe(5);
+    expect(built.payload.points.map((q) => q.key)).not.toContain("R6");
+    expect(built.payload.omitted).toEqual([
+      { label: "Brand Z", ref: null, reason: "dropped" },
+      { label: "Brand F", ref: "R6", reason: "not_scored" },
+    ]);
+  });
+
+  it("builds three points (the figure lists them) but never fewer, and says why", () => {
+    const three = buildTasteMap({ source: "screener", members: members(3), sim: simOf(square.slice(0, 3)) });
+    expect(three.ok && three.payload.k).toBe(3);
+    expect(TASTE_MAP_DRAW_MIN_K).toBe(4);
+    const two = buildTasteMap({ source: "screener", members: members(2), sim: simOf(square.slice(0, 2)) });
+    expect(two).toEqual({ ok: false, reason: "insufficient_n", message: "A taste map needs at least 3 entities with a scored pair; only 2 had one." });
+    const none = buildTasteMap({ source: "screener", members: members(4), sim: members(4).map(() => [null, null, null, null]) });
+    expect(none).toMatchObject({ ok: false, reason: "insufficient_n", message: expect.stringContaining("none had one") });
+  });
+
+  it("builds no map when more than half of the pairs are unscored", () => {
+    const sim = simOf(square);
+    for (const [i, j] of [[0, 2], [0, 3], [1, 3], [1, 4], [2, 4], [3, 4]] as const) {
+      sim[i]![j] = null;
+      sim[j]![i] = null;
+    }
+    expect(buildTasteMap({ source: "screener", members: members(5), sim })).toEqual({
+      ok: false,
+      reason: "not_scored",
+      message: "Qloo scored 4 of 10 pairs; a taste map needs at least half of them measured.",
+    });
+  });
+
+  it("rejects more than 14 members and a matrix of the wrong size", () => {
+    const fifteen = Array.from({ length: 15 }, (_, i) => member(i));
+    const sim15 = fifteen.map(() => fifteen.map(() => 0.5));
+    expect(() => buildTasteMap({ source: "screener", members: fifteen, sim: sim15 })).toThrow(RangeError);
+    expect(() => buildTasteMap({ source: "screener", members: members(4), sim: [[null]] })).toThrow(RangeError);
+  });
+});
+
+describe("tasteMapFromScreen", () => {
+  const sim = [
+    [null, 0.7, 0.4, 0.3],
+    [null, null, 0.5, 0.2],
+    [null, null, null, 0.6],
+    [null, null, null, null],
+  ];
+  const members = ["S1", "S2", "S3", "S4"].map((key, i) => ({ key, label: `Brand ${key}`, target: i === 0, hub: null }));
+
+  it("maps a whole screen from its upper triangle, with no refs (the screener is not a run)", () => {
+    const built = tasteMapFromScreen({ members, sim, complete: true });
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.payload).toMatchObject({ source: "screener", k: 4 });
+    expect(built.payload.points.every((p) => p.ref === null)).toBe(true);
+    expect(built.payload.points[0]).toMatchObject({ key: "S1", target: true });
+  });
+
+  it("builds no map from a screen that lost a call, and says so", () => {
+    expect(tasteMapFromScreen({ members, sim, complete: false })).toMatchObject({ ok: false, reason: "error" });
   });
 });

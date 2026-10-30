@@ -64,6 +64,19 @@ export async function setStatus(
   return rows.length > 0;
 }
 
+/**
+ * Stamps when the run left the queue and started; the first stamp wins. Returns false when the run does not
+ * exist. Runs that never start keep a null started_at (countRunsSince `startedOnly`).
+ */
+export async function markStarted(db: Queryable, id: string, ts: Date = new Date()): Promise<boolean> {
+  const rows = await db
+    .update(runs)
+    .set({ startedAt: sql`coalesce(${runs.startedAt}, ${ts.toISOString()}::timestamptz)`, updatedAt: sql`now()` })
+    .where(eq(runs.id, id))
+    .returning({ id: runs.id });
+  return rows.length > 0;
+}
+
 /** Raises the cancel flag the run loop polls. Keeps the first request time. False if no such run. */
 export async function requestCancel(db: Queryable, id: string): Promise<boolean> {
   const rows = await db
@@ -100,11 +113,16 @@ export interface CountRunsSinceOptions {
   ipHash?: string;
   /** Only runs of this lane. */
   lane?: RunLane;
+  /**
+   * Only runs that started (started_at set): a run that never left the queue (queue timeout, cancel or
+   * shutdown while queued) spent nothing and counts toward no visitor or global cap (Part 10 open issue).
+   */
+  startedOnly?: boolean;
 }
 
 /** The conditions of countRunsSince's filter. */
 function sinceConditions(what: string, options: CountRunsSinceOptions): SQL[] {
-  const { hashPrefix, sinceMs, ipHash, lane } = options;
+  const { hashPrefix, sinceMs, ipHash, lane, startedOnly } = options;
   checkWindow(what, sinceMs);
   if (ipHash !== undefined && ipHash.trim() === "") throw new RangeError(`${what}: ipHash must not be empty`);
   const conditions = [
@@ -113,6 +131,7 @@ function sinceConditions(what: string, options: CountRunsSinceOptions): SQL[] {
   ];
   if (ipHash !== undefined) conditions.push(eq(runs.ipHash, ipHash));
   if (lane !== undefined) conditions.push(eq(runs.lane, lane));
+  if (startedOnly === true) conditions.push(isNotNull(runs.startedAt));
   return conditions;
 }
 

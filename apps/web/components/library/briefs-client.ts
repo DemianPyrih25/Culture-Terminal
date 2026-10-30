@@ -1,7 +1,8 @@
-import { ConfidenceBand, Job, Pillar, Signal } from "@ct/contracts";
-import { z } from "zod";
+import type { Pillar } from "@ct/contracts";
+import { CONFIDENCE_BAND_VALUES, JOB_VALUES, PILLAR_VALUES, SIGNAL_VALUES } from "@ct/contracts/values";
+import { array, nullable, num, object, oneOf, readAs, record, str, withDefault, type Read } from "../../lib/read";
 import { readRecentRunIds, recentIdsParam } from "../../lib/recent-briefs";
-// Types only: erased from the browser bundle, and they keep the schema below in step with the server.
+// Types only: erased from the browser bundle, and they keep the readers below in step with the server.
 import type { BriefList, BriefSummary } from "../../server/run-list";
 
 export type { BriefList, BriefSummary };
@@ -24,36 +25,36 @@ export interface BriefsQuery {
   before?: string | null;
 }
 
-const MetricDisplaySchema = z.object({ label: z.string(), display: z.string().nullable(), badge: z.string() });
+const MetricDisplaySchema = object({ label: str, display: nullable(str), badge: str });
 
-const BriefSummarySchema = z.object({
-  runId: z.string(),
-  question: z.string(),
-  pillar: Pillar.nullable(),
-  job: Job.nullable(),
-  jobLabel: z.string().nullable(),
-  status: z.enum(["completed", "incomplete"]),
-  signal: Signal.nullable(),
+const BriefSummarySchema: Read<BriefSummary> = object({
+  runId: str,
+  question: str,
+  pillar: nullable(oneOf(PILLAR_VALUES)),
+  job: nullable(oneOf(JOB_VALUES)),
+  jobLabel: nullable(str),
+  status: oneOf(["completed", "incomplete"] as const),
+  signal: nullable(oneOf(SIGNAL_VALUES)),
   // A list from before the verdict tag existed sends none: the row prints the signal label.
-  tag: z.string().nullable().default(null),
-  headline: z.string().nullable(),
-  metrics: z.record(z.string(), MetricDisplaySchema),
-  confidence: z.object({ score: z.number(), band: ConfidenceBand }).nullable(),
-  createdAt: z.string(),
-  numbersTraced: z.object({ traced: z.number(), total: z.number() }).nullable(),
-  sources: z.number(),
-}) satisfies z.ZodType<BriefSummary>;
+  tag: withDefault(nullable(str), null),
+  headline: nullable(str),
+  metrics: record(MetricDisplaySchema),
+  confidence: nullable(object({ score: num, band: oneOf(CONFIDENCE_BAND_VALUES) })),
+  createdAt: str,
+  numbersTraced: nullable(object({ traced: num, total: num })),
+  sources: num,
+});
 
-const TracedSchema = z.object({ traced: z.number(), total: z.number() });
+const TracedSchema = object({ traced: num, total: num });
 
-const BriefListSchema = z.object({
-  runs: z.array(BriefSummarySchema),
-  next: z.string().nullable(),
-  total: z.number(),
-  pillars: z.object({ investment: z.number(), location: z.number(), marketing: z.number(), audience: z.number() }),
+const BriefListSchema: Read<BriefList> = object({
+  runs: array(BriefSummarySchema),
+  next: nullable(str),
+  total: num,
+  pillars: object({ investment: num, location: num, marketing: num, audience: num }),
   numbersTraced: TracedSchema,
-  pillarsTraced: z.object({ investment: TracedSchema, location: TracedSchema, marketing: TracedSchema, audience: TracedSchema }),
-}) satisfies z.ZodType<BriefList>;
+  pillarsTraced: object({ investment: TracedSchema, location: TracedSchema, marketing: TracedSchema, audience: TracedSchema }),
+});
 
 /** The list URL for a query and this browser's run ids (newest 50). */
 export function briefsUrl(query: BriefsQuery, ids: readonly string[] = []): string {
@@ -103,7 +104,7 @@ export async function fetchBriefs(query: BriefsQuery, options: FetchBriefsOption
     const message = typeof (body as { error?: unknown } | null)?.error === "string" ? (body as { error: string }).error : null;
     throw new BriefsError(message ?? "The briefs could not be loaded.", res.status >= 500);
   }
-  const parsed = BriefListSchema.safeParse(body);
+  const parsed = readAs(BriefListSchema, body);
   if (!parsed.success) throw new BriefsError("The briefs could not be read.", false);
   return parsed.data;
 }

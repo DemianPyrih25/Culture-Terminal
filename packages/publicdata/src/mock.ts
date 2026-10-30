@@ -3,10 +3,11 @@ import { type Now, realNow } from "@ct/qloo";
 import listed from "../../../config/listed_companies.json";
 import type { PublicRequest, PublicTransport, PublicTransportResponse } from "./api";
 import { CENSUS_VARIABLES } from "./census";
+import { osmAnswer } from "./osm/mock";
 
 /**
- * The synthetic public-data transport (QLOO_MOCK=1): a clean clone runs SEC and Census reads with no
- * key and no network. Every value is invented and a pure function of the request (sha256, never
+ * The synthetic public-data transport (QLOO_MOCK=1): a clean clone runs SEC, Census and OpenStreetMap
+ * reads with no key and no network. Every value is invented and a pure function of the request (sha256, never
  * Math.random), in the live response shapes:
  * - the ticker map lists every ticker of config/listed_companies.json (plus three invented ones) under
  *   an invented title and an invented CIK (0009xxxxxx), so the brand → ticker → CIK path works;
@@ -16,6 +17,7 @@ import { CENSUS_VARIABLES } from "./census";
  *   before Census publishes it), any 5-digit ZCTA, and for a county the tract codes 000100..129909
  *   (basic numbers 0001-1299, suffixes 00-09). Real tract codes outside that grid get no mock row.
  * Only the fixed ACS variables are answered; any other variable is a 400, as live.
+ * - OpenStreetMap (Overpass) counts and named places come from osm/mock.ts, from the request's plan.
  */
 
 export interface MockPublicFault {
@@ -256,7 +258,9 @@ export function createMockPublicTransport(options: MockPublicTransportOptions = 
     const started = performance.now();
     signal?.throwIfAborted();
     if (options.latencyMs !== undefined && options.latencyMs > 0) await sleep(options.latencyMs, signal);
-    const reply = injected(request) ?? (request.source === "sec" ? secAnswer(request, now()) : censusAnswer(request, now()));
+    const reply =
+      injected(request) ??
+      (request.source === "sec" ? secAnswer(request, now()) : request.source === "osm" ? osmAnswer(request) : censusAnswer(request, now()));
     return { status: reply.status, body: reply.body, ms: Math.round(performance.now() - started) };
   };
 }

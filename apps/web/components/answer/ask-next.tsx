@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useId, useRef, useState } from "react";
-import { QUESTION_MAX_CHARS } from "@ct/contracts";
+import { QUESTION_MAX_CHARS } from "@ct/contracts/values";
 import { nextMoveHref, type BriefNextMove } from "../../lib/brief";
 import { Button, Card, CardTitle, ChipLink } from "../ui";
 
@@ -22,8 +22,8 @@ export function AskNextCard({ runId, moves, placeholder }: { runId: string; move
         <ul className="mb-4 flex flex-wrap gap-3 max-md:gap-2" data-next-moves={moves.length}>
           {moves.map((m) => (
             <li key={m.question} className="max-w-full">
-              <ChipLink href={m.href} title={m.question} data-next-move={m.label} className="max-w-full">
-                <span className="truncate">{m.label}</span>
+              <ChipLink href={m.href} title={m.question} data-next-move={m.label} className="max-w-full" wrap>
+                {m.label}
               </ChipLink>
             </li>
           ))}

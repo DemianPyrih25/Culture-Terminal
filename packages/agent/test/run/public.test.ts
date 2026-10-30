@@ -79,7 +79,7 @@ describe("runAgent: public data", () => {
     expect(result.status).toBe("completed");
     expect(ofType(events, "qloo")).toEqual([]);
     const context = String(fake.streamRequests[0]?.messages[0]?.content);
-    expect(context).toContain("Only company_financials and area_economics still read SEC and Census data.");
+    expect(context).toContain("Only company_financials, area_economics and local_supply still read SEC, Census and OpenStreetMap data.");
     expect(context).toMatch(/UNAVAILABLE TOOLS: (?!.*company_financials)(?!.*area_economics).*peer_landscape/);
     // The call ran its skill (no registered brand here, so it answers why), not the Qloo-disabled notice.
     const answer = userTexts(fake.streamRequests[1]!).join("\n");

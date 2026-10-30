@@ -43,6 +43,8 @@ export function formatEvent(event: EventInput, state: TraceState): string[] {
         `RUN      ${event.model} · ${event.mode} · lane ${event.lane} · caps ${event.limits.qlooCalls} Qloo calls, ${formatUsd(event.limits.usdHard)} LLM` +
           (event.parentRunId === null ? "" : ` · child of ${event.parentRunId}`),
       ];
+    case "run.queued":
+      return [`QUEUED   position ${event.position} · ${event.ahead} ahead · gives up in ${event.waitSMax} s`];
     case "clerk": {
       const { intent } = event;
       const geo = [intent.geo.metro, intent.geo.area, intent.geo.unsupported_place].filter((g) => g !== null);
@@ -128,6 +130,18 @@ export function formatEvent(event: EventInput, state: TraceState): string[] {
         `usage    ${formatUsd(event.llmUsd)} · ${formatTokens(event.tokens)} · Qloo ${formatCount(event.qloo.network)} network / ` +
           `${formatCount(event.qloo.cached)} cached / ${formatCount(event.qloo.reused)} reused · ${formatMs(event.elapsedMs)}`,
       ];
+    case "context.ai": {
+      const b = event.block;
+      const what = b.status === "ok" ? `${b.items.length} item(s)` + (b.presenceMarkets.length > 0 ? ` · present in ${b.presenceMarkets.join(", ")}` : "") : (b.note ?? b.status);
+      return [`AI CTX   ${b.status} · ${oneLine(what, NOTE_MAX)}${b.cached ? " · cached" : ""} · ${formatUsd(event.usd)} · ${formatMs(event.ms)}` +
+        (b.droppedForNumbers > 0 ? ` · ${b.droppedForNumbers} dropped for numbers` : "")];
+    }
+    case "context.web": {
+      const b = event.block;
+      const what = b.status === "ok" ? `${b.items.length} item(s) from ${b.searches} search(es)` : (b.note ?? b.status);
+      return [`WEB CTX  ${b.status} · ${oneLine(what, NOTE_MAX)}${b.cached ? " · cached" : ""} · ${formatUsd(event.usd)} · ${formatMs(event.ms)}` +
+        (b.droppedForNumbers > 0 ? ` · ${b.droppedForNumbers} dropped for numbers` : "")];
+    }
     case "error":
       return [`ERROR    ${event.code}: ${event.message}${event.retryable ? " (retryable)" : ""}`];
     case "run.end":
