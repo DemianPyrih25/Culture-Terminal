@@ -137,12 +137,6 @@ export function requestLookup(entry: ScreenerRequestEntry, now: number): { looku
   };
 }
 
-/** "6 Qloo requests · 2 saved copies · code only, no AI model". */
-export function requestsLine(screen: Pick<ScreenerResult, "requests" | "qloo">): string {
-  const saved = screen.requests.length - screen.qloo.network;
-  return [plural(screen.requests.length, "Qloo request"), saved > 0 ? `${saved} saved ${saved === 1 ? "copy" : "copies"}` : "all fetched live", "code only, no AI model"].join(" · ");
-}
-
 /** The taste map's source line: its own similarity requests, how many were fetched live, and the cost. */
 export function mapSourceText(screen: Pick<ScreenerResult, "requests">): string {
   const calls = screen.requests.filter((r) => r.purpose === "taste_map");

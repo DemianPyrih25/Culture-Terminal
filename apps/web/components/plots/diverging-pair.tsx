@@ -101,7 +101,7 @@ export function DivergingPair({ groups, keyLabels = PAIR_KEY, baseline = 1, labe
                       <NoDataMark />
                     ) : (
                       <>
-                        <span className="type-label text-ink-2 tabular-nums">{pairDisplay(g.less)}</span>
+                        <span className="font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums">{pairDisplay(g.less)}</span>
                         <Bar tone="less" share={shares[i]!.less} />
                       </>
                     )}
@@ -116,7 +116,7 @@ export function DivergingPair({ groups, keyLabels = PAIR_KEY, baseline = 1, labe
                     ) : (
                       <>
                         <Bar tone="more" share={shares[i]!.more} />
-                        <span className="type-label text-ink-2 tabular-nums">{pairDisplay(g.more)}</span>
+                        <span className="font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums">{pairDisplay(g.more)}</span>
                       </>
                     )}
                     <span className="min-w-0 type-body text-ink [overflow-wrap:anywhere]">{g.more.label}</span>
@@ -145,7 +145,7 @@ export function DivergingPair({ groups, keyLabels = PAIR_KEY, baseline = 1, labe
                 <div key={side} className="flex flex-col gap-1">
                   <span className="flex items-baseline gap-1.5">
                     <span className="min-w-0 type-body text-ink [overflow-wrap:anywhere]">{s.label}</span>
-                    <span className="type-label text-ink-2 tabular-nums">{pairDisplay(s)}</span>
+                    <span className="font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums">{pairDisplay(s)}</span>
                   </span>
                   <span className="relative h-2 w-full overflow-hidden rounded-xs bg-sunken">
                     <span

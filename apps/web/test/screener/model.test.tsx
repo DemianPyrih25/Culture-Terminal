@@ -7,9 +7,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { tasteMap } from "../../components/figures/fixtures";
 import { ScreenerMapSlot } from "../../components/screener/map-slot";
-import { absenceText, cellText, DEFAULT_SORT, mapSourceText, nextSort, requestLookup, requestsLine, sortRows } from "../../components/screener/model";
+import { absenceText, cellText, DEFAULT_SORT, mapSourceText, nextSort, requestLookup, sortRows } from "../../components/screener/model";
 import { ScreenerTable } from "../../components/screener/screener-table";
-import { costLine } from "../../components/screener/screener-view";
+import { isDailyLimit } from "../../components/screener/screener-view";
 
 const ok = (value: number, display = value.toFixed(2)): ScreenerCell => ({ status: "ok", value, reason: null, display, requestIds: ["Q2"] });
 const gap = (reason: ScreenerCell["reason"], requestIds: ScreenerCell["requestIds"] = []): ScreenerCell => ({ status: "unavailable", value: null, reason, display: null, requestIds });
@@ -78,10 +78,10 @@ describe("requests", () => {
     expect(query.query["filter.results.entities"]).toBe("ent-a,ent-b,ent-c");
   });
 
-  it("counts requests and saved copies, and states the plan's cost", () => {
-    expect(requestsLine({ requests: [entry, { ...entry, id: "Q4", cache: "miss" }], qloo: { network: 1, cached: 1 } })).toBe("2 Qloo requests · 1 saved copy · code only, no AI model");
-    expect(costLine(0, false)).toMatch(/^Up to 5 Qloo requests/);
-    expect(costLine(4, true)).toMatch(/^Up to 22 Qloo requests/);
+  it("tells the day's budget apart from a short wait, so only the day's limit links to the plan", () => {
+    expect(isDailyLimit("Today's Qloo requests are used up. The screener resumes at 00:00 UTC; screens already run still open.")).toBe(true);
+    expect(isDailyLimit("You have run several new screens in a short time. Try again in 40 s; screens already run still open.")).toBe(false);
+    expect(isDailyLimit("The screener is busy right now. Try again in 12 minutes.")).toBe(false);
   });
 });
 

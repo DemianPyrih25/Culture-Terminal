@@ -58,7 +58,7 @@ export function RankedFitList({ rows, max = 100, climbLabel = CLIMB_LABEL, label
             data-row={row.key ?? row.label}
             className="grid grid-cols-[16px_minmax(0,1fr)_48px_14px] items-center gap-x-3 gap-y-1 py-2 md:min-h-11 md:grid-cols-[16px_minmax(0,1fr)_160px_48px_14px] md:py-1"
           >
-            <span className="type-label text-ink-2 tabular-nums">{i + 1}</span>
+            <span className="font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums">{i + 1}</span>
             <span className="col-span-3 min-w-0 text-[15px] leading-6 font-semibold text-ink [overflow-wrap:anywhere] md:col-span-1">
               {row.label}
             </span>
@@ -74,7 +74,7 @@ export function RankedFitList({ rows, max = 100, climbLabel = CLIMB_LABEL, label
                 />
               </span>
             )}
-            <span className="type-label text-ink-2 tabular-nums">{row.value === null ? "" : fitDisplay(row, max)}</span>
+            <span className="font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums">{row.value === null ? "" : fitDisplay(row, max)}</span>
             {row.climbs ? (
               <span data-climbs="true" className="inline-flex">
                 <Icon name="arrow-up" size={14} className="text-good-ink" />

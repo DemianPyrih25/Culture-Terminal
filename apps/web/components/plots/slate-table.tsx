@@ -81,7 +81,7 @@ function Fit({ row }: { row: SlateRow }) {
           style={{ width: `${(share(row.fit, 1) * 100).toFixed(2)}%` }}
         />
       </span>
-      <span className="type-label whitespace-nowrap text-ink-2 tabular-nums">{row.display}</span>
+      <span className="font-mono text-[12px] leading-[18px] whitespace-nowrap text-ink-2 tabular-nums">{row.display}</span>
     </span>
   );
 }

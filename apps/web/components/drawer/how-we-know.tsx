@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import type { RunState } from "@ct/contracts";
 import { GHOST_HONESTY_LINE, isPublicProvenanceRequest } from "@ct/contracts/values";
 import type { BriefModel, Footnote } from "../../lib/brief";
-import { CONFIDENCE_EXPLAINER, DrawerShell, Icon, Segmented, segmentedPanelId, segmentedTabId, useToast } from "../ui";
+import { CONFIDENCE_EXPLAINER, cx, DrawerShell, Icon, Segmented, segmentedPanelId, segmentedTabId, useToast } from "../ui";
 import type { CallQuery } from "./request-copy";
 import { FocusCard, focusView, type NumberCopy } from "./focus-card";
 import { freshnessCounts, refNames } from "./source-copy";
@@ -235,7 +235,7 @@ export interface HowWeKnowPanelProps {
 /** One tab's panel of the drawer (also drawn on its own by the dev gallery and the tests). */
 export function HowWeKnowPanel({ model, tab, footnote, onFocus = () => undefined, queries = new Map(), onCopied = () => undefined, ghost = false, describe }: HowWeKnowPanelProps) {
   return (
-    <div role="tabpanel" id={segmentedPanelId(ID, tab)} aria-labelledby={segmentedTabId(ID, tab)} data-how-tab={tab} className="flex flex-col gap-5">
+    <div role="tabpanel" id={segmentedPanelId(ID, tab)} aria-labelledby={segmentedTabId(ID, tab)} data-how-tab={tab} className="flex flex-col gap-7">
       {tab === "summary" ? <SummaryPanel model={model} ghost={ghost} /> : null}
       {tab === "numbers" ? <NumbersPanel model={model} footnote={footnote} onFocus={onFocus} queries={queries} onCopied={onCopied} describe={describe} /> : null}
       {tab === "sources" ? <SourcesPanel model={model} queries={queries} onCopied={onCopied} /> : null}
@@ -243,6 +243,9 @@ export function HowWeKnowPanel({ model, tab, footnote, onFocus = () => undefined
     </div>
   );
 }
+
+/** A section's label: small caps, 11 px, tracked, in ink-3 (the Ledger section label). */
+const LABEL = "text-[11px] leading-4 font-semibold tracking-[0.08em] text-ink-3 uppercase";
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
@@ -267,42 +270,68 @@ function SummaryPanel({ model, ghost }: { model: BriefModel; ghost: boolean }) {
   const conviction = model.conviction;
   return (
     <>
-      <p className="flex items-start gap-2 type-body text-ink" data-check={check.ok ? "passed" : "partial"}>
-        <span className="flex h-6 shrink-0 items-center">
+      <p
+        className={cx(
+          "flex items-start gap-2.5 rounded-sm px-3.5 py-3 text-[13px] leading-5 font-medium",
+          check.ok ? "bg-good-soft text-good-ink" : "bg-caution-soft text-caution-ink",
+        )}
+        data-check={check.ok ? "passed" : "partial"}
+      >
+        <span className="flex h-5 shrink-0 items-center">
           <Icon name={check.ok ? "badge-check" : "triangle-alert"} size={16} className={check.ok ? "text-good" : "text-caution"} />
         </span>
         {check.text}.
       </p>
-      <p className="type-body text-ink-2">
-        {plural(numbersCount(model), "number")} · {plural(model.sources.items.length, "source")} · {plural(saved, "saved copy", "saved copies")}, {live} fetched live
-      </p>
-      {from ? (
-        <p className="type-label text-ink-2" data-providers>
-          {from}
+      <div className="-mt-3 flex flex-col gap-1">
+        <p className="font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums">
+          {plural(numbersCount(model), "number")} · {plural(model.sources.items.length, "source")} · {plural(saved, "saved copy", "saved copies")}, {live} fetched live
         </p>
-      ) : null}
+        {from ? (
+          <p className="text-[12px] leading-[18px] text-ink-2" data-providers>
+            {from}
+          </p>
+        ) : null}
+      </div>
       {conviction.summary ? (
-        <section aria-label="Confidence" className="flex flex-col gap-2 rounded-tile bg-sunken p-4">
-          <h3 className="text-[15px] leading-6 font-semibold text-ink">{conviction.summary.bandLabel} confidence</h3>
-          <p className="type-label text-ink-2">{CONFIDENCE_EXPLAINER}</p>
-          {conviction.why && conviction.why.lines.length > 0 ? (
-            <ul className="flex flex-col gap-1">
-              {conviction.why.lines.map((line) => (
-                <li key={line.rule} className="flex items-baseline justify-between gap-3 type-label text-ink">
-                  <span>{line.label}</span>
-                  <span className="shrink-0 text-ink-2 tabular-nums">{line.pointsText}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="type-label text-ink">Nothing lowered it.</p>
-          )}
+        <section aria-label="Confidence" className="flex flex-col gap-2.5">
+          <p className={LABEL} aria-hidden="true">
+            Confidence
+          </p>
+          <div className="flex flex-col gap-2.5 rounded-sm border border-line bg-canvas px-4 py-3.5">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className={cx("inline-flex items-center gap-1.5 rounded-xs px-2 py-0.5 text-[12px] leading-[18px] font-semibold", BAND_CHIP[conviction.summary.band] ?? BAND_CHIP.MED)}>
+                <span aria-hidden="true" className="size-1.5 rounded-full bg-current" />
+                {conviction.summary.bandLabel} confidence
+              </h3>
+              <span className="font-mono text-[12px] leading-4 text-ink-2 tabular-nums">{conviction.summary.score} / 100</span>
+            </div>
+            <p className="text-[12px] leading-[18px] text-ink-2">{CONFIDENCE_EXPLAINER}</p>
+            {conviction.why && conviction.why.lines.length > 0 ? (
+              <ul className="flex flex-col">
+                {conviction.why.lines.map((line) => (
+                  <li key={line.rule} className="flex items-baseline justify-between gap-3 border-t border-line py-1.5 text-[13px] leading-5 text-ink-2">
+                    <span>{line.label}</span>
+                    <span className="shrink-0 font-mono text-[12px] font-medium text-danger tabular-nums">{line.pointsText}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="border-t border-line pt-1.5 text-[13px] leading-5 text-ink">Nothing lowered it.</p>
+            )}
+          </div>
         </section>
       ) : null}
-      {ghost ? <p className="type-label text-ink-2">{GHOST_HONESTY_LINE}</p> : null}
+      {ghost ? <p className="text-[12px] leading-[18px] text-ink-2">{GHOST_HONESTY_LINE}</p> : null}
     </>
   );
 }
+
+/** The confidence band's chip colours. */
+const BAND_CHIP: Readonly<Record<string, string>> = {
+  HIGH: "bg-good-soft text-good-ink",
+  MED: "bg-caution-soft text-caution-ink",
+  LOW: "bg-danger-soft text-danger-ink",
+};
 
 const PROVIDER_NAME = { qloo: "Qloo", sec: "SEC EDGAR", census: "US Census Bureau", osm: "OpenStreetMap" } as const;
 
@@ -347,7 +376,7 @@ function NumbersPanel({
     const notes = focusable(model);
     if (notes.length === 0) return <p className="type-body text-ink-2">No numbers in this answer.</p>;
     return (
-      <ul className="flex flex-col gap-2" aria-label="Numbers in this answer">
+      <ul className="flex flex-col border-t border-line" aria-label="Numbers in this answer">
         {notes.map((n) => {
           const view = focusView(n, describe?.(n) ?? null, model.evidence.figures.find((f) => f.footnote === n.n)?.title ?? null);
           return (
@@ -355,13 +384,13 @@ function NumbersPanel({
               <button
                 type="button"
                 onClick={() => onFocus(n.n)}
-                className="flex w-full items-center gap-3 rounded-control border border-line bg-surface px-4 py-3 text-left transition-colors hover:border-line-strong"
+                className="group flex w-full items-center gap-4 border-b border-line py-3 text-left transition-colors hover:bg-canvas"
               >
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="text-[14px] leading-5 font-semibold text-ink">{view.value ?? view.kicker}</span>
-                  <span className="truncate type-label text-ink-2">{view.description}</span>
+                <span className={cx("w-24 shrink-0 truncate text-ink", view.value ? "font-mono text-[15px] leading-5 font-medium tabular-nums" : "text-[13px] leading-5 font-semibold")}>
+                  {view.value ?? view.kicker}
                 </span>
-                <Icon name="chevron-right" size={16} className="shrink-0 text-ink-3" />
+                <span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-ink-2">{view.description}</span>
+                <Icon name="chevron-right" size={16} className="shrink-0 text-ink-3 group-hover:text-ink-2" />
               </button>
             </li>
           );
@@ -374,17 +403,17 @@ function NumbersPanel({
   const names = refNames(model.sources.items);
   return (
     <>
-      <button type="button" onClick={() => onFocus(null)} className="-mb-2 inline-flex items-center gap-1 self-start rounded-sm type-label text-ink-2 hover:text-ink">
+      <button type="button" onClick={() => onFocus(null)} className="-mb-2 inline-flex items-center gap-1 self-start rounded-xs text-[12px] leading-4 font-semibold text-accent hover:text-accent-hover">
         <Icon name="chevron-left" size={14} />
         All numbers
       </button>
       <FocusCard view={focusView(note, describe?.(note) ?? null, figureTitle)} />
       {lookups.length > 0 ? (
-        <section aria-labelledby={`${ID}-lookups`} className="flex flex-col gap-3">
-          <h3 id={`${ID}-lookups`} className="text-[13px] leading-[18px] font-semibold text-ink-2">
+        <section aria-labelledby={`${ID}-lookups`} className="flex flex-col gap-2">
+          <h3 id={`${ID}-lookups`} className={LABEL}>
             Lookups behind this number
           </h3>
-          <ul className="flex flex-col gap-2">
+          <ul className="flex flex-col border-t border-line">
             {lookups.map((l, i) => (
               <SourceRow key={l.qlooCallId} lookup={l} query={queries.get(l.qlooCallId)} defaultOpen={i === 0} names={names} onCopied={onCopied} />
             ))}
@@ -401,7 +430,7 @@ function SourcesPanel({ model, queries, onCopied }: { model: BriefModel; queries
   if (model.sources.items.length === 0) return <p className="type-body text-ink-2">No lookups were made.</p>;
   const names = refNames(model.sources.items);
   return (
-    <ul className="flex flex-col gap-2" aria-label="Lookups">
+    <ul className="flex flex-col border-t border-line" aria-label="Lookups">
       {model.sources.items.map((s) => (
         <SourceRow key={s.qlooCallId} lookup={s} query={queries.get(s.qlooCallId)} names={names} onCopied={onCopied} />
       ))}
@@ -445,19 +474,19 @@ function MethodPanel({ model }: { model: BriefModel }) {
   return (
     <>
       {reading ? (
-        <section aria-label="How the question was read" className="flex flex-col gap-1">
-          <h3 className="text-[13px] leading-[18px] font-semibold text-ink-2">How we read the question</h3>
+        <section aria-label="How the question was read" className="flex flex-col gap-1.5">
+          <h3 className={LABEL}>How we read the question</h3>
           <p className="type-body text-ink">
             {reading.jobLabel}
             {reading.subjects.length > 0 ? ` · ${reading.subjects.join(", ")}` : ""}
           </p>
           {reading.readAs ? (
-            <p className="type-label text-ink" data-read-as>
+            <p className="text-[13px] leading-5 text-ink-2" data-read-as>
               {reading.readAs.line}
             </p>
           ) : null}
           {reading.assumptions.length > 0 ? (
-            <ul className="flex list-disc flex-col gap-0.5 pl-5 type-label text-ink-2">
+            <ul className="flex list-disc flex-col gap-0.5 pl-5 text-[13px] leading-5 text-ink-2 marker:text-ink-3">
               {reading.assumptions.map((a) => (
                 <li key={a}>{a}</li>
               ))}
@@ -467,16 +496,16 @@ function MethodPanel({ model }: { model: BriefModel }) {
       ) : null}
       {method.steps.length > 0 ? (
         <section aria-label="Steps" className="flex flex-col gap-2">
-          <h3 className="text-[13px] leading-[18px] font-semibold text-ink-2">What we looked up</h3>
-          <ol className="flex flex-col gap-2">
+          <h3 className={LABEL}>What we looked up</h3>
+          <ol className="flex flex-col border-t border-line">
             {method.steps.map((step) => (
-              <li key={step.n} className="flex items-start gap-3 rounded-control border border-line bg-surface px-4 py-3">
-                <span className="w-5 shrink-0 type-label text-ink-2 tabular-nums">{step.n}</span>
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="text-[14px] leading-5 font-semibold text-ink">{step.toolLabel}</span>
-                  {step.purpose ? <span className="type-label text-ink-2">{step.purpose}</span> : null}
+              <li key={step.n} className="flex items-start gap-3 border-b border-line py-2.5">
+                <span className="w-5 shrink-0 font-mono text-[12px] leading-5 text-ink-3 tabular-nums">{step.n}</span>
+                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                  <span className="text-[13px] leading-5 font-semibold text-ink">{step.toolLabel}</span>
+                  {step.purpose ? <span className="text-[12px] leading-[18px] text-ink-2">{step.purpose}</span> : null}
                 </span>
-                <span className="shrink-0 type-label text-ink-2">
+                <span className="shrink-0 font-mono text-[11px] leading-5 text-ink-2">
                   {STEP_WORD[step.status] ?? step.status}
                   {step.actual + (step.publicActual ?? 0) > 0 ? ` · ${plural(step.actual + (step.publicActual ?? 0), "lookup")}` : ""}
                 </span>
@@ -487,8 +516,8 @@ function MethodPanel({ model }: { model: BriefModel }) {
       ) : null}
       {method.pivots.length > 0 || method.fallbacks.length > 0 ? (
         <section aria-label="Changes of plan" className="flex flex-col gap-2">
-          <h3 className="text-[13px] leading-[18px] font-semibold text-ink-2">Where the plan changed</h3>
-          <ul className="flex flex-col gap-2 type-body text-ink">
+          <h3 className={LABEL}>Where the plan changed</h3>
+          <ul className="flex flex-col gap-1.5 text-[13px] leading-5 text-ink">
             {method.pivots.map((p) => (
               <li key={p.toolCallId}>
                 Looked closer with {p.toolLabel.toLowerCase()}
@@ -503,18 +532,18 @@ function MethodPanel({ model }: { model: BriefModel }) {
           </ul>
         </section>
       ) : null}
-      <section aria-label="The check" className="flex flex-col gap-1">
-        <h3 className="text-[13px] leading-[18px] font-semibold text-ink-2">The check</h3>
+      <section aria-label="The check" className="flex flex-col gap-1.5">
+        <h3 className={LABEL}>The check</h3>
         <p className="type-body text-ink">{checkerText(model)}</p>
       </section>
       {method.context ? (
-        <p className="type-label text-ink-2" data-context-receipt="true">
+        <p className="text-[12px] leading-[18px] text-ink-2" data-context-receipt="true">
           {method.context}. The AI and web blocks are shown apart and never change the measured answer.
         </p>
       ) : null}
-      <p className="type-label text-ink-2">
+      <p className="border-t border-line pt-4 text-[12px] leading-[18px] text-ink-2">
         Numbers are computed by our code, never typed by the AI.{" "}
-        <a href="/method" className="font-medium text-accent hover:underline hover:underline-offset-4">
+        <a href="/method" className="font-semibold text-accent hover:underline hover:underline-offset-4">
           Every formula and rule
         </a>
       </p>

@@ -2,6 +2,7 @@
 
 import type { PickerCandidate, ScreenerAnswer, ScreenerColumn, ScreenerResult } from "@ct/contracts";
 import { SCREENER_MARKETS_MAX, SCREENER_QUERY_MAX, SCREENER_ROWS_DEFAULT } from "@ct/contracts/values";
+import Link from "next/link";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { HumanCheckPanel, sharedHumanFetch, useHumanCheck } from "../protection/human-check-panel";
 import { Button } from "../ui/button";
@@ -11,10 +12,11 @@ import { Icon } from "../ui/icons";
 import { InlineState } from "../ui/inline-state";
 import { Monogram } from "../ui/monogram";
 import { Segmented } from "../ui/segmented";
+import { Skeleton } from "../ui/skeleton";
 import { useToast } from "../ui/toast";
 import { CellDrawer } from "./cell-drawer";
 import { ScreenerMapSlot } from "./map-slot";
-import { DEFAULT_SORT, nextSort, requestsLine, type SortState } from "./model";
+import { DEFAULT_SORT, nextSort, type SortState } from "./model";
 import { ScreenerTable } from "./screener-table";
 
 /**
@@ -42,10 +44,25 @@ const SEED_OPTIONS = [
   { value: "brand" as const, label: "Seed brand" },
 ];
 
-/** What one screen costs, for the line under the button (FEATURE_COSTS screener and taste_map_screener). */
-export function costLine(markets: number, map: boolean): string {
-  const max = 5 + markets + (map ? 13 : 0);
-  return `Up to ${max} Qloo requests · no AI model · a repeat within the hour makes none`;
+/** A section label: small caps, tracked, quiet (Ledger). */
+const SECTION_LABEL = "text-[11px] leading-4 font-semibold tracking-[0.08em] text-ink-3 uppercase";
+
+/**
+ * The day's screens are used up (the server's daily budget answer). Limits and usage live on Settings
+ * only, so the page says it once, calmly, and links there.
+ */
+export function isDailyLimit(message: string): boolean {
+  return message.startsWith("Today's Qloo requests are used up");
+}
+
+/** When the screen was put together, in UTC ("Oct 31, 2026, 14:08 UTC"); a saved copy's own dates are in the limits. */
+function screenedAt(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "just now";
+  const d = new Date(t);
+  const date = d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  const time = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+  return `${date}, ${time} UTC`;
 }
 
 async function postScreen(body: unknown): Promise<Status> {
@@ -66,19 +83,19 @@ async function postScreen(body: unknown): Promise<Status> {
 
 function Candidates({ candidates, onPick }: { candidates: readonly PickerCandidate[]; onPick: (key: string) => void }) {
   return (
-    <ul className="flex flex-col gap-2" aria-label="Candidates">
+    <ul className="flex flex-col divide-y divide-line overflow-hidden rounded-control border border-line bg-surface" aria-label="Candidates">
       {candidates.map((c) => (
         <li key={c.key}>
           <button
             type="button"
             onClick={() => onPick(c.key)}
-            className="flex min-h-14 w-full items-center gap-3 rounded-control border border-line bg-surface px-4 py-2 text-left transition-[border-color,box-shadow] hover:border-line-strong hover:shadow-md"
+            className="flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-canvas focus-visible:bg-canvas"
             data-candidate={c.key}
           >
             <Monogram name={c.name} size={32} />
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-[15px] leading-6 font-semibold text-ink">{c.name}</span>
-              <span className="truncate type-label text-ink-2">{c.disambiguation ?? "No other detail from Qloo"}</span>
+              <span className="truncate text-[15px] leading-6 font-medium text-ink">{c.name}</span>
+              <span className="truncate type-caption text-ink-3">{c.disambiguation ?? "No other detail from Qloo"}</span>
             </span>
             <Icon name="chevron-right" size={16} className="shrink-0 text-ink-3" />
           </button>
@@ -89,29 +106,48 @@ function Candidates({ candidates, onPick }: { candidates: readonly PickerCandida
 }
 
 function Notes({ items }: { items: readonly string[] }) {
+  const [shown, setShown] = useState(true);
+  if (items.length === 0) return null;
   return (
-    <ul className="flex flex-col gap-2" aria-label="Limits of this screen">
-      {items.map((note) => (
-        <li key={note} className="flex gap-3 type-label text-ink-2">
-          <span aria-hidden="true" className="mt-[7px] size-[5px] shrink-0 rounded-full bg-ink-3" />
-          {note}
-        </li>
-      ))}
-    </ul>
+    <div className="flex flex-col gap-3 rounded-control border border-line bg-sunken/50 px-5 py-4">
+      <div className="flex items-center gap-2">
+        <Icon name="triangle-alert" size={14} className="text-caution" />
+        <h3 className="type-label font-semibold text-ink">Limits of this screen</h3>
+        <button
+          type="button"
+          onClick={() => setShown((v) => !v)}
+          aria-expanded={shown}
+          aria-controls="screen-limits"
+          className="ml-auto type-label font-medium text-accent hover:text-accent-hover"
+        >
+          {shown ? "Hide" : "Show"}
+        </button>
+      </div>
+      <ul id="screen-limits" hidden={!shown} className="grid gap-x-10 gap-y-2 lg:grid-cols-2" aria-label="Limits of this screen">
+        {items.map((note) => (
+          <li key={note} className="flex gap-2.5 type-label text-ink-2">
+            <span aria-hidden="true" className="shrink-0 text-ink-3">
+              —
+            </span>
+            {note}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
-/** The taste map's own calls at most, for the cost of adding it (FEATURE_COSTS.taste_map_screener). */
-const MAP_CALLS_MAX = 13;
+/** The brands the taste map places at most (contracts: k ≤ 14). */
+const MAP_BRANDS_MAX = 14;
 
 function AddMap({ onAdd, busy }: { onAdd: () => void; busy: boolean }) {
   return (
-    <Card padding="default" className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" data-screen-map="offer">
-      <div className="flex flex-col gap-1">
-        <h3 className="type-label font-semibold text-ink">Category Taste Map</h3>
+    <Card padding="default" className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-8" data-screen-map="offer">
+      <div className="flex max-w-[640px] flex-col gap-1.5">
+        <h3 className={SECTION_LABEL}>Category Taste Map</h3>
         <p className="type-label text-ink-2">
-          Places the top brands by how alike their audiences are, and measures distinctiveness. Up to {MAP_CALLS_MAX} more Qloo requests, no AI model; the
-          table&apos;s own requests come from the cache.
+          Places the top {MAP_BRANDS_MAX} brands by how alike their audiences are, and measures distinctiveness. Code only, no AI model; the table&apos;s own
+          requests are reused.
         </p>
       </div>
       <Button variant="secondary" onClick={onAdd} loading={busy} disabled={busy} className="shrink-0">
@@ -129,15 +165,22 @@ function Result({ screen, onCopied, onAddMap, busy }: { screen: ScreenerResult; 
   const kind = screen.seed.by === "tag" ? "Category screen" : "Brands near a seed";
   const caption = `${kind}: ${screen.seed.label}, ${screen.rows.length} brands`;
   return (
-    <section className="flex flex-col gap-4" aria-labelledby="screen-title" data-screen="ok">
-      <header className="flex flex-col gap-1">
-        <h2 id="screen-title" className="type-title text-ink max-md:type-title-sm">
-          {screen.seed.label}
-        </h2>
-        <p className="type-label text-ink-2">
-          {kind} · {screen.rows.length} brands
-          {screen.markets.length > 0 ? ` · ${screen.markets.map((m) => m.label).join(", ")}` : ""} · {requestsLine(screen)}
-        </p>
+    <section className="flex flex-col gap-5" aria-labelledby="screen-title" data-screen="ok">
+      <header className="flex flex-col gap-3 border-t border-line pt-8 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex min-w-0 flex-col gap-1">
+          <span className={SECTION_LABEL}>{kind}</span>
+          <h2 id="screen-title" className="font-display text-[28px] leading-9 font-semibold tracking-[-0.01em] text-ink max-md:text-[24px] max-md:leading-8">
+            {screen.seed.label}
+          </h2>
+          <p className="type-label text-ink-3">
+            {screen.rows.length} brands
+            {screen.markets.length > 0 ? ` · ${screen.markets.map((m) => m.label).join(", ")}` : ""} · code only, no AI model
+          </p>
+        </div>
+        <span className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-sm bg-sunken px-2.5 py-1 font-mono text-[12px] leading-4 text-ink-2 sm:self-auto">
+          <Icon name="clock-4" size={12} className="text-ink-3" />
+          Screened {screenedAt(screen.createdAt)}
+        </span>
       </header>
       <Notes items={screen.limitations} />
       {screen.rows.length === 0 ? (
@@ -145,7 +188,7 @@ function Result({ screen, onCopied, onAddMap, busy }: { screen: ScreenerResult; 
           Qloo returned no brands for this screen. Try a broader category, or a seed brand.
         </InlineState>
       ) : (
-        <Card padding="default">
+        <div className="flex flex-col gap-3">
           <ScreenerTable
             caption={caption}
             columns={screen.columns}
@@ -155,8 +198,8 @@ function Result({ screen, onCopied, onAddMap, busy }: { screen: ScreenerResult; 
             onCell={(rowKey, col) => setOpen({ rowKey, column: col })}
             selected={open}
           />
-          <p className="mt-3 type-caption text-ink-2">Select any value to see the Qloo requests behind it. No composite score: each column stands on its own.</p>
-        </Card>
+          <p className="type-caption text-ink-3">Select any value to see the Qloo requests behind it. No composite score: each column stands on its own.</p>
+        </div>
       )}
       {screen.map ? (
         <ScreenerMapSlot map={screen.map} screen={screen} />
@@ -173,23 +216,60 @@ interface AnswerViewProps {
   onPick: (key: string) => void;
   onCopied: (m: string) => void;
   onAddMap: () => void;
+  /** Sends the last screen again after an error. */
+  onRetry: () => void;
   /** A taste map is being added to the screen on show. */
   adding: boolean;
 }
 
-function AnswerView({ status, onPick, onCopied, onAddMap, adding }: AnswerViewProps): ReactNode {
+/** The table's shape while the screen runs: a head and five pulsing rows. */
+function LoadingTable() {
+  return (
+    <div aria-hidden="true" className="overflow-hidden rounded-control border border-line bg-surface">
+      <div className="flex h-10 items-center gap-6 border-b border-line bg-sunken/60 px-4">
+        <Skeleton className="h-2 w-4" />
+        <Skeleton className="h-2 w-24 flex-1" />
+        {Array.from({ length: 6 }, (_, i) => (
+          <Skeleton key={i} className="h-2 w-14 max-sm:hidden" />
+        ))}
+      </div>
+      {Array.from({ length: 5 }, (_, r) => (
+        <div key={r} className="flex h-11 items-center gap-6 border-b border-line px-4 last:border-b-0">
+          <Skeleton className="h-2.5 w-4" />
+          <Skeleton className="h-2.5 w-32 flex-1" />
+          {Array.from({ length: 6 }, (_, i) => (
+            <Skeleton key={i} className="h-2.5 w-14 max-sm:hidden" />
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AnswerView({ status, onPick, onCopied, onAddMap, onRetry, adding }: AnswerViewProps): ReactNode {
   switch (status.kind) {
     case "idle":
       return null;
     case "loading":
       return (
-        <InlineState tone="neutral" icon="loader-circle" data-screen="loading">
-          Screening: finding the brands, then reading ages and markets. This takes a few seconds.
-        </InlineState>
+        <div className="flex flex-col gap-4" data-screen="loading">
+          <InlineState tone="neutral" icon="loader-circle">
+            Screening: finding the brands, then reading ages and markets. This takes a few seconds.
+          </InlineState>
+          <LoadingTable />
+        </div>
       );
     case "error":
       return (
-        <InlineState tone="danger" data-screen="error">
+        <InlineState
+          tone="danger"
+          data-screen="error"
+          action={
+            <Button variant="quiet" size="sm" onClick={onRetry}>
+              Try again
+            </Button>
+          }
+        >
           {status.message}
         </InlineState>
       );
@@ -201,13 +281,28 @@ function AnswerView({ status, onPick, onCopied, onAddMap, adding }: AnswerViewPr
         case "pick":
         case "not_found":
           return (
-            <Card padding="lg" className="flex flex-col gap-4" data-screen={a.kind}>
+            <section className="flex max-w-[744px] flex-col gap-4 border-t border-line pt-8" data-screen={a.kind}>
               <h2 className="type-title text-ink max-md:type-title-sm">{a.kind === "pick" ? "Which one?" : "Not found"}</h2>
               <p className="type-body text-ink-2">{a.message}</p>
               {a.candidates.length > 0 ? <Candidates candidates={a.candidates} onPick={onPick} /> : null}
-            </Card>
+            </section>
           );
         case "unavailable":
+          if (isDailyLimit(a.message))
+            return (
+              <InlineState
+                tone="neutral"
+                icon="clock-4"
+                data-screen="unavailable"
+                action={
+                  <Link href="/settings" prefetch={false} className="type-label font-medium whitespace-nowrap text-accent hover:text-accent-hover">
+                    See plan
+                  </Link>
+                }
+              >
+                You&apos;ve used today&apos;s screens. They reset at 00:00 UTC.
+              </InlineState>
+            );
           return (
             <InlineState tone="neutral" icon={a.retryAfterS !== null ? "clock-4" : "circle-pause"} data-screen="unavailable">
               {a.message}
@@ -236,6 +331,8 @@ export function ScreenerView({ markets: marketOptions, initial }: ScreenerViewPr
   /** The request behind the screen on show, so the taste map can be added to that same screen. */
   const [last, setLast] = useState<Record<string, unknown> | null>(null);
   const [adding, setAdding] = useState(false);
+  /** The pick of the last screen sent, so Try again resends the same choice. */
+  const [lastPick, setLastPick] = useState<string | null>(null);
 
   const run = async (pick: string | null) => {
     const text = query.trim();
@@ -248,6 +345,7 @@ export function ScreenerView({ markets: marketOptions, initial }: ScreenerViewPr
     const seed = by === "tag" ? { by, query: text } : { by, name: text };
     const body = { seed, markets, rows, map, pick };
     setLast(body);
+    setLastPick(pick);
     setStatus(await postScreen(body));
   };
   // The map only on the reader's ask: the same screen again with map on. Its table calls come from
@@ -274,88 +372,110 @@ export function ScreenerView({ markets: marketOptions, initial }: ScreenerViewPr
   const labelOf = (id: string) => marketOptions.find((m) => m.id === id)?.label ?? id;
 
   return (
-    <div className="flex flex-col gap-6 pt-10 pb-12 max-md:gap-4 max-md:pt-6 max-md:pb-8">
-      <header className="flex max-w-[744px] flex-col gap-2 pb-3">
+    <div className="flex flex-col gap-10 pt-10 pb-16 max-md:gap-6 max-md:pt-6 max-md:pb-10">
+      <header className="flex max-w-[760px] flex-col gap-3">
         <h1 className="type-display-m text-ink max-md:type-display-m-sm">Brand screener</h1>
         <p className="type-lead text-ink-2 max-md:text-[16px] max-md:leading-6">
           Rank the brands of a category, or the brands nearest a seed brand, on taste fit, next-gen tilt, metro breadth, popularity and how far they sit under the radar.
         </p>
       </header>
 
-      <Card className="flex max-w-[744px] flex-col gap-4" aria-labelledby="screen-form-title">
-        <h2 id="screen-form-title" className="sr-only">
-          What to screen
-        </h2>
-        <form onSubmit={submit} className="flex flex-col gap-4" data-screener-form="true">
-          <Segmented options={SEED_OPTIONS} value={by} onChange={setBy} label="Screen by" />
-          <Input
-            label={by === "tag" ? "Category" : "Seed brand"}
-            name="q"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            maxLength={SCREENER_QUERY_MAX}
-            autoComplete="off"
-            spellCheck={false}
-            placeholder={by === "tag" ? "A Qloo brand category, e.g. energy drinks" : "A brand name"}
-            error={fieldError ?? undefined}
-          />
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-            <Select
-              label={`Markets for metro breadth (${markets.length} of ${SCREENER_MARKETS_MAX})`}
-              value=""
-              disabled={markets.length >= SCREENER_MARKETS_MAX}
-              onChange={(e) => {
-                const id = e.target.value;
-                if (id) setMarkets((m) => (m.length < SCREENER_MARKETS_MAX && !m.includes(id) ? [...m, id] : m));
-              }}
-              className="sm:flex-1"
-            >
-              <option value="">{markets.length >= SCREENER_MARKETS_MAX ? "Four markets picked" : "Add a market"}</option>
-              {free.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </Select>
-            <Select label="Brands" value={String(rows)} onChange={(e) => setRows(Number(e.target.value))} className="sm:w-[120px]">
-              {ROW_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </Select>
-          </div>
-          {markets.length > 0 ? (
-            <ul className="flex flex-wrap gap-2" aria-label="Markets picked">
-              {markets.map((id) => (
-                <li key={id}>
-                  <button
-                    type="button"
-                    onClick={() => setMarkets((m) => m.filter((x) => x !== id))}
-                    className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line bg-surface px-3 type-label text-ink hover:border-line-strong"
-                    aria-label={`Remove ${labelOf(id)}`}
-                  >
-                    {labelOf(id)}
-                    <Icon name="x" size={14} className="text-ink-2" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          <Checkbox checked={map} onChange={(e) => setMap(e.target.checked)}>
-            Measure distinctiveness with the taste map (up to 13 more Qloo requests)
-          </Checkbox>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-            <Button type="submit" variant="primary" loading={status.kind === "loading"} disabled={status.kind === "loading"}>
-              Run screen
-            </Button>
-            <span className="type-caption text-ink-2">{costLine(markets.length, map)}</span>
-          </div>
-        </form>
-        <HumanCheckPanel check={human} />
-      </Card>
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-10">
+        <Card className="flex min-w-0 flex-1 flex-col gap-5 lg:max-w-[820px]" aria-labelledby="screen-form-title">
+          <h2 id="screen-form-title" className="sr-only">
+            What to screen
+          </h2>
+          <form onSubmit={submit} className="flex flex-col gap-5" data-screener-form="true">
+            <Segmented options={SEED_OPTIONS} value={by} onChange={setBy} label="Screen by" />
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+              <Input
+                label={by === "tag" ? "Category" : "Seed brand"}
+                name="q"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                maxLength={SCREENER_QUERY_MAX}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={by === "tag" ? "A Qloo brand category, e.g. energy drinks" : "A brand name"}
+                error={fieldError ?? undefined}
+                className="sm:flex-1"
+              />
+              <Select label="Brands" value={String(rows)} onChange={(e) => setRows(Number(e.target.value))} className="sm:w-[140px]">
+                {ROW_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div className="flex flex-col gap-3">
+              <Select
+                label={`Markets for metro breadth (${markets.length} of ${SCREENER_MARKETS_MAX})`}
+                value=""
+                disabled={markets.length >= SCREENER_MARKETS_MAX}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  if (id) setMarkets((m) => (m.length < SCREENER_MARKETS_MAX && !m.includes(id) ? [...m, id] : m));
+                }}
+                className="sm:max-w-[360px]"
+              >
+                <option value="">{markets.length >= SCREENER_MARKETS_MAX ? "Four markets picked" : "Add a market"}</option>
+                {free.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </Select>
+              {markets.length > 0 ? (
+                <ul className="flex flex-wrap gap-2" aria-label="Markets picked">
+                  {markets.map((id) => (
+                    <li key={id}>
+                      <button
+                        type="button"
+                        onClick={() => setMarkets((m) => m.filter((x) => x !== id))}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-sm bg-accent-soft px-2.5 type-label font-medium text-accent-ink hover:bg-accent-soft/70"
+                        aria-label={`Remove ${labelOf(id)}`}
+                      >
+                        {labelOf(id)}
+                        <Icon name="x" size={12} className="text-accent" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+            <Checkbox checked={map} onChange={(e) => setMap(e.target.checked)}>
+              Measure distinctiveness with the taste map
+            </Checkbox>
+            <div className="flex border-t border-line pt-5 max-sm:flex-col">
+              <Button type="submit" variant="primary" loading={status.kind === "loading"} disabled={status.kind === "loading"}>
+                Run screen
+              </Button>
+            </div>
+          </form>
+          <HumanCheckPanel check={human} />
+        </Card>
+        <aside className="flex flex-col gap-3 lg:w-[300px] lg:shrink-0 lg:pt-2" aria-labelledby="screen-reading-title">
+          <h2 id="screen-reading-title" className={SECTION_LABEL}>
+            Reading this screen
+          </h2>
+          <p className="type-label text-ink-2">No composite score. Each column stands on its own, and empty cells say why they are empty instead of showing 0.</p>
+          <p className="type-label text-ink-2">Group-level taste data from Qloo, not sales, share or revenue.</p>
+          <Link href="/method" prefetch={false} className="inline-flex items-center gap-1 type-label font-medium text-accent hover:text-accent-hover">
+            How each column is computed
+            <Icon name="arrow-right" size={13} />
+          </Link>
+        </aside>
+      </div>
 
-      <AnswerView status={status} onPick={(key) => void run(key)} onCopied={show} onAddMap={() => void addMap()} adding={adding} />
+      <AnswerView
+        status={status}
+        onPick={(key) => void run(key)}
+        onCopied={show}
+        onAddMap={() => void addMap()}
+        onRetry={() => void run(lastPick)}
+        adding={adding}
+      />
       {toast}
     </div>
   );

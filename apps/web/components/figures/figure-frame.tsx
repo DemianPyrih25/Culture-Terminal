@@ -6,8 +6,8 @@ import { FigureViews } from "./figure-views";
 import { abbreviateRequestId } from "./format";
 
 /**
- * The frame every figure family draws in: the C/ChartCard anatomy (design/redesign.pen). The kind line
- * (13/500 ink-2) and the title (20/600) on the left; Draft, the "Chart | Table" switch and Source on the
+ * The frame every figure family draws in: the Ledger chart card (design/redesign-v3.pen). The kind line
+ * (11/600 small caps ink-3) and the serif title (20/600) on the left; Draft, the "Chart | Table" switch and Source on the
  * right; then the legend, the plot (or its table), the captions, and a quiet footer with the source line
  * and the link to how the number is calculated. `chrome="plain"` drops the card for figures shown inside
  * another surface (the chart sheet).
@@ -87,7 +87,7 @@ export function FigureFrame({
   const plain = meta.chrome === "plain";
   const heading = (
     <div className="flex min-w-0 flex-col gap-1.5">
-      {meta.kind ? <p className="m-0 type-label text-ink-2">{meta.kind}</p> : null}
+      {meta.kind ? <p className="m-0 type-overline text-ink-3">{meta.kind}</p> : null}
       <Heading id={meta.titleId} className="m-0 type-title text-ink max-md:type-title-sm">
         {meta.title}
       </Heading>
@@ -126,7 +126,7 @@ function FigureFooter({ source, formulaId, label }: { source: FigureSource | nul
   if (!source && !method) return null;
   const rid = source?.requestId ? `req ${abbreviateRequestId(source.requestId)}` : null;
   return (
-    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 type-caption text-ink-2">
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-line pt-3 type-caption text-ink-3">
       {source ? (
         <span>
           {source.text}
@@ -153,7 +153,7 @@ function FigureFooter({ source, formulaId, label }: { source: FigureSource | nul
   );
 }
 
-/** A legend entry: an 8 px dot (bars, points) or a hatch swatch (no data) and its label. */
+/** A legend entry: an 8 px square swatch (bars, points) or a hatch swatch (no data) and its label. */
 export interface LegendItem {
   label: string;
   swatch: "data" | "data-2" | "accent-soft" | "hatch" | "second";
@@ -167,13 +167,13 @@ const SWATCH: Readonly<Record<LegendItem["swatch"], string>> = {
   hatch: "bg-hatch ring-1 ring-line-strong ring-inset",
 };
 
-/** The legend row: 8 px dots and 13/500 ink-2 labels, gap 20. */
+/** The calm legend row: 8 px squares and caption ink-2 labels, gap 20. */
 export function Legend({ items }: { items: readonly LegendItem[] }) {
   return (
     <ul className="m-0 flex list-none flex-wrap items-center gap-x-5 gap-y-1 p-0">
       {items.map((item) => (
-        <li key={item.label} className="flex items-center gap-1.5 type-label text-ink-2">
-          <span aria-hidden="true" className={cx("inline-block size-2 shrink-0 rounded-full", SWATCH[item.swatch])} />
+        <li key={item.label} className="flex items-center gap-1.5 type-caption text-ink-2">
+          <span aria-hidden="true" className={cx("inline-block size-2 shrink-0 rounded-[2px]", SWATCH[item.swatch])} />
           {item.label}
         </li>
       ))}

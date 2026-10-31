@@ -122,6 +122,9 @@ export const EMPTY_TEXT =
 /** The page's lead: what a follow is, and what it is not (§2.4: no alerts, nothing compared). */
 export const LEAD_TEXT =
   "The brands, places and questions you follow on this browser, each with its latest note. Re-run one to read it again with today's data. Nothing here updates by itself and there are no alerts.";
+/** LEAD_TEXT in two parts: what the page holds, then how it behaves (set smaller under it). */
+export const LEAD_MAIN = "The brands, places and questions you follow on this browser, each with its latest note.";
+export const LEAD_NOTE = "Re-run one to read it again with today's data. Nothing here updates by itself and there are no alerts.";
 
 // The Follow button ------------------------------------------------------------------------------
 

@@ -167,6 +167,7 @@ function ReplayBrief({ runId, initialState, serverNow, events, links, fallbackQu
         positionMs: controls.positionMs,
         durationMs: controls.durationMs,
         progress: controls.progress,
+        exitHref: links.exitReplay,
       }
     : null;
   return (

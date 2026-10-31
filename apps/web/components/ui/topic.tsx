@@ -47,7 +47,7 @@ const TONE: Readonly<Record<TopicKey, { tile: string; ink: string }>> = {
 export type TopicTileSize = 20 | 24 | 28;
 
 const TILE_SIZE: Readonly<Record<TopicTileSize, { box: string; icon: number }>> = {
-  20: { box: "size-5 rounded-[6px]", icon: 12 },
+  20: { box: "size-5 rounded-xs", icon: 12 },
   24: { box: "size-6 rounded-sm", icon: 14 },
   28: { box: "size-7 rounded-sm", icon: 14 },
 };

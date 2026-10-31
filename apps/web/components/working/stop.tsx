@@ -68,13 +68,14 @@ export function useStopRun(runId: string, enabled: boolean, cancel: (runId: stri
   return { phase, press };
 }
 
-/** Quiet "Stop" (square). It spins from the press until the run ends. */
+/** "Stop" (square), a secondary button with its Esc hint. It spins from the press until the run ends. */
 export function StopButton({ phase, press, className }: { phase: StopPhase; press: () => void; className?: string }) {
   const busy = phase === "sending" || phase === "sent";
   return (
     <>
       <Button
-        variant="quiet"
+        variant="secondary"
+        size="sm"
         icon="square"
         onClick={press}
         loading={busy}
@@ -85,6 +86,11 @@ export function StopButton({ phase, press, className }: { phase: StopPhase; pres
         className={className}
       >
         {phase === "failed" ? "Stop again" : "Stop"}
+        {busy ? null : (
+          <kbd aria-hidden className="ml-1 rounded-xs border border-line px-1 font-mono text-[10px] leading-4 text-ink-3 max-md:hidden">
+            Esc
+          </kbd>
+        )}
       </Button>
       <span role="status" aria-live="polite" className="sr-only">
         {phase === "sent" ? "Stopping the answer." : phase === "failed" ? "The stop didn't go through. Try again." : ""}

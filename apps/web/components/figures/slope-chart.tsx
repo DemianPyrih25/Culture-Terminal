@@ -323,7 +323,7 @@ function SlopePlot(props: SlopeChartProps & { label: string; style: NumberStyle;
                     textAnchor={left ? "end" : "start"}
                     fontSize={FONT}
                     fontWeight={strong ? 600 : 400}
-                    className={`tabular-nums ${strong ? "fill-ink" : "fill-ink-2"}`}
+                    className={`font-mono tabular-nums ${strong ? "fill-ink" : "fill-ink-2"}`}
                   >
                     {left ? (
                       <>
@@ -360,7 +360,7 @@ function SlopePlot(props: SlopeChartProps & { label: string; style: NumberStyle;
                       textAnchor="end"
                       fontSize={FONT}
                       fontWeight={strong ? 600 : 400}
-                      className={`tabular-nums ${shift === null || shiftLabel?.startsWith("=") ? "fill-ink-2" : shift > 0 ? "fill-accent" : "fill-second"}`}
+                      className={`font-mono tabular-nums ${shift === null || shiftLabel?.startsWith("=") ? "fill-ink-2" : shift > 0 ? "fill-accent" : "fill-second"}`}
                     >
                       {shiftLabel ?? "—"}
                     </text>
@@ -371,7 +371,7 @@ function SlopePlot(props: SlopeChartProps & { label: string; style: NumberStyle;
                         textAnchor="end"
                         fontSize={FONT}
                         fontWeight={strong ? 600 : 400}
-                        className={`tabular-nums ${l.line.score === null ? "fill-ink-2" : "fill-ink"}`}
+                        className={`font-mono tabular-nums ${l.line.score === null ? "fill-ink-2" : "fill-ink"}`}
                       >
                         {l.line.score === null ? "—" : formatNumber(l.line.score, "score", { digits: 0 })}
                       </text>

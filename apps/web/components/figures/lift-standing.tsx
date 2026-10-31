@@ -132,7 +132,7 @@ function AreaList({ title, areas, kind }: { title: string; areas: readonly Stand
         <ol className="m-0 flex list-none flex-col gap-2 p-0">
           {areas.map((a, i) => (
             <li key={a.id} className="grid grid-cols-[20px_minmax(0,1fr)] items-baseline gap-x-2">
-              <span className="type-label text-ink-2 tabular-nums">{i + 1}</span>
+              <span className="font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums">{i + 1}</span>
               <span className="flex min-w-0 flex-col">
                 <span className="text-[15px] leading-6 font-semibold text-ink [overflow-wrap:anywhere]">{a.name}</span>
                 <span className="type-label text-ink-2 tabular-nums">

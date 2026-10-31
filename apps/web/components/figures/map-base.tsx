@@ -1,6 +1,6 @@
 "use client";
 
-import { setWorkerUrl } from "maplibre-gl";
+import { setWorkerUrl, type Map as MapLibreMap } from "maplibre-gl";
 import { Icon } from "../ui/icons";
 
 /**
@@ -17,6 +17,40 @@ export const BASEMAP_ATTRIBUTION = [
   { text: "© OpenMapTiles", href: "https://www.openmaptiles.org/" },
   { text: "© OpenStreetMap contributors", href: "https://www.openstreetmap.org/copyright" },
 ] as const;
+
+/**
+ * A design token's value from app/globals.css (`@theme static` emits every variable), or the fallback
+ * when it is missing or there is no document; MapLibre paint needs plain colour strings.
+ */
+export function cssToken(name: string, fallback: string): string {
+  if (typeof document === "undefined") return fallback;
+  const v = getComputedStyle(document.documentElement).getPropertyValue(`--${name}`).trim();
+  return v || fallback;
+}
+
+/**
+ * Re-tints the Positron basemap to the Ledger map (design a-map-land, a-map-water): warm paper land and
+ * pale blue water, so the data layers carry the colour. Layers the style lacks are skipped; a failure
+ * leaves Positron's own colours, which stay readable.
+ */
+export function paintLedgerBasemap(map: MapLibreMap): void {
+  const land = cssToken("color-map-land", "#f1ede6");
+  const water = cssToken("color-map-water", "#d5e0e6");
+  const road = cssToken("color-surface", "#ffffff");
+  try {
+    for (const layer of map.getStyle().layers ?? []) {
+      const id = layer.id.toLowerCase();
+      if (layer.type === "background") map.setPaintProperty(layer.id, "background-color", land);
+      else if (layer.type === "fill" && id.includes("water")) map.setPaintProperty(layer.id, "fill-color", water);
+      else if (layer.type === "line" && id.includes("waterway")) map.setPaintProperty(layer.id, "line-color", water);
+      else if (layer.type === "fill" && (id.includes("landuse") || id.includes("landcover") || id.includes("park"))) {
+        map.setPaintProperty(layer.id, "fill-color", land);
+      } else if (layer.type === "line" && (id.includes("highway") || id.includes("road"))) map.setPaintProperty(layer.id, "line-color", road);
+    }
+  } catch {
+    // Keep the basemap's own paint.
+  }
+}
 
 /** The worker URL MapLibre is given; routeMapWorker starts the bundled worker entry for it. */
 const WORKER_SENTINEL = "/_lift-map/maplibre-worker.js";
@@ -42,11 +76,11 @@ export function routeMapWorker(): void {
   setWorkerUrl(WORKER_SENTINEL);
 }
 
-/** The zoom buttons: a 36 x 72 surface pill (r10) with plus over minus. */
+/** The zoom buttons: a 36 x 72 hairline surface box (r6) with plus over minus. */
 export function ZoomButtons({ onZoom }: { onZoom: (direction: 1 | -1) => void }) {
   const btn = "flex h-9 w-9 items-center justify-center text-ink-2 hover:bg-sunken hover:text-ink";
   return (
-    <div className="absolute right-3 bottom-8 flex flex-col overflow-hidden rounded-md border border-line bg-surface shadow-xs">
+    <div className="absolute right-3 bottom-8 flex flex-col overflow-hidden rounded-md border border-line-strong bg-surface">
       <button type="button" aria-label="Zoom in" className={btn} onClick={() => onZoom(1)}>
         <Icon name="plus" size={16} />
       </button>
@@ -78,7 +112,7 @@ export function MapAttribution() {
   return (
     <>
       <p
-        className="absolute right-14 bottom-1.5 m-0 hidden rounded-sm bg-surface/80 px-1.5 py-px text-[11px] leading-4 whitespace-nowrap text-ink-2 @min-[640px]:block"
+        className="absolute right-14 bottom-1.5 m-0 hidden rounded-sm bg-surface/80 px-1.5 py-px text-[11px] leading-4 whitespace-nowrap text-ink-3 @min-[640px]:block"
         data-attribution="basemap"
       >
         <Credits />

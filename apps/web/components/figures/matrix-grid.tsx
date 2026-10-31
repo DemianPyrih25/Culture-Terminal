@@ -411,7 +411,7 @@ function Cell({
           textAnchor="middle"
           fontSize={11}
           fontWeight={bold ? 600 : 400}
-          className={`tabular-nums ${dark ? "fill-white" : "fill-ink-2"}`}
+          className={`font-mono tabular-nums ${dark ? "fill-white" : "fill-ink-2"}`}
         >
           {text}
         </text>
@@ -489,7 +489,7 @@ function MarginRow({
         return (
           <g key={j}>
             <title>{`${name}: ${text}`}</title>
-            <text x={px(x + cellW / 2)} y={px(y + 12)} textAnchor="middle" fontSize={10} className="fill-ink-2 tabular-nums">
+            <text x={px(x + cellW / 2)} y={px(y + 12)} textAnchor="middle" fontSize={10} className="fill-ink-2 font-mono tabular-nums">
               {text}
             </text>
             <rect
@@ -533,13 +533,13 @@ function RampLegend({
   const hatchX = hiX + textWidth(hi, FONT) + 14;
   return (
     <g aria-hidden="true">
-      <text x={px(x)} y={px(y + 11)} fontSize={FONT} className="fill-ink-2 tabular-nums">
+      <text x={px(x)} y={px(y + 11)} fontSize={FONT} className="fill-ink-2 font-mono tabular-nums">
         {lo}
       </text>
       {steps.map((v, k) => (
         <rect key={k} x={px(stepsX + k * 20)} y={px(y + 4)} width={16} height={6} fillOpacity={px(alpha(v))} className="fill-accent" />
       ))}
-      <text x={px(hiX)} y={px(y + 11)} fontSize={FONT} className="fill-ink-2 tabular-nums">
+      <text x={px(hiX)} y={px(y + 11)} fontSize={FONT} className="fill-ink-2 font-mono tabular-nums">
         {hi}
       </text>
       {hatch ? (

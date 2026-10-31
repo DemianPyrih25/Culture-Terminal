@@ -113,7 +113,7 @@ export interface HumanCheckCardProps {
 }
 
 /**
- * The human check's frame under the question box, in the InlineState style (sunken, r12, padding 14 16):
+ * The human check's frame under the question box, in the InlineState style (a white surface with a hairline, padding 14 16):
  * the copy, the widget, and Try again after an error. While the check runs unseen it is a zero-height box around the widget.
  * The ask for a click is announced politely, an error as an alert.
  */
@@ -128,26 +128,26 @@ export function HumanCheckCard({ status, error = null, onRetry, children, classN
         copy === null
           ? // The widget runs here unseen; Turnstile shows its iframe only when it needs the visitor.
             "h-0 overflow-hidden"
-          : cx("flex flex-col gap-3 rounded-control bg-sunken px-4 py-3.5 md:flex-row md:items-start md:gap-3", className)
+          : cx("flex flex-col gap-3 rounded-sm border border-line bg-surface px-4 py-3.5 md:flex-row md:items-start md:gap-3", className)
       }
     >
       {copy !== null ? (
-        <span className="flex h-6 shrink-0 items-center text-ink-2">
+        <span className="flex h-5 shrink-0 items-center text-accent">
           <Icon name="shield-check" size={18} />
         </span>
       ) : null}
       <div className="flex min-w-0 flex-1 flex-col gap-3">
         {copy !== null ? (
           <div className="flex flex-col gap-0.5" role={status === "error" ? "alert" : "status"}>
-            <p className="m-0 type-body-strong text-ink">{copy.head}</p>
-            <p className="m-0 type-label text-ink-2">{copy.detail}</p>
+            <p className="m-0 text-[14px] leading-5 font-semibold text-ink">{copy.head}</p>
+            <p className="m-0 text-[13px] leading-5 text-ink-2">{copy.detail}</p>
           </div>
         ) : null}
         {children}
       </div>
       {status === "error" && onRetry ? (
         <div className="flex shrink-0 max-md:pl-9">
-          <Button icon="rotate-ccw" onClick={onRetry}>
+          <Button size="sm" icon="rotate-ccw" onClick={onRetry}>
             Try again
           </Button>
         </div>

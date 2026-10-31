@@ -10,7 +10,7 @@ import { Map as MapLibreMap } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { watchMapLoad } from "./lift-map-load";
 import { loadOutlines, type OutlineFeature } from "./lift-outlines";
-import { BASEMAP_STYLE, MapAttribution, ZoomButtons, routeMapWorker } from "./map-base";
+import { BASEMAP_STYLE, MapAttribution, ZoomButtons, paintLedgerBasemap, routeMapWorker } from "./map-base";
 
 export { BASEMAP_ATTRIBUTION, BASEMAP_STYLE, MapAttribution } from "./map-base";
 export { fitPadding, overlayBoxes } from "./lift-scale";
@@ -18,7 +18,8 @@ import { MapPinMark } from "./lift-map-parts";
 import { TOKEN_RGB, cellFills, fitPadding, flagName, flagSize, flagText, focusBounds, formatLift, overlayBoxes, pinRadius, placeChips, type LiftLabel, type LiftMode, type MapPlace, type Rgb } from "./lift-scale";
 
 /**
- * The WebGL LiftMap (PLAN §8.4): a light OpenFreeMap basemap in MapLibre with deck.gl on top
+ * The WebGL LiftMap (PLAN §8.4): the OpenFreeMap basemap in MapLibre, re-tinted to paper land and pale
+ * blue water, with deck.gl on top
  * (interleaved: false): the geohash cells on the mode's ramp with confidence as alpha, the gazetteer
  * outlines of the pinned areas, numbered ink pins with their flags, the venue sample, and the zoom buttons.
  * This module is only ever loaded with a dynamic import from LiftMapView, so MapLibre and deck.gl
@@ -102,6 +103,7 @@ export default function LiftMapCanvas({ data, mode, labels, label, outlinesUrl, 
     // A style that cannot load, or one that hangs past the timeout, keeps the schematic.
     const unwatch = watchMapLoad(map, {
       onLoad: () => {
+        paintLedgerBasemap(map);
         setLoaded(true);
         callbacks.current.onReady();
       },
@@ -259,7 +261,7 @@ export default function LiftMapCanvas({ data, mode, labels, label, outlinesUrl, 
             <MapPinMark label={marker.label} x={px} y={py} />
             {flag ? (
               <span
-                className="absolute flex flex-col rounded-sm bg-surface px-2.5 py-1.5 whitespace-nowrap shadow-md"
+                className="absolute flex flex-col rounded-sm border border-line-strong bg-surface px-2.5 py-1.5 whitespace-nowrap shadow-xs"
                 style={{ left: flag.x, top: flag.y }}
               >
                 <span className="text-[13px] leading-[18px] font-semibold text-ink">{flagName(marker.label.name)}</span>
@@ -279,13 +281,14 @@ export default function LiftMapCanvas({ data, mode, labels, label, outlinesUrl, 
   );
 }
 
+/** The hover card: a Ledger surface with a strong hairline, Inter, tokens read through CSS variables. */
 const TOOLTIP_STYLE = {
-  backgroundColor: "#ffffff",
-  color: "#0e1116",
-  border: "1px solid #e6e8ec",
-  borderRadius: "8px",
-  boxShadow: "0 6px 18px #10182824",
-  fontFamily: "Geist Variable, Geist, system-ui, sans-serif",
+  backgroundColor: "var(--color-surface)",
+  color: "var(--color-ink)",
+  border: "1px solid var(--color-line-strong)",
+  borderRadius: "6px",
+  boxShadow: "var(--shadow-xs)",
+  fontFamily: "var(--font-sans)",
   fontSize: "12px",
   lineHeight: "16px",
   padding: "6px 10px",

@@ -12,14 +12,14 @@ import { Icon } from "../ui/icons";
  * link (nofollow, ugc, opener-free). A run stored before Part 11 has neither block: the row draws nothing.
  */
 
-const CARD = "flex min-w-0 flex-col gap-4 rounded-card border border-dashed border-line-strong bg-sunken p-6 max-md:p-5";
+const CARD = "flex min-w-0 flex-col gap-4 rounded-card border border-dashed border-line-strong bg-surface p-6 max-md:p-5";
 
 export function AiContextCard({ view, className }: { view: AiContextView; className?: string }) {
   const id = useId();
   return (
     <section aria-labelledby={id} className={cx(CARD, className)} data-context="ai" data-context-status={view.status}>
       <div className="flex flex-col gap-1.5">
-        <h2 id={id} className="flex items-center gap-2 text-[15px] leading-6 font-semibold text-ink">
+        <h2 id={id} className="flex items-center gap-2 font-display text-[18px] leading-6 font-medium text-ink">
           <Icon name="bot" size={16} className="shrink-0 text-ink-2" />
           {AI_CONTEXT_HEADING}
         </h2>
@@ -29,7 +29,7 @@ export function AiContextCard({ view, className }: { view: AiContextView; classN
         <div className="flex flex-col gap-4">
           {view.groups.map((g) => (
             <div key={g.kind} className="flex flex-col gap-2" data-context-kind={g.kind}>
-              <h3 className="text-[13px] leading-[18px] font-semibold text-ink-2">{g.label}</h3>
+              <h3 className="text-[11px] leading-4 font-semibold tracking-[0.12em] text-ink-3 uppercase">{g.label}</h3>
               <ul className="flex flex-col gap-2">
                 {g.items.map((item, i) => (
                   <li key={`${g.kind}-${i}`} className="flex flex-col gap-0.5 type-body text-ink [overflow-wrap:anywhere]">
@@ -58,7 +58,7 @@ export function WebContextCard({ view, className }: { view: WebContextView; clas
   return (
     <section aria-labelledby={id} className={cx(CARD, className)} data-context="web" data-context-status={view.status}>
       <div className="flex flex-col gap-1.5">
-        <h2 id={id} className="flex items-center gap-2 text-[15px] leading-6 font-semibold text-ink">
+        <h2 id={id} className="flex items-center gap-2 font-display text-[18px] leading-6 font-medium text-ink">
           <Icon name="external-link" size={16} className="shrink-0 text-ink-2" />
           {WEB_CONTEXT_HEADING}
         </h2>
@@ -96,16 +96,25 @@ export function WebContextCard({ view, className }: { view: WebContextView; clas
   );
 }
 
-/** Both cards on one row (3 + 3 on the six-column grid from 900 px); one alone takes the row. */
+/**
+ * Both cards on one row (3 + 3 on the six-column grid from 900 px); one alone takes the row. A ruled
+ * divider labels the row as context, so it never reads as measured data.
+ */
 export function ContextRow({ context, className }: { context: AnswerContext; className?: string }) {
   const { ai, web } = context;
   if (!ai && !web) return null;
   const both = ai !== null && web !== null;
   const span = both ? "min-[900px]:col-span-3" : "min-[900px]:col-span-6";
   return (
-    <div className={cx("grid grid-cols-1 gap-6 max-md:gap-4 min-[900px]:grid-cols-6", className)} data-context-row={both ? "ai+web" : ai ? "ai" : "web"}>
-      {ai ? <AiContextCard view={ai} className={span} /> : null}
-      {web ? <WebContextCard view={web} className={span} /> : null}
+    <div className={cx("flex flex-col gap-5", className)} data-context-row={both ? "ai+web" : ai ? "ai" : "web"}>
+      <div className="flex items-center gap-4" aria-hidden="true">
+        <span className="shrink-0 text-[11px] leading-4 font-semibold tracking-[0.12em] text-ink-3 uppercase">Context · not measured, not checked</span>
+        <span className="h-px flex-1 bg-line-strong" />
+      </div>
+      <div className="grid grid-cols-1 gap-6 max-md:gap-4 min-[900px]:grid-cols-6">
+        {ai ? <AiContextCard view={ai} className={span} /> : null}
+        {web ? <WebContextCard view={web} className={span} /> : null}
+      </div>
     </div>
   );
 }

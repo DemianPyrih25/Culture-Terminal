@@ -9,6 +9,7 @@ import { Monogram } from "../ui/monogram";
 import { Skeleton } from "../ui/skeleton";
 import { DES_TYPE_LABEL, desHref, type DesType } from "./des-href";
 import { DesSearch } from "./des-search";
+import { CHIP, EYEBROW } from "./eyebrow";
 import type { DesCandidate, DesOutcome } from "./model";
 
 /**
@@ -22,26 +23,29 @@ const WIDELY_KNOWN = 0.5;
 
 export const LOOK_UP_ID = "look-up";
 
+/** Candidates: one white list with hairline rows, each opening its own profile. */
 function Candidates({ candidates, label }: { candidates: readonly DesCandidate[]; label: string }) {
   return (
-    <ul aria-label={label} className="flex flex-col gap-2">
+    <ul aria-label={label} className="flex flex-col divide-y divide-line overflow-hidden rounded-card border border-line bg-surface">
       {candidates.map((c) => (
         <li key={c.key}>
           <Link
             href={c.href}
             prefetch={false}
-            className="flex min-h-14 items-center gap-3 rounded-control border border-line bg-surface px-4 py-2 transition-[border-color,box-shadow] hover:border-line-strong hover:shadow-md"
+            className="group flex min-h-16 items-center gap-4 px-5 py-3 transition-colors hover:bg-canvas max-sm:gap-3 max-sm:px-4"
             data-candidate={c.key}
           >
             <Monogram name={c.name} size={32} />
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-[15px] leading-6 font-semibold text-ink">{c.name}</span>
-              <span className="truncate type-label text-ink-2">{c.disambiguation ?? "No other detail from Qloo"}</span>
+              <span className="truncate type-body-strong text-ink group-hover:text-accent">{c.name}</span>
+              <span className="truncate type-label font-normal text-ink-2">{c.disambiguation ?? "No other detail from Qloo"}</span>
             </span>
             {c.popularity !== null ? (
-              <span className="shrink-0 type-label text-ink-2 max-sm:hidden">{c.popularity >= WIDELY_KNOWN ? "Widely known" : "Less known"}</span>
+              <span className={cx(CHIP, "max-sm:hidden", c.popularity >= WIDELY_KNOWN ? "bg-accent-soft text-accent-ink" : "bg-sunken text-ink-2")}>
+                {c.popularity >= WIDELY_KNOWN ? "Widely known" : "Less known"}
+              </span>
             ) : null}
-            <Icon name="chevron-right" size={16} className="shrink-0 text-ink-3" />
+            <Icon name="arrow-right" size={16} className="shrink-0 text-ink-3 group-hover:text-accent" />
           </Link>
         </li>
       ))}
@@ -49,23 +53,32 @@ function Candidates({ candidates, label }: { candidates: readonly DesCandidate[]
   );
 }
 
-function StateCard({ icon, tone = "neutral", title, children, label }: { icon: IconName; tone?: "neutral" | "danger"; title: ReactNode; children?: ReactNode; label: string }) {
+function StateCard({
+  icon,
+  tone = "neutral",
+  title,
+  children,
+  label,
+}: {
+  icon: IconName;
+  tone?: "neutral" | "danger";
+  title: ReactNode;
+  children?: ReactNode;
+  label: string;
+}) {
   return (
-    <Card
-      padding="lg"
-      aria-label={label}
-      data-state-card={label}
-      className={cx("flex flex-col gap-5", tone === "danger" && "!border-transparent !bg-danger-soft")}
-    >
-      <Icon name={icon} size={28} className={tone === "danger" ? "text-danger" : "text-ink-2"} />
-      <h2 className={cx("type-title-l max-md:type-title-l-sm", tone === "danger" ? "text-danger-ink" : "text-ink")}>{title}</h2>
-      {children}
+    <Card padding="lg" aria-label={label} data-state-card={label} className={cx("flex flex-col gap-3", tone === "danger" && "!border-danger/40")}>
+      <div className="flex items-start gap-3">
+        <Icon name={icon} size={20} className={cx("mt-[3px] shrink-0", tone === "danger" ? "text-danger" : "text-ink-2")} />
+        <h2 className={cx("type-display-s break-words max-md:type-display-s-sm", tone === "danger" ? "text-danger-ink" : "text-ink")}>{title}</h2>
+      </div>
+      {children ? <div className="flex flex-col gap-4 pl-8 max-sm:pl-0">{children}</div> : null}
     </Card>
   );
 }
 
 const lookUpLink = (
-  <a href={`#${LOOK_UP_ID}`} className="inline-flex items-center gap-1.5 font-medium text-accent hover:text-accent-hover">
+  <a href={`#${LOOK_UP_ID}`} className="inline-flex items-center gap-1.5 font-medium text-accent hover:text-accent-hover hover:underline">
     Look up another
     <Icon name="arrow-right" size={14} />
   </a>
@@ -75,19 +88,24 @@ function OutcomeCard({ outcome, retry }: { outcome: Exclude<DesOutcome, { kind: 
   switch (outcome.kind) {
     case "pick":
       return (
-        <Card padding="lg" aria-label="Which one" data-state-card="Which one" className="flex flex-col gap-4">
-          <h2 className="type-title text-ink max-md:type-title-sm">“{outcome.query.name}” could mean a few things. Which one?</h2>
+        <section aria-label="Which one" data-state-card="Which one" className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1">
+            <h2 className="type-display-s break-words text-ink max-md:type-display-s-sm">
+              “{outcome.query.name}” could mean a few things. Which one?
+            </h2>
+            <p className="type-body text-ink-2">Nothing is picked for you; each opens its own profile.</p>
+          </div>
           <Candidates candidates={outcome.candidates} label="Candidates" />
-          <p className="type-label text-ink-2">Not listed? {lookUpLink}</p>
-        </Card>
+          <p className="type-label font-normal text-ink-2">Not listed? {lookUpLink}</p>
+        </section>
       );
     case "not_found":
       return (
         <StateCard icon="search-x" label="Name not found" title={`“${outcome.query.name}” isn't in Qloo's data.`}>
           <p className="type-body text-ink-2">Check the spelling or use the full name. Nothing was swapped in for you.</p>
           {outcome.candidates.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              <h3 className="text-[13px] leading-[18px] font-semibold text-ink-2">Closest names in Qloo</h3>
+            <div className="flex flex-col gap-3 pt-1">
+              <h3 className={EYEBROW}>Closest names in Qloo</h3>
               <Candidates candidates={outcome.candidates} label="Closest names" />
             </div>
           ) : null}
@@ -97,12 +115,24 @@ function OutcomeCard({ outcome, retry }: { outcome: Exclude<DesOutcome, { kind: 
       return (
         <StateCard icon="ban" label="Not looked up" title="We only profile public figures.">
           <p className="type-body text-ink-2">{outcome.message}</p>
-          <p className="type-label text-ink-2">Group-level taste only: no individuals.</p>
+          <p className="type-label font-normal text-ink-3">Group-level taste only: no individuals.</p>
         </StateCard>
       );
     case "unavailable":
       return (
-        <InlineState tone="neutral" icon="circle-pause" data-state-card="Paused">
+        <InlineState
+          tone="neutral"
+          icon="circle-pause"
+          data-state-card="Paused"
+          action={
+            // A spent daily budget is a limit: the plan page says what it is and when it resets.
+            outcome.cause === "budget" ? (
+              <Link href="/settings" prefetch={false} className="type-label text-accent hover:text-accent-hover hover:underline">
+                See plan
+              </Link>
+            ) : undefined
+          }
+        >
           {outcome.message}
         </InlineState>
       );
@@ -129,7 +159,14 @@ function OutcomeCard({ outcome, retry }: { outcome: Exclude<DesOutcome, { kind: 
           <p className="type-body text-ink">{outcome.message}</p>
           {retry ? (
             <div>
-              <ButtonLink href={retry} prefetch={false} variant="primary" icon="rotate-ccw" trailing={null} className="max-md:w-full max-md:justify-center">
+              <ButtonLink
+                href={retry}
+                prefetch={false}
+                variant="primary"
+                icon="rotate-ccw"
+                trailing={null}
+                className="max-md:w-full max-md:justify-center"
+              >
                 Try again
               </ButtonLink>
             </div>
@@ -143,21 +180,24 @@ function OutcomeCard({ outcome, retry }: { outcome: Exclude<DesOutcome, { kind: 
 function LookUp({ title, name, type, error }: { title: string; name?: string; type?: DesType; error?: string | null }) {
   return (
     <Card id={LOOK_UP_ID} aria-labelledby={`${LOOK_UP_ID}-title`} className="flex scroll-mt-6 flex-col gap-4">
-      <h2 id={`${LOOK_UP_ID}-title`} className="type-title text-ink max-md:type-title-sm">
+      <h2 id={`${LOOK_UP_ID}-title`} className="type-display-s text-ink max-md:type-display-s-sm">
         {title}
       </h2>
       <DesSearch name={name} type={type} error={error} />
+      <p className="type-caption text-ink-3">
+        A brand, artist, public figure, podcast, TV show or film. Places aren&apos;t profiled: ask a question about a place instead.
+      </p>
     </Card>
   );
 }
 
 function Page({ title, labelLine, lead, children }: { title: string; labelLine?: string; lead?: string; children: ReactNode }) {
   return (
-    <div className="flex max-w-[744px] flex-col gap-6 pt-10 pb-12 max-md:gap-4 max-md:pt-6 max-md:pb-8">
-      <header className="flex flex-col gap-2 pb-3">
+    <div className="flex max-w-[744px] flex-col gap-8 pt-12 pb-16 max-md:gap-6 max-md:pt-6 max-md:pb-10">
+      <header className="flex flex-col gap-2">
+        {labelLine ? <p className={EYEBROW}>{labelLine}</p> : null}
         <h1 className="type-display-m break-words text-ink max-md:type-display-m-sm">{title}</h1>
-        {labelLine ? <p className="type-label text-ink-2">{labelLine}</p> : null}
-        {lead ? <p className="type-lead text-ink-2 max-md:text-[16px] max-md:leading-6">{lead}</p> : null}
+        {lead ? <p className="mt-1 type-body text-ink-2 md:text-[16px] md:leading-[26px]">{lead}</p> : null}
       </header>
       {children}
     </div>
@@ -176,7 +216,11 @@ export interface ProfileStateViewProps {
 export function ProfileStateView({ query, outcome, error = null }: ProfileStateViewProps) {
   if (query === null || outcome === null) {
     return (
-      <Page title="Look up a profile" lead="See who a brand's, artist's or show's fans are, what else they love, and where their taste travels.">
+      <Page
+        title="Look up a profile"
+        labelLine="Audience profiles"
+        lead="See who a brand's, artist's or show's fans are, what else they love, and where their taste travels."
+      >
         <LookUp title="Name and type" name={query?.name} type={query?.type} error={error} />
       </Page>
     );
@@ -185,10 +229,7 @@ export function ProfileStateView({ query, outcome, error = null }: ProfileStateV
   const refused = outcome.kind === "refused";
   const retry = outcome.kind === "failed" || outcome.kind === "limited" ? desHref(query) : null;
   return (
-    <Page
-      title={refused ? "Look up a profile" : query.name}
-      labelLine={refused ? undefined : `${DES_TYPE_LABEL[query.type]} · Audience profile`}
-    >
+    <Page title={refused ? "Look up a profile" : query.name} labelLine={refused ? undefined : `${DES_TYPE_LABEL[query.type]} · Audience profile`}>
       <OutcomeCard outcome={outcome} retry={retry} />
       <LookUp title="Look up another" name={refused ? "" : undefined} type={query.type} />
     </Page>
@@ -198,18 +239,22 @@ export function ProfileStateView({ query, outcome, error = null }: ProfileStateV
 /** While a profile is computed: the header and the cards as skeletons. */
 export function ProfileSkeleton() {
   return (
-    <div className="flex flex-col gap-9 pt-10 pb-12 max-md:gap-6 max-md:pt-6" role="status" aria-live="polite" data-profile-loading="true">
+    <div className="flex flex-col gap-10 pt-12 pb-16 max-md:gap-6 max-md:pt-6" role="status" aria-live="polite" data-profile-loading="true">
       <span className="sr-only">Reading Qloo…</span>
       <div className="flex items-center gap-4">
-        <Skeleton className="size-14 rounded-[14px]" />
+        <Skeleton className="size-14 rounded-tile max-md:size-12" />
         <div className="flex flex-col gap-2">
+          <Skeleton className="h-3 w-56 max-md:w-40" />
           <Skeleton className="h-9 w-64 max-md:w-44" />
-          <Skeleton className="h-4 w-80 max-md:w-56" />
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-6 max-md:grid-cols-1 max-md:gap-4">
+      <div className="grid grid-cols-3 gap-px overflow-hidden rounded-card border border-line bg-line max-md:grid-cols-1">
         {[0, 1, 2].map((i) => (
-          <Skeleton key={i} className="h-[148px] rounded-card max-md:h-[114px]" />
+          <div key={i} className="flex flex-col gap-3 bg-surface p-5">
+            <Skeleton className="h-3 w-28" />
+            <Skeleton className="h-8 w-36" />
+            <Skeleton className="h-3 w-48" />
+          </div>
         ))}
       </div>
       <div className="grid grid-cols-2 gap-6 max-lg:grid-cols-1">

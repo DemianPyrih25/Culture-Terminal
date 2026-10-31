@@ -8,12 +8,12 @@ export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Status · Culture Terminal",
-  description: "Mode, breakers, budgets and quota of this Culture Terminal server.",
+  description: "Service health, runs, Qloo and system readings of this Culture Terminal server.",
   // An operations page, not content: kept out of search results.
   robots: { index: false, follow: false },
 };
 
-/** /status (PLAN Part 7, P1 item 13): the mode and why, budgets, quota, outcomes and system health. */
+/** /status (PLAN Part 7, P1 item 13): the service state and why, runs, Qloo and system health. */
 export default async function StatusPage() {
   const report = await currentStatus();
   return (

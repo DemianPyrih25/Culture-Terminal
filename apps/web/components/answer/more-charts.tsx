@@ -20,11 +20,11 @@ import { GroupLabel } from "./cards";
 export function MoreCharts({ charts, onOpen }: { charts: readonly MoreChart[]; onOpen: (chart: MoreChart) => void }) {
   if (charts.length === 0) return null;
   return (
-    <section aria-labelledby="more-charts" className="flex flex-col gap-3">
+    <section aria-labelledby="more-charts" className="flex flex-col gap-4">
       <div id="more-charts">
         <GroupLabel icon="chart-bar">More charts</GroupLabel>
       </div>
-      <ul className="grid gap-6 max-md:gap-3 md:grid-cols-2 lg:grid-cols-4">
+      <ul className="grid gap-4 max-md:gap-3 md:grid-cols-2 lg:grid-cols-4">
         {charts.map((c) => (
           <li key={c.datasetId} className="flex">
             <button
@@ -34,7 +34,7 @@ export function MoreCharts({ charts, onOpen }: { charts: readonly MoreChart[]; o
               data-more-chart={c.datasetId}
               className={cardClassName(
                 "none",
-                "group flex w-full flex-col gap-3 p-4 text-left transition-[border-color,box-shadow] hover:border-line-strong hover:shadow-md active:shadow-xs max-md:flex-row max-md:items-center max-md:px-5 max-md:py-4",
+                "group flex w-full flex-col gap-3 p-4 text-left transition-colors hover:border-ink-3 max-md:flex-row max-md:items-center max-md:px-5 max-md:py-4",
               )}
             >
               <span className="relative flex h-16 items-center rounded-sm bg-sunken px-3 max-md:hidden">
@@ -42,7 +42,7 @@ export function MoreCharts({ charts, onOpen }: { charts: readonly MoreChart[]; o
                 <Icon name="arrow-up-right" size={14} className="absolute top-2 right-2 text-ink-3 transition-colors group-hover:text-accent" />
               </span>
               <Icon name="chart-bar" size={16} className="shrink-0 text-ink md:hidden" />
-              <span className="min-w-0 flex-1 text-[15px] leading-6 font-semibold text-ink">{c.name}</span>
+              <span className="min-w-0 flex-1 text-[15px] leading-6 font-medium text-ink">{c.name}</span>
               <Icon name="chevron-right" size={18} className="shrink-0 text-ink-3 md:hidden" />
             </button>
           </li>
@@ -89,7 +89,7 @@ export function ChartSheet({
         if (e.target === e.currentTarget) onClose();
       }}
       className={cx(
-        "m-auto w-[min(960px,calc(100vw-32px))] max-w-none rounded-box border border-line bg-surface p-0 shadow-lg backdrop:bg-scrim",
+        "m-auto w-[min(960px,calc(100vw-32px))] max-w-none rounded-box border border-line bg-surface p-0 shadow-md backdrop:bg-scrim",
         "max-md:h-full max-md:max-h-none max-md:w-full max-md:rounded-none max-md:rounded-t-box",
       )}
     >

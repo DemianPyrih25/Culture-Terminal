@@ -1,10 +1,8 @@
 import type { Lane } from "@ct/contracts";
 import type { ReactNode } from "react";
-import { formatUsd, formatUtcDate } from "../../lib/brief/format";
-import type { HourCount, StatusLevel, StatusReport } from "../../server/status";
+import type { BreakerKey, HourCount, StatusLevel, StatusReport } from "../../server/status";
 import { ButtonLink } from "../ui/button";
 import { Card } from "../ui/card";
-import { chipClassName } from "../ui/chip";
 import { Icon } from "../ui/icons";
 import {
   BREAKER_LABEL,
@@ -27,45 +25,57 @@ import { UsageMeter } from "./usage-meter";
 
 /** The page's sections, in order: the index links to them. */
 export const STATUS_SECTIONS: readonly { id: string; label: string }[] = [
-  { id: "mode", label: "Mode" },
-  { id: "spend", label: "LLM spend" },
+  { id: "mode", label: "Service" },
   { id: "runs", label: "Runs" },
   { id: "qloo", label: "Qloo" },
-  { id: "today", label: "Shared use" },
   { id: "system", label: "System" },
 ];
 
 const LANES: readonly Lane[] = ["public", "judge"];
 
+/**
+ * The breakers shown as service health. Spend, the hourly run cap and Qloo's daily cap and month floor
+ * are budgets, not health: they live with the plan, and their effect still shows in each lane's state.
+ */
+const HEALTH_BREAKERS: ReadonlySet<BreakerKey> = new Set<BreakerKey>(["stored", "override", "qloo_auth", "qloo_switch", "draining"]);
+
 export interface StatusViewProps {
   report: StatusReport;
 }
 
-const NotRead = ({ children = "Not read" }: { children?: ReactNode }) => <span className="text-ink-2">{children}</span>;
+const EYEBROW = "text-[11px] leading-4 font-semibold tracking-[0.08em] uppercase text-ink-3";
+
+const NotRead = ({ children = "Not read" }: { children?: ReactNode }) => <span className="text-ink-3">{children}</span>;
 
 /** A note under a section: what the rows mean, and where it comes from. */
 function StatusNote({ children, trace }: { children: ReactNode; trace?: ReactNode }) {
   return (
-    <div className="flex gap-2 border-t border-line pt-4" data-status-note="true">
-      <Icon name="lightbulb" size={16} className="mt-0.5 shrink-0 text-ink-2" />
-      <p className="type-label text-ink-2">
+    <div className="flex gap-2.5 rounded-b-card border-t border-line bg-sunken/50 px-5 py-3.5" data-status-note="true">
+      <Icon name="lightbulb" size={15} className="mt-0.5 shrink-0 text-caution" />
+      <p className="type-caption text-ink-2">
         {children}
-        {trace ? <span className="block pt-0.5 font-mono text-[12px] leading-[18px] [overflow-wrap:anywhere]">{trace}</span> : null}
+        {trace ? <span className="block pt-1 font-mono text-[11px] leading-4 text-ink-3 [overflow-wrap:anywhere]">{trace}</span> : null}
       </p>
     </div>
   );
 }
 
 function Section({ id, title, aside, notes, children }: { id: string; title: string; aside?: ReactNode; notes?: ReactNode; children: ReactNode }) {
+  const n = STATUS_SECTIONS.findIndex((s) => s.id === id) + 1;
   return (
-    <Card id={id} aria-labelledby={`${id}-title`} className="flex scroll-mt-6 flex-col gap-3" data-section={id}>
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 id={`${id}-title`} className="type-title text-ink max-md:type-title-sm">
+    <Card id={id} aria-labelledby={`${id}-title`} padding="none" className="flex scroll-mt-6 flex-col" data-section={id}>
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-line px-5 pt-4.5 pb-3.5">
+        {n > 0 ? (
+          <span aria-hidden="true" className="font-mono text-[11px] leading-4 text-ink-3">
+            {String(n).padStart(2, "0")}
+          </span>
+        ) : null}
+        <h2 id={`${id}-title`} className="font-display text-[22px] leading-[28px] text-ink max-md:text-[19px] max-md:leading-6">
           {title}
         </h2>
-        {aside ? <p className="type-label text-ink-2">{aside}</p> : null}
+        {aside ? <p className="ml-auto type-caption text-ink-3">{aside}</p> : null}
       </div>
-      {children}
+      <div className="px-5 py-1">{children}</div>
       {notes}
     </Card>
   );
@@ -77,7 +87,7 @@ function ModeSection({ report }: StatusViewProps) {
   return (
     <Section
       id="mode"
-      title="Mode"
+      title="Service"
       aside={aside}
       notes={
         <StatusNote trace="live → economy → replay only">
@@ -100,7 +110,7 @@ function ModeSection({ report }: StatusViewProps) {
             </StatusRow>
           );
         })}
-        {breakers.map((breaker) => (
+        {breakers.filter((b) => HEALTH_BREAKERS.has(b.key)).map((breaker) => (
           <StatusRow key={breaker.key} label={BREAKER_LABEL[breaker.key]} note={<LevelTag level={breaker.level} />}>
             <span data-breaker={breaker.key}>{breakerDetail(breaker.key, report)}</span>
           </StatusRow>
@@ -110,64 +120,10 @@ function ModeSection({ report }: StatusViewProps) {
   );
 }
 
-function SpendSection({ report }: StatusViewProps) {
-  const { llm } = report;
-  const today = llm.todayUsd;
-  const usd = (v: number | null) => (v === null ? "–" : formatUsd(v));
-  return (
-    <Section
-      id="spend"
-      title="LLM spend"
-      aside="Resets 00:00 UTC"
-      notes={
-        <StatusNote trace={`LLM_DAILY_USD_CAP ${formatUsd(llm.capUsd)}`}>
-          Today&apos;s spend across both lanes. The public lane steps down first; the rest of the budget is held for judges.
-        </StatusNote>
-      }
-    >
-      <StatusRows label="LLM spend">
-        <StatusRow label="Spent today" note={`public ${usd(llm.laneUsd.public)} · judge ${usd(llm.laneUsd.judge)}`}>
-          {today === null ? <NotRead /> : <Amount used={formatUsd(today)} of={`of ${formatUsd(llm.capUsd)} cap`} />}
-        </StatusRow>
-        {LANES.map((lane) => {
-          const b = llm.budgets[lane];
-          return (
-            <StatusRow key={lane} label={LANE_LABEL[lane]}>
-              <UsageMeter
-                value={today}
-                max={b.cap}
-                label={`LLM spend today against the ${lane} lane's budget`}
-                valueText={today === null ? undefined : `${formatUsd(today)} of ${formatUsd(b.cap)}`}
-                ticks={[
-                  { at: b.economyAt, label: `Economy from ${formatUsd(b.economyAt)}` },
-                  { at: b.replayAt, label: `Paused from ${formatUsd(b.replayAt)}` },
-                ]}
-                tripped={today !== null && today >= b.replayAt}
-              />
-              <Amount used={`economy at ${formatUsd(b.economyAt)}`} of={`· paused at ${formatUsd(b.replayAt)}`} />
-            </StatusRow>
-          );
-        })}
-        <StatusRow label="Anthropic key" note="never shown">
-          {llm.configured ? <Amount used="Set" /> : <Amount used="Not set" of="· live runs are refused, test runs still work" />}
-        </StatusRow>
-      </StatusRows>
-    </Section>
-  );
-}
-
 function HourRow({ label, hour }: { label: string; hour: HourCount }) {
-  const full = hour.lastHour !== null && hour.lastHour >= hour.hourlyCap;
   return (
     <StatusRow label={label} note="all servers">
-      <UsageMeter
-        value={hour.lastHour}
-        max={hour.hourlyCap}
-        label={label}
-        valueText={hour.lastHour === null ? undefined : `${hour.lastHour} of ${hour.hourlyCap}`}
-        tripped={full}
-      />
-      {hour.lastHour === null ? <NotRead /> : <Amount used={count(hour.lastHour)} of={`of ${count(hour.hourlyCap)}`} />}
+      {hour.lastHour === null ? <NotRead /> : <Amount used={count(hour.lastHour)} of={hour.lastHour === 1 ? "run started" : "runs started"} />}
     </StatusRow>
   );
 }
@@ -246,60 +202,19 @@ function QlooSection({ report }: StatusViewProps) {
       </Section>
     );
   }
-  const level = (key: "qloo_daily" | "qloo_floor") => report.breakers.find((b) => b.key === key)?.level;
-  const { today, month } = qloo;
   const rate = cacheRate(qloo.cache);
-  const used = month.limit !== null && month.remaining !== null ? Math.max(0, month.limit - month.remaining) : null;
   return (
     <Section
       id="qloo"
       title="Qloo"
-      aside={month.resetsAt ? `${ENV_LABEL[qloo.env]} · month resets ${formatUtcDate(month.resetsAt)}` : ENV_LABEL[qloo.env]}
+      aside={ENV_LABEL[qloo.env]}
       notes={
-        <StatusNote trace={`floor ${count(month.floor)} · ${qloo.env}`}>
-          Below {count(month.floor)} calls left this month the app switches to replay only. A cached answer costs no call.
+        <StatusNote trace={qloo.env}>
+          A cached answer costs no call. When Qloo cannot be reached or its quota runs low, live runs step down to replay only and say so.
         </StatusNote>
       }
     >
       <StatusRows label="Qloo">
-        <StatusRow label="Fresh calls today" note={today.enforced ? "resets 00:00 UTC" : "cap in prod only"}>
-          <UsageMeter
-            value={today.network}
-            max={today.cap}
-            label="Fresh Qloo calls today"
-            valueText={`${today.network} of ${today.cap}`}
-            tripped={level("qloo_daily") === "tripped"}
-          />
-          <Amount used={count(today.network)} of={`of ${count(today.cap)}`} />
-        </StatusRow>
-        {qloo.env === "mock" ? null : (
-          <StatusRow label="By lane" note="60% public · 40% judges">
-            <span>
-              Public{" "}
-              <Amount used={today.lanes.public.used === null ? "–" : count(today.lanes.public.used)} of={`of ${count(today.lanes.public.cap)}`} />
-              <span className="px-2 text-ink-3">·</span>
-              Judge{" "}
-              <Amount used={today.lanes.judge.used === null ? "–" : count(today.lanes.judge.used)} of={`of ${count(today.lanes.judge.cap)}`} />
-            </span>
-          </StatusRow>
-        )}
-        <StatusRow label="Left this month" note={`floor ${count(month.floor)}`}>
-          {month.limit !== null ? (
-            <UsageMeter
-              value={used}
-              max={month.limit}
-              label="Qloo calls used this month"
-              valueText={used === null ? undefined : `${used} used of ${month.limit}`}
-              ticks={[{ at: month.limit - month.floor, label: "Replay only below the floor" }]}
-              tripped={level("qloo_floor") === "tripped"}
-            />
-          ) : null}
-          {month.remaining === null ? (
-            <NotRead>No reading yet: the next Qloo response brings one</NotRead>
-          ) : (
-            <Amount used={count(month.remaining)} of={month.limit === null ? "left" : `left of ${count(month.limit)}`} />
-          )}
-        </StatusRow>
         <StatusRow label="Cache hit rate today">
           <UsageMeter
             value={rate}
@@ -387,46 +302,6 @@ function LocalitiesRow({ pins }: { pins: StatusReport["localities"] }) {
   );
 }
 
-/**
- * Today's use of what answers share outside their own Qloo calls (Part 11): brand screens, the side
- * context calls ("What AI knows", "From the web") and OpenStreetMap requests against the daily cap.
- * Counts and spend only. A reading from a server before Part 11 has none, and the section is left out.
- */
-function TodaySection({ report }: StatusViewProps) {
-  const today = report.today;
-  if (!today) return null;
-  const { context, osm } = today;
-  const usd = (v: number) => formatUsd(v);
-  const contextText =
-    context.aiUsd === null && context.webUsd === null
-      ? null
-      : `AI ${context.aiUsd === null ? "not read" : usd(context.aiUsd)} · web ${context.webUsd === null ? "not read" : usd(context.webUsd)}`;
-  return (
-    <Section id="today" title="Shared use" aside="Today, UTC">
-      <StatusRows label="Shared use">
-        <StatusRow label="Brand screens" note="all servers">
-          {today.screens === null ? <NotRead /> : <Amount used={count(today.screens)} of={today.screens === 1 ? "screen today" : "screens today"} />}
-        </StatusRow>
-        <StatusRow label="Context calls" note={context.webSearches === null ? undefined : `${count(context.webSearches)} ${context.webSearches === 1 ? "search" : "searches"}`}>
-          {contextText === null ? <NotRead /> : <Amount used={contextText} of="spent today, part of the LLM spend" wrap />}
-        </StatusRow>
-        <StatusRow label="OpenStreetMap requests" note={osm.configured ? "resets 00:00 UTC" : undefined}>
-          {!osm.configured ? (
-            <span className="text-ink-2">Not configured: place counts need OSM_USER_AGENT.</span>
-          ) : osm.requests === null ? (
-            <NotRead />
-          ) : (
-            <>
-              <UsageMeter value={osm.requests} max={Math.max(1, osm.dailyMax)} label="OpenStreetMap requests today" valueText={`${count(osm.requests)} of ${count(osm.dailyMax)}`} />
-              <Amount used={count(osm.requests)} of={`of ${count(osm.dailyMax)}`} />
-            </>
-          )}
-        </StatusRow>
-      </StatusRows>
-    </Section>
-  );
-}
-
 function SystemSection({ report }: StatusViewProps) {
   const { db, migrations } = report;
   return (
@@ -452,6 +327,14 @@ function SystemSection({ report }: StatusViewProps) {
           <Amount wrap used={MIGRATION_TEXT[migrations.state]} of={migrations.journal ? `· ${count(migrations.journal.count)} in the journal` : undefined} />
           {migrations.journal?.latest ? <span className="type-mono text-ink-2">{migrations.journal.latest}</span> : null}
         </StatusRow>
+        <StatusRow label="Anthropic key" note="never shown">
+          {report.llm.configured ? <Amount used="Set" /> : <Amount used="Not set" of="· live runs are refused, test runs still work" />}
+        </StatusRow>
+        {report.today ? (
+          <StatusRow label="OpenStreetMap">
+            {report.today.osm.configured ? <Amount used="Configured" /> : <span className="text-ink-2">Not configured: place counts need OSM_USER_AGENT.</span>}
+          </StatusRow>
+        ) : null}
         <LocalitiesRow pins={report.localities} />
         <StatusRow label="Version" note={`up ${formatUptime(report.uptimeS)}`}>
           <span className="type-mono text-ink">{report.version}</span>
@@ -466,40 +349,68 @@ function SystemSection({ report }: StatusViewProps) {
 
 /**
  * /status, the operator page: the reading's time and Reload, the answer first (what a public live
- * question gets now), then five cards of label · value · note rows. A server reading, rendered as it
- * was taken. Statuses and counts only: no questions, names or request ids.
+ * question gets now), then service health, runs, Qloo and the system as label · value · note rows, with
+ * an index and a note on how to read the page beside them. A server reading, rendered as it was taken.
+ * Statuses and counts only: no questions, names or request ids. Spend and caps live with the plan.
  */
 export function StatusView({ report }: StatusViewProps) {
   return (
-    <div className="flex flex-col gap-6 pt-12 pb-12 max-md:gap-4 max-md:pt-6 max-md:pb-8">
+    <div className="flex flex-col gap-7 pt-12 pb-16 max-md:gap-5 max-md:pt-6 max-md:pb-8">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-2">
           <h1 className="type-display-m text-ink max-md:type-display-m-sm">Status</h1>
-          <p className="type-label text-ink-2">Operations · Version {report.version}</p>
+          <p className="flex flex-wrap items-center gap-x-2.5 type-label text-ink-3">
+            <span>Operations · Version {report.version}</span>
+            <span aria-hidden="true" className="size-[3px] rounded-full bg-ink-3" />
+            <span>Read {utcTime(report.readAt)}</span>
+          </p>
         </div>
-        <div className="flex shrink-0 items-center gap-3">
-          <span className="type-label text-ink-2">Read {utcTime(report.readAt)}</span>
-          <ButtonLink href="/status" prefetch={false} variant="secondary" size="sm" icon="rotate-ccw" trailing={null}>
-            Reload
-          </ButtonLink>
-        </div>
+        <ButtonLink href="/status" prefetch={false} variant="secondary" size="sm" icon="rotate-ccw" trailing={null} className="shrink-0 self-start sm:self-auto">
+          Reload
+        </ButtonLink>
       </header>
-      <p className="max-w-[744px] type-lead text-ink" data-live-state={report.live.state}>
+      <p className="max-w-[860px] border-b border-line pb-6 font-display text-[24px] leading-[32px] text-ink max-md:text-[19px] max-md:leading-[27px]" data-live-state={report.live.state}>
         {leadSentence(report)}
       </p>
-      <nav aria-label="Sections" className="flex flex-wrap gap-2">
+      <nav aria-label="Sections" className="flex flex-wrap items-center gap-2 lg:hidden">
+        <span className="pr-1 type-caption text-ink-3">Jump to</span>
         {STATUS_SECTIONS.map((s) => (
-          <a key={s.id} href={`#${s.id}`} className={chipClassName(false)}>
+          <a key={s.id} href={`#${s.id}`} className="inline-flex h-7 items-center rounded-control border border-line bg-surface px-3 type-caption text-ink-2 hover:text-ink">
             {s.label}
           </a>
         ))}
       </nav>
-      <ModeSection report={report} />
-      <SpendSection report={report} />
-      <RunsSection report={report} />
-      <QlooSection report={report} />
-      <TodaySection report={report} />
-      <SystemSection report={report} />
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_272px]">
+        <div className="flex min-w-0 flex-col gap-6 max-md:gap-4">
+          <ModeSection report={report} />
+          <RunsSection report={report} />
+          <QlooSection report={report} />
+          <SystemSection report={report} />
+        </div>
+        <aside className="flex flex-col gap-6 max-lg:hidden">
+          <nav aria-label="On this page" className="flex flex-col gap-2.5 border-b border-line pb-5">
+            <p className={EYEBROW}>On this page</p>
+            <ol className="flex flex-col border-l border-line">
+              {STATUS_SECTIONS.map((s, i) => (
+                <li key={s.id}>
+                  <a href={`#${s.id}`} className="-ml-px flex items-baseline gap-2.5 border-l border-transparent py-1 pl-2.5 type-label text-ink-2 hover:border-accent hover:text-accent">
+                    <span aria-hidden="true" className="font-mono text-[11px] text-ink-3">
+                      {String(i + 1).padStart(2, "0")}
+                    </span>
+                    {s.label}
+                  </a>
+                </li>
+              ))}
+            </ol>
+          </nav>
+          <div className="flex flex-col gap-2.5">
+            <p className={EYEBROW}>About this page</p>
+            <p className="type-label text-ink-2">Operator page. Not indexed and not linked from the app.</p>
+            <p className="type-caption text-ink-3">Every value is read on load and reused for 5 seconds, so Reload more often shows the same reading.</p>
+            <p className="type-caption text-ink-3">A value we could not read says Not read. We never fill a gap with an estimate.</p>
+          </div>
+        </aside>
+      </div>
     </div>
   );
 }

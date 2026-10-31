@@ -1,11 +1,12 @@
 import { cx } from "../ui/cx";
 import { Icon } from "../ui/icons";
-import type { LiftLabel, LiftMode } from "./lift-scale";
+import { LIFT_ABOVE, LIFT_BELOW, MAP_RAMP, rgbHex, type LiftLabel, type LiftMode } from "./lift-scale";
 
 /**
  * The map's HTML marks, shared by the WebGL map, the area map and the map card: the numbered ink pin
  * (28 px, white 13/600 numeral) with the few-rivals ring (40 px, 2 px second), the corner pin (32 px
- * accent with a white map-pin), the flag, and the ramp legend (four swatches map-2..5 at 70 %).
+ * accent with a white map-pin), the flag, and the ramp legend (the sequential blue ramp, or the diverging
+ * red-paper-green lift ramp on the LIFT layer).
  */
 
 /** A numbered pin centred on (x, y) in px. */
@@ -58,7 +59,7 @@ export function CornerPin({ x, y, flag }: { x: number | string; y: number | stri
         <Icon name="map-pin" size={16} />
       </span>
       {flag ? (
-        <span className="absolute top-[-17px] left-6 rounded-sm bg-surface px-2.5 py-1.5 text-[13px] leading-[18px] font-semibold whitespace-nowrap text-ink shadow-md">
+        <span className="absolute top-[-17px] left-6 rounded-sm border border-line-strong bg-surface px-2.5 py-1.5 text-[13px] leading-[18px] font-semibold whitespace-nowrap text-ink shadow-xs">
           {flag}
         </span>
       ) : null}
@@ -84,18 +85,28 @@ export const MAP_LEGEND_TEXT: Readonly<Record<LiftMode, string>> = {
 export const PIN_KEY_TEXT =
   "Numbered pins: most extra interest for an area's size. Orange pins and \"hidden pocket\" flags: high extra interest but little interest overall, so small or early. Ringed pins: where it's already popular, with the most interest overall.";
 
-/** The ramp legend: a surface pill (r12, shadow-xs) with four 16 x 8 swatches and the words. */
+/** The legend's swatches: the diverging lift ramp (less, 1.0×, more) or the sequential ramp's four upper steps. */
+const LEGEND_SWATCHES: Readonly<Record<"LIFT" | "HEAT", readonly string[]>> = {
+  LIFT: [...LIFT_BELOW.slice(1).reverse(), ...LIFT_ABOVE].map(rgbHex),
+  HEAT: MAP_RAMP.slice(1).map(rgbHex),
+};
+
+/** The ramp legend: a hairline surface pill with the ramp's swatches, the 1.0× ends in mono, and the words. */
 export function MapLegend({ mode, className }: { mode: LiftMode; className?: string }) {
+  const lift = mode === "LIFT";
   return (
     <span
       data-map-legend={mode}
-      className={cx("inline-flex items-center gap-2.5 rounded-control bg-surface px-3 py-2 type-caption text-ink-2 shadow-xs", className)}
+      className={cx("inline-flex items-center gap-2.5 rounded-md border border-line bg-surface px-3 py-2 type-caption text-ink-2", className)}
     >
-      <span aria-hidden="true" className="flex gap-0.5 opacity-70">
-        <span className="h-2 w-4 rounded-[2px] bg-map-2" />
-        <span className="h-2 w-4 rounded-[2px] bg-map-3" />
-        <span className="h-2 w-4 rounded-[2px] bg-map-4" />
-        <span className="h-2 w-4 rounded-[2px] bg-map-5" />
+      <span aria-hidden="true" className="flex items-center gap-1.5">
+        {lift ? <span className="font-mono text-[11px] leading-none text-ink-3">less</span> : null}
+        <span className="flex gap-px">
+          {LEGEND_SWATCHES[lift ? "LIFT" : "HEAT"].map((c, i) => (
+            <span key={i} className="h-2 w-3.5 first:rounded-l-[2px] last:rounded-r-[2px]" style={{ backgroundColor: c }} />
+          ))}
+        </span>
+        {lift ? <span className="font-mono text-[11px] leading-none text-ink-3">more</span> : null}
       </span>
       {MAP_LEGEND_TEXT[mode]}
     </span>

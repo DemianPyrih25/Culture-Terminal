@@ -1,11 +1,26 @@
-// Page chrome (design/redesign.pen, N·C Components): the header (desktop and phone variants, the menu
+// Page chrome (design/redesign-v3.pen, Ledger): the header (the desktop sidebar, the phone bar and the menu
 // sheet), the footer, the page head, the logo mark and the page shell.
 export { Footer } from "./footer";
 export { Header, PAGE_COLUMN } from "./header";
 export type { HeaderProps, HeaderVariant, MobileHeaderVariant } from "./header";
-export { BackButton, focusAskField, MenuSheetButton, NewQuestionLink, ShareIconButton, useShareLink } from "./header-actions";
+export { BackButton, focusAskField, MenuSheetButton, NewQuestionLink, ShareIconButton, SidebarNav, useShareLink } from "./header-actions";
 export type { MenuItem } from "./header-actions";
-export { ANSWERS_HREF, ASK_FIELD_ID, FOLLOWING_HREF, HOW_IT_WORKS_HREF, NEW_QUESTION_HREF, SCREENER_HREF, SITE_NAV } from "./links";
+export {
+  ANSWERS_HREF,
+  ASK_FIELD_ID,
+  ASK_HREF,
+  FOLLOWING_HREF,
+  HOW_IT_WORKS_HREF,
+  METHOD_HREF,
+  navKeyForPath,
+  NEW_QUESTION_HREF,
+  PROFILES_HREF,
+  SCREENER_HREF,
+  SETTINGS_HREF,
+  SITE_LINKS,
+  SITE_NAV,
+  STATUS_HREF,
+} from "./links";
 export type { NavItem, NavKey } from "./links";
 export { LogoMark } from "./logo-mark";
 export { PageHead } from "./page-head";

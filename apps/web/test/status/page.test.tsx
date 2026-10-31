@@ -33,7 +33,7 @@ describe("/status", () => {
     expect(metadata.title).toBe("Status · Culture Terminal");
   });
 
-  it("renders the new shell, the heading, the answer and the five section cards", async () => {
+  it("renders the new shell, the heading, the answer and the four section cards", async () => {
     const html = await render();
     expect(html).toContain('aria-label="Main"');
     expect(html).toMatch(/<h1[^>]*>Status<\/h1>/);
@@ -41,8 +41,7 @@ describe("/status", () => {
     expect(html).toContain('href="/status"');
     expect(html).toMatch(/data-live-state="live"[^>]*>Live analysis is on: Sonnet 5.5 writes each answer\.<\/p>/);
     for (const [id, title] of [
-      ["mode", "Mode"],
-      ["spend", "LLM spend"],
+      ["mode", "Service"],
       ["runs", "Runs"],
       ["qloo", "Qloo"],
       ["system", "System"],
@@ -54,28 +53,29 @@ describe("/status", () => {
     // The new shell, and no Concept A remnants.
     expect(html).toContain('data-header="inner"');
     expect(html).not.toMatch(/font-serif|text-dim|text-faint|rounded-brief|bg-paper|text-negative/);
+    // Spend and caps live with the plan (Settings), not here.
+    expect(html).not.toContain('id="spend"');
+    expect(html).not.toContain('id="today"');
   });
 
-  it("shows each lane's mode and every breaker with its state", async () => {
+  it("shows each lane's mode and the health breakers with their state", async () => {
     const html = await render();
     expect((html.match(/data-state="live"/g) ?? []).length).toBe(2);
-    expect((html.match(/data-breaker="/g) ?? []).length).toBe(9);
-    expect(html).toContain("$0.12 today · public economy at $0.49, paused at $0.79");
+    expect((html.match(/data-breaker="/g) ?? []).length).toBe(5);
+    expect(html).toContain('data-breaker="qloo_switch"');
+    expect(html).not.toContain("$0.12 today");
     expect(html).toContain('data-state="clear"');
     // States are soft pills in their tone.
     expect(html).toMatch(/data-state="clear" data-tone="good"/);
     expect(html).toMatch(/data-state="live" data-tone="good"/);
   });
 
-  it("draws the usage meters against their caps, with the thresholds as ticks", async () => {
+  it("shows no spend or cap meters: last-hour runs as counts, the cache rate as a meter", async () => {
     const html = await render();
-    expect(html).toContain('aria-label="LLM spend today against the public lane&#x27;s budget"');
-    expect(html).toContain('aria-valuetext="$0.12 of $0.84"');
-    expect(html).toContain('data-tick="Economy from $0.49"');
-    expect(html).toContain('data-tick="Paused from $0.79"');
-    expect(html).toContain('aria-valuetext="4 of 20"');
+    expect(html).not.toContain("LLM spend today against");
+    expect(html).not.toContain("data-tick=");
+    expect(html).not.toContain("Fresh Qloo calls today");
     expect(html).toContain('aria-valuetext="75%"');
-    expect(html).toContain('data-tick="Replay only below the floor"');
   });
 
   it("shows the latest runs as status cells and counts, newest first", async () => {
@@ -110,7 +110,7 @@ describe("/status", () => {
       statusReport({
         live: { state: "paused", blocks: ["replay_only"], message },
         mode: { ...base.mode, lanes: { public: decision("public", "replay_only", { reason: "this month's Qloo quota is at its floor" }), judge: decision("judge", "replay_only") } },
-        breakers: base.breakers.map((b) => (b.key === "qloo_floor" ? { ...b, level: "tripped" as const } : b)),
+        breakers: base.breakers.map((b) => (b.key === "qloo_auth" ? { ...b, level: "tripped" as const } : b)),
       }),
     );
     expect(html).toContain('data-live-state="paused"');
@@ -135,8 +135,7 @@ describe("/status", () => {
     expect(html).toContain("Unreachable");
     expect(html).toContain("The breakers could not be read");
     expect(html).toContain("Not configured: live Qloo needs a key");
-    expect(html).toMatch(/<span role="img" aria-label="Public runs, last hour: not read"/);
-    expect(html).toMatch(/<span role="img" aria-label="LLM spend today against the public lane&#x27;s budget: not read"/);
+    expect(html).toMatch(/Public runs, last hour<\/dt>.*?Not read/);
     expect(html).not.toContain('data-strip="runs"');
   });
 
@@ -234,23 +233,16 @@ describe("/status", () => {
 });
 
 describe("shared use today (Part 11)", () => {
-  it("shows brand screens, the context calls' spend and searches, and OpenStreetMap requests against the cap", async () => {
+  it("keeps today's shared spend and counts off the page (they live with the plan), but says when OpenStreetMap is not configured", async () => {
     const html = await render(
       statusReport({ today: { screens: 4, context: { aiUsd: 0.03, webUsd: 0.12, webSearches: 9 }, osm: { configured: true, requests: 40, dailyMax: 2000 } } }),
     );
-    expect(html).toContain('id="today"');
-    expect(html).toContain("Brand screens");
-    expect(html).toContain("screens today");
-    expect(html).toContain("9 searches");
-    expect(html).toContain("OpenStreetMap requests");
-    expect(html).toContain("of 2,000");
-  });
-
-  it("says when OpenStreetMap is not configured, and leaves the section out for an older reading", async () => {
+    expect(html).not.toContain('id="today"');
+    expect(html).not.toContain("Brand screens");
+    expect(html).not.toContain("of 2,000");
     const off = await render(statusReport({ today: { screens: null, context: { aiUsd: null, webUsd: null, webSearches: null }, osm: { configured: false, requests: null, dailyMax: 2000 } } }));
     expect(off).toContain("Not configured: place counts need OSM_USER_AGENT.");
-    expect(off).toContain("Not read");
     const old = await render(statusReport());
-    expect(old).not.toContain('id="today"');
+    expect(old).not.toContain("OpenStreetMap</dt>");
   });
 });

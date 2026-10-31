@@ -38,7 +38,8 @@ describe("early: the progress card", () => {
     expect(html).toContain('data-stop="idle"');
     expect(html).toContain('aria-keyshortcuts="Escape"');
     expect(text(slice(html, "data-status-title", "</h2>"))).toBe("Comparing audiences");
-    expect(text(slice(html, "data-time", "</p>"))).toMatch(/^Usually under a minute · \d:\d\d$/);
+    // The elapsed clock alone: no lane estimate on the working view.
+    expect(text(slice(html, "data-time", "</p>"))).toMatch(/^\d:\d\d$/);
     expect(attrValues(html, "data-step")).toEqual(["read", "find", "pull", "write", "check"]);
     expect(attrValues(html, "data-state").slice(0, 5)).toEqual(["done", "done", "active", "pending", "pending"]);
     expect(html).toMatch(/role="progressbar"[^>]*aria-valuenow="\d+"/);
@@ -96,7 +97,9 @@ describe("a run that ended early: its card takes the progress card's slot", () =
     const html = render(endedAs(upTo(SAMPLE, "tool.start"), "cancelled", "stopped by the reader"));
     expect(html).not.toContain("data-progress-card");
     expect(html).not.toContain("data-stop=");
-    expect(text(slice(html, 'data-state-card="cancelled"', "</section>"))).toBe("You stopped this answer. Run it again");
+    expect(text(slice(html, 'data-state-card="cancelled"', "</section>"))).toBe(
+      "You stopped this answer. Nothing more is fetched. Anything that arrived before you stopped stays below. Run it again",
+    );
   });
 
   it("failed: the line, Try again and the reason under Details", () => {

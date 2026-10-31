@@ -8,7 +8,7 @@ import { watchMapLoad } from "./lift-map-load";
 import type { OutlineFeature } from "./lift-outlines";
 import type { GeoPoint } from "./area-map-shape";
 import { outlineBounds } from "./area-map-shape";
-import { BASEMAP_STYLE, MapAttribution, ZoomButtons, routeMapWorker } from "./map-base";
+import { BASEMAP_STYLE, MapAttribution, ZoomButtons, cssToken, paintLedgerBasemap, routeMapWorker } from "./map-base";
 
 /**
  * The WebGL area map: the OpenFreeMap basemap in MapLibre with the area's boundary (accent dashed 1.5 px
@@ -26,8 +26,6 @@ export interface AreaMapCanvasProps {
   onError: () => void;
 }
 
-const ACCENT = "#5b3df5";
-const INK_3 = "#8a93a3";
 
 export default function AreaMapCanvas({ outline, corner, cornerLabel, venues, label, onReady, onError }: AreaMapCanvasProps) {
   const container = useRef<HTMLDivElement>(null);
@@ -66,13 +64,15 @@ export default function AreaMapCanvas({ outline, corner, cornerLabel, venues, la
     mapRef.current = map;
     const unwatch = watchMapLoad(map, {
       onLoad: () => {
+        const accent = cssToken("color-accent", "#1d3e9e");
+        paintLedgerBasemap(map);
         map.addSource("area", { type: "geojson", data: outline as never });
-        map.addLayer({ id: "area-fill", type: "fill", source: "area", paint: { "fill-color": ACCENT, "fill-opacity": 0.12 } });
+        map.addLayer({ id: "area-fill", type: "fill", source: "area", paint: { "fill-color": accent, "fill-opacity": 0.12 } });
         map.addLayer({
           id: "area-line",
           type: "line",
           source: "area",
-          paint: { "line-color": ACCENT, "line-width": 1.5, "line-dasharray": [3, 2] },
+          paint: { "line-color": accent, "line-width": 1.5, "line-dasharray": [3, 2] },
         });
         if (venues.length > 0) {
           map.addSource("venues", {
@@ -86,7 +86,12 @@ export default function AreaMapCanvas({ outline, corner, cornerLabel, venues, la
             id: "venues",
             type: "circle",
             source: "venues",
-            paint: { "circle-radius": 3, "circle-color": INK_3, "circle-stroke-color": "#ffffff", "circle-stroke-width": 1 },
+            paint: {
+              "circle-radius": 3,
+              "circle-color": cssToken("color-ink-3", "#8c909a"),
+              "circle-stroke-color": cssToken("color-surface", "#ffffff"),
+              "circle-stroke-width": 1,
+            },
           });
         }
         setLoaded(true);

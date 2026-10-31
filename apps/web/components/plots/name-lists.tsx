@@ -59,7 +59,7 @@ export function NumberedList({ items, columns = 2, label, emptyLabel, className 
           data-row={item.key ?? item.name}
           className="flex min-h-10 min-w-0 items-center gap-3 py-1"
         >
-          <span className="w-4 shrink-0 type-label text-ink-2 tabular-nums">{i + 1}</span>
+          <span className="w-4 shrink-0 font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums">{i + 1}</span>
           <Monogram name={item.name} size={24} />
           <Name item={item} arrow={false} />
           <PlotTagView tag={item.tag} className="ml-1" />
@@ -119,7 +119,7 @@ export function NeighbourColumns({ columns, label, emptyLabel, className }: Neig
             <ol className="flex flex-col">
               {col.items.map((item, i) => (
                 <li key={item.key ?? item.name} data-row={item.key ?? item.name} className="flex min-h-[52px] items-start gap-3 py-1.5">
-                  <span className="w-3 shrink-0 pt-0.5 type-label text-ink-2 tabular-nums">{i + 1}</span>
+                  <span className="w-3 shrink-0 pt-0.5 font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums">{i + 1}</span>
                   <Monogram name={item.name} size={24} />
                   <span className="flex min-w-0 flex-col gap-0.5">
                     <Name item={item} arrow />

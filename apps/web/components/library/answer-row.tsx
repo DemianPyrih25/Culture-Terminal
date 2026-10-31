@@ -10,6 +10,14 @@ const STATUS_ICON: Readonly<Record<AnswerStatus, { icon: IconName; className: st
   stopped: { icon: "circle-x", className: "text-ink-3", label: "Stopped" },
 };
 
+/** The note's colour: a verdict reads in ink-2, an unfinished state in its status colour. */
+const NOTE_TONE: Readonly<Record<AnswerStatus, string>> = {
+  done: "font-medium text-ink-2",
+  partial: "text-caution-ink",
+  working: "text-accent",
+  stopped: "text-ink-3",
+};
+
 export interface AnswerRowProps {
   item: AnswerItem;
   /** "Today", "Yesterday", "26 Oct": relativeDay of the item, worked out by the list. */
@@ -18,9 +26,9 @@ export interface AnswerRowProps {
 }
 
 /**
- * AnswerRow (N13): one of the visitor's answers, 64 tall, the whole row a link to the run. A status icon,
- * the question, the verdict or the status in words, the day and a chevron; on phones the verdict and the
- * day go under the question.
+ * AnswerRow: one of the visitor's answers, a ruled row of the list, the whole row a link to the run. A
+ * status icon, the question with its note under it, the day in mono and a chevron; on phones the day
+ * follows the note.
  */
 export function AnswerRow({ item, day, className }: AnswerRowProps) {
   const look = STATUS_ICON[item.status];
@@ -29,28 +37,28 @@ export function AnswerRow({ item, day, className }: AnswerRowProps) {
       href={`/run/${encodeURIComponent(item.runId)}`}
       data-status={item.status}
       className={cx(
-        "flex min-h-16 items-center gap-4 rounded-control border border-line bg-surface px-5 shadow-xs transition-[border-color,box-shadow] hover:border-line-strong hover:shadow-md",
-        "max-md:gap-3 max-md:px-4 max-md:py-3",
+        "group flex items-center gap-4 px-4 py-3.5 transition-colors hover:bg-canvas focus-visible:bg-canvas",
+        "max-md:items-start max-md:gap-3",
         className,
       )}
     >
-      <span className={cx("flex shrink-0 items-center self-center max-md:self-start max-md:pt-[3px]", look.className)}>
-        {item.status === "working" ? <Spinner size={18} /> : <Icon name={look.icon} size={18} />}
+      <span className={cx("flex shrink-0 items-center max-md:pt-0.5", look.className)}>
+        {item.status === "working" ? <Spinner size={16} /> : <Icon name={look.icon} size={16} />}
         <span className="sr-only">{look.label}: </span>
       </span>
-      <span className="flex min-w-0 flex-1 items-center gap-4 max-md:flex-col max-md:items-start max-md:gap-0.5">
-        <span className="min-w-0 truncate type-body-strong text-ink md:w-[560px] md:shrink-0 max-md:w-full max-md:whitespace-normal max-md:line-clamp-2">
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        <span className="min-w-0 truncate text-[14px] leading-5 font-medium text-ink max-md:line-clamp-2 max-md:whitespace-normal">
           {item.question}
         </span>
-        <span className="min-w-0 truncate type-label text-ink-2 md:w-[240px] md:shrink-0 max-md:w-full">
+        <span className={cx("min-w-0 truncate type-caption", NOTE_TONE[item.status])}>
           {item.note}
-          <span className="md:hidden">{day ? ` · ${day}` : ""}</span>
-        </span>
-        <span className="ml-auto shrink-0 text-right type-label text-ink-2 tabular-nums max-md:hidden">
-          <time dateTime={item.createdAt}>{day}</time>
+          <span className="font-normal text-ink-3 md:hidden">{day ? ` · ${day}` : ""}</span>
         </span>
       </span>
-      <Icon name="chevron-right" size={16} className="shrink-0 text-ink-3" />
+      <span className="w-[96px] shrink-0 font-mono text-[12px] leading-4 text-ink-3 tabular-nums max-md:hidden">
+        <time dateTime={item.createdAt}>{day}</time>
+      </span>
+      <Icon name="chevron-right" size={16} className="shrink-0 text-ink-3 transition-colors group-hover:text-ink max-md:mt-0.5" />
     </Link>
   );
 }

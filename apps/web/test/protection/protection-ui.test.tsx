@@ -25,7 +25,7 @@ describe("the human check's card", () => {
 
     const asking = renderToStaticMarkup(<HumanCheckCard status="interactive" className="mt-3" />);
     expect(asking).toContain('aria-label="Human check"');
-    expect(asking).toContain("bg-sunken");
+    expect(asking).toContain("border-line");
     expect(asking).toContain("mt-3");
     expect(asking).toContain("Confirm you&#x27;re a person to get a new answer");
     expect(asking).toContain("Answers you already have need no check.");

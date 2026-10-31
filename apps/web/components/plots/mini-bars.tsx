@@ -70,7 +70,7 @@ export function MiniBarColumns({ columns, baseline = 1, label, emptyLabel, class
                   <li key={row.key ?? row.label} data-row={row.key ?? row.label} className="flex flex-col gap-1">
                     <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 type-label">
                       <span className="text-ink">{row.label}</span>
-                      {row.value === null ? null : <span className="text-ink-2 tabular-nums">{miniBarDisplay(row)}</span>}
+                      {row.value === null ? null : <span className="font-mono text-ink-2 tabular-nums">{miniBarDisplay(row)}</span>}
                       <PlotTagView tag={row.tag} className="ml-1.5" />
                     </span>
                     {row.value === null ? (

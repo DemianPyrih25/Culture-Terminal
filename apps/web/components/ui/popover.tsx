@@ -269,7 +269,7 @@ export function Popover({
               onBlur={onPanelBlur}
               style={panelStyle}
               className={cx(
-                "fixed z-50 max-h-[min(480px,calc(100vh-16px))] overflow-auto rounded-control border border-line bg-surface p-4 text-ink shadow-lg outline-none",
+                "fixed z-50 max-h-[min(480px,calc(100vh-16px))] overflow-auto rounded-card border border-line bg-surface p-4 text-ink shadow-md outline-none",
                 className,
               )}
             >

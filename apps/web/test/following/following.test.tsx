@@ -142,7 +142,8 @@ describe("the list", () => {
 
   it("lists each follow with its latest note, Re-run and Unfollow, and never a change or an alert", () => {
     const out = html(<FollowingView state={ready([follow(), follow({ id: "follow-2", latest: null, label: "Aurora Footwear", subjectKey: "brand:aurora footwear" })])} now={NOW} timeZone="UTC" />);
-    expect(out).toContain("2 of 50");
+    expect(out).toContain("2 followed");
+    expect(out).not.toContain("of 50");
     expect(out).toContain("Taste island");
     expect(out).toContain('href="/r/run-brand-0001"');
     expect(out).toContain("No note yet");

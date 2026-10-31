@@ -16,7 +16,8 @@ export interface SiteShellProps extends Omit<HeaderProps, "variant" | "mobile"> 
 }
 
 /**
- * Every page: canvas, the Header, a centred 1128 main and the Footer. A skip link jumps to the main content.
+ * Every page: the paper canvas, the Header (a left sidebar from 1024 px, a top bar below), then a centred
+ * 1128 main and the Footer to its right. A skip link jumps to the main content.
  */
 export function SiteShell({
   header = "inner",
@@ -30,7 +31,7 @@ export function SiteShell({
   children,
 }: SiteShellProps) {
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-canvas">
+    <div className="flex min-h-full flex-1 flex-col bg-canvas lg:flex-row">
       <a
         href="#main"
         className="sr-only z-50 rounded-control bg-surface px-4 py-2 text-[15px] font-medium text-ink shadow-md focus:not-sr-only focus:fixed focus:top-3 focus:left-3"
@@ -45,10 +46,12 @@ export function SiteShell({
         sharePath={sharePath}
         menuItems={menuItems}
       />
-      <main id="main" tabIndex={-1} className={cx("flex-1 outline-none", width === "page" && PAGE_COLUMN, mainClassName)}>
-        {children}
-      </main>
-      <Footer />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <main id="main" tabIndex={-1} className={cx("flex-1 outline-none", width === "page" && PAGE_COLUMN, mainClassName)}>
+          {children}
+        </main>
+        <Footer />
+      </div>
     </div>
   );
 }

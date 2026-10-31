@@ -22,19 +22,19 @@ export function suggestionOptionId(listId: string, key: string): string {
 }
 
 /**
- * SuggestionList (N02): an overlay under the box, r16 with shadow-lg, grouped rows of 44 and the hint
+ * SuggestionList: an overlay under the box, small radius on a hairline, grouped rows of 44 and the hint
  * bar about place questions. A listbox of options; the field keeps focus and walks it with the arrows.
  * A row press is taken on mouse down, so the field's blur does not close the list first.
  */
 export function SuggestionList({ id, groups, activeKey, onPick, onHover, className }: SuggestionListProps) {
   return (
-    <div className={cx("overflow-hidden rounded-card border border-line bg-surface shadow-lg", className)}>
+    <div className={cx("overflow-hidden rounded-md border border-line-strong bg-surface shadow-md", className)}>
       <div id={id} role="listbox" aria-label="Suggestions" className="flex flex-col p-2">
         {groups.map((group) => {
           const labelId = `${id}-${group.key}-label`;
           return (
             <div key={group.key} role="group" aria-labelledby={labelId} className="flex flex-col">
-              <div id={labelId} role="presentation" className="flex h-7 items-center px-3 text-[12px] leading-4 font-semibold text-ink-2">
+              <div id={labelId} role="presentation" className="flex h-7 items-center px-3 text-[11px] leading-4 font-semibold tracking-[0.08em] text-ink-3 uppercase">
                 {group.label}
               </div>
               {group.rows.map((row) => {
@@ -51,7 +51,7 @@ export function SuggestionList({ id, groups, activeKey, onPick, onHover, classNa
                     }}
                     onMouseEnter={() => onHover?.(row)}
                     className={cx(
-                      "flex h-11 cursor-pointer items-center gap-3 rounded-md px-3 transition-colors",
+                      "flex h-11 cursor-pointer items-center gap-3 rounded-sm px-3 transition-colors",
                       active ? "bg-sunken" : "hover:bg-sunken",
                     )}
                   >
@@ -65,7 +65,7 @@ export function SuggestionList({ id, groups, activeKey, onPick, onHover, classNa
           );
         })}
       </div>
-      <p className="m-0 flex h-9 items-center gap-2 bg-sunken px-5 type-caption text-ink-2">
+      <p className="m-0 flex min-h-9 items-center gap-2 border-t border-line bg-sunken px-4 py-2 type-caption text-ink-2">
         <Icon name="map-pin" size={14} className="shrink-0" />
         {PLACE_HINT}
       </p>

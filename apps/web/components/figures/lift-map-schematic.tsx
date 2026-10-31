@@ -102,7 +102,7 @@ export function LiftSchematic({
       })}
       {pins.map((m) => (
         <g key={`m-${m.label.id}`} data-marker={m.label.id} data-pin={m.label.rank ?? ""}>
-          {m.label.fewRivals ? <circle cx={px(m.x)} cy={px(m.y)} r={19} fill="#ffffff" fillOpacity={0.6} className="stroke-second" strokeWidth={2} /> : null}
+          {m.label.fewRivals ? <circle cx={px(m.x)} cy={px(m.y)} r={19} fillOpacity={0.6} className="fill-surface stroke-second" strokeWidth={2} /> : null}
           {m.label.hidden && m.label.rank === undefined && !m.label.named ? (
             <circle cx={px(m.x)} cy={px(m.y)} r={11} className="fill-second stroke-surface" strokeWidth={2} data-hidden-pin={m.label.id} />
           ) : m.label.popular ? (
@@ -124,7 +124,7 @@ export function LiftSchematic({
         const size = flagSize(m.label);
         return (
           <g key={`c-${m.label.id}`} data-chip={m.label.id}>
-            <rect x={px(at.x)} y={px(at.y)} width={size.w} height={size.h} rx={8} className="fill-surface" filter="drop-shadow(0 6px 9px rgb(16 24 40 / 0.14))" />
+            <rect x={px(at.x)} y={px(at.y)} width={size.w} height={size.h} rx={4} className="fill-surface stroke-line-strong" strokeWidth={1} />
             <text x={px(at.x + 10)} y={px(at.y + 20)} fontSize={13} fontWeight={600} className="fill-ink">
               {flagName(m.label.name)}
             </text>

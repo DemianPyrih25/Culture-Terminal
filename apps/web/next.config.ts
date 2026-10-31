@@ -24,6 +24,23 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [{ source: "/trust", destination: "/how-it-works", permanent: true }];
   },
+  // Browser hardening on every response. No full CSP: Turnstile, the map tiles and Next's inline scripts
+  // would each need allowances; frame-ancestors alone stops the site being framed.
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "X-Frame-Options", value: "DENY" },
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+          { key: "Strict-Transport-Security", value: "max-age=31536000" },
+          { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+        ],
+      },
+    ];
+  },
   poweredByHeader: false,
   reactStrictMode: true,
 };

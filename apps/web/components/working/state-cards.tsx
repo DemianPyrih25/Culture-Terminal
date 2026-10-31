@@ -74,54 +74,68 @@ function AgainButton({ question, label = "Try again", size = "md" }: { question:
 
 type Tone = "plain" | "danger" | "caution";
 
-const TONE: Readonly<Record<Tone, string>> = {
-  plain: "border border-line bg-surface shadow-xs",
-  danger: "bg-danger-soft",
-  caution: "bg-caution-soft",
+/** The icon well beside the heading: a small tinted square. */
+const WELL: Readonly<Record<Tone, string>> = {
+  plain: "bg-sunken text-ink-2",
+  danger: "bg-danger-soft text-danger",
+  caution: "bg-caution-soft text-caution-ink",
 };
 
-/** VerdictCard shell: padding 28, gap 20, an optional 28 px icon beside the display-m heading. */
+/**
+ * The end-state card: a white surface with a hairline border, a small tinted icon well, the serif heading,
+ * one or two short lines and one primary action. `foot` is a sunken band under it (failure details).
+ */
 function EndCard({
   state,
   tone,
   icon,
-  iconClass,
   heading,
-  headingClass,
   children,
+  foot,
   className,
 }: {
   state: string;
   tone: Tone;
-  icon?: IconName;
-  iconClass?: string;
+  icon: IconName;
   heading: ReactNode;
-  headingClass?: string;
   children?: ReactNode;
+  foot?: ReactNode;
   className?: string;
 }) {
   return (
-    <section aria-label={typeof heading === "string" ? heading : undefined} data-state-card={state} className={cx("flex flex-col gap-5 rounded-card p-7 max-md:p-5", TONE[tone], className)}>
-      <h2 className={cx("flex items-start gap-3 type-display-m max-md:type-display-m-sm", headingClass ?? "text-ink")}>
-        {icon ? (
-          <span className="flex h-10 shrink-0 items-center max-md:h-8">
-            <Icon name={icon} size={28} className={iconClass} />
-          </span>
-        ) : null}
-        <span className="min-w-0">{heading}</span>
-      </h2>
-      {children}
+    <section
+      aria-label={typeof heading === "string" ? heading : undefined}
+      data-state-card={state}
+      data-tone={tone}
+      className={cx("flex flex-col overflow-hidden rounded-card border border-line bg-surface", className)}
+    >
+      <div className="flex items-start gap-4 p-6 max-md:p-5">
+        <span className={cx("flex size-9 shrink-0 items-center justify-center rounded-md", WELL[tone])}>
+          <Icon name={icon} size={18} />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <h2 className="type-title text-ink max-md:type-title-sm">{heading}</h2>
+          {children}
+        </div>
+      </div>
+      {foot}
     </section>
   );
+}
+
+/** The actions row under an end card's lines. */
+function Actions({ children }: { children: ReactNode }) {
+  return <div className="flex flex-wrap items-center gap-3 pt-4">{children}</div>;
 }
 
 /** Stopped: "You stopped this answer." and "Run it again". */
 export function StoppedCard({ question, className }: { question: string | null; className?: string }) {
   return (
-    <EndCard state="cancelled" tone="plain" heading="You stopped this answer." className={className}>
-      <div className="flex flex-wrap items-center gap-3">
+    <EndCard state="cancelled" tone="plain" icon="square" heading="You stopped this answer." className={className}>
+      <p className="type-body text-ink-2">Nothing more is fetched. Anything that arrived before you stopped stays below.</p>
+      <Actions>
         <AgainButton question={question} label="Run it again" />
-      </div>
+      </Actions>
     </EndCard>
   );
 }
@@ -143,13 +157,22 @@ export function FailedCard({ terminal, question, className }: { terminal: Of<"fa
       state="failed"
       tone="danger"
       icon="circle-x"
-      iconClass="text-danger"
       heading="This answer couldn't be finished."
-      headingClass="text-danger-ink"
       className={className}
+      foot={
+        details.length > 0 ? (
+          <ul id={id} hidden={!open} className="flex flex-col gap-1.5 border-t border-line bg-sunken px-6 py-4 font-mono text-[12px] leading-[18px] text-ink-2 max-md:px-5">
+            {details.map((line) => (
+              <li key={line} className="[overflow-wrap:anywhere]">
+                {line}
+              </li>
+            ))}
+          </ul>
+        ) : null
+      }
     >
-      <p className="type-lead text-ink">Please try again.</p>
-      <div className="flex flex-wrap items-center gap-3">
+      <p className="type-body text-ink-2">Please try again.</p>
+      <Actions>
         <AgainButton question={question} />
         {details.length > 0 ? (
           <Button
@@ -159,17 +182,10 @@ export function FailedCard({ terminal, question, className }: { terminal: Of<"fa
             aria-controls={id}
             onClick={() => setOpen((v) => !v)}
           >
-            Details
+            {open ? "Hide details" : "Details"}
           </Button>
         ) : null}
-      </div>
-      {details.length > 0 ? (
-        <ul id={id} hidden={!open} className="flex list-disc flex-col gap-1 pl-5 type-label text-ink-2">
-          {details.map((line) => (
-            <li key={line}>{line}</li>
-          ))}
-        </ul>
-      ) : null}
+      </Actions>
     </EndCard>
   );
 }
@@ -180,11 +196,11 @@ export function FailedCard({ terminal, question, className }: { terminal: Of<"fa
  */
 export function NotStartedCard({ reason, question, className }: { reason: string | null; question: string | null; className?: string }) {
   return (
-    <EndCard state="not_started" tone="plain" icon="clock-4" iconClass="text-ink-2" heading="This question didn't start." className={className}>
-      <p className="type-lead text-ink">{reason ?? "No live slot freed up in time. Nothing was spent."}</p>
-      <div className="flex flex-wrap items-center gap-3">
+    <EndCard state="not_started" tone="plain" icon="clock-4" heading="This question didn't start." className={className}>
+      <p className="type-body text-ink-2">{reason ?? "No live slot freed up in time. Nothing was spent."}</p>
+      <Actions>
         <AgainButton question={question} label="Ask again" />
-      </div>
+      </Actions>
     </EndCard>
   );
 }
@@ -192,12 +208,15 @@ export function NotStartedCard({ reason, question, className }: { reason: string
 /** Partial: the evidence is here, the analysis ran out of time, nothing was checked. */
 export function PartialCard({ question, className }: { question: string | null; className?: string }) {
   return (
-    <EndCard state="incomplete" tone="caution" icon="triangle-alert" iconClass="text-caution" heading="Partial answer" className={className}>
-      <p className="type-lead text-ink">The evidence is here, but the analysis ran out of time to conclude.</p>
-      <p className="type-label text-ink-2">This partial answer was not checked.</p>
-      <div className="flex flex-wrap items-center gap-3">
+    <EndCard state="incomplete" tone="caution" icon="triangle-alert" heading="Partial answer" className={className}>
+      <p className="type-body text-ink-2">The evidence is here, but the analysis ran out of time to conclude.</p>
+      <p className="flex items-center gap-1.5 type-label text-caution-ink">
+        <Icon name="triangle-alert" size={14} className="shrink-0" />
+        This partial answer was not checked.
+      </p>
+      <Actions>
         <AgainButton question={question} />
-      </div>
+      </Actions>
     </EndCard>
   );
 }
@@ -205,10 +224,10 @@ export function PartialCard({ question, className }: { question: string | null; 
 /** Refused in the run: what we don't answer, and a question we can. */
 export function RefusedCard({ terminal, className }: { terminal: Of<"refused">; className?: string }) {
   return (
-    <EndCard state="refused" tone="plain" icon="ban" iconClass="text-ink-2" heading={refusalSentence(terminal.category)} className={className}>
+    <EndCard state="refused" tone="plain" icon="ban" heading={refusalSentence(terminal.category)} className={className}>
       {terminal.reframe ? (
-        <div className="flex flex-col items-start gap-3">
-          <p className="type-lead text-ink-2">Try this instead:</p>
+        <div className="flex flex-col items-start gap-2 pt-3">
+          <p className="type-label text-ink-2">Try this instead:</p>
           <ChipLink
             href={editQuestionHref(terminal.reframe)}
             className="h-auto! min-h-9 py-2 text-left whitespace-normal! [&>span]:whitespace-normal"

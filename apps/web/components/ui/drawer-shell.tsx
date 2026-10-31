@@ -23,9 +23,9 @@ export interface DrawerShellProps {
   open: boolean;
   /** Esc, a scrim click and the close button. Focus then returns to the element that opened it. */
   onClose: () => void;
-  /** The dialog's title (20/600). */
+  /** The dialog's title (serif 20). */
   title: ReactNode;
-  /** The line under the title, 13/500 ink-2. */
+  /** The line under the title, 13/500 ink-3. */
   subtitle?: ReactNode;
   /** Desktop width in px (default 520: How we know; 320 for the phone menu sheet). */
   width?: number;
@@ -36,7 +36,8 @@ export interface DrawerShellProps {
 }
 
 /**
- * The drawer shell: a scrim and a panel fixed to the right (surface, padding 20 24 24, shadow-lg). A modal
+ * The drawer shell: a scrim and a panel fixed to the right (surface, a hairline edge, a soft shadow-lg; a
+ * hairline rule between the head and the body). A modal
  * dialog: focus moves in and is trapped, Esc and a scrim click close it, focus returns to the opener. On
  * phones it is a full-screen sheet with a 44 px close button. Page scroll is locked while it is open.
  */
@@ -97,7 +98,7 @@ export function DrawerShell({ open, onClose, title, subtitle, width = 520, toolb
         style={{ ["--drawer-w" as string]: `${width}px` }}
         className={cx(
           "absolute inset-y-0 right-0 flex w-full flex-col bg-surface shadow-lg outline-none",
-          "max-md:top-0 max-md:rounded-t-box md:w-[min(var(--drawer-w),100vw)] md:rounded-l-box",
+          "max-md:top-0 md:w-[min(var(--drawer-w),100vw)] md:border-l md:border-line",
           "motion-safe:animate-rise",
           className,
         )}
@@ -108,15 +109,15 @@ export function DrawerShell({ open, onClose, title, subtitle, width = 520, toolb
               {title}
             </h2>
             {subtitle ? (
-              <p id={subtitleId} className="type-label text-ink-2">
+              <p id={subtitleId} className="mt-0.5 type-label text-ink-3">
                 {subtitle}
               </p>
             ) : null}
           </div>
-          <IconButton label="Close" icon="x" onClick={onClose} className="-mt-1.5 -mr-2 max-md:size-11" />
+          <IconButton label="Close" icon="x" onClick={onClose} className="-mt-1 -mr-2 max-md:size-11" />
         </div>
         {toolbar ? <div className="px-6 pb-4 max-md:px-4">{toolbar}</div> : null}
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 max-md:px-4">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto border-t border-line px-6 pt-5 pb-6 max-md:px-4">{children}</div>
       </div>
     </div>,
     document.body,

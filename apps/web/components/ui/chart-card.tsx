@@ -23,13 +23,13 @@ export interface LegendItem {
   tone: SeriesTone;
 }
 
-/** A chart legend: 8 px dots and 13/500 ink-2 labels, gap 20. */
+/** A chart legend: 8 px square swatches and 12/500 ink-2 labels, gap 20. */
 export function Legend({ items, className }: { items: readonly LegendItem[]; className?: string }) {
   return (
     <ul className={cx("flex flex-wrap items-center gap-x-5 gap-y-1", className)}>
       {items.map((item) => (
-        <li key={item.label} className="inline-flex items-center gap-1.5 type-label text-ink-2">
-          <span aria-hidden="true" className={cx("size-2 shrink-0 rounded-full", SERIES_DOT[item.tone])} />
+        <li key={item.label} className="inline-flex items-center gap-1.5 text-[12px] leading-4 font-medium text-ink-2">
+          <span aria-hidden="true" className={cx("size-2 shrink-0 rounded-[2px]", SERIES_DOT[item.tone])} />
           {item.label}
         </li>
       ))}
@@ -53,20 +53,20 @@ export interface ChartTableProps {
 }
 
 /**
- * The Table view of a chart: real table markup. Head 32 tall, 12/600 ink-2 over a line; rows 36 tall over
- * a line; numbers right-aligned in an 80 px column.
+ * The Table view of a chart: real table markup. Head 32 tall, small caps ink-3 over a line-strong rule; rows
+ * 36 tall over a hairline; numbers in Plex Mono, right-aligned in an 80 px column.
  */
 export function ChartTable({ columns, rows, label, className }: ChartTableProps) {
   return (
     <table aria-label={label} className={cx("w-full border-collapse text-left tabular-nums", className)}>
       <thead>
-        <tr className="h-8 border-b border-line">
+        <tr className="h-8 border-b border-line-strong">
           {columns.map((col) => (
             <th
               key={col.label}
               scope="col"
               className={cx(
-                "text-[12px] leading-4 font-semibold text-ink-2",
+                "type-overline text-ink-3",
                 col.numeric ? "w-20 text-right" : "pr-4",
               )}
             >
@@ -80,7 +80,10 @@ export function ChartTable({ columns, rows, label, className }: ChartTableProps)
           <tr key={r} className="h-9 border-b border-line">
             {row.map((cell, c) => {
               const numeric = columns[c]?.numeric === true;
-              const cls = cx("type-body text-ink", numeric ? "w-20 text-right" : "pr-4");
+              const cls = cx(
+                "text-ink",
+                numeric ? "w-20 text-right font-mono text-[13px] leading-5" : "pr-4 type-body",
+              );
               return c === 0 ? (
                 <th key={c} scope="row" className={cx(cls, "font-normal")}>
                   {cell}
@@ -101,9 +104,9 @@ export function ChartTable({ columns, rows, label, className }: ChartTableProps)
 export type ChartView = "chart" | "table";
 
 export interface ChartCardProps {
-  /** The fixed kind line, 13/500 ink-2: "Closest audiences". */
+  /** The fixed kind line, small caps ink-3: "Closest audiences". */
   kind: string;
-  /** The chart's title (the exhibit title), 20/600. */
+  /** The chart's title (the exhibit title), serif 20. */
   title: ReactNode;
   /** The heading level of the title (default h3). */
   titleAs?: "h2" | "h3";
@@ -120,7 +123,7 @@ export interface ChartCardProps {
   onViewChange?: (view: ChartView) => void;
   /** Opens the drawer on this figure. Without it no Source shows. */
   onSource?: () => void;
-  /** The caption under the plot, 12 ink-2. */
+  /** The caption under the plot, 12 ink-3. */
   caption?: ReactNode;
   /** Kind and controls on one line, then the title (long titles; always on phones). */
   stacked?: boolean;
@@ -183,7 +186,7 @@ export function ChartCard({
     </div>
   );
 
-  const kindLine = <p className="type-label text-ink-2">{kind}</p>;
+  const kindLine = <p className="type-overline text-ink-3">{kind}</p>;
   const titleEl = (
     <TitleTag id={titleId} className="type-title text-ink max-md:type-title-sm">
       {title}
@@ -212,7 +215,7 @@ export function ChartCard({
       )}
       {legend && legend.length > 0 && view === "chart" ? <Legend items={legend} /> : null}
       <div data-view={view}>{view === "table" && table !== undefined ? table : children}</div>
-      {caption ? <p className="type-caption text-ink-2">{caption}</p> : null}
+      {caption ? <p className="border-t border-line pt-3 type-caption text-ink-3">{caption}</p> : null}
     </Card>
   );
 }

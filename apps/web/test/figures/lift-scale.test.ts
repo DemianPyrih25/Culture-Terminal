@@ -95,12 +95,12 @@ describe("lift ramp", () => {
     expect(liftT(0.8)).toBeLessThan(0);
   });
 
-  it("colours extra interest on the map ramp and leaves less interest grey", () => {
-    expect(liftRgb(1)).toEqual([241, 238, 254]);
-    expect(liftRgb(1.6)).toEqual([91, 61, 245]);
-    expect(liftRgb(0.6)).toEqual([201, 206, 214]);
-    expect(heatRgb(0)).toEqual([241, 238, 254]);
-    expect(heatRgb(1)).toEqual([91, 61, 245]);
+  it("colours lift on the diverging ramp (red below, paper at 1.00x, green above) and heat on the blue ramp", () => {
+    expect(liftRgb(1)).toEqual([238, 234, 226]);
+    expect(liftRgb(1.6)).toEqual([30, 122, 79]);
+    expect(liftRgb(0.6)).toEqual([180, 50, 44]);
+    expect(heatRgb(0)).toEqual([232, 236, 247]);
+    expect(heatRgb(1)).toEqual([29, 62, 158]);
   });
 
   it("uses confidence as alpha, fades cells at the baseline and below the gate", () => {

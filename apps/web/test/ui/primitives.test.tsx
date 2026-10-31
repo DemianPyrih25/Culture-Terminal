@@ -63,7 +63,8 @@ describe("buttons", () => {
   it("primary is the accent with a trailing arrow; loading reads Reading…", () => {
     const primary = html(<Button variant="primary">Get answer</Button>);
     expect(primary).toContain("bg-accent");
-    expect(primary).toContain("h-11");
+    expect(primary).toContain("h-9");
+    expect(primary).toContain("rounded-sm");
     expect(primary).toContain('data-icon="arrow-right"');
     const loading = html(
       <Button variant="primary" size="lg" loading>
@@ -73,7 +74,7 @@ describe("buttons", () => {
     expect(loading).toContain("Reading…");
     expect(loading).toContain('data-icon="loader-circle"');
     expect(loading).toContain('aria-busy="true"');
-    expect(loading).toContain("h-[52px]");
+    expect(loading).toContain("h-11");
   });
 
   it("a disabled primary drops its icons", () => {
@@ -101,10 +102,16 @@ describe("buttons", () => {
     expect(link).toContain('data-icon="arrow-right"');
   });
 
-  it("IconButton is round, named and 44 on phones", () => {
+  it("a destructive button is the danger fill without an arrow", () => {
+    const del = html(<Button variant="destructive" icon="x">Delete brief</Button>);
+    expect(del).toContain("bg-danger");
+    expect(del).not.toContain('data-icon="arrow-right"');
+  });
+
+  it("IconButton is square, named and 44 on phones", () => {
     const btn = html(<IconButton label="Menu" icon="menu" size="lg" />);
     expect(btn).toContain('aria-label="Menu"');
-    expect(btn).toContain("rounded-chip");
+    expect(btn).toContain("rounded-sm");
     expect(btn).toContain("size-11");
   });
 });
@@ -239,7 +246,8 @@ describe("inline state, cards, toast, hatch", () => {
       </Card>,
     );
     expect(out).toContain("rounded-card");
-    expect(out).toContain("shadow-xs");
+    expect(out).toContain("border-line");
+    expect(out).not.toContain("shadow-md");
     expect(out).toMatch(/<h2[^>]*>Next steps<\/h2>/);
     expect(html(<Card selected />)).toContain('data-selected="true"');
   });

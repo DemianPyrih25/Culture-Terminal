@@ -12,11 +12,11 @@ const PADDING: Readonly<Record<CardPadding, string>> = {
   none: "",
 };
 
-/** The class list of a card: surface, 1 px line (accent when selected), r16, shadow-xs. */
+/** The class list of a card: white surface, 1 px hairline (accent when selected), r8, no shadow. */
 export function cardClassName(padding: CardPadding = "default", className?: string, selected = false): string {
   return cx(
     "rounded-card border bg-surface",
-    selected ? "border-accent shadow-[inset_0_0_0_1px_var(--color-accent),var(--shadow-xs)]" : "border-line shadow-xs",
+    selected ? "border-accent shadow-[inset_0_0_0_1px_var(--color-accent)]" : "border-line",
     PADDING[padding],
     className,
   );
@@ -26,7 +26,7 @@ export type CardProps = HTMLAttributes<HTMLElement> & {
   /** The element (default section). */
   as?: ElementType;
   padding?: CardPadding;
-  /** Line-strong border and shadow-md on hover (cards and rows that are links). */
+  /** Line-strong border on hover (cards and rows that are links). */
   interactive?: boolean;
   /** A 2 px accent stroke (the key number the drawer shows). */
   selected?: boolean;
@@ -41,7 +41,7 @@ export function Card({ as: As = "section", padding = "default", interactive, sel
       className={cardClassName(
         padding,
         cx(
-          interactive && !selected && "transition-[border-color,box-shadow] hover:border-line-strong hover:shadow-md active:shadow-xs",
+          interactive && !selected && "transition-[border-color,box-shadow] hover:border-line-strong hover:shadow-xs active:border-ink-3",
           className,
         ),
         selected === true,
@@ -67,15 +67,15 @@ export interface CardTitleProps {
   children: ReactNode;
 }
 
-/** A card's title row: 16 px icon and 20/600 title, gap 8; 16 px to the body (mb-4). */
+/** A card's title row: 16 px icon and the serif 20 title, gap 8; 16 px to the body (mb-4). */
 export function CardTitle({ icon, iconClassName, as: As = "h2", after, id, className, children }: CardTitleProps) {
   return (
     <div className={cx("mb-4 flex items-center gap-2", className)}>
-      {icon ? <Icon name={icon} size={16} className={cx("shrink-0", iconClassName ?? "text-ink")} /> : null}
+      {icon ? <Icon name={icon} size={16} className={cx("shrink-0", iconClassName ?? "text-ink-2")} /> : null}
       <As id={id} className="type-title text-ink max-md:type-title-sm">
         {children}
       </As>
-      {after ? <span className="type-label text-ink-2">{after}</span> : null}
+      {after ? <span className="type-label text-ink-3">{after}</span> : null}
     </div>
   );
 }

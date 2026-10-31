@@ -42,7 +42,7 @@ describe("FigureFrame", () => {
   it("draws a ChartCard: the kind line, the title and the caption under the plot", () => {
     expect(html).toContain("<figure");
     expect(html).toMatch(/<figure[^>]*class="[^"]*rounded-card/);
-    expect(html).toMatch(/<p class="m-0 type-label text-ink-2">Closest audiences<\/p>/);
+    expect(html).toMatch(/<p class="m-0 type-overline text-ink-3">Closest audiences<\/p>/);
     expect(html).toMatch(/<h3[^>]*type-title[^>]*>A finding<\/h3>/);
     expect(html.indexOf("A caption.")).toBeGreaterThan(html.indexOf('data-view="plot"'));
     expect(html).not.toContain("FIGURE");

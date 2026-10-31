@@ -65,28 +65,26 @@ export function SourceRow({ lookup, query, defaultOpen = false, names, onCopied 
   const copy = (text: string) =>
     void copyText(text).then((ok) => onCopied?.(ok ? "Copied" : "Copy failed: select the text instead"));
   return (
-    <li className="rounded-control border border-line bg-surface" data-source-row={lookup.qlooCallId}>
+    <li className="border-b border-line" data-source-row={lookup.qlooCallId}>
       <button
         type="button"
         aria-expanded={open}
         aria-controls={id}
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full flex-col gap-1 rounded-control px-4 py-[13px] text-left"
+        className="group flex w-full flex-col gap-[3px] rounded-xs py-3 text-left"
       >
         <span className="flex w-full items-start gap-3">
-          <span className="min-w-0 flex-1 text-[14px] leading-5 font-semibold text-ink">{sourceDescription(lookup)}</span>
-          <Icon name={open ? "chevron-up" : "chevron-down"} size={16} className="mt-0.5 shrink-0 text-ink-2" />
+          <span className="min-w-0 flex-1 text-[13px] leading-5 font-medium text-ink group-hover:text-accent">{sourceDescription(lookup)}</span>
+          <Icon name={open ? "chevron-up" : "chevron-down"} size={16} className="mt-0.5 shrink-0 text-ink-3 group-hover:text-ink-2" />
         </span>
-        <span className="flex w-full flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-          <span className="min-w-0 font-mono text-[12px] leading-[18px] text-ink-2 [overflow-wrap:anywhere]">{sourceLine(lookup)}</span>
-          <span className="text-[12px] leading-4 text-ink-2">{freshnessText(lookup)}</span>
-        </span>
+        <span className="min-w-0 pr-7 font-mono text-[11px] leading-4 text-ink-2 [overflow-wrap:anywhere]">{sourceLine(lookup)}</span>
+        <span className="font-mono text-[10px] leading-[14px] text-ink-3">{freshnessText(lookup)}</span>
       </button>
-      <div id={id} hidden={!open} className="flex flex-col gap-3 px-4 pb-4">
-        <dl className="flex flex-col gap-2 rounded-sm bg-sunken p-3 font-mono text-[12px] leading-[18px] md:grid md:grid-cols-[max-content_minmax(0,1fr)] md:gap-x-3 md:gap-y-0">
+      <div id={id} hidden={!open} className="flex flex-col gap-2.5 pb-3.5">
+        <dl className="flex flex-col gap-2 rounded-sm bg-sunken px-3 py-2 font-mono text-[11px] leading-[18px] md:grid md:grid-cols-[max-content_minmax(0,1fr)] md:gap-x-3 md:gap-y-1">
           {requestPairs(lookup, names).map(([k, v]) => (
             <div key={k} className="flex flex-col md:contents">
-              <dt className="whitespace-nowrap text-ink-2 md:min-w-[136px]">{k}</dt>
+              <dt className="whitespace-nowrap text-ink-3 md:min-w-[110px]">{k}</dt>
               <dd className="min-w-0 text-ink [overflow-wrap:anywhere]">{v}</dd>
             </div>
           ))}
@@ -136,12 +134,12 @@ export function SourceRow({ lookup, query, defaultOpen = false, names, onCopied 
           ) : null}
         </div>
         {overpass ? (
-          <pre className="max-h-48 overflow-auto rounded-sm bg-sunken p-3 font-mono text-[12px] leading-[18px] whitespace-pre-wrap text-ink [overflow-wrap:anywhere]" data-overpass-query>
+          <pre className="max-h-48 overflow-auto rounded-sm bg-sunken px-3 py-2 font-mono text-[11px] leading-[18px] whitespace-pre-wrap text-ink [overflow-wrap:anywhere]" data-overpass-query>
             {overpass.query}
           </pre>
         ) : null}
-        {copyable ? <p className="type-caption text-ink-2">{QLOO_IDS_LINE}</p> : null}
-        {publicSource ? <p className="type-caption text-ink-2">{publicNote(lookup, link ?? (overpass ? {} : null))}</p> : null}
+        {copyable ? <p className="text-[11px] leading-4 text-ink-3">{QLOO_IDS_LINE}</p> : null}
+        {publicSource ? <p className="text-[11px] leading-4 text-ink-3">{publicNote(lookup, link ?? (overpass ? {} : null))}</p> : null}
       </div>
     </li>
   );

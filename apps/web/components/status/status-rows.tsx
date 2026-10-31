@@ -13,7 +13,7 @@ export function StatusRows({ children, label }: { children: ReactNode; label?: s
 }
 
 export interface StatusRowProps {
-  /** The 200 px label on the left, 13/500 ink-2. */
+  /** The 168 px label on the left, 13/500 ink-2. */
   label: ReactNode;
   /** The value: text, a meter and its amount, a strip. */
   children: ReactNode;
@@ -30,11 +30,11 @@ export function StatusRow({ label, children, note, className }: StatusRowProps) 
   return (
     <div
       className={cx(
-        "flex min-h-11 flex-wrap items-center gap-x-4 gap-y-1 border-t border-line py-2.5 first:border-t-0 max-sm:flex-col max-sm:items-start",
+        "flex min-h-12 flex-wrap items-center gap-x-6 gap-y-1 border-t border-line py-3 first:border-t-0 max-sm:flex-col max-sm:items-start",
         className,
       )}
     >
-      <dt className="w-[200px] shrink-0 type-label text-ink-2 max-sm:w-full">{label}</dt>
+      <dt className="w-[168px] shrink-0 type-label text-ink-3 max-sm:w-full">{label}</dt>
       <dd className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1 type-body text-ink-2 max-sm:w-full sm:flex-nowrap">{children}</dd>
       {note ? <dd className="shrink-0 text-right type-label text-ink-2 max-sm:text-left">{note}</dd> : null}
     </div>

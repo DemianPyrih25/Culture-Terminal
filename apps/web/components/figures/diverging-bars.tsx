@@ -15,8 +15,8 @@ import { fitText, linear, niceDomain, px, symmetricDomain, textWidth, ticksBetwe
 
 /**
  * DivergingBars (kind Bars: BLOCK, DNA and head-to-head splits). Four displays of one payload:
- * - diverging: one series of deltas around the comparator, over in the data colour, under in the
- *   negative colour, with NEW notches (Block DNA);
+ * - diverging: one series of deltas around the comparator, over in the Ledger good green, under in the
+ *   danger red (the lift palette), with NEW notches (Block DNA);
  * - split (A04 figure 1): two shares around an even split, the bar is the lead of the first share
  *   within the pair, the shaded band (±.02 by default) reads as even, both value columns; a row
  *   missing either share gets its reason, never a lead;
@@ -299,7 +299,7 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
               {ticks
                 .filter((t) => Math.abs(t - centre) > 1e-9)
                 .map((t) => (
-                  <line key={t} x1={px(x(t)) + 0.5} x2={px(x(t)) + 0.5} y1={y} y2={y + rowH} className="stroke-line" />
+                  <line key={t} x1={px(x(t)) + 0.5} x2={px(x(t)) + 0.5} y1={y} y2={y + rowH} className="stroke-chart-grid" />
                 ))}
               <text x={0} y={px(mid + 4)} fontSize={12} className="fill-ink-2">
                 {labelText}
@@ -321,7 +321,7 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
                     y={px(mid - 4.5)}
                     width={px(Math.abs(x(v0) - cx))}
                     height={9}
-                    className={v0 >= baseline ? "fill-accent" : "fill-second"}
+                    className={v0 >= baseline ? "fill-good" : "fill-danger"}
                   />
                 )
               ) : (
@@ -373,7 +373,7 @@ function BarsPlot(props: DivergingBarsProps & { display: BarsDisplay; label: str
               textAnchor="middle"
               fontSize={12}
               fontWeight={atCentre && display === "dumbbell" ? 500 : 400}
-              className={`tabular-nums ${atCentre && display === "dumbbell" ? "fill-ink" : "fill-ink-2"}`}
+              className={`font-mono tabular-nums ${atCentre && display === "dumbbell" ? "fill-ink" : "fill-ink-2"}`}
             >
               {text}
             </text>
@@ -527,7 +527,7 @@ function ValueColumns({
         textAnchor="end"
         fontSize={12}
         fontWeight={500}
-        className={`tabular-nums ${v0 < baseline ? "fill-second" : "fill-ink"}`}
+        className={`font-mono tabular-nums ${v0 < baseline ? "fill-danger-ink" : "fill-ink"}`}
       >
         {formatNumber(v0, unit, { signed: true, ...style })}
       </text>
@@ -541,7 +541,7 @@ function ValueColumns({
         {v0 === null ? (
           missing(0)
         ) : (
-          <text x={colX(0)} y={px(y)} textAnchor="end" fontSize={12} fontWeight={500} className="fill-ink tabular-nums">
+          <text x={colX(0)} y={px(y)} textAnchor="end" fontSize={12} fontWeight={500} className="fill-ink font-mono tabular-nums">
             {formatNumber(v0, unit, style)}
           </text>
         )}
@@ -553,7 +553,7 @@ function ValueColumns({
             y={px(y)}
             textAnchor="end"
             fontSize={12}
-            className={`tabular-nums ${flat ? "fill-ink-2" : delta > 0 ? "fill-accent" : "fill-second"}`}
+            className={`font-mono tabular-nums ${flat ? "fill-ink-2" : delta > 0 ? "fill-accent" : "fill-second"}`}
           >
             {`${flat ? "=" : delta > 0 ? "▲" : "▼"} ${formatNumber(Math.abs(delta), unit, { ...style, signed: false })}`}
           </text>
@@ -580,7 +580,7 @@ function ValueColumns({
             textAnchor="end"
             fontSize={12}
             fontWeight={clear && leads ? 600 : 400}
-            className={`tabular-nums ${tone}`}
+            className={`font-mono tabular-nums ${tone}`}
           >
             {formatNumber(v, unit, style)}
           </text>
@@ -744,7 +744,7 @@ function Butterfly(props: DivergingBarsProps & { label: string; style: NumberSty
                     fontSize={12}
                     strokeWidth={3}
                     paintOrder="stroke"
-                    className={`stroke-surface tabular-nums ${outward ? "fill-ink-2" : "fill-second"}`}
+                    className={`stroke-surface font-mono tabular-nums ${outward ? "fill-ink-2" : "fill-second"}`}
                   >
                     {formatNumber(cell.value, data.unit, style)}
                   </text>

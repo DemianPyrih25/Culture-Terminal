@@ -11,7 +11,7 @@ export interface PageHeadProps {
   eyebrow: ReactNode;
   /** The phone eyebrow ("Brands & investing · 23 Oct 2026"); default `eyebrow`. */
   mobileEyebrow?: ReactNode;
-  /** The question, lead ink-2. */
+  /** The question, a serif title in ink. */
   question: ReactNode;
   /** The question's element (default h1: one per page). */
   questionAs?: "h1" | "h2" | "p";
@@ -25,8 +25,8 @@ export interface PageHeadProps {
 }
 
 /**
- * C/PageHead: not sticky. A 40 px top row (topic tile and eyebrow left, actions right), then the question
- * in lead ink-2 (max 900). Variants: answer, working (Stop only), compare (monograms), phone. Between 768
+ * C/PageHead (Ledger): not sticky. A 40 px top row (topic tile and the muted eyebrow left, actions right),
+ * then the question as the serif page title in ink (max 900). Variants: answer, working (Stop only), compare (monograms), phone. Between 768
  * and 899 px the eyebrow wraps and the actions move under it, so the date is never cut.
  */
 export function PageHead({
@@ -41,9 +41,9 @@ export function PageHead({
   className,
 }: PageHeadProps) {
   return (
-    <div className={cx("flex flex-col gap-1 max-md:gap-2", className)}>
+    <div className={cx("flex flex-col gap-3 max-md:gap-2", className)}>
       <div className="flex min-h-10 items-center justify-between gap-3 md:max-[900px]:flex-wrap md:max-[900px]:gap-y-2">
-        <p className="flex min-w-0 items-center gap-2 type-label text-ink-2 max-md:text-[12px] max-md:leading-4">
+        <p className="flex min-w-0 items-center gap-2.5 type-label text-ink-2 max-md:text-[12px] max-md:leading-4">
           {topic ? (
             <>
               <TopicTile topic={topic} size={24} className="max-md:hidden" />
@@ -66,7 +66,7 @@ export function PageHead({
             <Monogram name={compare.second} size={32} palette="second" />
           </span>
         ) : null}
-        <Question className="max-w-[900px] type-lead text-ink-2 max-md:text-[16px] max-md:leading-6">{question}</Question>
+        <Question className="max-w-[900px] type-title-l text-pretty text-ink max-md:type-title-l-sm">{question}</Question>
       </div>
     </div>
   );

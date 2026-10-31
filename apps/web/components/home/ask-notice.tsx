@@ -14,6 +14,22 @@ const LOOK: Readonly<Record<AskNotice["kind"], { tone: InlineStateTone; icon: Ic
   run_failed: { tone: "danger", icon: "circle-x" },
 };
 
+/** Where the visitor's plan and usage live: the only page that shows limits. */
+export const PLAN_HREF = "/settings";
+
+/** The one calm line a used-up day shows on Home, in place of the server's limit or budget wording. */
+export const DAILY_CAP_TEXT = "You've used today's answers. They reset at 00:00 UTC.";
+
+/** A run that did not start because today's limit or budget is used up: trying again cannot pass. */
+export function isDailyCap(notice: AskNotice): boolean {
+  return notice.kind === "run_failed" && /today's (limit|budget)/i.test(notice.text);
+}
+
+/** A limit that lifts only with time (hourly or daily): "Try again" would only fail again. */
+function isLimit(notice: AskNotice): boolean {
+  return notice.kind === "run_failed" && /(hourly|today's) (limit|budget)/i.test(notice.text);
+}
+
 export interface AskNoticeViewProps {
   notice: AskNotice;
   /** The id the field's aria-describedby names. */
@@ -26,16 +42,35 @@ export interface AskNoticeViewProps {
 }
 
 /**
- * The one inline state under the question box (N16 1-3): one sentence and at most one action. Paused
- * and limited link to the visitor's own answers; a refusal offers its reframe as a chip that asks it;
- * needs input has no button (the box keeps focus); an error and a run that did not start try again.
+ * The one inline state under the question box: one sentence and at most one action. Paused and limited
+ * link to the visitor's own answers; a refusal offers its reframe as a chip that asks it; needs input
+ * has no button (the box keeps focus); an error and a run that did not start try again. A used-up day
+ * says so calmly and links to the plan; an hourly limit offers nothing that would only fail again.
  */
 export function AskNoticeView({ notice, id, onReframe, onRetry, className }: AskNoticeViewProps) {
+  if (isDailyCap(notice)) {
+    return (
+      <InlineState
+        id={id}
+        tone="caution"
+        icon="clock-4"
+        role="alert"
+        data-notice={notice.kind}
+        data-cap="daily"
+        className={className}
+        action={<ButtonLink href={PLAN_HREF}>See plan</ButtonLink>}
+      >
+        <p className="m-0">{DAILY_CAP_TEXT}</p>
+      </InlineState>
+    );
+  }
   const look = LOOK[notice.kind];
   let action = null;
-  if (notice.kind === "paused" || notice.kind === "limited") {
+  if (isLimit(notice)) {
+    action = null;
+  } else if (notice.kind === "paused" || notice.kind === "limited") {
     action = (
-      <ButtonLink variant="primary" href={ANSWERS_HREF}>
+      <ButtonLink href={ANSWERS_HREF}>
         Your answers
       </ButtonLink>
     );

@@ -172,14 +172,14 @@ function ScatterPlot(props: QuadrantScatterProps & { label: string; style: Numbe
           data-quadrant="HIDDEN_POCKET"
         />
         {yTicks.map((t, i) =>
-          i === 0 ? null : <line key={`gy-${t}`} x1={left} x2={right} y1={px(sy(t)) + 0.5} y2={px(sy(t)) + 0.5} className="stroke-line" />,
+          i === 0 ? null : <line key={`gy-${t}`} x1={left} x2={right} y1={px(sy(t)) + 0.5} y2={px(sy(t)) + 0.5} className="stroke-chart-grid" />,
         )}
         <line x1={left} x2={right} y1={bottom + 0.5} y2={bottom + 0.5} className="stroke-line-strong" />
         <line x1={left} x2={right} y1={splitY + 0.5} y2={splitY + 0.5} className="stroke-line-strong" />
         <line x1={splitX + 0.5} x2={splitX + 0.5} y1={top} y2={bottom} className="stroke-line-strong" />
 
         {yTicks.map((t) => (
-          <text key={`ty-${t}`} x={left - 8} y={px(sy(t) + 4)} textAnchor="end" fontSize={FONT} className="fill-ink-2 tabular-nums">
+          <text key={`ty-${t}`} x={left - 8} y={px(sy(t) + 4)} textAnchor="end" fontSize={FONT} className="fill-ink-2 font-mono tabular-nums">
             {formatTick(t, yd.step, data.yUnit, { minDigits: 1 })}
           </text>
         ))}
@@ -190,7 +190,7 @@ function ScatterPlot(props: QuadrantScatterProps & { label: string; style: Numbe
             y={bottom + 17}
             textAnchor={i === 0 ? "start" : i === xTicks.length - 1 ? "end" : "middle"}
             fontSize={FONT}
-            className="fill-ink-2 tabular-nums"
+            className="fill-ink-2 font-mono tabular-nums"
           >
             {xd.percentile
               ? `${Math.round(t * 100)}${i === xTicks.length - 1 ? "th pctl" : ""}`

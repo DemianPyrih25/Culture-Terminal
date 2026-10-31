@@ -50,7 +50,7 @@ import { Hatch } from "../ui/skeleton";
 import { Tag } from "../ui/tag";
 import { formatEvalValue, type EvalState, type EvalSummary } from "./eval-summary";
 import { bandRanges, modelLabel, penaltyText } from "./facts";
-import { BODY, Colophon, type IndexItem, LABEL, LIST, REFERENCE_ANCHOR, ReferenceLayout, RefNote, RefSection, ROW, SUBHEAD } from "./reference";
+import { BODY, Colophon, EYEBROW, type IndexItem, LABEL, LIST, REFERENCE_ANCHOR, ReferenceLayout, RefNote, RefSection, ROW, SUBHEAD } from "./reference";
 import { RULES_INDEX, RulesSections, type RulesFacts } from "./rules-sections";
 import { TexFormula } from "./tex";
 
@@ -553,9 +553,10 @@ export function MethodView({ facts, scan, endpoints, trendWindow, evaluation, ru
     ...appendix,
   ];
   const head = (
-    <header className="flex flex-col gap-3 pb-2">
-      <h1 className="type-display-m text-ink max-md:type-display-m-sm">{METHOD_PAGE.title}</h1>
-      <p className="max-w-[744px] type-lead text-ink-2 max-md:text-[16px] max-md:leading-6">{METHOD_PAGE.lede}</p>
+    <header className="flex flex-col gap-5">
+      <p className={EYEBROW}>How it works · Method</p>
+      <h1 className="type-display-l text-ink max-md:type-display-l-sm">{METHOD_PAGE.title}</h1>
+      <p className="max-w-[760px] font-display text-[21px] leading-[31px] text-ink-2 max-md:text-[18px] max-md:leading-[27px]">{METHOD_PAGE.lede}</p>
     </header>
   );
   return (

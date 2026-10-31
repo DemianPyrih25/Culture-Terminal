@@ -12,21 +12,25 @@ import { FollowMenu, noteFollowOptions } from "../following";
 import { LiftMapCard } from "../figures/lift-map-card";
 import { AreaStandingCard, supplyForMap } from "../figures/lift-standing";
 import { SupplyTable } from "../figures/supply-table";
-import { Button, ChartCard, ChartTable, cx, Icon, IconButton, KeyNumber, Popover, Tag } from "../ui";
+import { absoluteUrl, Button, ChartCard, ChartTable, cx, Icon, IconButton, KeyNumber, Popover, Tag } from "../ui";
 import { GUESS_CAPTION, GuessesCard, StateCard } from "../working";
+import { AnswerActionsSheet } from "./actions-sheet";
 import { AskNextCard } from "./ask-next";
-import { AIAloneCard, ChangeCard, ConceptNote, NextStepsCard, ReadAsNote, UnlistedNote, VerdictCard, WhyRow } from "./cards";
+import { AIAloneCard, ChangeCard, ConceptNote, NextStepsCard, ReadAsNote, SECTION_LABEL, UnlistedNote, VerdictCard, WhyRow } from "./cards";
 import { ChartBodyView } from "./chart-bodies";
 import { ContextRow } from "./context-cards";
 import { useFetchedDatasets } from "./datasets";
 import { ChartSheet, MoreCharts } from "./more-charts";
 
 /**
- * The answer page (design/redesign.pen N05, N07–N12; phones N18): a finished run on /run/[id] and its
- * permalink /r/[id]. The page head, then rows of cards on a six-column grid: the verdict and next steps,
- * the key numbers, the job's charts and the guesses, AI alone and what could change this, why we think
- * this, more charts and ask next. Numbers and charts open How we know (the drawer around the page,
- * components/drawer); a chart under "More charts" opens in a sheet.
+ * The answer page (design/redesign-v3.pen xU0kc, Lmw5N, V1IQB; phones puFRb, BPiz6): a finished run on
+ * /run/[id] and its permalink /r/[id]. One reading column: the page head, the verdict block and next steps,
+ * the key numbers, the job's charts and the guesses, the places already there, AI alone and what could
+ * change this, why we think this, the context row, more charts and ask next. From 1280 px a quiet rail
+ * beside it holds the How we know entry and the page's contents (last in the markup, so the reading order
+ * stays the column's). Numbers and charts open How we know (the drawer around the page,
+ * components/drawer); a chart under "More charts" opens in a sheet. On phones the head's actions sit in an
+ * actions sheet.
  */
 
 /** What the page reads from the run besides the brief model (a full RunState fits). */
@@ -58,11 +62,20 @@ const SPAN: Readonly<Record<number, string>> = {
 
 const ROW = "grid grid-cols-1 gap-6 max-md:gap-4 min-[900px]:grid-cols-6";
 
+/** A block of the reading column a contents link can land on. */
+const ANCHOR = "scroll-mt-6";
+
+/** One entry of the rail's contents: a block's id and its name. */
+interface PageSection {
+  id: string;
+  label: string;
+}
+
 function KeyNumbers({ numbers }: { numbers: readonly AnswerKeyNumber[] }) {
   const how = useHowWeKnow();
   if (numbers.length === 0) return null;
   return (
-    <section aria-label="Key numbers" className="grid grid-cols-1 gap-6 max-md:gap-4 min-[720px]:grid-cols-3" data-key-numbers={numbers.length}>
+    <section aria-label="Key numbers" className="grid grid-cols-1 gap-5 max-md:gap-4 min-[720px]:grid-cols-3" data-key-numbers={numbers.length}>
       {numbers.map((k) => {
         const onSource = how.available && k.footnote !== null ? () => how.open({ tab: "numbers", footnote: k.footnote ?? undefined }) : undefined;
         const selected = how.isOpen && k.footnote !== null && how.focused === k.footnote;
@@ -156,11 +169,11 @@ function Cell({ cell, answer, model }: { cell: AnswerCell; answer: AnswerModel; 
   return chart ? <AnswerChartCard chart={chart} className={span} /> : null;
 }
 
-/** The page head's actions: How we know, Follow, Share and the ellipsis menu. */
+/** The page head's actions: How we know, Follow, Share and the ellipsis menu (Watch, Export, Copy link). */
 function HeadActions({ permalink, replay, follow }: { permalink: string; replay: string | null; follow?: ReactNode }) {
   const how = useHowWeKnow();
   const { share, toast } = useShareLink(permalink);
-  const item = "flex h-10 w-full items-center gap-3 rounded-sm px-3 text-left text-[15px] leading-6 font-medium text-ink transition-colors hover:bg-sunken";
+  const item = "flex h-10 w-full items-center gap-3 rounded-sm px-3 text-left text-[14px] leading-5 font-medium text-ink transition-colors hover:bg-sunken";
   return (
     <>
       {how.available ? (
@@ -185,7 +198,7 @@ function HeadActions({ permalink, replay, follow }: { permalink: string; replay:
             {replay ? (
               <li>
                 <Link href={replay} className={item} onClick={close}>
-                  <Icon name="circle-play" size={18} className="text-ink-2" />
+                  <Icon name="circle-play" size={16} className="text-ink-2" />
                   Watch it being made
                 </Link>
               </li>
@@ -199,7 +212,7 @@ function HeadActions({ permalink, replay, follow }: { permalink: string; replay:
                   window.print();
                 }}
               >
-                <Icon name="download" size={18} className="text-ink-2" />
+                <Icon name="download" size={16} className="text-ink-2" />
                 Export
               </button>
             </li>
@@ -212,7 +225,7 @@ function HeadActions({ permalink, replay, follow }: { permalink: string; replay:
                   share();
                 }}
               >
-                <Icon name="link" size={18} className="text-ink-2" />
+                <Icon name="link" size={16} className="text-ink-2" />
                 Copy link
               </button>
             </li>
@@ -221,6 +234,53 @@ function HeadActions({ permalink, replay, follow }: { permalink: string; replay:
       </Popover>
       {toast}
     </>
+  );
+}
+
+/**
+ * The rail beside the reading column from 1280 px (xU0kc's context rail): the How we know entry with the
+ * check line, then the page's contents. Hidden below 1280: the head's How we know and the verdict's check
+ * line are the way in there.
+ */
+function AnswerRail({ check, sections }: { check: AnswerModel["verdict"]["check"]; sections: readonly PageSection[] }) {
+  const how = useHowWeKnow();
+  return (
+    <aside aria-label="About this answer" className="hidden min-w-0 xl:col-start-2 xl:row-start-1 xl:block">
+      <div className="sticky top-6 flex flex-col gap-8">
+        {how.available ? (
+          <section aria-labelledby="rail-how" className="flex flex-col gap-3 rounded-card border border-line bg-surface p-5">
+            <h2 id="rail-how" className="font-display text-[18px] leading-6 font-medium text-ink">
+              How we know
+            </h2>
+            {check ? (
+              <p className="flex items-start gap-2 text-[13px] leading-5 text-ink-2">
+                <Icon name={check.ok ? "circle-check" : "triangle-alert"} size={14} className={cx("mt-[3px] shrink-0", check.ok ? "text-good" : "text-caution")} />
+                {check.text}
+              </p>
+            ) : (
+              <p className="text-[13px] leading-5 text-ink-2">Every number, its source and the method behind it.</p>
+            )}
+            <Button variant="secondary" size="sm" icon="shield-check" className="self-start" onClick={() => how.open({ tab: "summary" })}>
+              Open How we know
+            </Button>
+          </section>
+        ) : null}
+        {sections.length > 1 ? (
+          <nav aria-label="Contents of this answer" className="flex flex-col gap-2">
+            <p className={SECTION_LABEL}>On this page</p>
+            <ul className="flex flex-col border-l border-line">
+              {sections.map((s) => (
+                <li key={s.id}>
+                  <a href={`#${s.id}`} className="-ml-px block border-l border-transparent py-1.5 pl-3 text-[13px] leading-5 text-ink-2 hover:border-ink hover:text-ink">
+                    {s.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        ) : null}
+      </div>
+    </aside>
   );
 }
 
@@ -256,6 +316,13 @@ export function AnswerPage({ model, state, runId = model.runId, links, fallbackQ
     [state],
   );
   const answer = useMemo(() => buildAnswerModel(model, run, { datasets: fetched, fallbackQuestion }), [model, run, fetched, fallbackQuestion]);
+  const { share: copyLink, toast: shareToast } = useShareLink(links.permalink);
+  // Share from the phone sheet: the system share sheet where there is one, else the link is copied.
+  const shareNative = () => {
+    const url = absoluteUrl(links.permalink);
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") void navigator.share({ url, title: answer.head.question }).catch(() => undefined);
+    else copyLink();
+  };
   const [sheet, setSheet] = useState<MoreChart | null>(null);
 
   // A shared link with ?chart= opens its chart once the page is in the browser.
@@ -296,67 +363,124 @@ export function AnswerPage({ model, state, runId = model.runId, links, fallbackQ
     </div>
   );
 
+  const hasRows = answer.rows.some((row) => row.length > 0);
+  const hasPlaces = answer.standing !== null || answer.supply.length > 0;
+  const hasWhy = answer.why.count > 0 || (answer.why.thesis?.length ?? 0) > 0;
+  const hasContext = answer.context.ai !== null || answer.context.web !== null;
+  const sections: PageSection[] = [
+    { id: "answer-verdict", label: model.terminal?.kind === "incomplete" ? "What we found" : "Verdict" },
+    ...(answer.keyNumbers.length > 0 ? [{ id: "answer-numbers", label: "Key numbers" }] : []),
+    ...(hasRows ? [{ id: "answer-figures", label: "Charts" }] : []),
+    ...(hasPlaces ? [{ id: "answer-places", label: "Places already there" }] : []),
+    { id: "answer-change", label: "What could change this" },
+    ...(hasWhy ? [{ id: "answer-why", label: "Why we think this" }] : []),
+    ...(hasContext ? [{ id: "answer-context", label: "Context" }] : []),
+    ...(answer.more.length > 0 ? [{ id: "answer-more", label: "More charts" }] : []),
+    { id: "answer-ask", label: "Ask next" },
+  ];
+
   return (
-    <SiteShell header="inner" mobileHeader="answer" sharePath={links.permalink} menuItems={menuItems} mainClassName="flex flex-col gap-6 pt-6 pb-12 max-md:gap-4 max-md:pt-4 max-md:pb-2">
-      <div data-answer={answer.job ?? "unknown"} className="contents">
-        <PageHead
-          topic={head.topic}
-          eyebrow={head.eyebrow}
-          mobileEyebrow={head.mobileEyebrow}
-          question={head.question}
-          compare={head.compare ?? undefined}
-          actions={<HeadActions permalink={links.permalink} replay={links.replay} follow={<FollowMenu options={followOptions} />} />}
-          className="pb-0.5"
-        />
-
-        {unlisted ? <UnlistedNote /> : null}
-        {answer.concept ? <ConceptNote text={answer.concept} level={answer.conceptLevel} /> : null}
-        {answer.readAs ? <ReadAsNote readAs={answer.readAs} /> : null}
-
-        <div className={ROW}>
-          {model.terminal?.kind === "incomplete" ? (
-            // A digest: the evidence is here, the conclusion is not; its numbers and charts stay below.
-            <StateCard terminal={model.terminal} question={head.question} className={cx(answer.steps.length > 0 ? SPAN[4] : SPAN[6], "min-w-0")} />
-          ) : (
-            <VerdictCard verdict={verdict} topic={head.topic} className={cx(answer.steps.length > 0 ? SPAN[4] : SPAN[6], "min-w-0")} />
-          )}
-          {answer.steps.length > 0 ? <NextStepsCard steps={answer.steps} className={cx(SPAN[2], "min-w-0")} /> : null}
-        </div>
-
-        <KeyNumbers numbers={answer.keyNumbers} />
-
-        {answer.rows.map((row, i) => (
-          <div key={i} className={ROW} data-row={row.map((c) => c.slot).join("+")}>
-            {row.map((cell) => (
-              <Cell key={cell.slot} cell={cell} answer={answer} model={model} />
-            ))}
+    <SiteShell header="inner" mobileHeader="answer" sharePath={links.permalink} menuItems={menuItems} mainClassName="pt-8 pb-16 max-md:pt-4 max-md:pb-6">
+      <div data-answer={answer.job ?? "unknown"} className="grid grid-cols-1 gap-x-10 xl:grid-cols-[minmax(0,1fr)_260px]">
+        <div className="flex min-w-0 flex-col gap-14 max-md:gap-10 xl:col-start-1 xl:row-start-1">
+          <div className="flex flex-col gap-6 max-md:gap-4">
+            <PageHead
+              topic={head.topic}
+              eyebrow={head.eyebrow}
+              mobileEyebrow={head.mobileEyebrow}
+              question={head.question}
+              compare={head.compare ?? undefined}
+              actions={<HeadActions permalink={links.permalink} replay={links.replay} follow={<FollowMenu options={followOptions} />} />}
+              mobileActions={
+                <>
+                  <FollowMenu options={followOptions} />
+                  <AnswerActionsSheet question={head.question} replay={links.replay} onShare={shareNative} />
+                </>
+              }
+            />
+            {unlisted || answer.concept || answer.readAs ? (
+              <div className="flex flex-col gap-2">
+                {unlisted ? <UnlistedNote /> : null}
+                {answer.concept ? <ConceptNote text={answer.concept} level={answer.conceptLevel} /> : null}
+                {answer.readAs ? <ReadAsNote readAs={answer.readAs} /> : null}
+              </div>
+            ) : null}
           </div>
-        ))}
 
-        {answer.standing ? <AreaStandingCard data={answer.standing.data} supply={answer.standing.supply} /> : null}
+          <div id="answer-verdict" className={cx("flex flex-col gap-10 max-md:gap-8", ANCHOR)}>
+            {model.terminal?.kind === "incomplete" ? (
+              // A digest: the evidence is here, the conclusion is not; its numbers and charts stay below.
+              <StateCard terminal={model.terminal} question={head.question} className="min-w-0" />
+            ) : (
+              <VerdictCard verdict={verdict} topic={head.topic} className="min-w-0" />
+            )}
+            {answer.steps.length > 0 ? <NextStepsCard steps={answer.steps} className="min-w-0" /> : null}
+          </div>
 
-        {answer.supply.map((s) => (
-          <SupplyTable
-            key={s.datasetId}
-            data={s.data}
-            kind={s.data.mix ? "What the area already has" : "Places already there"}
-            title={s.title}
-            headingLevel={2}
-            formulaId={s.formulaId}
-            onSource={how.available ? () => how.open({ figure: s.datasetId }) : undefined}
-          />
-        ))}
+          {answer.keyNumbers.length > 0 ? (
+            <div id="answer-numbers" className={ANCHOR}>
+              <KeyNumbers numbers={answer.keyNumbers} />
+            </div>
+          ) : null}
 
-        {rowE}
+          {hasRows ? (
+            <div id="answer-figures" className={cx("flex flex-col gap-6 max-md:gap-4", ANCHOR)}>
+              {answer.rows.map((row, i) => (
+                <div key={i} className={ROW} data-row={row.map((c) => c.slot).join("+")}>
+                  {row.map((cell) => (
+                    <Cell key={cell.slot} cell={cell} answer={answer} model={model} />
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : null}
 
-        <WhyRow why={answer.why} />
+          {hasPlaces ? (
+            <div id="answer-places" className={cx("flex flex-col gap-6 max-md:gap-4", ANCHOR)}>
+              {answer.standing ? <AreaStandingCard data={answer.standing.data} supply={answer.standing.supply} /> : null}
+              {answer.supply.map((s) => (
+                <SupplyTable
+                  key={s.datasetId}
+                  data={s.data}
+                  kind={s.data.mix ? "What the area already has" : "Places already there"}
+                  title={s.title}
+                  headingLevel={2}
+                  formulaId={s.formulaId}
+                  onSource={how.available ? () => how.open({ figure: s.datasetId }) : undefined}
+                />
+              ))}
+            </div>
+          ) : null}
 
-        <ContextRow context={answer.context} />
+          <div id="answer-change" className={ANCHOR}>
+            {rowE}
+          </div>
 
-        <MoreCharts charts={answer.more} onOpen={openSheet} />
+          {hasWhy ? (
+            <div id="answer-why" className={ANCHOR}>
+              <WhyRow why={answer.why} />
+            </div>
+          ) : null}
 
-        <AskNextCard runId={runId} moves={answer.ask.moves} placeholder={answer.ask.placeholder} />
+          {hasContext ? (
+            <div id="answer-context" className={ANCHOR}>
+              <ContextRow context={answer.context} />
+            </div>
+          ) : null}
+
+          {answer.more.length > 0 ? (
+            <div id="answer-more" className={ANCHOR}>
+              <MoreCharts charts={answer.more} onOpen={openSheet} />
+            </div>
+          ) : null}
+
+          <div id="answer-ask" className={ANCHOR}>
+            <AskNextCard runId={runId} moves={answer.ask.moves} placeholder={answer.ask.placeholder} />
+          </div>
+        </div>
+        <AnswerRail check={verdict.check} sections={sections} />
       </div>
+      {shareToast}
       <ChartSheet
         chart={sheet}
         figure={sheetFigure}
@@ -384,14 +508,12 @@ export function RefusedAnswerPage({
 }) {
   const answer = useMemo(() => buildAnswerModel(model, { resolves: [] }, { fallbackQuestion }), [model, fallbackQuestion]);
   return (
-    <SiteShell header="inner" mobileHeader="answer" sharePath={permalink} mainClassName="flex flex-col gap-6 pt-6 pb-12 max-md:gap-4 max-md:pt-4 max-md:pb-2">
-      <PageHead topic={answer.head.topic} eyebrow={answer.head.eyebrow} mobileEyebrow={answer.head.mobileEyebrow} question={answer.head.question} />
-      {unlisted ? <UnlistedNote /> : null}
-      {model.terminal ? (
-        <div className={ROW}>
-          <StateCard terminal={model.terminal} question={answer.head.question} className={cx(SPAN[4], "min-w-0")} />
-        </div>
-      ) : null}
+    <SiteShell header="inner" mobileHeader="answer" sharePath={permalink} mainClassName="flex flex-col gap-10 pt-8 pb-16 max-md:gap-6 max-md:pt-4 max-md:pb-6">
+      <div className="flex flex-col gap-6 max-md:gap-4">
+        <PageHead topic={answer.head.topic} eyebrow={answer.head.eyebrow} mobileEyebrow={answer.head.mobileEyebrow} question={answer.head.question} />
+        {unlisted ? <UnlistedNote /> : null}
+      </div>
+      {model.terminal ? <StateCard terminal={model.terminal} question={answer.head.question} className="max-w-[760px] min-w-0" /> : null}
     </SiteShell>
   );
 }

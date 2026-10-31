@@ -32,7 +32,7 @@ export function RankTrack({ rank, of, className }: { rank: number | null; of: nu
           />
         ))}
       </span>
-      <span className="type-label whitespace-nowrap text-ink-2 tabular-nums">{rankText(rank, of)}</span>
+      <span className="font-mono text-[12px] leading-[18px] whitespace-nowrap text-ink-2 tabular-nums">{rankText(rank, of)}</span>
     </span>
   );
 }

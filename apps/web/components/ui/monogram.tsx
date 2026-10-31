@@ -17,11 +17,11 @@ const PALETTE: Readonly<Record<MonogramPalette, string>> = {
 
 // Box, radius and initials size: initials are 600 at about 0.42 of the box.
 const SIZE: Readonly<Record<MonogramSize, string>> = {
-  20: "size-5 rounded-[5px] text-[8.5px]",
-  24: "size-6 rounded-[6px] text-[10px]",
+  20: "size-5 rounded-xs text-[8.5px]",
+  24: "size-6 rounded-xs text-[10px]",
   32: "size-8 rounded-sm text-[13.5px]",
-  48: "size-12 rounded-control text-[20px]",
-  56: "size-14 rounded-[14px] text-[23.5px]",
+  48: "size-12 rounded-md text-[20px]",
+  56: "size-14 rounded-md text-[23.5px]",
 };
 
 const LEADING = new Set(["the", "a"]);

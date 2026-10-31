@@ -202,10 +202,10 @@ function StripPlot(props: MomentumStripProps & { label: string; style: NumberSty
         {/* The shared scale, once, beside the first row past the hatch, when any series is drawn. */}
         {rows.some((s) => s.state === "ok") ? (
           <g data-scale="true">
-            <text x={tailX1 + 4} y={px(HEADER_H + SPARK_PAD + 6)} fontSize={FONT} className="fill-ink-2 tabular-nums">
+            <text x={tailX1 + 4} y={px(HEADER_H + SPARK_PAD + 6)} fontSize={FONT} className="fill-ink-2 font-mono tabular-nums">
               {formatNumber(domain.max, "pct", style)}
             </text>
-            <text x={tailX1 + 4} y={px(HEADER_H + ROW_H - SPARK_PAD + 2)} fontSize={FONT} className="fill-ink-2 tabular-nums">
+            <text x={tailX1 + 4} y={px(HEADER_H + ROW_H - SPARK_PAD + 2)} fontSize={FONT} className="fill-ink-2 font-mono tabular-nums">
               {formatNumber(domain.min, "pct", style)}
             </text>
           </g>
@@ -313,13 +313,13 @@ function SeriesRow({
         }
         if (c.key === "delta") {
           return (
-            <text key={c.key} x={right} y={cy} textAnchor="end" fontSize={FONT} className={`tabular-nums ${series.delta26w === null ? "fill-ink-2" : "fill-ink"}`}>
+            <text key={c.key} x={right} y={cy} textAnchor="end" fontSize={FONT} className={`font-mono tabular-nums ${series.delta26w === null ? "fill-ink-2" : "fill-ink"}`}>
               {series.delta26w === null ? "—" : formatNumber(series.delta26w, "pct", { ...style, signed: true })}
             </text>
           );
         }
         return (
-          <text key={c.key} x={right} y={cy} textAnchor="end" fontSize={FONT} className="fill-ink-2 tabular-nums">
+          <text key={c.key} x={right} y={cy} textAnchor="end" fontSize={FONT} className="fill-ink-2 font-mono tabular-nums">
             {series.peerRank ? `${series.peerRank.rank} of ${series.peerRank.of}` : "—"}
           </text>
         );

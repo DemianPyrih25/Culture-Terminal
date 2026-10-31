@@ -252,7 +252,7 @@ function Lollipop(props: RankedTableProps & { label: string; style: NumberStyle 
         <title>{props.label}</title>
         <desc>{`${rows.length} rows ranked by ${(column?.label ?? "value").toLowerCase()}. The table view lists every value.`}</desc>
         {ticks.map((t) => (
-          <line key={`grid-${t}`} x1={px(x(t)) + 0.5} x2={px(x(t)) + 0.5} y1={0} y2={px(plotH)} className="stroke-line" />
+          <line key={`grid-${t}`} x1={px(x(t)) + 0.5} x2={px(x(t)) + 0.5} y1={0} y2={px(plotH)} className="stroke-chart-grid" />
         ))}
         {lines.map((line) => {
           if (line.kind === "group") {
@@ -319,7 +319,7 @@ function Lollipop(props: RankedTableProps & { label: string; style: NumberStyle 
                 textAnchor="end"
                 fontSize={12}
                 fontWeight={strong ? 600 : 400}
-                className={`tabular-nums ${text === null ? "fill-ink-2" : grey ? "fill-ink-2" : "fill-ink"}`}
+                className={`font-mono tabular-nums ${text === null ? "fill-ink-2" : grey ? "fill-ink-2" : "fill-ink"}`}
               >
                 {text ?? "—"}
               </text>
@@ -333,7 +333,7 @@ function Lollipop(props: RankedTableProps & { label: string; style: NumberStyle 
             y={px(plotH + 12)}
             textAnchor={i === 0 ? "start" : i === ticks.length - 1 ? "end" : "middle"}
             fontSize={12}
-            className="fill-ink-2 tabular-nums"
+            className="fill-ink-2 font-mono tabular-nums"
           >
             {formatTick(t, domain.step, unit)}
           </text>
@@ -406,7 +406,7 @@ function SlateStyleTable(props: RankedTableProps & { style: NumberStyle }) {
                 data-veto={vetoed || undefined}
                 className={`h-[25.5px] border-b border-line ${strong ? "bg-sunken" : ""}`}
               >
-                <td className="px-2 text-[12px] text-ink-2 tabular-nums">{row.rank ?? "—"}</td>
+                <td className="px-2 font-mono text-[12px] text-ink-2 tabular-nums">{row.rank ?? "—"}</td>
                 {withSub ? <td className="px-2 text-[13px] text-ink-2">{row.sublabel ?? ""}</td> : null}
                 <th
                   scope="row"
@@ -422,7 +422,7 @@ function SlateStyleTable(props: RankedTableProps & { style: NumberStyle }) {
                     </span>
                   ) : (
                     <span className="flex items-center gap-2.5">
-                      <span className="w-[34px] text-[13px] font-medium text-ink tabular-nums">
+                      <span className="w-[34px] font-mono text-[13px] font-medium text-ink tabular-nums">
                         {formatNumber(cell.value, unit, style)}
                       </span>
                       <svg viewBox="0 0 120 9" width="120" height="9" aria-hidden="true" className="shrink-0">
@@ -444,7 +444,7 @@ function SlateStyleTable(props: RankedTableProps & { style: NumberStyle }) {
                 {others.map((c) => {
                   const t = row.cells[c.i];
                   return (
-                    <td key={c.key} className="px-2 text-right text-[13px] text-ink-2 tabular-nums">
+                    <td key={c.key} className="px-2 text-right font-mono text-[13px] text-ink-2 tabular-nums">
                       {t?.value == null ? (
                         <span className="text-ink-2 italic" data-missing="true">
                           {reasonLabel(t?.reason ?? null)}
@@ -519,7 +519,7 @@ function RankedLists(props: RankedTableProps & { style: NumberStyle }) {
               const grey = comparison.has(row.key);
               return (
                 <tr key={row.key} data-row={row.key} data-tone={grey ? "comparison" : "default"} className="h-[24.5px] border-b border-line">
-                  <td className="text-[12px] text-ink-2 tabular-nums">{row.rank ?? ""}</td>
+                  <td className="font-mono text-[12px] text-ink-2 tabular-nums">{row.rank ?? ""}</td>
                   <th
                     scope="row"
                     className={`text-left text-[13px] [overflow-wrap:anywhere] ${grey ? "font-normal text-ink-2" : first ? "font-medium text-ink" : "font-normal text-ink-2"}`}
@@ -533,7 +533,7 @@ function RankedLists(props: RankedTableProps & { style: NumberStyle }) {
                       </span>
                     ) : null}
                   </th>
-                  <td className={`text-right text-[13px] font-medium tabular-nums ${missing ? "text-ink-2" : "text-ink"}`}>
+                  <td className={`text-right font-mono text-[13px] font-medium tabular-nums ${missing ? "text-ink-2" : "text-ink"}`}>
                     {missing ? "—" : formatNumber(value, unit, style)}
                   </td>
                 </tr>
@@ -629,7 +629,7 @@ function RankedBars(props: RankedTableProps & { label: string; style: NumberStyl
                 textAnchor="end"
                 fontSize={12}
                 fontWeight={500}
-                className={`tabular-nums ${text === null ? "fill-ink-2" : "fill-ink"}`}
+                className={`font-mono tabular-nums ${text === null ? "fill-ink-2" : "fill-ink"}`}
               >
                 {text ?? "—"}
               </text>

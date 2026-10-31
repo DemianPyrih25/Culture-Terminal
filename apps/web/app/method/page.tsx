@@ -41,9 +41,9 @@ export default async function MethodPage() {
         ]}
       />
       {/* The coverage and cost cards sit under the reference column, in its index. */}
-      <div className="-mt-6 pb-12 max-md:-mt-4 max-md:pb-8 md:grid md:grid-cols-[200px_minmax(0,1fr)] md:gap-12">
+      <div className="-mt-2 pb-16 max-md:-mt-2 max-md:pb-8 md:grid md:grid-cols-[216px_minmax(0,1fr)] md:gap-14">
         <div className="max-md:hidden" />
-        <div className="flex min-w-0 flex-col gap-6 max-md:gap-4">
+        <div className="flex min-w-0 max-w-[880px] flex-col gap-10 max-md:gap-6">
           <CoverageSection facts={coverageFacts()} />
           <CostSection facts={costs} />
         </div>

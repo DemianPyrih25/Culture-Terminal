@@ -14,11 +14,11 @@ export interface KeyNumberSide {
 }
 
 interface KeyNumberBase {
-  /** "Closest audience" (15/600). On the split variant it sits on top. */
+  /** "Closest audience": a small-caps label (type-overline, ink-3) on top of the value. */
   label: string;
   /** A Tag after the label (e.g. Hidden gem). */
   tag?: ReactNode;
-  /** The context line, 13/500 ink-2: "Pinecone Soap Co. · 1.00 = identical". */
+  /** The context line under the value, 13/500 ink-2: "Pinecone Soap Co. · 1.00 = identical". */
   context?: ReactNode;
   /** While the run is live: the Draft tag replaces Source and nothing opens. */
   draft?: boolean;
@@ -43,7 +43,7 @@ function SourceButton({ label, onSource, compact }: { label: string; onSource: (
       onClick={onSource}
       aria-label={`Source of ${label}`}
       className={cx(
-        "inline-flex items-center gap-1.5 rounded-sm text-[13px] leading-[18px] font-medium text-ink-2 transition-colors hover:text-accent",
+        "inline-flex items-center gap-1.5 rounded-xs text-[13px] leading-[18px] font-medium text-ink-3 transition-colors hover:text-accent",
         compact ? "size-11 justify-center md:hidden" : "max-md:hidden",
       )}
     >
@@ -60,10 +60,10 @@ function Split({ sides }: { sides: readonly [KeyNumberSide, KeyNumberSide] }) {
         <div key={i} className="flex items-stretch gap-3">
           <span
             aria-hidden="true"
-            className={cx("w-1 shrink-0 rounded-[2px]", side.tone === "subject" ? "bg-accent" : "bg-second")}
+            className={cx("w-[3px] shrink-0 rounded-[1px]", side.tone === "subject" ? "bg-accent" : "bg-second")}
           />
           <div className="flex flex-col justify-end">
-            <span className="type-label text-ink-2">{side.name}</span>
+            <span className="type-caption text-ink-2">{side.name}</span>
             <span
               className={cx(
                 "type-number-l max-md:type-number-l-sm",
@@ -80,10 +80,11 @@ function Split({ sides }: { sides: readonly [KeyNumberSide, KeyNumberSide] }) {
 }
 
 /**
- * C/KeyNumber: 148 tall, padding 20, gap 8. The main column stacks from the top: a 44 px value slot (number,
- * word, name with a monogram, or a split of two sides), then 8 below it the label and the context, so a
- * wrapped context grows downward and labels line up across a row. "Source" sits bottom right in its own
- * column and opens the drawer. On phones Source is an icon-only receipt at the top right.
+ * C/KeyNumber (Ledger): padding 20, gap 8. The main column stacks from the top: the small-caps label, a
+ * 44 px value slot (a Plex Mono number, a word, a name with a monogram, or a split of two sides), then the
+ * context, so labels and values line up across a row and a wrapped context grows downward. "Source" sits
+ * bottom right in its own column and opens the drawer. On phones Source is an icon-only receipt at the
+ * top right.
  */
 export function KeyNumber(props: KeyNumberProps) {
   const { label, tag, context, draft, selected, onSource, className } = props;
@@ -110,8 +111,8 @@ export function KeyNumber(props: KeyNumberProps) {
   }
 
   const labelLine = (
-    <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-      <span className="text-[15px] leading-6 font-semibold text-ink">{label}</span>
+    <p className={cx("flex flex-wrap items-center gap-x-2 gap-y-1", (draft || onSource) && "max-md:pr-14")}>
+      <span className="type-overline text-ink-3">{label}</span>
       {tag}
     </p>
   );
@@ -125,17 +126,12 @@ export function KeyNumber(props: KeyNumberProps) {
       selected={selected}
       data-variant={variant}
       data-draft={draft ? "true" : undefined}
-      className={cx("relative flex gap-2 px-5 py-5 max-md:py-4 md:min-h-[148px]", className)}
+      className={cx("relative flex gap-2 px-5 py-5 max-md:py-4 md:min-h-[140px]", className)}
     >
       <div className={cx("flex min-w-0 flex-1 flex-col", variant === "split" ? "gap-3" : "gap-2")}>
-        {variant === "split" ? labelLine : null}
+        {labelLine}
         <div className="flex min-h-8 min-w-0 items-end md:min-h-11">{value}</div>
-        {variant === "split" ? null : (
-          <div className="flex min-w-0 flex-col gap-0.5">
-            {labelLine}
-            {context ? <p className="type-label text-ink-2">{context}</p> : null}
-          </div>
-        )}
+        {variant !== "split" && context ? <p className="type-label text-ink-2">{context}</p> : null}
       </div>
       {source ? <div className="flex shrink-0 flex-col items-end justify-end max-md:hidden">{source}</div> : null}
       {!draft && onSource ? (

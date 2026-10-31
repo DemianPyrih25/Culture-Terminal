@@ -47,8 +47,8 @@ export function segmentedKeyMove(key: string, index: number, count: number): num
 }
 
 /**
- * C/Segmented: a sunken track (padding 3, r10) with the active segment raised on surface (r7, shadow-xs,
- * 13/600 ink); the others 13/500 ink-2. One tab stop; arrow keys move the choice.
+ * C/Segmented: a sunken track (padding 2, r4) with the active segment on surface (r3, a hairline, 13/600
+ * ink); the others 13/500 ink-2. One tab stop; arrow keys move the choice.
  */
 export function Segmented<T extends string>({
   options,
@@ -83,7 +83,7 @@ export function Segmented<T extends string>({
       aria-label={label}
       onKeyDown={onKeyDown}
       className={cx(
-        "rounded-md bg-sunken p-[3px]",
+        "rounded-sm bg-sunken p-[2px]",
         width === "full" ? "flex h-9 w-full" : "inline-flex h-8",
         className,
       )}
@@ -105,9 +105,11 @@ export function Segmented<T extends string>({
             tabIndex={on ? 0 : -1}
             onClick={() => onChange(option.value)}
             className={cx(
-              "flex items-center justify-center rounded-[7px] px-3 text-[13px] leading-[18px] whitespace-nowrap transition-colors focus-visible:outline-offset-0",
+              "flex items-center justify-center rounded-[3px] px-3 text-[13px] leading-[18px] whitespace-nowrap transition-colors focus-visible:outline-offset-0",
               width === "full" && "min-w-0 flex-1",
-              on ? "bg-surface font-semibold text-ink shadow-xs" : "font-medium text-ink-2 hover:text-ink",
+              on
+                ? "bg-surface font-semibold text-ink shadow-[0_0_0_1px_var(--color-line),var(--shadow-xs)]"
+                : "font-medium text-ink-2 hover:text-ink",
             )}
           >
             {option.label}

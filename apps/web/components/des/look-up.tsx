@@ -21,8 +21,8 @@ export function LookUpAnother({ type }: { type: DesType }) {
         </>
       }
     >
-      <div className="flex flex-col gap-3">
-        <p className="text-[15px] leading-6 font-semibold text-ink">Look up a profile</p>
+      <div className="flex flex-col gap-4">
+        <p className="type-display-s text-ink">Look up a profile</p>
         <DesSearch type={type} layout="stack" autoFocus />
       </div>
     </Popover>

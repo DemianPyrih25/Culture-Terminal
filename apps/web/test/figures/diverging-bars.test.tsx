@@ -167,7 +167,7 @@ describe("DivergingBars · diverging (Block DNA)", () => {
     expect(text(plot)).toContain("Δ vs city");
     expect(text(plot)).toContain("Above city →");
     expect(text(rowMarkup(plot, "T21"))).toContain("+14");
-    expect(rowMarkup(plot, "T24")).toContain("fill-second");
+    expect(rowMarkup(plot, "T24")).toContain("fill-danger");
     expect(text(rowMarkup(plot, "T24"))).toContain(`${MINUS}8`);
     expect(text(rowMarkup(plot, "T21"))).toContain("New");
     expect(html).toContain("Location method · POLYGON");

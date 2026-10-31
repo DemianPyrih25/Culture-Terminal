@@ -62,7 +62,7 @@ describe("RankedTable · lollipop", () => {
     expect(plot).toContain("<title>Its nearest audience is a tonic, not a rival</title>");
     expect(plot).toContain("Top five above");
     // Axis ticks at 0, 0.2, 0.4, 0.6 for similarities up to .47.
-    expect(plot.match(/font-size="12" class="fill-ink-2 tabular-nums">[^<]+</g)?.map((t) => t.split(">")[1]!.slice(0, -1))).toEqual([
+    expect(plot.match(/font-size="12" class="fill-ink-2 font-mono tabular-nums">[^<]+</g)?.map((t) => t.split(">")[1]!.slice(0, -1))).toEqual([
       "0",
       "0.2",
       "0.4",

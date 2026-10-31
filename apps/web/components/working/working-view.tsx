@@ -4,13 +4,15 @@ import type { ReactNode } from "react";
 import type { RunState } from "@ct/contracts";
 import type { BriefModel } from "../../lib/brief";
 import { endedInQueue, queuedPlace, queueWaitLeftS } from "../../lib/run-stream";
-import { noticed, readingAs, replayTime, WORKING_JOB_LABEL, workingProgress, workingTime } from "../../lib/brief/steps";
+import { noticed, readingAs, replayTime, WORKING_JOB_LABEL, workingProgress } from "../../lib/brief/steps";
+import { formatClockShort } from "../../lib/brief/format";
+import type { IncomingRequest } from "../../lib/brief/types";
 import { ANSWERS_HREF, PageHead, SiteShell } from "../chrome";
-import { cx, KeyNumber, topicForPillar, type KeyNumberProps } from "../ui";
+import { cx, Icon, KeyNumber, Spinner, Tag, topicForPillar, type KeyNumberProps } from "../ui";
 import { GuessesCard } from "./guesses";
 import { editQuestionHref, NotFoundCard, ProgressCard, QueuedCard } from "./progress-card";
 import { ReplayControls, type ReplayControlsProps } from "./replay-controls";
-import { lookupChips } from "./sources";
+import { lookupChips, type LookupChip } from "./sources";
 import { ReconnectingState, StateCard } from "./state-cards";
 import { StopButton, useStopRun } from "./stop";
 import { WhichOneCard } from "./which-one";
@@ -19,9 +21,10 @@ import { ContextRow } from "../answer/context-cards";
 
 /**
  * The working view (N03 early, N04 late, N16 end states): the page while an answer is being made, and
- * the page of a run that ended before its answer. The page head with Stop, the progress card (or the
- * end-state card in its slot), then what has arrived: draft key numbers, a draft chart and the guesses,
- * and the context cards ("What AI knows (not verified)", "From the web") as soon as each block settles.
+ * the page of a run that ended before its answer. The page head with Stop (or the replay controls and
+ * the replay bar), the progress card (or the end-state card in its slot), then "Evidence so far": draft
+ * key numbers, a draft chart and the guesses, and the context cards ("What AI knows (not verified)",
+ * "From the web") as soon as each block settles. While live, a margin rail lists the lookups arriving.
  */
 
 export interface WorkingReplay extends ReplayControlsProps {
@@ -55,6 +58,49 @@ export interface WorkingViewProps {
 }
 
 const RISE = "motion-safe:animate-rise";
+
+/** One lookup in the live evidence rail: what it fetched, then its trace in mono. */
+function FeedRow({ row }: { row: IncomingRequest }) {
+  return (
+    <li className="flex min-w-0 flex-col gap-0.5 py-3" data-incoming={row.state}>
+      <p className="flex items-start gap-2 type-label text-ink">
+        <span className="flex h-[18px] shrink-0 items-center">
+          {row.state === "fetching" ? (
+            <Spinner size={12} className="text-accent" />
+          ) : (
+            <Icon name={row.state === "queued" ? "circle-dashed" : "circle-check"} size={12} className={row.state === "queued" ? "text-ink-3" : "text-accent"} />
+          )}
+        </span>
+        <span className="min-w-0 [overflow-wrap:anywhere]">{row.text}</span>
+      </p>
+      <p className="pl-5 font-mono text-[11px] leading-4 text-ink-3 [overflow-wrap:anywhere]">{row.trace}</p>
+    </li>
+  );
+}
+
+/** The live evidence rail: the lookups in flight and the latest to arrive, newest first. */
+function EvidenceFeed({ rows, lookups }: { rows: readonly IncomingRequest[]; lookups: readonly LookupChip[] }) {
+  const total = lookups.reduce((n, l) => n + l.count, 0);
+  return (
+    <aside aria-label="Live evidence" data-evidence-feed className="flex min-w-0 flex-col gap-2 xl:sticky xl:top-6 xl:self-start">
+      <div className="flex items-baseline justify-between gap-3 border-b border-line pb-2">
+        <h2 className="type-overline text-ink-3">Live evidence</h2>
+        <p className="font-mono text-[11px] leading-4 text-ink-3 tabular-nums">
+          {total} {total === 1 ? "lookup" : "lookups"}
+        </p>
+      </div>
+      {rows.length > 0 ? (
+        <ul className="flex flex-col divide-y divide-line">
+          {rows.map((row) => (
+            <FeedRow key={row.key} row={row} />
+          ))}
+        </ul>
+      ) : (
+        <p className="py-3 type-label text-ink-3">Nothing fetched yet. Lookups appear here as they land.</p>
+      )}
+    </aside>
+  );
+}
 
 /** An end-state card spans 8 of 12 columns (744 at 1440), as the verdict card does. */
 const END_CARD = "lg:max-w-[744px]";
@@ -91,8 +137,11 @@ export function WorkingView({
   const editHref = editQuestionHref(question);
   const hasEvidence = keyNumbers.length > 0 || chart !== null;
   const priors = model.priors.items;
+  const lookups = lookupChips(state);
   // Waiting for a live slot (D24): only a live run waits; a replay plays its queue part instantly.
   const place = mode === "live" ? queuedPlace(state) : null;
+  // The live evidence rail: only while the run is being made (a replay or an ended run has no feed).
+  const feed = live && terminal === null ? (model.live?.incoming ?? []) : null;
   // A run that stopped will not score its guesses: the caption does not promise it.
   const guessCaption = state.ended !== null ? "Written before any data." : undefined;
 
@@ -114,47 +163,77 @@ export function WorkingView({
     slot = (
       <ProgressCard
         title={progress.title}
-        time={replay ? replayTime(replay.positionMs, replay.durationMs) : workingTime(state, elapsedMs)}
+        time={replay ? replayTime(replay.positionMs, replay.durationMs) : formatClockShort(elapsedMs)}
         fraction={replay ? replay.progress : (model.live?.progress.fraction ?? 0)}
         steps={progress.steps}
         readingAs={readingAs(state)}
         editHref={mode === "replay" ? null : editHref}
         noticed={noticed(state)}
         readAsLine={model.method.interpretation?.readAs?.line ?? null}
-        lookups={lookupChips(state)}
+        lookups={lookups}
+        since={live ? (model.live?.since ?? null) : null}
         announcement={progress.announcement}
         variant={replay ? "replay" : "live"}
       />
     );
   }
 
-  return (
-    <SiteShell header="working" mobileHeader="answer" backHref={ANSWERS_HREF} sharePath={sharePath} mainClassName="flex flex-col gap-6 pt-6 pb-12 max-md:gap-4 max-md:pt-4">
-      <div data-working={mode} data-run={runId} className="flex flex-col gap-5 max-md:gap-4">
-        <PageHead topic={topic?.key ?? null} eyebrow={eyebrow} question={question ?? "Your question"} actions={actions} mobileActions={actions} />
-        {slot}
-      </div>
-      {connectionLost && live ? <ReconnectingState /> : null}
-      {hasEvidence ? (
-        <>
-          {keyNumbers.length > 0 ? (
-            <div className="grid gap-6 max-md:gap-4 md:grid-cols-3" data-key-numbers="draft">
-              {keyNumbers.map((k) => (
-                <KeyNumber key={k.label} {...k} draft onSource={undefined} className={cx(RISE, k.className)} />
-              ))}
-            </div>
-          ) : null}
-          <div className="grid gap-6 max-md:gap-4 lg:grid-cols-12">
-            {chart ? <div className={cx("min-w-0 lg:col-span-8", RISE)}>{chart}</div> : null}
-            {priors.length > 0 ? (
-              <GuessesCard priors={priors} variant={chart ? "side" : "full"} caption={guessCaption} className={cx(chart ? "lg:col-span-4" : "lg:col-span-12", RISE)} />
-            ) : null}
-          </div>
-        </>
-      ) : priors.length > 0 ? (
-        <GuessesCard priors={priors} variant="full" caption={guessCaption} className={RISE} />
+  const evidence = hasEvidence ? (
+    <>
+      {keyNumbers.length > 0 ? (
+        <div className="grid gap-4 md:grid-cols-3" data-key-numbers="draft">
+          {keyNumbers.map((k) => (
+            <KeyNumber key={k.label} {...k} draft onSource={undefined} className={cx(RISE, k.className)} />
+          ))}
+        </div>
       ) : null}
-      <ContextRow context={buildAnswerContext(state)} className={RISE} />
+      <div className="grid gap-4 lg:grid-cols-12">
+        {chart ? <div className={cx("min-w-0 lg:col-span-8", RISE)}>{chart}</div> : null}
+        {priors.length > 0 ? (
+          <GuessesCard priors={priors} variant={chart ? "side" : "full"} caption={guessCaption} className={cx(chart ? "lg:col-span-4" : "lg:col-span-12", RISE)} />
+        ) : null}
+      </div>
+    </>
+  ) : priors.length > 0 ? (
+    <GuessesCard priors={priors} variant="full" caption={guessCaption} className={RISE} />
+  ) : null;
+  const evidenceNote =
+    mode === "replay"
+      ? "Played back from the stored run. Drafts appear as they did live."
+      : state.ended !== null
+        ? "Kept from the run. Not checked."
+        : "Drafts appear as data lands. Nothing here is checked yet.";
+
+  return (
+    <SiteShell header="working" mobileHeader="answer" backHref={ANSWERS_HREF} sharePath={sharePath} mainClassName="pt-8 pb-16 max-md:pt-4 max-md:pb-12">
+      <div className={cx("flex flex-col gap-10 max-md:gap-8", feed !== null && "xl:grid xl:grid-cols-[minmax(0,1fr)_280px] xl:items-start xl:gap-12")}>
+        <div className="flex min-w-0 flex-col gap-10 max-md:gap-8">
+          <div data-working={mode} data-run={runId} className="flex flex-col gap-6 max-md:gap-4">
+            <PageHead topic={topic?.key ?? null} eyebrow={eyebrow} question={question ?? "Your question"} actions={actions} mobileActions={actions} />
+            {replay ? (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-control border border-line bg-sunken px-4 py-2.5" data-replay-bar>
+                <Tag preset="recording" />
+                <p className="min-w-0 flex-1 type-label text-ink-2">
+                  This is a recording of a finished run, played at {replay.speed}×. Nothing is fetched, and picks are closed here.
+                </p>
+              </div>
+            ) : null}
+            {slot}
+            {connectionLost && live ? <ReconnectingState /> : null}
+          </div>
+          {evidence ? (
+            <section aria-label="Evidence so far" className="flex flex-col gap-4">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line pb-2">
+                <h2 className="type-overline text-ink-3">Evidence so far</h2>
+                <p className="type-caption text-ink-3">{evidenceNote}</p>
+              </div>
+              {evidence}
+            </section>
+          ) : null}
+          <ContextRow context={buildAnswerContext(state)} className={RISE} />
+        </div>
+        {feed !== null ? <EvidenceFeed rows={feed} lookups={lookups} /> : null}
+      </div>
     </SiteShell>
   );
 }

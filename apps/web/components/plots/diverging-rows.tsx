@@ -76,7 +76,7 @@ export function DivergingRows({
                 <span className="flex min-w-0 items-center justify-end gap-2">
                   {less ? (
                     <>
-                      <span className="type-label text-ink-2 tabular-nums">{text}</span>
+                      <span className="font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums">{text}</span>
                       <span aria-hidden="true" data-bar="less" className="h-3 shrink-0 rounded-l-xs bg-second" style={{ width }} />
                     </>
                   ) : v === null ? (
@@ -89,7 +89,7 @@ export function DivergingRows({
                   {v !== null && !less ? (
                     <>
                       <span aria-hidden="true" data-bar="more" className="h-3 shrink-0 rounded-r-xs bg-accent" style={{ width }} />
-                      <span className="type-label text-ink-2 tabular-nums">{text}</span>
+                      <span className="font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums">{text}</span>
                     </>
                   ) : (
                     <span className="min-w-0 pl-3 type-body text-ink [overflow-wrap:anywhere]">{row.label}</span>

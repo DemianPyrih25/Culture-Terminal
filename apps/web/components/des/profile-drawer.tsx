@@ -6,8 +6,9 @@ import { Button } from "../ui/button";
 import { copyText } from "../ui/clipboard";
 import { cx } from "../ui/cx";
 import { DrawerShell } from "../ui/drawer-shell";
-import { Icon } from "../ui/icons";
+import { Icon, type IconName } from "../ui/icons";
 import { Segmented, segmentedPanelId, segmentedTabId } from "../ui/segmented";
+import { EYEBROW } from "./eyebrow";
 import type { ProfileHow, ProfileSource } from "./profile-model";
 
 /**
@@ -29,7 +30,7 @@ const ID_PREFIX = "profile-how";
 function KeyValue({ k, children }: { k: string; children: ReactNode }) {
   return (
     <div className="flex gap-3">
-      <dt className="w-[136px] shrink-0 text-ink-2 max-md:w-24">{k}</dt>
+      <dt className="w-[112px] shrink-0 text-ink-3 max-md:w-24">{k}</dt>
       <dd className="min-w-0 text-ink [overflow-wrap:anywhere]">{children}</dd>
     </div>
   );
@@ -39,25 +40,25 @@ function SourceRow({ source, open, onToggle, onCopied }: { source: ProfileSource
   const line = [source.endpoint, source.filter, source.rows === null ? null : plural(source.rows, "row")].filter(Boolean).join(" · ");
   const panel = `profile-source-${source.n}`;
   return (
-    <li id={`source-${source.n}`} className="rounded-control border border-line bg-surface" data-source={source.n}>
+    <li id={`source-${source.n}`} className="scroll-mt-2" data-source={source.n}>
       <button
         type="button"
         onClick={onToggle}
         aria-expanded={open}
         aria-controls={panel}
-        className="flex w-full items-start gap-3 rounded-control px-4 py-[13px] text-left"
+        className="flex w-full items-start gap-2.5 rounded-sm py-3 text-left hover:bg-canvas"
       >
+        <Icon name="chevron-right" size={14} className={cx("mt-[3px] shrink-0 text-ink-3 transition-transform", open && "rotate-90")} />
         <span className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="text-[14px] leading-5 font-semibold text-ink">{source.title}</span>
+          <span className="type-label text-ink">{source.title}</span>
           <span className="type-mono text-ink-2 [overflow-wrap:anywhere]">{line}</span>
-          <span className="type-caption text-ink-2">{source.fresh}</span>
+          <span className="type-caption text-ink-3">{source.fresh}</span>
           {source.error ? <span className="type-caption text-danger-ink">This request failed: {source.error}</span> : null}
         </span>
-        <Icon name={open ? "chevron-up" : "chevron-down"} size={16} className="mt-0.5 shrink-0 text-ink-3" />
       </button>
       {open ? (
-        <div id={panel} className="flex flex-col gap-3 px-4 pb-4">
-          <dl className="flex flex-col gap-1 rounded-sm bg-sunken p-3 type-mono">
+        <div id={panel} className="flex flex-col gap-3 pb-4 pl-6">
+          <dl className="flex flex-col gap-1 rounded-sm border border-line bg-canvas p-3 type-mono">
             <KeyValue k="Endpoint">{source.endpoint}</KeyValue>
             {source.filter ? <KeyValue k="Filter">{source.filter}</KeyValue> : null}
             <KeyValue k="Rows">{source.rows ?? "No data"}</KeyValue>
@@ -86,34 +87,48 @@ function SourceRow({ source, open, onToggle, onCopied }: { source: ProfileSource
   );
 }
 
+/** One Summary group: a small-caps label over its line, hairline rules between groups. */
+function Group({ label, icon, iconClassName, children }: { label: string; icon?: IconName; iconClassName?: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-2 border-b border-line py-4 first:pt-0 last:border-b-0">
+      <h3 className={EYEBROW}>{label}</h3>
+      <div className="flex items-start gap-2 type-body text-ink">
+        {icon ? <Icon name={icon} size={16} className={cx("mt-1 shrink-0", iconClassName ?? "text-ink-3")} /> : null}
+        <div className="min-w-0">{children}</div>
+      </div>
+    </section>
+  );
+}
+
+// The view's cost (how.cost) is a usage line: it lives on Settings > Plan & usage, not in this drawer.
 function Summary({ how }: { how: ProfileHow }) {
   const all = how.total > 0 && how.traced === how.total;
   return (
-    <div className="flex flex-col gap-5">
-      <p className="flex items-start gap-2 type-body text-ink">
-        <Icon name={all ? "badge-check" : "triangle-alert"} size={16} className={cx("mt-1 shrink-0", all ? "text-good" : "text-caution")} />
+    <div className="flex flex-col">
+      <Group label="Trace" icon={all ? "badge-check" : "triangle-alert"} iconClassName={all ? "text-good" : "text-caution"}>
         {all ? `All ${how.total} numbers traced to a Qloo request.` : `${how.traced} of ${how.total} numbers traced to a Qloo request.`}
-      </p>
-      <dl className="flex flex-col gap-2 type-body">
-        <KeyValue k="Requests">
-          {plural(how.requests, "Qloo request")} · {how.saved} saved {how.saved === 1 ? "copy" : "copies"}, {how.live} fetched live
-        </KeyValue>
-        <KeyValue k="Cost">{how.cost}</KeyValue>
-        <KeyValue k="Name">{how.matched}</KeyValue>
-        <KeyValue k="Written by">Code only. No AI model writes or reads any of this page.</KeyValue>
-      </dl>
+      </Group>
+      <Group label="Requests" icon="list-checks">
+        {plural(how.requests, "Qloo request")} · {how.saved} saved {how.saved === 1 ? "copy" : "copies"}, {how.live} fetched live
+      </Group>
+      <Group label="Name" icon="circle-check">
+        {how.matched}
+      </Group>
+      <Group label="Written by" icon="file-text">
+        Code only. No AI model writes or reads any of this page.
+      </Group>
       {how.notes.length > 0 ? (
-        <div className="flex flex-col gap-2">
-          <h3 className="text-[13px] leading-[18px] font-semibold text-ink-2">Good to know</h3>
+        <section className="flex flex-col gap-2 py-4">
+          <h3 className={EYEBROW}>Good to know</h3>
           <ul className="flex flex-col gap-2">
             {how.notes.map((note) => (
-              <li key={note} className="flex gap-3 type-body text-ink">
-                <span aria-hidden="true" className="mt-[10px] size-[5px] shrink-0 rounded-full bg-ink-3" />
+              <li key={note} className="flex gap-3 type-body text-ink-2">
+                <span aria-hidden="true" className="mt-[10px] size-1 shrink-0 rounded-full bg-ink-3" />
                 {note}
               </li>
             ))}
           </ul>
-        </div>
+        </section>
       ) : null}
     </div>
   );
@@ -171,7 +186,7 @@ export function ProfileDrawer({ how, target, onTarget, onClose, onCopied }: Prof
         ) : how.sources.length === 0 ? (
           <p className="type-body text-ink-2">No Qloo request was made for this page.</p>
         ) : (
-          <ol className="flex flex-col gap-2">
+          <ol className="flex flex-col divide-y divide-line">
             {how.sources.map((source) => (
               <SourceRow
                 key={source.n}

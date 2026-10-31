@@ -1,8 +1,9 @@
 import type { Metadata, Viewport } from "next";
-// The optical-size cut: display sizes draw tighter, as the design sets them.
-import "@fontsource-variable/bricolage-grotesque/opsz.css";
-import "@fontsource-variable/geist";
-import "@fontsource-variable/geist-mono";
+// Ledger type: Source Serif 4 (optical-size cut) for titles, Inter for the interface, IBM Plex Mono for numbers.
+import "@fontsource-variable/source-serif-4/opsz.css";
+import "@fontsource-variable/inter";
+import "@fontsource/ibm-plex-mono/400.css";
+import "@fontsource/ibm-plex-mono/500.css";
 import "./globals.css";
 import { publicSiteUrlFromEnv } from "../server/config";
 

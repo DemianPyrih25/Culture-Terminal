@@ -66,22 +66,26 @@ export function focusView(note: Footnote, copy: NumberCopy | null = null, figure
 
 export function FocusCard({ view, children }: { view: FocusView; children?: ReactNode }) {
   return (
-    <section aria-label={view.kicker} data-focus-card className="flex flex-col gap-3 rounded-tile bg-accent-soft p-4">
-      <div className="flex flex-col gap-1">
-        <p className="text-[12px] leading-4 font-semibold text-accent-ink">{view.kicker}</p>
-        {view.value ? <p className="text-[32px] leading-9 font-semibold tracking-[-0.02em] text-ink tabular-nums">{view.value}</p> : null}
-        <p className="type-body text-ink">{view.description}</p>
+    <section aria-label={view.kicker} data-focus-card className="flex flex-col gap-3.5 rounded-sm border border-line bg-canvas px-5 py-[18px]">
+      <div className="flex flex-col gap-2">
+        <p className="text-[11px] leading-4 font-semibold tracking-[0.08em] text-ink-3 uppercase">{view.kicker}</p>
+        {view.value ? (
+          <p className="font-mono text-[40px] leading-[44px] font-medium tracking-[-0.02em] text-ink tabular-nums [overflow-wrap:anywhere] max-md:text-[32px] max-md:leading-9">
+            {view.value}
+          </p>
+        ) : null}
+        <p className="text-[13px] leading-5 text-ink-2">{view.description}</p>
       </div>
-      <dl className="grid grid-cols-[104px_minmax(0,1fr)] gap-x-3 gap-y-1">
+      <dl className="flex flex-col">
         {view.rows.map((row) => (
-          <div key={row.key} className="contents">
-            <dt className="type-label text-ink-2">{row.key}</dt>
-            <dd className="type-label text-ink">{row.value}</dd>
+          <div key={row.key} className="grid grid-cols-[84px_minmax(0,1fr)] gap-x-3 border-t border-line py-2">
+            <dt className="text-[12px] leading-5 text-ink-3">{row.key}</dt>
+            <dd className="text-[13px] leading-5 text-ink">{row.value}</dd>
           </div>
         ))}
       </dl>
       {view.methodHref ? (
-        <ButtonLink href={view.methodHref} className="self-start">
+        <ButtonLink href={view.methodHref} size="sm" trailing="arrow-right" className="self-start">
           How it&apos;s calculated
         </ButtonLink>
       ) : null}

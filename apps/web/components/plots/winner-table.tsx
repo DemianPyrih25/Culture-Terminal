@@ -36,12 +36,12 @@ export function Scoreboard({ a, b, caption, className }: ScoreboardProps) {
       <span className="flex flex-col items-center gap-1">
         <span className="sr-only">{`${a.name} ${a.score}, ${b.name} ${b.score}`}</span>
         <span aria-hidden="true" className="flex items-center gap-3 type-score max-md:text-[44px] max-md:leading-[44px]">
-          <span className="text-accent tabular-nums">{a.score}</span>
+          <span className="font-mono text-accent tabular-nums">{a.score}</span>
           <span className="flex flex-col gap-2">
             <span className="size-2.5 rounded-full bg-ink-3" />
             <span className="size-2.5 rounded-full bg-ink-3" />
           </span>
-          <span className="text-second tabular-nums">{b.score}</span>
+          <span className="font-mono text-second tabular-nums">{b.score}</span>
         </span>
         <span className="text-center type-label text-ink-2">{caption}</span>
       </span>

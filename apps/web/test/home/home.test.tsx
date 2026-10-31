@@ -13,6 +13,9 @@ vi.mock("next/navigation", async (importOriginal) => ({
 const { default: Home } = await import("../../app/page");
 const { AskNoticeView } = await import("../../components/home/ask-notice");
 const { HOW_ITEMS } = await import("../../components/home/how-band");
+const { HERO_SUBLINE } = await import("../../components/home/home-view");
+const { DAILY_CAP_TEXT } = await import("../../components/home/ask-notice");
+const { understoodParts } = await import("../../components/home/understood-line");
 const { QUESTION_PLACEHOLDER, QuestionBox, questionKeyAction, questionText } = await import("../../components/home/question-box");
 const { SuggestionList, suggestionOptionId } = await import("../../components/home/suggestion-list");
 const { looksLikeName, moveActive, PLACE_HINT, suggestionRows, suggestionsFor } = await import("../../components/home/suggestions");
@@ -23,8 +26,10 @@ const noop = () => undefined;
 describe("Home", () => {
   it("renders the hero, the question box and the how band in the home shell", () => {
     const out = html(<Home />);
-    expect(out).toMatch(/<h1[^>]*>Ask what any audience<br\/>really loves\.<\/h1>/);
-    expect(out).toContain("Get a one-page answer in about a minute, from Qloo taste data plus SEC filings and US Census figures where a question needs them.");
+    expect(out).toMatch(/<h1[^>]*>Ask what any audience really loves\.<\/h1>/);
+    expect(out).toContain(HERO_SUBLINE);
+    // No limits, costs or time estimates on Home: they live on Settings > Plan & usage.
+    expect(out).not.toMatch(/about a minute|\d+ of \d+|per day|quota|economy|\$\d/i);
     // The box is #ask, so "New question" from any page lands in it.
     const field = out.match(/<textarea[^>]*id="ask"[^>]*>/)?.[0] ?? "";
     expect(field).toContain('aria-autocomplete="list"');
@@ -39,8 +44,8 @@ describe("Home", () => {
       expect(out).toContain(item.title);
       expect(out).toContain(item.line.replace(/'/g, "&#x27;"));
     }
-    // The home header: no New question button; the footer is there.
-    expect(out).not.toContain("New question");
+    // The small label over the statement; the footer is there.
+    expect(out).toContain(">New question</p>");
     expect(out).toContain("Not financial advice");
   });
 
@@ -49,7 +54,7 @@ describe("Home", () => {
     expect(out).not.toMatch(/example|showcase|ready answer|Try:|recording|replay/i);
     expect(out).not.toContain("/r/");
     expect(out).not.toContain("?replay=1");
-    // Nothing is listed on Home: the visitor's own answers live on /briefs.
+    // Nothing is listed on the server: the visitor's recent answers load in the browser, only when there are some.
     expect(out).not.toMatch(/Recent briefs|Your answers<\/h2>/);
   });
 
@@ -91,7 +96,7 @@ describe("the question box", () => {
     );
     expect(follow).toContain("Follow-up to: Who is the Brand Beta audience?");
     expect(follow).toContain('aria-label="Ask on its own"');
-    expect(follow).toContain("md:min-h-[104px]");
+    expect(follow).toContain("corner-down-right");
   });
 
   it("wires the field to the list and its active row", () => {
@@ -177,5 +182,39 @@ describe("the inline states", () => {
     expect(failed).toContain('role="alert"');
     expect(failed).toContain('data-tone="danger"');
     expect(failed).toContain("Try again");
+  });
+
+  it("a used-up day shows one calm line and See plan, never the limit wording or Try again", () => {
+    const out = view({ kind: "run_failed", text: "Today's limit for live runs is reached. Answers you already have still open." });
+    expect(out).toContain(DAILY_CAP_TEXT.replace(/'/g, "&#x27;"));
+    expect(out).toMatch(/href="\/settings"[^>]*>.*See plan/);
+    expect(out).not.toContain("Try again");
+    expect(view({ kind: "run_failed", text: "Today's budget for live analysis is used up. Live runs resume at 00:00 UTC." })).toContain('data-cap="daily"');
+    expect(view({ kind: "run_failed", text: "The hourly limit for live runs is reached. Try again later." })).not.toContain(">Try again<");
+  });
+});
+
+describe("the understood-as line", () => {
+  it("names the desk, the matched names and the cities, and says when a typed name was read as another", () => {
+    const parts = understoodParts({
+      pillar: "marketing",
+      job: "head_to_head",
+      jobLabel: "Head to head",
+      mnemonic: "<NAME> VS <NAME>",
+      mentions: [
+        { text: "JC", type: "brand", role: "primary", match: "inexact", name: "Juniper Cola" },
+        { text: "Riverside Tea", type: "brand", role: "peer", match: "exact", name: "Riverside Tea" },
+        { text: "Nowhere Brand", type: "brand", role: "peer", match: "not_found", name: null },
+      ],
+      metros: ["Denver"],
+      scope: "",
+      lens: "",
+    } as never);
+    expect(parts).toEqual({
+      desk: "Head to head",
+      names: ["Juniper Cola", "Riverside Tea"],
+      metros: ["Denver"],
+      swaps: [{ typed: "JC", read: "Juniper Cola" }],
+    });
   });
 });

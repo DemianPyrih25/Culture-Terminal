@@ -73,6 +73,16 @@ services:
         value: "5"
       - key: QLOO_DAILY_FRESH_CAP
         value: "1900"
+      # Judging window and daily budgets, set for judging through 2026-11-06. The daily Qloo cap spreads the
+      # month's remaining calls (less the 2,000 floor) over the days left to this date.
+      - key: JUDGING_END_DATE
+        value: "2026-11-06"
+      # LLM spend per UTC day: the judge lane stops at $10 (about 65 answers at the measured $0.15), the
+      # public lane at 60% of it ($6, about 40); economy (Haiku) analyst from $7.50 (judge) / $4.50 (public).
+      - key: LLM_DAILY_USD_CAP
+        value: "10"
+      - key: LLM_ECONOMY_USD
+        value: "7.5"
       - key: LOG_LEVEL
         value: info
 

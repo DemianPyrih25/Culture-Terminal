@@ -10,16 +10,16 @@ export interface ToastProps {
   className?: string;
 }
 
-/** C/Toast: ink, r10, 40 tall, a white check and a 13/500 label. Static; useToast shows it for a moment. */
+/** C/Toast: ink, r4, 40 tall, a soft-green check and a 13/500 white label. Static; useToast shows it for a moment. */
 export function Toast({ children, className }: ToastProps) {
   return (
     <div
       className={cx(
-        "inline-flex h-10 items-center gap-2 rounded-md bg-ink px-4 text-[13px] leading-[18px] font-medium whitespace-nowrap text-white shadow-lg",
+        "inline-flex h-10 items-center gap-2.5 rounded-sm bg-ink px-3.5 text-[13px] leading-[18px] font-medium whitespace-nowrap text-white shadow-md",
         className,
       )}
     >
-      <Icon name="check" size={16} />
+      <Icon name="check" size={16} className="text-good-soft" />
       <span>{children}</span>
     </div>
   );

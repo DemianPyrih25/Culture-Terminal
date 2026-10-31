@@ -29,6 +29,7 @@ import { AskNoticeView } from "./ask-notice";
 import { QuestionBox, type QuestionBoxState } from "./question-box";
 import { SuggestionList, suggestionOptionId } from "./suggestion-list";
 import { moveActive, suggestionRows, suggestionsFor, type Suggestion } from "./suggestions";
+import { UnderstoodLine } from "./understood-line";
 
 export interface AskBoxProps {
   /** /ask?q=: sent as soon as the page opens. */
@@ -46,8 +47,8 @@ function focusOnAskHash(field: HTMLTextAreaElement | null): void {
 }
 
 /**
- * Home's ask flow (N01, N02, N16 1-3): the question box, its suggestion list and the one inline state
- * under it. "Get answer" reads the question (POST /api/preview) and then, with no confirm step, opens
+ * Home's ask flow: the question box, its suggestion list, the "Understood as" line once the question
+ * is read, and the one inline state under it. "Get answer" reads the question (POST /api/preview) and then, with no confirm step, opens
  * the answer the visitor already has or starts the run (POST /api/runs with the preview's token) and
  * moves to it; the run id is kept in this browser's own answers first. Both requests pass the human
  * check (Turnstile, under the box) through humanFetch. A visitor whose live questions are paused sees
@@ -78,6 +79,8 @@ export function AskBox({ initialQuestion = "", parent: initialParent = null, cla
   const rows = suggestionRows(groups);
   const open = focused && !dismissed && rows.length > 0;
   const activeRow = open && active >= 0 ? rows[active] : undefined;
+  // How the question was read, once it is: shown while the answer starts (never a refused question).
+  const understood = state.phase.kind === "ready" && state.phase.preview.refusal === undefined ? state.phase.preview.understood : null;
   const boxState: QuestionBoxState = busy ? "loading" : pause !== null || state.phase.kind === "paused" ? "paused" : "idle";
 
   async function startAnswer(after: AskState): Promise<void> {
@@ -223,11 +226,12 @@ export function AskBox({ initialQuestion = "", parent: initialParent = null, cla
           />
         ) : null}
       </div>
+      {understood !== null ? <UnderstoodLine understood={understood} className="mt-4" /> : null}
       {notice ? (
         <AskNoticeView
           id={NOTICE_ID}
           notice={notice}
-          className="mt-3"
+          className="mt-4"
           onReframe={(question) => {
             setText(question);
             ask(question);

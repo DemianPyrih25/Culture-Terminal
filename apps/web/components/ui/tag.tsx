@@ -61,7 +61,7 @@ export type TagProps = { className?: string } & (
     }
 );
 
-/** C/Tag: an 8 px dot (or a 14 px icon) and 13/500 text, gap 6. Colour is never the only signal. */
+/** C/Tag: a 6 px dot (or a 14 px icon) and 12/500 text, gap 6. Colour is never the only signal. */
 export function Tag(props: TagProps) {
   const { className } = props;
   const spec: { tone: TagTone; icon?: IconName; label: ReactNode } =
@@ -69,12 +69,16 @@ export function Tag(props: TagProps) {
   return (
     <span
       data-tag={props.preset}
-      className={cx("inline-flex shrink-0 items-center gap-1.5 type-label whitespace-nowrap", TEXT[spec.tone], className)}
+      className={cx(
+        "inline-flex shrink-0 items-center gap-1.5 text-[12px] leading-4 font-medium whitespace-nowrap",
+        TEXT[spec.tone],
+        className,
+      )}
     >
       {spec.icon ? (
         <Icon name={spec.icon} size={14} className="shrink-0 text-ink-2" />
       ) : (
-        <span aria-hidden="true" className={cx("size-2 shrink-0 rounded-full", DOT[spec.tone])} />
+        <span aria-hidden="true" className={cx("size-1.5 shrink-0 rounded-full", DOT[spec.tone])} />
       )}
       <span>{spec.label}</span>
     </span>

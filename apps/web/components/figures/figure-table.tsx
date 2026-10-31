@@ -79,7 +79,7 @@ export function FigureTable({ spec }: { spec: TableSpec }) {
               {row.cells.map((cell, i) => {
                 const numeric = spec.columns[i]?.numeric ?? false;
                 const content = renderCell(cell);
-                const cls = `px-2 py-1.5 type-body first:pl-0 last:pr-0 ${numeric ? "text-right tabular-nums" : "text-left"}`;
+                const cls = `px-2 py-1.5 type-body first:pl-0 last:pr-0 ${numeric ? "text-right font-mono! tabular-nums" : "text-left"}`;
                 return i === 0 ? (
                   <th key={i} scope="row" className={`${cls} font-normal text-ink`}>
                     {content}

@@ -83,10 +83,11 @@ export interface QuestionBoxProps {
 }
 
 /**
- * QuestionBox (N01, N02, N17): the 880 box with the field and Primary-L "Get answer". Focus draws the
- * accent border and its 4 px soft ring; loading greys the text and spins the button; paused disables
- * the button. On phones the box stacks the field over a full-width button. A follow-up shows its parent
- * as a pill above the field. The form is a plain GET to /ask, so it works before the page hydrates.
+ * QuestionBox (Ledger home): a white box on hairline rules. A small "Question" label and the character
+ * count over the field (serif, 22), then a sunken toolbar with the one primary "Get answer". Focus draws
+ * the accent border and a soft ring; loading greys the text and spins the button; paused disables the
+ * button. On phones the button takes the toolbar's full width. A follow-up shows its parent as a pill
+ * above the field. The form is a plain GET to /ask, so it works before the page hydrates.
  */
 export function QuestionBox({
   id,
@@ -136,11 +137,7 @@ export function QuestionBox({
       onSubmit={submit}
       data-state={state}
       className={cx(
-        "flex w-full rounded-box border-[1.5px] bg-surface shadow-xs transition-[border-color,box-shadow]",
-        // 1.5 px inner stroke: 6.5 px around Primary-L makes the 68 px box (148 on phones with 14.5).
-        "gap-4 py-[6.5px] pr-[6.5px] pl-6 md:items-end",
-        "max-md:min-h-[148px] max-md:flex-col max-md:p-[14.5px]",
-        followUp === null ? "md:min-h-[68px] md:items-center" : "md:min-h-[104px]",
+        "flex w-full flex-col overflow-hidden rounded-md border bg-surface transition-[border-color,box-shadow]",
         loading
           ? "border-line-strong"
           : showFocus
@@ -149,66 +146,74 @@ export function QuestionBox({
         className,
       )}
     >
-      <div className="flex min-w-0 flex-1 flex-col gap-2 md:self-stretch md:justify-center">
-        {followUp !== null ? (
-          <span className="inline-flex h-7 max-w-full items-center gap-1.5 self-start rounded-chip bg-sunken pr-1 pl-3 type-label text-ink-2">
+      {followUp !== null ? (
+        <div className="flex px-5 pt-4 max-md:px-4">
+          <span className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-sm border border-line bg-sunken pr-1 pl-2.5 type-label text-ink-2">
+            <Icon name="corner-down-right" size={14} className="shrink-0 text-ink-3" />
             <span className="truncate">Follow-up to: {followUp.label}</span>
             {followUp.onDrop ? (
               <button
                 type="button"
                 onClick={followUp.onDrop}
                 aria-label="Ask on its own"
-                className="inline-flex size-5 shrink-0 items-center justify-center rounded-chip text-ink-2 hover:bg-line hover:text-ink"
+                className="inline-flex size-5 shrink-0 items-center justify-center rounded-xs text-ink-2 hover:bg-line hover:text-ink"
               >
                 <Icon name="x" size={14} />
               </button>
             ) : null}
           </span>
-        ) : null}
-        <label htmlFor={id} className="sr-only">
-          Your question
-        </label>
-        <textarea
-          ref={areaRef}
-          id={id}
-          name="q"
-          rows={1}
-          autoComplete="off"
-          spellCheck={false}
-          enterKeyHint="go"
-          autoFocus={autoFocus}
-          value={value}
-          maxLength={QUESTION_MAX_CHARS}
-          readOnly={loading}
-          placeholder={placeholder}
-          // A textarea keeps its textbox role (ARIA allows combobox only on an input): while the list is
-          // open the field names it and its active row.
-          aria-autocomplete={combobox ? "list" : undefined}
-          aria-controls={combobox?.expanded ? combobox.listId : undefined}
-          aria-activedescendant={combobox?.expanded ? (combobox.activeId ?? undefined) : undefined}
-          aria-describedby={describedBy}
-          onChange={(e) => onChange(questionText(e.target.value))}
-          onKeyDown={keyDown}
-          onFocus={onFocus}
-          onBlur={onBlur}
-          className={cx(
-            "block max-h-[120px] min-w-0 resize-none overflow-y-auto bg-transparent py-3 text-[17px] leading-6 caret-accent outline-none field-sizing-content placeholder:text-ink-3 focus-visible:outline-none",
-            "max-md:min-h-12 max-md:py-0 max-md:text-[16px]",
-            loading ? "text-ink-2" : "text-ink",
-          )}
-        />
+        </div>
+      ) : null}
+      <div aria-hidden="true" className="flex items-center justify-between gap-4 px-5 pt-4 max-md:px-4">
+        <span className="text-[11px] leading-4 font-semibold tracking-[0.08em] text-ink-3 uppercase">Question</span>
+        <span className="font-mono text-[10px] leading-4 text-ink-3 tabular-nums">
+          {value.length} / {QUESTION_MAX_CHARS}
+        </span>
       </div>
-      <Button
-        type="submit"
-        variant="primary"
-        size="lg"
-        loading={loading}
-        loadingLabel={loadingLabel}
-        disabled={state === "paused"}
-        className="md:min-w-[148px] max-md:w-full"
-      >
-        Get answer
-      </Button>
+      <label htmlFor={id} className="sr-only">
+        Your question
+      </label>
+      <textarea
+        ref={areaRef}
+        id={id}
+        name="q"
+        rows={1}
+        autoComplete="off"
+        spellCheck={false}
+        enterKeyHint="go"
+        autoFocus={autoFocus}
+        value={value}
+        maxLength={QUESTION_MAX_CHARS}
+        readOnly={loading}
+        placeholder={placeholder}
+        // A textarea keeps its textbox role (ARIA allows combobox only on an input): while the list is
+        // open the field names it and its active row.
+        aria-autocomplete={combobox ? "list" : undefined}
+        aria-controls={combobox?.expanded ? combobox.listId : undefined}
+        aria-activedescendant={combobox?.expanded ? (combobox.activeId ?? undefined) : undefined}
+        aria-describedby={describedBy}
+        onChange={(e) => onChange(questionText(e.target.value))}
+        onKeyDown={keyDown}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        className={cx(
+          "block max-h-[120px] min-h-[64px] w-full min-w-0 resize-none overflow-y-auto bg-transparent px-5 pt-2.5 pb-5 font-display text-[22px] leading-8 caret-accent outline-none field-sizing-content placeholder:text-ink-3 focus-visible:outline-none",
+          "max-md:px-4 max-md:text-[18px] max-md:leading-7",
+          loading ? "text-ink-2" : "text-ink",
+        )}
+      />
+      <div className="flex items-center justify-end gap-3 border-t border-line bg-sunken px-3 py-2.5 max-md:flex-col max-md:items-stretch">
+        <Button
+          type="submit"
+          variant="primary"
+          loading={loading}
+          loadingLabel={loadingLabel}
+          disabled={state === "paused"}
+          className="md:min-w-[148px] max-md:w-full"
+        >
+          Get answer
+        </Button>
+      </div>
     </form>
   );
 }

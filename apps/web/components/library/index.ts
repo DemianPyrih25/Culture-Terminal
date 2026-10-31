@@ -16,5 +16,5 @@ export { BriefsError, briefsUrl, fetchBriefs } from "./briefs-client";
 export type { BriefList, BriefSort, BriefSummary, BriefsQuery, FetchBriefsOptions } from "./briefs-client";
 export { verdictText } from "./format";
 export type { VerdictSource } from "./format";
-export { EMPTY_TEXT, YourAnswers, YourAnswersView } from "./your-answers";
+export { EMPTY_TEXT, YourAnswers, YourAnswersNotes, YourAnswersView } from "./your-answers";
 export type { YourAnswersState, YourAnswersViewProps } from "./your-answers";

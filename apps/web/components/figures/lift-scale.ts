@@ -6,7 +6,7 @@ import { clamp, textWidth } from "./scale";
 
 /**
  * LiftMap scales shared by the static schematic and the WebGL map, so both draw the same colours:
- * the log2 diverging lift ramp (negative → neutral at 1.00× → data, clamped to 0.6–1.6×, PLAN §8.3),
+ * the log2 diverging lift ramp (red → paper at 1.00× → green, clamped to 0.6–1.6×, PLAN §8.3),
  * the sequential RAW and BASE ramp by percentile, confidence as alpha, the neighbourhood markers
  * sized by lift and the labels' positions. Pure; colours mirror the redesign tokens in globals.css.
  */
@@ -19,30 +19,34 @@ export const LIFT_MODE_KEY: Readonly<Record<LiftMode, string>> = { RAW: "1", BAS
 
 export type Rgb = readonly [number, number, number];
 
-/** Redesign tokens (app/globals.css) as RGB, for ramps and map layers that need computed colours. */
+/** Ledger tokens (app/globals.css, design/redesign-v3.pen) as RGB, for ramps and map layers that need computed colours. */
 export const TOKEN_RGB = {
   surface: [255, 255, 255],
-  ink: [14, 17, 22],
-  ink2: [74, 82, 97],
-  ink3: [138, 147, 163],
-  line: [230, 232, 236],
-  lineStrong: [205, 210, 218],
-  accent: [91, 61, 245],
-  second: [242, 118, 11],
-  muted: [201, 206, 214],
+  ink: [22, 24, 29],
+  ink2: [79, 83, 92],
+  ink3: [140, 144, 154],
+  line: [226, 221, 211],
+  lineStrong: [203, 195, 180],
+  accent: [29, 62, 158],
+  second: [194, 122, 44],
+  muted: [203, 195, 180],
+  good: [30, 122, 79],
+  danger: [180, 50, 44],
 } as const satisfies Record<string, Rgb>;
 
-/** The map ramp, map-1 … map-5: more interest is deeper violet. */
+/** The sequential map ramp, map-1 … map-5: more interest is deeper ledger blue. */
 export const MAP_RAMP: readonly Rgb[] = [
-  [241, 238, 254],
-  [213, 204, 252],
-  [168, 151, 249],
-  [124, 99, 247],
-  [91, 61, 245],
+  [232, 236, 247],
+  [184, 196, 229],
+  [125, 147, 205],
+  [67, 100, 179],
+  [29, 62, 158],
 ];
 
-/** The neutral the ramps start from: 1.00× on the lift ramp. */
-const NEUTRAL: Rgb = [239, 241, 244];
+/** The diverging lift ramp's arms (design a-div-*): the neutral 1.00× step, then green above and red below. */
+const NEUTRAL: Rgb = [238, 234, 226];
+export const LIFT_ABOVE: readonly Rgb[] = [NEUTRAL, [179, 214, 192], [98, 168, 130], [30, 122, 79]];
+export const LIFT_BELOW: readonly Rgb[] = [NEUTRAL, [236, 187, 177], [213, 119, 107], [180, 50, 44]];
 /** The lift ramp's clamp (PLAN §8.3): 0.6× is full "less", 1.6× the deepest ramp step. */
 export const LIFT_CLAMP = { min: 0.6, max: 1.6 } as const;
 
@@ -51,11 +55,15 @@ function mix(a: Rgb, b: Rgb, t: number): Rgb {
   return [Math.round(a[0] + (b[0] - a[0]) * k), Math.round(a[1] + (b[1] - a[1]) * k), Math.round(a[2] + (b[2] - a[2]) * k)];
 }
 
+function along(ramp: readonly Rgb[], t: number): Rgb {
+  const k = clamp(t, 0, 1) * (ramp.length - 1);
+  const i = Math.min(ramp.length - 2, Math.floor(k));
+  return mix(ramp[i]!, ramp[i + 1]!, k - i);
+}
+
 /** A colour along the map ramp, 0 (map-1) to 1 (map-5). */
 export function rampRgb(t: number): Rgb {
-  const k = clamp(t, 0, 1) * (MAP_RAMP.length - 1);
-  const i = Math.min(MAP_RAMP.length - 2, Math.floor(k));
-  return mix(MAP_RAMP[i]!, MAP_RAMP[i + 1]!, k - i);
+  return along(MAP_RAMP, t);
 }
 
 export function rgbHex(rgb: Rgb): string {
@@ -70,12 +78,12 @@ export function liftT(lift: number): number {
 }
 
 /**
- * The lift ramp colour: the map ramp above 1.00× (more interest than a typical area), a muted grey below
- * it, so only extra interest is coloured; the table keeps every value.
+ * The diverging lift ramp colour: paper at 1.00×, deeper green the more interest above a typical area,
+ * deeper red the less; confidence (the alpha) keeps uncertain cells pale either way.
  */
 export function liftRgb(lift: number): Rgb {
   const t = liftT(lift);
-  return t >= 0 ? rampRgb(t) : mix(NEUTRAL, TOKEN_RGB.muted, -t);
+  return t >= 0 ? along(LIFT_ABOVE, t) : along(LIFT_BELOW, -t);
 }
 
 /** The RAW/BASE ramp colour for a heat percentile (0 = coolest cell, 1 = hottest). */

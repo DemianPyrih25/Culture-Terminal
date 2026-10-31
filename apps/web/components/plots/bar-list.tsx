@@ -73,13 +73,13 @@ export function BarList({ rows, max, label, emptyLabel, className }: BarListProp
                       style={{ ["--f" as string]: f.toFixed(4), ["--room" as string]: `${room}px` }}
                     />
                     <span className="relative hidden shrink-0 items-center gap-1.5 bg-surface pr-1.5 md:flex">
-                      <span className="pl-1.5 type-label text-ink-2 tabular-nums">{row.display}</span>
+                      <span className="pl-1.5 font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums">{row.display}</span>
                       <PlotTagView tag={row.tag} />
                     </span>
                   </>
                 )}
               </span>
-              <span className="text-right type-label text-ink-2 tabular-nums md:hidden">{row.value === null ? "" : row.display}</span>
+              <span className="text-right font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums md:hidden">{row.value === null ? "" : row.display}</span>
             </li>
           );
         })}

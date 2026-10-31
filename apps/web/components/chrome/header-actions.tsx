@@ -1,16 +1,16 @@
 "use client";
 
-// The chrome's interactive parts: the "New question" link, the phone header's back and share buttons, and
-// the phone menu sheet.
+// The chrome's interactive parts: the "New question" link, the sidebar's section links, the phone bar's
+// back and share buttons, and the phone menu sheet.
 import Link from "next/link";
-import { useState, type MouseEvent, type ReactNode } from "react";
+import { useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
 import { buttonClassName, IconButton } from "../ui/button";
 import { absoluteUrl, copyText } from "../ui/clipboard";
 import { cx } from "../ui/cx";
 import { DrawerShell } from "../ui/drawer-shell";
 import { Icon, type IconName } from "../ui/icons";
 import { useToast } from "../ui/toast";
-import { ASK_FIELD_ID, NEW_QUESTION_HREF, SITE_NAV, type NavKey } from "./links";
+import { ASK_FIELD_ID, navKeyForPath, NEW_QUESTION_HREF, SITE_LINKS, SITE_NAV, type NavKey } from "./links";
 
 /** Puts the caret in Home's question box when it is on this page; true when it did. */
 export function focusAskField(): boolean {
@@ -103,71 +103,140 @@ export interface MenuItem {
   onSelect?: () => void;
 }
 
-const NAV_ICON = { answers: "file-text", following: "list-checks", screener: "table-2", how: "circle-question-mark" } as const satisfies Record<NavKey, IconName>;
+const NAV_ICON = {
+  ask: "message-square-text",
+  answers: "file-text",
+  following: "list-checks",
+  screener: "table-2",
+  profiles: "users",
+  how: "circle-question-mark",
+} as const satisfies Record<NavKey, IconName>;
+
+function subscribeToHistory(onChange: () => void): () => void {
+  window.addEventListener("popstate", onChange);
+  return () => window.removeEventListener("popstate", onChange);
+}
+
+/**
+ * The page's section: the one it names, else the one its path belongs to. Read from the location after
+ * hydration (the server marks only a named section), so pages such as /d need not pass one.
+ */
+function useActiveKey(active: NavKey | null | undefined): NavKey | null {
+  const path = useSyncExternalStore(
+    subscribeToHistory,
+    () => window.location.pathname,
+    () => null,
+  );
+  return active === undefined ? navKeyForPath(path) : active;
+}
+
+const SIDE_ROW = "flex h-9 items-center gap-2.5 rounded-control px-2.5 text-[14px] leading-5 transition-colors";
+
+/** The sidebar's sections (aria-label "Main"): the current one in the accent on its tint. */
+export function SidebarNav({ active }: { active?: NavKey | null }) {
+  const current = useActiveKey(active);
+  return (
+    <nav aria-label="Main">
+      <ul className="flex flex-col gap-0.5">
+        {SITE_NAV.map((item) => {
+          const on = item.key === current;
+          return (
+            <li key={item.key}>
+              <Link
+                href={item.href}
+                data-nav={item.key}
+                aria-current={on ? "page" : undefined}
+                className={cx(SIDE_ROW, on ? "bg-accent-soft font-semibold text-accent" : "font-medium text-ink-2 hover:bg-sunken hover:text-ink")}
+              >
+                <Icon name={NAV_ICON[item.key]} size={16} className={on ? "text-accent" : "text-ink-3"} />
+                {item.label}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
 
 const ROW =
   "flex h-12 w-full items-center gap-3 rounded-control px-3 text-left text-[15px] leading-6 font-medium text-ink transition-colors hover:bg-sunken";
 
-/** The phone menu: a right sheet with Your answers, Following, Screener, How it works, New question and the page's extras. */
+/**
+ * The phone menu: a full-height sheet with Ask, Your answers, Following, Screener, Profiles and How it works,
+ * the primary "New question", the page's extras, then Settings, Method and Status.
+ */
 export function MenuSheetButton({ active, items = [] }: { active?: NavKey | null; items?: readonly MenuItem[] }) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
+  const current = useActiveKey(active);
   const shareItem = items.find((i) => i.share !== undefined);
   const { share, toast } = useShareLink(typeof shareItem?.share === "string" ? shareItem.share : undefined);
   return (
     <>
       <IconButton label="Menu" icon="menu" size="lg" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)} />
       <DrawerShell open={open} onClose={close} title="Menu" width={320}>
-        <nav aria-label="Menu">
-          <ul className="flex flex-col gap-1">
+        <nav aria-label="Menu" className="flex flex-col gap-6">
+          <ul className="flex flex-col gap-0.5">
             {SITE_NAV.map((item) => (
               <li key={item.key}>
                 <Link
                   href={item.href}
                   onClick={close}
-                  aria-current={item.key === active ? "page" : undefined}
-                  className={cx(ROW, item.key === active && "font-semibold")}
+                  aria-current={item.key === current ? "page" : undefined}
+                  className={cx(ROW, item.key === current && "bg-accent-soft font-semibold text-accent")}
                 >
-                  <Icon name={NAV_ICON[item.key]} size={18} className="text-ink-2" />
+                  <Icon name={NAV_ICON[item.key]} size={18} className={item.key === current ? "text-accent" : "text-ink-3"} />
                   {item.label}
                 </Link>
               </li>
             ))}
-            <li>
-              <NewQuestionLink onNavigate={close} className={ROW} />
-            </li>
-            {items.map((item) => (
-              <li key={item.label}>
-                {item.share !== undefined ? (
-                  <button
-                    type="button"
-                    className={ROW}
-                    onClick={() => {
-                      close();
-                      share();
-                    }}
-                  >
-                    <Icon name={item.icon} size={18} className="text-ink-2" />
-                    {item.label}
-                  </button>
-                ) : item.onSelect ? (
-                  <button
-                    type="button"
-                    className={ROW}
-                    onClick={() => {
-                      close();
-                      item.onSelect?.();
-                    }}
-                  >
-                    <Icon name={item.icon} size={18} className="text-ink-2" />
-                    {item.label}
-                  </button>
-                ) : (
-                  <Link href={item.href ?? "/"} onClick={close} className={ROW}>
-                    <Icon name={item.icon} size={18} className="text-ink-2" />
-                    {item.label}
-                  </Link>
-                )}
+          </ul>
+          <NewQuestionLink onNavigate={close} className={buttonClassName("primary", "lg", "w-full justify-center")} />
+          {items.length > 0 ? (
+            <ul className="flex flex-col gap-0.5 border-t border-line pt-4">
+              {items.map((item) => (
+                <li key={item.label}>
+                  {item.share !== undefined ? (
+                    <button
+                      type="button"
+                      className={ROW}
+                      onClick={() => {
+                        close();
+                        share();
+                      }}
+                    >
+                      <Icon name={item.icon} size={18} className="text-ink-3" />
+                      {item.label}
+                    </button>
+                  ) : item.onSelect ? (
+                    <button
+                      type="button"
+                      className={ROW}
+                      onClick={() => {
+                        close();
+                        item.onSelect?.();
+                      }}
+                    >
+                      <Icon name={item.icon} size={18} className="text-ink-3" />
+                      {item.label}
+                    </button>
+                  ) : (
+                    <Link href={item.href ?? "/"} onClick={close} className={ROW}>
+                      <Icon name={item.icon} size={18} className="text-ink-3" />
+                      {item.label}
+                    </Link>
+                  )}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <ul className="flex flex-wrap gap-x-5 gap-y-2 border-t border-line pt-4">
+            {SITE_LINKS.map((link) => (
+              <li key={link.href}>
+                <Link href={link.href} onClick={close} className="rounded-sm type-label text-ink-2 hover:text-ink">
+                  {link.label}
+                </Link>
               </li>
             ))}
           </ul>

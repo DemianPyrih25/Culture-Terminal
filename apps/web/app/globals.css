@@ -1,94 +1,102 @@
 @import "tailwindcss";
 
 /*
- * Culture Terminal design system (design/redesign.pen, N00 Foundations). Light only: the design has one
- * theme. Canvas pages, white cards with a hairline and a soft shadow, one violet accent, an orange second
- * series, four topic colours. Bricolage Grotesque for display, Geist for everything else, Geist Mono for
- * request data. `static` emits every variable, so inline styles, SVG fills and the map can read any token.
+ * Culture Terminal design system: direction A "Ledger" (design/redesign-v3.pen). Light only. Warm paper canvas,
+ * white surfaces with hairline rules, one ledger-blue accent, muted earth tones for the second series and topics.
+ * Source Serif 4 for titles, Inter for the interface, IBM Plex Mono for numbers. `static` emits every variable, so inline styles, SVG fills and the map can read any token.
  */
 @theme static {
   /* Surfaces */
-  --color-canvas: #f5f6f8;
+  --color-canvas: #f6f3ee;
   --color-surface: #ffffff;
-  --color-sunken: #eff1f4;
-  --color-line: #e6e8ec;
-  --color-line-strong: #cdd2da;
+  --color-sunken: #efebe3;
+  --color-line: #e2ddd3;
+  --color-line-strong: #cbc3b4;
 
   /* Ink */
-  --color-ink: #0e1116;
-  --color-ink-2: #4a5261;
-  --color-ink-3: #8a93a3;
-  --color-scrim: #0e111633;
+  --color-ink: #16181d;
+  --color-ink-2: #4f535c;
+  --color-ink-3: #62666e;
+  --color-scrim: #16181d52;
 
   /* Accent and second */
-  --color-accent: #5b3df5;
-  --color-accent-hover: #4a2ee0;
-  --color-accent-soft: #eeebfe;
-  --color-accent-ink: #3a22b8;
-  --color-second: #f2760b;
-  --color-second-soft: #fef0e3;
-  --color-second-ink: #a4510a;
+  --color-accent: #1d3e9e;
+  --color-accent-hover: #183485;
+  --color-accent-soft: #e8ecf7;
+  --color-accent-ink: #12286a;
+  --color-second: #c27a2c;
+  --color-second-soft: #f5eadb;
+  --color-second-ink: #8a5216;
 
   /* Status */
-  --color-good: #12a150;
-  --color-good-soft: #e7f6ee;
-  --color-good-ink: #0b7a3b;
-  --color-caution: #e0a100;
-  --color-caution-soft: #fff6db;
-  --color-caution-ink: #8a5a00;
-  --color-danger: #d92d20;
-  --color-danger-soft: #feeceb;
-  --color-danger-ink: #a11f16;
+  --color-good: #1b7048;
+  --color-good-soft: #e4f0e8;
+  --color-good-ink: #17603e;
+  --color-caution: #8f5c00;
+  --color-caution-soft: #f6ecd6;
+  --color-caution-ink: #7a4d00;
+  --color-danger: #b4322c;
+  --color-danger-soft: #f6e5e2;
+  --color-danger-ink: #9c1f1f;
 
   /* Charts and the map ramp */
-  --color-chart-muted: #c9ced6;
-  --color-chart-grid: #eef0f3;
-  --color-map-1: #f1eefe;
-  --color-map-2: #d5ccfc;
-  --color-map-3: #a897f9;
-  --color-map-4: #7c63f7;
-  --color-map-5: #5b3df5;
+  --color-chart-muted: #cbc3b4;
+  --color-chart-grid: #eeeae2;
+  --color-map-1: #e8ecf7;
+  --color-map-2: #b8c4e5;
+  --color-map-3: #7d93cd;
+  --color-map-4: #4364b3;
+  --color-map-5: #1d3e9e;
+  --color-map-land: #f1ede6;
+  --color-map-water: #d5e0e6;
+  --color-div-n3: #b4322c;
+  --color-div-n2: #d5776b;
+  --color-div-n1: #ecbbb1;
+  --color-div-0: #eeeae2;
+  --color-div-p1: #b3d6c0;
+  --color-div-p2: #62a882;
+  --color-div-p3: #1e7a4f;
 
   /* Topics */
-  --color-topic-brands: #ff7a45;
-  --color-topic-brands-soft: #ffe8dc;
-  --color-topic-brands-ink: #b43c0a;
-  --color-topic-places: #1fb57a;
-  --color-topic-places-soft: #ddf5ea;
-  --color-topic-places-ink: #08714a;
-  --color-topic-tours: #f2559b;
-  --color-topic-tours-soft: #fde3ef;
-  --color-topic-tours-ink: #a8195c;
-  --color-topic-audiences: #f5c02e;
-  --color-topic-audiences-soft: #fff3c9;
-  --color-topic-audiences-ink: #7a5c00;
+  --color-topic-brands: #c27a2c;
+  --color-topic-brands-soft: #f5eadb;
+  --color-topic-brands-ink: #8a5216;
+  --color-topic-places: #2b8585;
+  --color-topic-places-soft: #deefef;
+  --color-topic-places-ink: #1d5e5e;
+  --color-topic-tours: #8a4b78;
+  --color-topic-tours-soft: #f1e3ec;
+  --color-topic-tours-ink: #66365a;
+  --color-topic-audiences: #6e7d2e;
+  --color-topic-audiences-soft: #eceedc;
+  --color-topic-audiences-ink: #4f5a1f;
 
   /* Monogram neutrals (hard-coded in the design, not .pen variables) */
-  --color-mono-1: #e0f5f3;
-  --color-mono-1-ink: #0b6b63;
-  --color-mono-2: #e6f1fd;
-  --color-mono-2-ink: #1d5fa8;
-  --color-mono-3: #f6f0e6;
+  --color-mono-1: #e6efed;
+  --color-mono-1-ink: #245e57;
+  --color-mono-2: #e8ecf7;
+  --color-mono-2-ink: #1d3e9e;
+  --color-mono-3: #f3ece0;
   --color-mono-3-ink: #7a5a2b;
-  --color-mono-4: #edeff3;
-  --color-mono-4-ink: #3d4655;
+  --color-mono-4: #efebe3;
+  --color-mono-4-ink: #4f535c;
 
-  --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", system-ui, sans-serif;
-  --font-sans: "Geist Variable", Geist, system-ui, sans-serif;
-  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+  --font-display: "Source Serif 4 Variable", "Source Serif 4", Georgia, serif;
+  --font-sans: "Inter Variable", Inter, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
-  --radius-xs: 3px;
-  --radius-sm: 8px;
-  --radius-md: 10px;
-  --radius-control: 12px;
-  --radius-tile: 12px;
-  --radius-card: 16px;
-  --radius-box: 20px;
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-control: 6px;
+  --radius-tile: 6px;
+  --radius-card: 8px;
+  --radius-box: 10px;
   --radius-chip: 999px;
 
-  --shadow-xs: 0 1px 2px #1018280d;
-  --shadow-md: 0 6px 18px #10182824;
-  --shadow-lg: 0 12px 32px #1018282e, 0 2px 6px #1018280f;
+  --shadow-xs: 0 1px 0 #16181d0a;
+  --shadow-md: 0 4px 14px #16181d14;
+  --shadow-lg: 0 12px 32px #16181d1f, 0 1px 3px #16181d0f;
   --shadow-pressed: inset 0 1px 2px #0e11163d;
 
   /* The content column and the question box at 1440. */
@@ -109,141 +117,154 @@
   }
 }
 
-/* Type scale (N00 · Type). Mobile sizes are the -sm utilities, used as `max-md:type-…-sm`. */
+/*
+ * Type scale (Ledger, design/redesign-v3.pen · 02 Typography). Serif titles at 500 with slight negative
+ * tracking, Inter for the interface and prose, IBM Plex Mono for every figure. Mobile sizes are the -sm
+ * utilities, used as `max-md:type-…-sm`.
+ */
 @utility type-display-xl {
   font-family: var(--font-display);
-  font-variation-settings: "opsz" 96;
-  font-size: 64px;
-  line-height: 64px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
+  font-variation-settings: "opsz" 60;
+  font-size: 56px;
+  line-height: 60px;
+  font-weight: 500;
+  letter-spacing: -0.025em;
 }
 @utility type-hero-sm {
   font-family: var(--font-display);
-  font-variation-settings: "opsz" 96;
+  font-variation-settings: "opsz" 60;
   font-size: 36px;
-  line-height: 38px;
-  font-weight: 800;
-  letter-spacing: -0.03em;
+  line-height: 40px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
 }
 @utility type-display-l {
   font-family: var(--font-display);
-  font-variation-settings: "opsz" 96;
-  font-size: 52px;
+  font-variation-settings: "opsz" 60;
+  font-size: 48px;
   line-height: 54px;
-  font-weight: 800;
-  letter-spacing: -0.025em;
+  font-weight: 500;
+  letter-spacing: -0.02em;
 }
 @utility type-display-l-sm {
   font-family: var(--font-display);
-  font-variation-settings: "opsz" 96;
+  font-variation-settings: "opsz" 60;
   font-size: 34px;
-  line-height: 36px;
-  font-weight: 800;
-  letter-spacing: -0.025em;
+  line-height: 40px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
 }
+/* H1 · verdict. */
 @utility type-display-m {
   font-family: var(--font-display);
-  font-variation-settings: "opsz" 96;
-  font-size: 36px;
-  line-height: 40px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-variation-settings: "opsz" 60;
+  font-size: 40px;
+  line-height: 46px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
 }
 @utility type-display-m-sm {
   font-family: var(--font-display);
-  font-variation-settings: "opsz" 96;
+  font-variation-settings: "opsz" 60;
   font-size: 28px;
-  line-height: 32px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  line-height: 34px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
 }
 @utility type-display-s {
   font-family: var(--font-display);
-  font-variation-settings: "opsz" 96;
-  font-size: 22px;
-  line-height: 26px;
-  font-weight: 700;
+  font-variation-settings: "opsz" 60;
+  font-size: 24px;
+  line-height: 30px;
+  font-weight: 500;
   letter-spacing: -0.01em;
 }
 @utility type-display-s-sm {
   font-family: var(--font-display);
-  font-variation-settings: "opsz" 96;
-  font-size: 18px;
-  line-height: 22px;
-  font-weight: 700;
+  font-variation-settings: "opsz" 60;
+  font-size: 20px;
+  line-height: 26px;
+  font-weight: 500;
   letter-spacing: -0.01em;
 }
+/* The big score and key figures: Plex Mono, tabular. */
 @utility type-score {
-  font-family: var(--font-display);
-  font-variation-settings: "opsz" 96;
-  font-size: 64px;
-  line-height: 64px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+  font-family: var(--font-mono);
+  font-size: 56px;
+  line-height: 60px;
+  font-weight: 500;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
 @utility type-number-l {
-  font-family: var(--font-sans);
-  font-size: 40px;
-  line-height: 44px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-family: var(--font-mono);
+  font-size: 32px;
+  line-height: 36px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
   font-variant-numeric: tabular-nums;
 }
 @utility type-number-l-sm {
-  font-family: var(--font-sans);
-  font-size: 28px;
-  line-height: 32px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+  font-family: var(--font-mono);
+  font-size: 26px;
+  line-height: 30px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
   font-variant-numeric: tabular-nums;
 }
 @utility type-name-value {
-  font-family: var(--font-sans);
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 60;
   font-size: 24px;
   line-height: 30px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: -0.01em;
 }
 @utility type-name-value-sm {
-  font-family: var(--font-sans);
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 60;
   font-size: 20px;
   line-height: 26px;
-  font-weight: 600;
+  font-weight: 500;
   letter-spacing: -0.01em;
 }
+/* H2: section titles. */
 @utility type-title-l {
-  font-family: var(--font-sans);
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 60;
   font-size: 28px;
   line-height: 34px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
+  font-weight: 500;
+  letter-spacing: -0.01em;
 }
 @utility type-title-l-sm {
-  font-family: var(--font-sans);
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 60;
   font-size: 22px;
   line-height: 28px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
+  font-weight: 500;
+  letter-spacing: -0.01em;
 }
+/* H3: card and block titles. */
 @utility type-title {
-  font-family: var(--font-sans);
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 60;
   font-size: 20px;
   line-height: 28px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.005em;
 }
 @utility type-title-sm {
-  font-family: var(--font-sans);
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 60;
   font-size: 18px;
   line-height: 26px;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.005em;
 }
 @utility type-lead {
   font-family: var(--font-sans);
-  font-size: 18px;
+  font-size: 17px;
   line-height: 28px;
   font-weight: 400;
 }
@@ -261,9 +282,9 @@
 }
 @utility type-button {
   font-family: var(--font-sans);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 20px;
-  font-weight: 600;
+  font-weight: 500;
 }
 @utility type-label {
   font-family: var(--font-sans);
@@ -277,18 +298,28 @@
   line-height: 16px;
   font-weight: 400;
 }
+/* Section labels in small caps: CONFIDENCE · SOURCES · ASK NEXT. Pair with text-ink-3. */
+@utility type-overline {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 @utility type-mono {
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 18px;
   font-weight: 400;
+  font-variant-numeric: tabular-nums;
 }
 
 /* "No data": sunken with 1 px ink-3 lines at 45 degrees, drawn on a 6 px SVG tile so the lines never seam.
-   The stroke is ink-3 (#8A93A3), written out because a data URL cannot read a CSS variable. */
+   The stroke is ink-3 (#62666E), written out because a data URL cannot read a CSS variable. */
 @utility bg-hatch {
   background-color: var(--color-sunken);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6'%3E%3Cpath d='M-1 1l2-2M0 6l6-6M5 7l2-2' stroke='%238A93A3' stroke-width='1'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='6' height='6'%3E%3Cpath d='M-1 1l2-2M0 6l6-6M5 7l2-2' stroke='%2362666E' stroke-width='1'/%3E%3C/svg%3E");
   background-size: 6px 6px;
 }
 
@@ -302,6 +333,16 @@
     color: var(--color-ink);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: var(--color-accent-soft);
+    color: var(--color-accent-ink);
+  }
+
+  hr {
+    border-color: var(--color-line);
   }
 
   :focus-visible {

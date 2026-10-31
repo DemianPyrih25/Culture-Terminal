@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Footer } from "../../components/chrome/footer";
 import { Header } from "../../components/chrome/header";
-import { NEW_QUESTION_HREF, SITE_NAV } from "../../components/chrome/links";
+import { navKeyForPath, NEW_QUESTION_HREF, SITE_NAV } from "../../components/chrome/links";
 import { LogoMark } from "../../components/chrome/logo-mark";
 import { PageHead } from "../../components/chrome/page-head";
 import { SiteShell } from "../../components/chrome/site-shell";
@@ -11,21 +11,26 @@ import { SiteShell } from "../../components/chrome/site-shell";
 const html = renderToStaticMarkup;
 
 describe("header", () => {
-  it("links the wordmark home and lists Your answers, Following, Screener and How it works", () => {
+  it("links the wordmark home and lists Ask, Your answers, Following, Screener, Profiles and How it works", () => {
     const out = html(<Header variant="home" />);
     expect(out).toMatch(/<a[^>]*href="\/"[^>]*>.*Culture Terminal<\/span><\/a>/);
     expect(out).toContain('aria-label="Main"');
     expect(SITE_NAV.map((n) => [n.label, n.href])).toEqual([
+      ["Ask", "/"],
       ["Your answers", "/briefs"],
       ["Following", "/following"],
       ["Screener", "/screener"],
+      ["Profiles", "/d"],
       ["How it works", "/how-it-works"],
     ]);
     expect(out).toContain('href="/briefs"');
     expect(out).toContain('href="/following"');
     expect(out).toContain('href="/screener"');
     expect(out).toContain('href="/how-it-works"');
+    for (const href of ["/d", "/settings", "/method", "/status"]) expect(out).toContain(`href="${href}"`);
+    expect(out).toMatch(/<a[^>]*data-nav="ask"[^>]*aria-current="page"/);
     expect(out).not.toContain("New question");
+    expect(out).not.toMatch(/of 20|per day|daily limit/i);
     expect(out).not.toMatch(/examples/i);
   });
 
@@ -33,6 +38,9 @@ describe("header", () => {
     const out = html(<Header active="answers" />);
     expect(out).toMatch(/<a[^>]*data-nav="answers"[^>]*aria-current="page"/);
     expect(out).not.toMatch(/data-nav="how"[^>]*aria-current/);
+    expect(navKeyForPath("/method")).toBe("how");
+    expect(navKeyForPath("/d/lumen")).toBe("profiles");
+    expect(navKeyForPath("/status")).toBeNull();
   });
 
   it("adds New question on inner pages only, pointing at Home's box", () => {
