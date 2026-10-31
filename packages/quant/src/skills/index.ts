@@ -48,8 +48,8 @@ export { LISTED_COMPANIES, listedCompanyOf, makeCompanyFinancialsSkill, type Lis
 export { brandParams, tagParams } from "./blockDna/calls";
 export { cityLocation } from "./blockDna/location";
 export { PANEL_MIN_CITIES, panelMetros } from "./blockDna/city";
-export { resolveEntitiesSkill, classifyMatches, searchParams, unmatchedLimitation, SEARCH_TAKE } from "./resolve";
-export type { MatchAlternative, MatchClassification, ResolveMatchClass, SearchResult } from "./resolve";
+export { resolveEntitiesSkill, resolveEntitiesSkillWith, classifyMatches, searchParams, unmatchedLimitation, SEARCH_TAKE } from "./resolve";
+export type { MatchAlternative, MatchClassification, ResolveFallback, ResolveMatchClass, SearchResult } from "./resolve";
 export { peerLandscapeSkill, estimatePeerLandscapeCalls, discoveryParams, DISCOVERY_TAKE } from "./peerLandscape";
 export { normaliseName } from "./normalise";
 // The S10 category check; the coverage probe's C2 gate applies the same rule.

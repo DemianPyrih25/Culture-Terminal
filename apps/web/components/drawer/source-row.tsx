@@ -75,16 +75,19 @@ export function SourceRow({ lookup, query, defaultOpen = false, names, onCopied 
       >
         <span className="flex w-full items-start gap-3">
           <span className="min-w-0 flex-1 text-[13px] leading-5 font-medium text-ink group-hover:text-accent">{sourceDescription(lookup)}</span>
-          <Icon name={open ? "chevron-up" : "chevron-down"} size={16} className="mt-0.5 shrink-0 text-ink-3 group-hover:text-ink-2" />
+          <Icon name={open ? "chevron-up" : "chevron-down"} size={16} className="mt-0.5 shrink-0 text-ink-2 group-hover:text-ink" />
         </span>
         <span className="min-w-0 pr-7 font-mono text-[11px] leading-4 text-ink-2 [overflow-wrap:anywhere]">{sourceLine(lookup)}</span>
-        <span className="font-mono text-[10px] leading-[14px] text-ink-3">{freshnessText(lookup)}</span>
+        <span className="flex items-center gap-[5px] font-mono text-[10px] leading-[14px] text-ink-2">
+          <Icon name={lookup.cache === "miss" ? "zap" : "database"} size={11} className="shrink-0 text-ink-3" />
+          {freshnessText(lookup)}
+        </span>
       </button>
       <div id={id} hidden={!open} className="flex flex-col gap-2.5 pb-3.5">
         <dl className="flex flex-col gap-2 rounded-sm bg-sunken px-3 py-2 font-mono text-[11px] leading-[18px] md:grid md:grid-cols-[max-content_minmax(0,1fr)] md:gap-x-3 md:gap-y-1">
           {requestPairs(lookup, names).map(([k, v]) => (
             <div key={k} className="flex flex-col md:contents">
-              <dt className="whitespace-nowrap text-ink-3 md:min-w-[110px]">{k}</dt>
+              <dt className="whitespace-nowrap text-ink-2 md:min-w-[110px]">{k}</dt>
               <dd className="min-w-0 text-ink [overflow-wrap:anywhere]">{v}</dd>
             </div>
           ))}
@@ -138,8 +141,8 @@ export function SourceRow({ lookup, query, defaultOpen = false, names, onCopied 
             {overpass.query}
           </pre>
         ) : null}
-        {copyable ? <p className="text-[11px] leading-4 text-ink-3">{QLOO_IDS_LINE}</p> : null}
-        {publicSource ? <p className="text-[11px] leading-4 text-ink-3">{publicNote(lookup, link ?? (overpass ? {} : null))}</p> : null}
+        {copyable ? <p className="text-[11px] leading-4 text-ink-2">{QLOO_IDS_LINE}</p> : null}
+        {publicSource ? <p className="text-[11px] leading-4 text-ink-2">{publicNote(lookup, link ?? (overpass ? {} : null))}</p> : null}
       </div>
     </li>
   );

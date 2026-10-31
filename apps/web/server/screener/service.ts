@@ -236,6 +236,12 @@ export class ScreenerService {
     return this.limiter.networkToday(this.now());
   }
 
+  /** Read only, for Settings: one visitor's new screens in the last minute and hour, with the limits. */
+  visitorUsage(visitor: string): { minute: number; hour: number; hourFreeS: number | null; perMinute: number; perHour: number } {
+    const { visitorPerMinute, visitorPerHour } = this.limiter.limits;
+    return { ...this.limiter.visitorUsage(visitor, this.now()), perMinute: visitorPerMinute, perHour: visitorPerHour };
+  }
+
   /** The answer cache's screen for this request, as a repeat reads it (no network call); null on a miss. */
   cached(body: ScreenerRequest): ScreenerAnswer | null {
     const screen = this.answers.get(screenerKey(body), this.now());

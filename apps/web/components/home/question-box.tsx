@@ -147,25 +147,31 @@ export function QuestionBox({
       )}
     >
       {followUp !== null ? (
-        <div className="flex px-5 pt-4 max-md:px-4">
-          <span className="inline-flex h-7 max-w-full items-center gap-1.5 rounded-sm border border-line bg-sunken pr-1 pl-2.5 type-label text-ink-2">
-            <Icon name="corner-down-right" size={14} className="shrink-0 text-ink-3" />
-            <span className="truncate">Follow-up to: {followUp.label}</span>
+        <div className="flex px-5 pt-3.5 max-md:px-4">
+          <span className="inline-flex min-h-7 max-w-full items-center gap-2 rounded-sm bg-accent-soft py-1.5 pr-2 pl-2.5 text-[12px] leading-4">
+            <Icon name="corner-down-right" size={13} className="shrink-0 text-accent" />
+            <span className="min-w-0 truncate">
+              <span className="sr-only">Follow-up to: {followUp.label}</span>
+              <span aria-hidden="true">
+                <span className="font-medium text-accent">Follow-up to:</span> <span className="text-ink-2">{followUp.label}</span>
+              </span>
+            </span>
             {followUp.onDrop ? (
               <button
                 type="button"
                 onClick={followUp.onDrop}
                 aria-label="Ask on its own"
-                className="inline-flex size-5 shrink-0 items-center justify-center rounded-xs text-ink-2 hover:bg-line hover:text-ink"
+                className="inline-flex shrink-0 items-center gap-1 border-l border-accent/20 pl-2 text-ink-2 hover:text-ink"
               >
-                <Icon name="x" size={14} />
+                <Icon name="x" size={12} />
+                <span aria-hidden="true" className="max-md:hidden">Ask on its own</span>
               </button>
             ) : null}
           </span>
         </div>
       ) : null}
       <div aria-hidden="true" className="flex items-center justify-between gap-4 px-5 pt-4 max-md:px-4">
-        <span className="text-[11px] leading-4 font-semibold tracking-[0.08em] text-ink-3 uppercase">Question</span>
+        <span className="text-[11px] leading-4 font-semibold tracking-[0.08em] text-ink-2 uppercase">Question</span>
         <span className="font-mono text-[10px] leading-4 text-ink-3 tabular-nums">
           {value.length} / {QUESTION_MAX_CHARS}
         </span>
@@ -197,18 +203,25 @@ export function QuestionBox({
         onFocus={onFocus}
         onBlur={onBlur}
         className={cx(
-          "block max-h-[120px] min-h-[64px] w-full min-w-0 resize-none overflow-y-auto bg-transparent px-5 pt-2.5 pb-5 font-display text-[22px] leading-8 caret-accent outline-none field-sizing-content placeholder:text-ink-3 focus-visible:outline-none",
+          "block max-h-[120px] min-h-[64px] w-full min-w-0 resize-none overflow-y-auto bg-transparent px-5 pt-2.5 pb-5 font-display text-[22px] leading-8 caret-accent outline-none field-sizing-content placeholder:text-ink-3/80 focus-visible:outline-none",
           "max-md:px-4 max-md:text-[18px] max-md:leading-7",
           loading ? "text-ink-2" : "text-ink",
         )}
       />
-      <div className="flex items-center justify-end gap-3 border-t border-line bg-sunken px-3 py-2.5 max-md:flex-col max-md:items-stretch">
+      <div className="flex items-center justify-end gap-3 border-t border-line bg-canvas px-3 py-2.5 max-md:flex-col max-md:items-stretch">
+        {loading ? (
+          <span aria-hidden="true" className="mr-auto inline-flex items-center gap-1.5 pl-1 font-mono text-[12px] leading-4 text-ink-2 max-md:hidden">
+            <Icon name="loader-circle" size={13} className="animate-spin motion-reduce:animate-none" />
+            {loadingLabel === "Reading…" ? "Reading your question…" : "Starting your answer…"}
+          </span>
+        ) : null}
         <Button
           type="submit"
           variant="primary"
           loading={loading}
           loadingLabel={loadingLabel}
           disabled={state === "paused"}
+          trailing={<kbd className="ml-0.5 inline-flex rounded-xs bg-white/15 px-[5px] py-px font-mono text-[11px] leading-4 font-normal max-md:hidden">↵</kbd>}
           className="md:min-w-[148px] max-md:w-full"
         >
           Get answer

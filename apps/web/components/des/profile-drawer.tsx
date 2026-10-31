@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { plural } from "../../lib/brief/format";
 import { Button } from "../ui/button";
@@ -39,6 +40,7 @@ function KeyValue({ k, children }: { k: string; children: ReactNode }) {
 function SourceRow({ source, open, onToggle, onCopied }: { source: ProfileSource; open: boolean; onToggle: () => void; onCopied: () => void }) {
   const line = [source.endpoint, source.filter, source.rows === null ? null : plural(source.rows, "row")].filter(Boolean).join(" · ");
   const panel = `profile-source-${source.n}`;
+  const reduce = useReducedMotion();
   return (
     <li id={`source-${source.n}`} className="scroll-mt-2" data-source={source.n}>
       <button
@@ -46,9 +48,9 @@ function SourceRow({ source, open, onToggle, onCopied }: { source: ProfileSource
         onClick={onToggle}
         aria-expanded={open}
         aria-controls={panel}
-        className="flex w-full items-start gap-2.5 rounded-sm py-3 text-left hover:bg-canvas"
+        className="flex w-full items-start gap-2.5 rounded-sm py-3 text-left transition-colors duration-150 hover:bg-canvas active:bg-sunken"
       >
-        <Icon name="chevron-right" size={14} className={cx("mt-[3px] shrink-0 text-ink-3 transition-transform", open && "rotate-90")} />
+        <Icon name="chevron-right" size={14} className={cx("mt-[3px] shrink-0 text-ink-3 transition-transform duration-150", open && "rotate-90")} />
         <span className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="type-label text-ink">{source.title}</span>
           <span className="type-mono text-ink-2 [overflow-wrap:anywhere]">{line}</span>
@@ -56,7 +58,16 @@ function SourceRow({ source, open, onToggle, onCopied }: { source: ProfileSource
           {source.error ? <span className="type-caption text-danger-ink">This request failed: {source.error}</span> : null}
         </span>
       </button>
+      <AnimatePresence initial={false}>
       {open ? (
+        <motion.div
+          key="panel"
+          initial={reduce ? false : { height: 0, opacity: 0 }}
+          animate={{ height: "auto", opacity: 1 }}
+          exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { height: 0, opacity: 0 }}
+          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          className="overflow-hidden"
+        >
         <div id={panel} className="flex flex-col gap-3 pb-4 pl-6">
           <dl className="flex flex-col gap-1 rounded-sm border border-line bg-canvas p-3 type-mono">
             <KeyValue k="Endpoint">{source.endpoint}</KeyValue>
@@ -82,7 +93,9 @@ function SourceRow({ source, open, onToggle, onCopied }: { source: ProfileSource
             </div>
           ) : null}
         </div>
+        </motion.div>
       ) : null}
+      </AnimatePresence>
     </li>
   );
 }

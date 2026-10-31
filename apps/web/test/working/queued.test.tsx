@@ -49,7 +49,6 @@ describe("the working page of a queued run", () => {
     expect(text(slice(html, "data-status-title", "</h2>"))).toBe("Queued · position 2");
     // Told 110 s at 10 s; 5 s later.
     expect(text(slice(html, "data-time", "</p>"))).toBe("Up to 1:45 wait");
-    expect(text(html)).toContain("Your question starts on its own when one frees up.");
     expect(html).toContain('data-stop="idle"');
     expect(html).toMatch(/role="status" aria-live="polite" class="sr-only">Queued, position 2</);
   });

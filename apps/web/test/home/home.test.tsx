@@ -10,10 +10,17 @@ vi.mock("next/navigation", async (importOriginal) => ({
   usePathname: () => "/",
 }));
 
-const { default: Home } = await import("../../app/page");
+// "/" is now the landing for signed-out visitors (it reads the session on the server): Home is the view in the shell.
+const { SiteShell } = await import("../../components/chrome/site-shell");
+const { HomeView } = await import("../../components/home/home-view");
+const Home = () => (
+  <SiteShell header="home">
+    <HomeView />
+  </SiteShell>
+);
 const { AskNoticeView } = await import("../../components/home/ask-notice");
-const { HOW_ITEMS } = await import("../../components/home/how-band");
-const { HERO_SUBLINE } = await import("../../components/home/home-view");
+const { MAP_COVERAGE } = await import("../../components/home/home-view");
+const { MAP_CITIES } = await import("../../components/home/map-coverage");
 const { DAILY_CAP_TEXT } = await import("../../components/home/ask-notice");
 const { understoodParts } = await import("../../components/home/understood-line");
 const { QUESTION_PLACEHOLDER, QuestionBox, questionKeyAction, questionText } = await import("../../components/home/question-box");
@@ -24,10 +31,15 @@ const html = renderToStaticMarkup;
 const noop = () => undefined;
 
 describe("Home", () => {
-  it("renders the hero, the question box and the how band in the home shell", () => {
+  it("renders the statement and the question box in the home shell, with no help asides", () => {
     const out = html(<Home />);
     expect(out).toMatch(/<h1[^>]*>Ask what any audience really loves\.<\/h1>/);
-    expect(out).toContain(HERO_SUBLINE);
+    // Map coverage is one short line; the city list opens from it.
+    expect(MAP_COVERAGE).toBe(`Neighbourhood maps: ${MAP_CITIES.length} US cities`);
+    expect(out).toContain(MAP_COVERAGE);
+    expect(out).toMatch(/aria-expanded="false"/);
+    // No explainer rails or hints on a working screen.
+    expect(out).not.toMatch(/How every answer is made|What answers cannot tell you|You see how we read your question/);
     // No limits, costs or time estimates on Home: they live on Settings > Plan & usage.
     expect(out).not.toMatch(/about a minute|\d+ of \d+|per day|quota|economy|\$\d/i);
     // The box is #ask, so "New question" from any page lands in it.
@@ -40,10 +52,6 @@ describe("Home", () => {
     expect(out).toContain(`placeholder="${QUESTION_PLACEHOLDER}"`);
     expect(out).toMatch(/<form[^>]*data-state="idle"/);
     expect(out).toContain(">Get answer<");
-    for (const item of HOW_ITEMS) {
-      expect(out).toContain(item.title);
-      expect(out).toContain(item.line.replace(/'/g, "&#x27;"));
-    }
     // The small label over the statement; the footer is there.
     expect(out).toContain(">New question</p>");
     expect(out).toContain("Not financial advice");

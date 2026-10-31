@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { motion, useReducedMotion } from "motion/react";
 import { useId, useState, type ReactNode } from "react";
 import type { BriefTerminal } from "../../lib/brief";
 import { refusalSentence } from "../../lib/brief/steps";
@@ -132,7 +133,6 @@ function Actions({ children }: { children: ReactNode }) {
 export function StoppedCard({ question, className }: { question: string | null; className?: string }) {
   return (
     <EndCard state="cancelled" tone="plain" icon="square" heading="You stopped this answer." className={className}>
-      <p className="type-body text-ink-2">Nothing more is fetched. Anything that arrived before you stopped stays below.</p>
       <Actions>
         <AgainButton question={question} label="Run it again" />
       </Actions>
@@ -150,6 +150,7 @@ function failureDetails(terminal: Of<"failed">): string[] {
 /** Failed: "This answer couldn't be finished.", "Try again" and the "Details" disclosure. */
 export function FailedCard({ terminal, question, className }: { terminal: Of<"failed">; question: string | null; className?: string }) {
   const [open, setOpen] = useState(false);
+  const reduce = useReducedMotion();
   const id = useId();
   const details = failureDetails(terminal);
   return (
@@ -161,17 +162,27 @@ export function FailedCard({ terminal, question, className }: { terminal: Of<"fa
       className={className}
       foot={
         details.length > 0 ? (
-          <ul id={id} hidden={!open} className="flex flex-col gap-1.5 border-t border-line bg-sunken px-6 py-4 font-mono text-[12px] leading-[18px] text-ink-2 max-md:px-5">
-            {details.map((line) => (
-              <li key={line} className="[overflow-wrap:anywhere]">
-                {line}
-              </li>
-            ))}
-          </ul>
+          <motion.div
+            id={id}
+            initial={false}
+            animate={open ? { height: "auto", opacity: 1 } : { height: 0, opacity: 0 }}
+            transition={{ duration: reduce ? 0 : 0.2, ease: "easeOut" }}
+            aria-hidden={!open}
+            inert={!open}
+            data-details={open ? "open" : "closed"}
+            className="overflow-hidden"
+          >
+            <ul className="flex flex-col gap-1.5 border-t border-line bg-sunken px-6 py-4 font-mono text-[12px] leading-[18px] text-ink-2 max-md:px-5">
+              {details.map((line) => (
+                <li key={line} className="[overflow-wrap:anywhere]">
+                  {line}
+                </li>
+              ))}
+            </ul>
+          </motion.div>
         ) : null
       }
     >
-      <p className="type-body text-ink-2">Please try again.</p>
       <Actions>
         <AgainButton question={question} />
         {details.length > 0 ? (
@@ -209,11 +220,7 @@ export function NotStartedCard({ reason, question, className }: { reason: string
 export function PartialCard({ question, className }: { question: string | null; className?: string }) {
   return (
     <EndCard state="incomplete" tone="caution" icon="triangle-alert" heading="Partial answer" className={className}>
-      <p className="type-body text-ink-2">The evidence is here, but the analysis ran out of time to conclude.</p>
-      <p className="flex items-center gap-1.5 type-label text-caution-ink">
-        <Icon name="triangle-alert" size={14} className="shrink-0" />
-        This partial answer was not checked.
-      </p>
+      <p className="type-body text-ink-2">Ran out of time before concluding. Not checked.</p>
       <Actions>
         <AgainButton question={question} />
       </Actions>
@@ -245,7 +252,7 @@ export function RefusedCard({ terminal, className }: { terminal: Of<"refused">; 
 export function FailedInline({ question }: { question: string | null }) {
   return (
     <InlineState tone="danger" data-state-card="failed" action={<AgainButton question={question} size="sm" />}>
-      This answer couldn&apos;t be finished. Please try again.
+      This answer couldn&apos;t be finished.
     </InlineState>
   );
 }

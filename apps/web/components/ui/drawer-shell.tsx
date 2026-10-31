@@ -31,6 +31,8 @@ export interface DrawerShellProps {
   width?: number;
   /** Between the head and the body, e.g. the tabs. */
   toolbar?: ReactNode;
+  /** Phones: a full-screen sheet (default), or a side sheet at `width` over the scrim (the menu). */
+  phone?: "full" | "side";
   children: ReactNode;
   className?: string;
 }
@@ -41,7 +43,7 @@ export interface DrawerShellProps {
  * dialog: focus moves in and is trapped, Esc and a scrim click close it, focus returns to the opener. On
  * phones it is a full-screen sheet with a 44 px close button. Page scroll is locked while it is open.
  */
-export function DrawerShell({ open, onClose, title, subtitle, width = 520, toolbar, children, className }: DrawerShellProps) {
+export function DrawerShell({ open, onClose, title, subtitle, width = 520, toolbar, phone = "full", children, className }: DrawerShellProps) {
   const titleId = useId();
   const subtitleId = useId();
   const [panel, setPanel] = useState<HTMLDivElement | null>(null);
@@ -97,8 +99,10 @@ export function DrawerShell({ open, onClose, title, subtitle, width = 520, toolb
         onKeyDown={onPanelKeyDown}
         style={{ ["--drawer-w" as string]: `${width}px` }}
         className={cx(
-          "absolute inset-y-0 right-0 flex w-full flex-col bg-surface shadow-lg outline-none",
-          "max-md:top-0 md:w-[min(var(--drawer-w),100vw)] md:border-l md:border-line",
+          "absolute inset-y-0 right-0 flex flex-col bg-surface shadow-lg outline-none",
+          phone === "side"
+            ? "w-[min(var(--drawer-w),100vw)] border-l border-line"
+            : "w-full max-md:top-0 md:w-[min(var(--drawer-w),100vw)] md:border-l md:border-line",
           "motion-safe:animate-rise",
           className,
         )}

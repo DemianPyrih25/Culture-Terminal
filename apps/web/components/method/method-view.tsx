@@ -553,7 +553,7 @@ export function MethodView({ facts, scan, endpoints, trendWindow, evaluation, ru
     ...appendix,
   ];
   const head = (
-    <header className="flex flex-col gap-5">
+    <header className="flex animate-rise flex-col gap-5">
       <p className={EYEBROW}>How it works · Method</p>
       <h1 className="type-display-l text-ink max-md:type-display-l-sm">{METHOD_PAGE.title}</h1>
       <p className="max-w-[760px] font-display text-[21px] leading-[31px] text-ink-2 max-md:text-[18px] max-md:leading-[27px]">{METHOD_PAGE.lede}</p>

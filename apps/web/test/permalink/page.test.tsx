@@ -105,7 +105,7 @@ describe("a finished answer", () => {
     serve(stateOf(BRIEF));
     const own = await renderPage();
     expect(own).toContain('data-unlisted="true"');
-    expect(text(own)).toContain("Unlisted · user question");
+    expect(text(own)).toContain("Private link");
     serve(stateOf(BRIEF), true);
     expect(await renderPage()).not.toContain("data-unlisted");
   });

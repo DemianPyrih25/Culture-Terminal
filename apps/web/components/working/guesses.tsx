@@ -48,11 +48,13 @@ export function guessOf(prior: BriefPrior): Guess {
   return { id: prior.id, state, statement: guessStatement(prior), note };
 }
 
-export function GuessRow({ guess }: { guess: Guess }) {
+const ROW_DELAY = ["", "[animation-delay:40ms]", "[animation-delay:80ms]", "[animation-delay:120ms]"] as const;
+
+export function GuessRow({ guess, index = 0 }: { guess: Guess; index?: number }) {
   const look = LOOK[guess.state];
   return (
-    <li className="flex min-w-0 flex-col gap-1" data-guess={guess.state}>
-      <p className={cx("flex items-center gap-1.5 text-[13px] leading-[18px] font-semibold", look.wordClass)}>
+    <li className={cx("flex min-w-0 flex-col gap-1 motion-safe:animate-rise", ROW_DELAY[Math.min(index, ROW_DELAY.length - 1)])} data-guess={guess.state}>
+      <p className={cx("flex items-center gap-1.5 text-[13px] leading-[18px] font-semibold transition-colors duration-150", look.wordClass)}>
         <Icon name={look.icon} size={16} className={cx("shrink-0", look.iconClass)} />
         {look.word}
       </p>
@@ -69,18 +71,16 @@ export function GuessRow({ guess }: { guess: Guess }) {
   );
 }
 
-/** The captions: while live, and once the answer is checked. */
+/** The caption the answer page sets once every number is checked. The live card shows none. */
 export const GUESS_CAPTION = {
-  before: "Written before any data. Scored once every number is checked.",
-  side: "Scored once every number is checked.",
-  finished: "Written before any data. Scored after every number was checked.",
+  finished: "Scored after every number was checked.",
 } as const;
 
 export interface GuessesCardProps {
   priors: readonly BriefPrior[];
   /** full: the wide card before any number arrives. side: the column beside a chart. */
   variant?: "full" | "side";
-  /** Default per variant (the live captions); the answer page passes GUESS_CAPTION.finished. */
+  /** None by default; the answer page passes GUESS_CAPTION.finished. */
   caption?: string;
   className?: string;
 }
@@ -93,11 +93,11 @@ export function GuessesCard({ priors, variant = "side", caption, className }: Gu
     <Card data-guesses={variant} className={cx("flex flex-col", className)}>
       <CardTitle icon="lightbulb">{full ? "Before looking at the data, we guessed" : "We guessed, then checked"}</CardTitle>
       <ul className={cx("flex flex-col gap-6", full && "md:grid md:grid-cols-3 md:gap-x-6 md:gap-y-4")}>
-        {guesses.map((g) => (
-          <GuessRow key={g.id} guess={g} />
+        {guesses.map((g, i) => (
+          <GuessRow key={g.id} guess={g} index={i} />
         ))}
       </ul>
-      <p className={cx("mt-auto type-caption text-ink-2", full ? "pt-6" : "pt-6")}>{caption ?? (full ? GUESS_CAPTION.before : GUESS_CAPTION.side)}</p>
+      {caption ? <p className="mt-auto pt-6 type-caption text-ink-2">{caption}</p> : null}
     </Card>
   );
 }

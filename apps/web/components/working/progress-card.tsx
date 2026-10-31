@@ -19,7 +19,7 @@ const SURFACE = "flex flex-col overflow-hidden rounded-card border border-line b
 
 function StepIcon({ state }: { state: WorkingStepState }) {
   if (state === "active") return <Spinner size={16} className="shrink-0 text-accent" />;
-  if (state === "done") return <Icon name="circle-check" size={16} className="shrink-0 text-accent" />;
+  if (state === "done") return <Icon name="circle-check" size={16} className="shrink-0 text-good" />;
   return <Icon name="circle" size={16} className="shrink-0 text-ink-3" />;
 }
 
@@ -34,8 +34,8 @@ export function StepList({ steps, className }: { steps: readonly WorkingStep[]; 
           data-state={step.state}
           aria-current={step.state === "active" ? "step" : undefined}
           className={cx(
-            "flex min-w-0 items-center gap-3 px-5 py-3 md:flex-col md:items-stretch md:gap-2 md:py-4",
-            step.state === "active" && "bg-accent-soft",
+            "flex min-w-0 items-center gap-3 px-5 py-3 transition-[background-color,box-shadow] duration-200 ease-out md:flex-col md:items-stretch md:gap-2.5 md:px-4 md:py-4",
+            step.state === "active" && "bg-accent-soft shadow-[inset_0_2px_0_var(--color-accent)]",
           )}
         >
           <span className="flex items-center justify-between gap-2 md:w-full">
@@ -46,8 +46,8 @@ export function StepList({ steps, className }: { steps: readonly WorkingStep[]; 
           </span>
           <span
             className={cx(
-              "min-w-0 text-[14px] leading-5",
-              step.state === "active" ? "font-semibold text-ink" : step.state === "done" ? "text-ink" : "text-ink-3",
+              "min-w-0 text-[13px] leading-[18px]",
+              step.state === "active" ? "font-semibold text-ink" : step.state === "done" ? "font-medium text-ink" : "text-ink-3",
             )}
           >
             {step.label}
@@ -59,7 +59,7 @@ export function StepList({ steps, className }: { steps: readonly WorkingStep[]; 
 }
 
 /** The 4 px track: accent fill over sunken, width from the run's forward-only fraction. */
-export function ProgressTrack({ fraction, label = "Progress" }: { fraction: number; label?: string }) {
+export function ProgressTrack({ fraction, label = "Progress", className }: { fraction: number; label?: string; className?: string }) {
   const pct = Math.round(Math.min(1, Math.max(0, fraction)) * 100);
   return (
     <div
@@ -68,7 +68,7 @@ export function ProgressTrack({ fraction, label = "Progress" }: { fraction: numb
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={pct}
-      className="h-1 w-full overflow-hidden rounded-xs bg-sunken"
+      className={cx("h-1 w-full overflow-hidden rounded-xs bg-sunken", className)}
     >
       <div className="h-full rounded-xs bg-accent transition-[width] duration-[240ms] ease-out motion-reduce:transition-none" style={{ width: `${pct}%` }} />
     </div>
@@ -119,6 +119,10 @@ export interface ProgressCardProps {
   lookups?: readonly LookupChip[];
   /** "Being written · since 09:12:04"; null or absent hides the line. */
   since?: string | null;
+  /** "7 sources so far" or "7 of ~12 sources", right of the track; null or absent hides it. */
+  count?: string | null;
+  /** The lookup in flight ("Qloo /v2/insights · tags ← …") and its trace; null or absent hides the row. */
+  fetching?: { text: string; trace: string } | null;
   /** The polite announcement: the active step only, never the ticking time. */
   announcement: string;
   /** recording: a replay. */
@@ -138,6 +142,8 @@ export function ProgressCard({
   readAsLine = null,
   lookups = [],
   since = null,
+  count = null,
+  fetching = null,
   announcement,
   variant = "live",
 }: ProgressCardProps) {
@@ -148,7 +154,7 @@ export function ProgressCard({
       <CardHead
         title={title}
         time={
-          <p className="font-mono text-[13px] leading-5 text-ink-2 tabular-nums" data-time>
+          <p className="font-mono text-[13px] leading-5 text-ink tabular-nums" data-time>
             {time}
           </p>
         }
@@ -160,7 +166,7 @@ export function ProgressCard({
                   key={l.source}
                   data-lookup={l.source}
                   aria-label={l.label}
-                  className="flex items-center gap-1.5 rounded-sm border border-line px-2 py-0.5 type-caption text-ink-2"
+                  className="flex items-center gap-1.5 rounded-sm bg-sunken px-2 py-1 text-[11px] leading-4 font-medium text-ink-2 motion-safe:animate-rise"
                 >
                   {SOURCE_NAME[l.source]}
                   <span className="font-mono text-ink tabular-nums">{l.count}</span>
@@ -170,14 +176,29 @@ export function ProgressCard({
           ) : null
         }
       >
-        <ProgressTrack fraction={fraction} label={variant === "replay" ? "Recording progress" : "Progress"} />
+        <div className="flex items-center gap-4">
+          <ProgressTrack fraction={fraction} label={variant === "replay" ? "Recording progress" : "Progress"} className="min-w-0 flex-1" />
+          {count ? (
+            <p className="shrink-0 font-mono text-[11px] leading-4 text-ink-2 tabular-nums" data-source-count>
+              {count}
+            </p>
+          ) : null}
+        </div>
       </CardHead>
       <StepList steps={steps} className="border-y border-line" />
+      {fetching ? (
+        <p key={fetching.trace} className="flex min-w-0 items-center gap-2 border-b border-line px-6 py-3 text-[12px] leading-4 motion-safe:animate-rise max-md:px-5" data-now-fetching>
+          <Spinner size={13} className="shrink-0 text-accent" />
+          <span className="shrink-0 font-medium text-ink-2">Now fetching</span>
+          <span className="min-w-0 flex-1 truncate text-ink-2">{fetching.text}</span>
+          <span className="shrink-0 font-mono text-[11px] text-ink-3 tabular-nums max-md:hidden">{fetching.trace}</span>
+        </p>
+      ) : null}
       {readingAs || readAsLine || noticed || foot ? (
-        <div className="flex flex-col gap-4 px-6 py-5 max-md:px-5">
+        <div className="flex flex-col gap-3 bg-canvas/60 px-6 py-5 max-md:px-5">
           {readingAs ? (
-            <p className="type-body text-ink-2" data-reading-as>
-              <span className="font-semibold text-ink">Reading it as:</span> {readingAs}
+            <p className="text-[13px] leading-5 text-ink" data-reading-as>
+              <span className="font-medium text-ink-2">Reading it as:</span> {readingAs}
             </p>
           ) : null}
           {readAsLine ? (
@@ -186,7 +207,7 @@ export function ProgressCard({
             </p>
           ) : null}
           {noticed ? (
-            <p className="flex items-start gap-2 rounded-control border border-line px-3 py-2 type-body text-ink" data-noticed>
+            <p className="flex items-start gap-2 rounded-control border border-line bg-surface px-3 py-2.5 type-body text-ink motion-safe:animate-rise" data-noticed>
               <span className="flex h-6 shrink-0 items-center">
                 <Icon name="lightbulb" size={16} className="text-accent" />
               </span>
@@ -195,9 +216,9 @@ export function ProgressCard({
           ) : null}
           {foot ? (
             <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
-              {since ? <p className="type-caption text-ink-3">{since}</p> : <span />}
+              {since ? <p className="type-caption text-ink-2">{since}</p> : <span />}
               {editHref ? (
-                <ButtonLink href={editHref} variant="quiet" size="sm" icon="pencil" trailing={null} className="-mr-3 max-md:-ml-3">
+                <ButtonLink href={editHref} variant="link" size="sm" icon="pencil" trailing={null}>
                   Edit question
                 </ButtonLink>
               ) : null}
@@ -236,9 +257,6 @@ export function QueuedCard({ position, waitLeftS, editHref }: { position: number
         }
       >
         <ProgressTrack fraction={0} />
-        <p className="type-body text-ink-2" data-queue-note>
-          Every live slot is busy right now. Your question starts on its own when one frees up.
-        </p>
       </CardHead>
       {editHref ? (
         <div className="flex justify-end border-t border-line px-6 py-3 max-md:justify-start max-md:px-5">

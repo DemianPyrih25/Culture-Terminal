@@ -25,7 +25,10 @@ import { loadAccess } from "../protection/access-client";
 import { HumanCheckPanel, sharedHumanFetch, useHumanCheck, useHumanState } from "../protection/human-check-panel";
 import { useAccess } from "../protection/use-access";
 import { cx } from "../ui/cx";
+import { Icon } from "../ui/icons";
 import { AskNoticeView } from "./ask-notice";
+import { MapCoverageLine } from "./map-coverage-line";
+import { Expand, ExpandItem } from "./motion";
 import { QuestionBox, type QuestionBoxState } from "./question-box";
 import { SuggestionList, suggestionOptionId } from "./suggestion-list";
 import { moveActive, suggestionRows, suggestionsFor, type Suggestion } from "./suggestions";
@@ -47,8 +50,8 @@ function focusOnAskHash(field: HTMLTextAreaElement | null): void {
 }
 
 /**
- * Home's ask flow: the question box, its suggestion list, the "Understood as" line once the question
- * is read, and the one inline state under it. "Get answer" reads the question (POST /api/preview) and then, with no confirm step, opens
+ * Home's ask flow: the question box, its suggestion list, where maps exist, the "Understood as" line once
+ * the question is read, and the one inline state under it (each opens and closes with a short motion). "Get answer" reads the question (POST /api/preview) and then, with no confirm step, opens
  * the answer the visitor already has or starts the run (POST /api/runs with the preview's token) and
  * moves to it; the run id is kept in this browser's own answers first. Both requests pass the human
  * check (Turnstile, under the box) through humanFetch. A visitor whose live questions are paused sees
@@ -226,22 +229,51 @@ export function AskBox({ initialQuestion = "", parent: initialParent = null, cla
           />
         ) : null}
       </div>
-      {understood !== null ? <UnderstoodLine understood={understood} className="mt-4" /> : null}
-      {notice ? (
-        <AskNoticeView
-          id={NOTICE_ID}
-          notice={notice}
-          className="mt-4"
-          onReframe={(question) => {
-            setText(question);
-            ask(question);
-          }}
-          onRetry={() => {
-            if (state.run.kind === "failed") void startAnswer(state);
-            else if (state.phase.kind !== "idle") void send(state.phase.question);
-          }}
-        />
-      ) : null}
+      <MapCoverageLine className="pt-3" />
+      <Expand>
+        {understood !== null ? (
+          <ExpandItem key="understood" className="pt-3.5">
+            <UnderstoodLine understood={understood} />
+          </ExpandItem>
+        ) : null}
+        {state.phase.kind === "loading" ? (
+          <ExpandItem key="reading" className="pt-3.5">
+            <div aria-hidden="true" className="flex flex-col overflow-hidden rounded-md border border-line bg-surface">
+              <div className="flex items-center justify-between gap-3 border-b border-line px-[18px] py-3 max-md:px-3.5">
+                <span className="text-[11px] leading-4 font-semibold tracking-[0.08em] text-ink-2 uppercase">Understood as</span>
+                <span className="inline-flex items-center gap-1.5 text-[11px] leading-4 text-accent">
+                  <Icon name="loader-circle" size={12} className="animate-spin motion-reduce:animate-none" />
+                  Reading your question…
+                </span>
+              </div>
+              <div className="flex flex-col px-[18px] pt-1.5 pb-2.5 max-md:px-3.5">
+                {(["Desk", "Place", "Names matched"] as const).map((key, i) => (
+                  <div key={key} className="flex items-center gap-4 border-b border-line py-2.5 last:border-b-0">
+                    <span className="w-[120px] shrink-0 text-[12px] leading-5 text-ink-2">{key}</span>
+                    <span className="h-2.5 rounded-xs bg-sunken motion-safe:animate-pulse" style={{ width: [220, 260, 300][i] }} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </ExpandItem>
+        ) : null}
+        {notice ? (
+          <ExpandItem key={`notice-${notice.kind}`} className="pt-4">
+            <AskNoticeView
+              id={NOTICE_ID}
+              notice={notice}
+              onReframe={(question) => {
+                setText(question);
+                ask(question);
+              }}
+              onRetry={() => {
+                if (state.run.kind === "failed") void startAnswer(state);
+                else if (state.phase.kind !== "idle") void send(state.phase.question);
+              }}
+            />
+          </ExpandItem>
+        ) : null}
+      </Expand>
       <HumanCheckPanel check={human} className="mt-3" />
       <p role="status" aria-live="polite" className="sr-only">
         {askStatusText(state, notice, waitingForCheck)}

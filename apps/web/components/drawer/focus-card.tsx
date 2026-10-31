@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { capitalize, isKnownAbsence, type Footnote } from "../../lib/brief";
-import { ButtonLink } from "../ui";
+import { Icon } from "../ui";
 
 /**
  * C/FocusCard: the number the drawer is about. "This number", the value, what it is, then where it came
@@ -66,28 +66,29 @@ export function focusView(note: Footnote, copy: NumberCopy | null = null, figure
 
 export function FocusCard({ view, children }: { view: FocusView; children?: ReactNode }) {
   return (
-    <section aria-label={view.kicker} data-focus-card className="flex flex-col gap-3.5 rounded-sm border border-line bg-canvas px-5 py-[18px]">
+    <section aria-label={view.kicker} data-focus-card className="flex flex-col gap-3.5 rounded-sm border border-line bg-canvas px-5 py-[18px] max-md:px-4">
       <div className="flex flex-col gap-2">
-        <p className="text-[11px] leading-4 font-semibold tracking-[0.08em] text-ink-3 uppercase">{view.kicker}</p>
+        <p className="text-[11px] leading-4 font-semibold tracking-[0.09em] text-ink-2 uppercase">{view.kicker}</p>
         {view.value ? (
           <p className="font-mono text-[40px] leading-[44px] font-medium tracking-[-0.02em] text-ink tabular-nums [overflow-wrap:anywhere] max-md:text-[32px] max-md:leading-9">
             {view.value}
           </p>
         ) : null}
-        <p className="text-[13px] leading-5 text-ink-2">{view.description}</p>
+        <p className="text-[13px] leading-[19px] text-ink-2">{view.description}</p>
       </div>
       <dl className="flex flex-col">
         {view.rows.map((row) => (
           <div key={row.key} className="grid grid-cols-[84px_minmax(0,1fr)] gap-x-3 border-t border-line py-2">
-            <dt className="text-[12px] leading-5 text-ink-3">{row.key}</dt>
+            <dt className="text-[12px] leading-5 text-ink-2">{row.key}</dt>
             <dd className="text-[13px] leading-5 text-ink">{row.value}</dd>
           </div>
         ))}
       </dl>
       {view.methodHref ? (
-        <ButtonLink href={view.methodHref} size="sm" trailing="arrow-right" className="self-start">
+        <a href={view.methodHref} className="inline-flex items-center gap-1 self-start rounded-xs text-[12px] leading-[18px] font-semibold text-accent hover:text-accent-hover hover:underline hover:underline-offset-4">
           How it&apos;s calculated
-        </ButtonLink>
+          <Icon name="arrow-up-right" size={12} />
+        </a>
       ) : null}
       {children}
     </section>

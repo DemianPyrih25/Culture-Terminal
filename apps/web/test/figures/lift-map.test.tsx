@@ -175,8 +175,8 @@ describe("geoLiftBars", () => {
     const dots = plotView(render(<DivergingBars data={bars} display="dumbbell" title="Dots" />));
     // A dot below the baseline is drawn in the negative colour, one above in the data colour.
     const low = data.neighbourhoods.filter((n) => n.lift !== null).at(-1)!;
-    expect(rowMarkup(dots, low.id)).toContain("fill-second");
-    expect(rowMarkup(dots, data.neighbourhoods[0]!.id)).toMatch(/<circle[^>]*class="fill-accent"/);
+    expect(rowMarkup(dots, low.id)).toContain("fill-danger");
+    expect(rowMarkup(dots, data.neighbourhoods[0]!.id)).toMatch(/<circle[^>]*class="fill-good"/);
     expect(text(rowMarkup(dots, "holly"))).toContain("too few cells");
   });
 });

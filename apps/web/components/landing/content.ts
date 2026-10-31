@@ -10,9 +10,13 @@ export const LANDING_META = {
     "Ask one question in plain English and get a one-page answer in about a minute, built from Qloo taste data, SEC EDGAR, US Census ACS and OpenStreetMap. Every number is computed in code and traced to its source.",
 } as const;
 
-/** Where every call to action goes: there are no accounts, so "start" means "ask". */
+/** Where the calls to action go: a free account first, then the ask box on Home. */
 export const ASK_HREF = "/";
 export const START_LABEL = "Start asking";
+export const SIGNUP_HREF = "/signup";
+export const SIGNUP_LABEL = "Create account";
+export const LOGIN_HREF = "/login";
+export const LOGIN_LABEL = "Sign in";
 
 export const NAV_LINKS: readonly { label: string; href: string }[] = [
   { label: "Product", href: "#product" },
@@ -28,7 +32,6 @@ export const HERO = {
   title: "Know what your audience loves, and where, before you commit the budget.",
   lead: "Ask one question in plain English. In about a minute you get a one-page answer with a verdict, maps and charts. Every number is computed in code and traced to the request that produced it.",
   secondary: "See how it works",
-  fine: "No account needed. Your answers stay in this browser.",
   visualAlt:
     "An answer page: a verdict with rule-scored confidence, a neighbourhood lift map of Chicago, three key numbers, the guesses written before the data, and what AI alone would have said.",
   visualNote: "Illustration. The brand and figures are invented.",
@@ -47,7 +50,7 @@ export const SOURCES: readonly { name: string; text: string }[] = [
 export const HOW = {
   eyebrow: "How it works",
   title: "One question in. A one-page answer out, with the working shown.",
-  lead: "No job picker, no city picker, no dashboard to configure. You write the question the way you would ask a colleague.",
+  lead: "No pickers, no dashboard to configure. Ask the way you would ask a colleague.",
 } as const;
 
 export interface LandingStep {
@@ -60,17 +63,17 @@ export const STEPS: readonly LandingStep[] = [
   {
     n: "01",
     title: "Ask in plain English",
-    text: "Up to 400 characters. A small model reads it into one of 13 jobs. Names are matched exactly; if a name is ambiguous, you pick. Nothing is swapped in for you.",
+    text: "Up to 400 characters, read into one of 13 jobs. Names are matched exactly; if one is ambiguous, you pick.",
   },
   {
     n: "02",
     title: "Watch it work",
-    text: "Each step runs in front of you in about a minute: the opening scan, the analyst's guesses written before any data, follow-ups the data triggers. Stop at any time.",
+    text: "About a minute, step by step: the opening scan, guesses written before any data, follow-ups the data triggers. Stop at any time.",
   },
   {
     n: "03",
     title: "Get the answer, with proof",
-    text: "A verdict, rule-scored confidence, key numbers, maps and charts. Every number opens to the request behind it in the How we know drawer.",
+    text: "A verdict, rule-scored confidence, key numbers, maps and charts. Every number opens to the request behind it.",
   },
 ];
 
@@ -171,7 +174,7 @@ export const ALSO: readonly { title: string; text: string; href: string }[] = [
 export const FIGURES = {
   eyebrow: "The figures",
   title: "Maps, tables and grids you can put in front of a board.",
-  lead: "Every chart carries a fixed caption that states its limit. Every value opens to the request behind it. Where data is missing, the figure says so in words.",
+  lead: "Each chart states its limit. Each value opens to its request. Missing data is named, never drawn as zero.",
   mapAlt:
     "A neighbourhood lift map of Chicago with a layer switcher, a colour legend from below to above the city baseline, and a ranked list of areas.",
   tableAlt:
@@ -181,7 +184,7 @@ export const FIGURES = {
 export const HONESTY = {
   eyebrow: "Honest by construction",
   title: "We say what we do not know.",
-  lead: "A research answer is only worth acting on if you can see where it is thin. So the limits are part of the page, not a footnote.",
+  lead: "An answer is only worth acting on if you can see where it is thin.",
 } as const;
 
 export const HONESTY_POINTS: readonly { title: string; text: string }[] = [
@@ -209,7 +212,6 @@ export const APART = {
   aiSub: "Model knowledge · no figures",
   aiText:
     "Background the model already knows about the brand or place, written in words and kept out of the numbers.",
-  aiNote: "Not checked against data. Read as background, not evidence.",
   webTitle: "From the web",
   webSub: "Dated findings",
   webText: "Each finding names its publisher, title and date. It never changes the measured answer.",
@@ -248,8 +250,6 @@ export const LIMITS = {
   planLink: "See your current numbers in Settings",
   planHref: "/settings",
   note: "Paid plans with higher limits are not open yet. When they are, this page will say so first.",
-  hitLabel: "What you see when a limit is hit",
-  hitText: "You've used today's answers. They reset at 00:00 UTC. Answers you already have still open.",
 } as const;
 
 export const COVERAGE = {
@@ -311,10 +311,11 @@ export const FOOTER_COLUMNS: readonly { title: string; links: readonly { label: 
   {
     title: "Product",
     links: [
-      { label: "Start asking", href: "/" },
       { label: "How it works", href: "#how" },
       { label: "Desks", href: "#desks" },
       { label: "Limits", href: "#limits" },
+      { label: "Create account", href: "/signup" },
+      { label: "Sign in", href: "/login" },
     ],
   },
   {

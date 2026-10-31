@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { SiteShell } from "../../components/chrome/site-shell";
-import { Following, FollowingNotes } from "../../components/following/following-view";
-import { LEAD_MAIN, LEAD_NOTE } from "../../components/following/model";
+import { Following } from "../../components/following/following-view";
+import { LEAD_NOTE } from "../../components/following/model";
+import { Icon } from "../../components/ui/icons";
 
 export const metadata: Metadata = {
   title: "Following · Culture Terminal",
@@ -13,19 +14,14 @@ export const metadata: Metadata = {
 export default function FollowingPage() {
   return (
     <SiteShell active="following" mainClassName="pt-12 pb-24 max-md:pt-8 max-md:pb-16">
-      <div className="flex items-start gap-14">
-        <div className="min-w-0 flex-1">
-          <header className="flex flex-col gap-5 pb-10 max-md:pb-8">
-            <h1 className="m-0 type-display-m text-ink max-md:type-display-m-sm">Following</h1>
-            <div className="flex max-w-[680px] flex-col gap-2">
-              <p className="m-0 type-body text-ink">{LEAD_MAIN}</p>
-              <p className="m-0 type-label font-normal text-ink-3">{LEAD_NOTE}</p>
-            </div>
-          </header>
-          <Following />
-        </div>
-        <FollowingNotes className="w-[260px] shrink-0 border-l border-line pt-24 pl-6 max-lg:hidden" />
-      </div>
+      <header className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2 pb-8 max-md:pb-6 motion-safe:animate-rise">
+        <h1 className="m-0 type-display-m text-ink max-md:type-display-m-sm">Following</h1>
+        <span className="inline-flex items-center gap-1.5 text-[12px] leading-4 text-ink-2">
+          <Icon name="circle-pause" size={13} className="shrink-0 text-ink-3" />
+          {LEAD_NOTE}
+        </span>
+      </header>
+      <Following />
     </SiteShell>
   );
 }

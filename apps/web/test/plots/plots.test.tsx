@@ -125,12 +125,12 @@ describe("DivergingRows", () => {
   ];
   const html = render(<DivergingRows label="Who the fans are" rows={rows} />);
 
-  it("puts more to the right in accent and less to the left in second, with the direction header", () => {
+  it("puts more to the right in green and less to the left in red, with the direction header", () => {
     expect(html).toMatch(/data-row="Women" data-side="more"/);
     expect(html).toMatch(/data-row="Men" data-side="less"/);
     expect(html).toMatch(/data-row="55\+" data-side="none"/);
-    expect(html).toContain('data-bar="more" class="h-3 shrink-0 rounded-r-xs bg-accent"');
-    expect(html).toContain('data-bar="less" class="h-3 shrink-0 rounded-l-xs bg-second"');
+    expect(html).toContain('data-bar="more" class="h-3 shrink-0 rounded-r-xs bg-good"');
+    expect(html).toContain('data-bar="less" class="h-3 shrink-0 rounded-l-xs bg-danger"');
     expect(text(html)).toContain("Less than averageMore than average");
     expect(text(html)).toContain(`${MINUS}0.29`);
     expect(text(html)).toContain("+0.31");

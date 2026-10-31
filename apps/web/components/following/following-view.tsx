@@ -15,7 +15,7 @@ import { InlineState } from "../ui/inline-state";
 import { Skeleton } from "../ui/skeleton";
 import { FollowsError, pointFollow, readPendingReruns, runStatus, sharedFollows, writePendingRerun, type FollowsState } from "./client";
 import { useFollows } from "./follow-button";
-import { EMPTY_TEXT, followRowModel, RERUN_IDLE, rerunEndedMessage, type FollowRowModel, type NoteStatus, type RerunState } from "./model";
+import { EMPTY_HEAD, EMPTY_TEXT, followRowModel, RERUN_IDLE, rerunEndedMessage, type FollowRowModel, type NoteStatus, type RerunState } from "./model";
 
 /** How often a running re-run is looked at. */
 export const RERUN_POLL_MS = 5000;
@@ -35,8 +35,8 @@ const NOTE_TAG: Readonly<Record<NoteStatus, string>> = {
   stopped: "bg-sunken text-ink-2",
 };
 
-/** Section labels: small caps, tracked, ink-3. */
-const SECTION_LABEL = "text-[11px] leading-4 font-semibold tracking-[0.1em] uppercase text-ink-3";
+/** The kind line of a row and the rail head: mono small caps. */
+const MONO_LABEL = "font-mono text-[11px] leading-4 font-semibold tracking-[0.1em] uppercase text-ink-2";
 
 export interface FollowRowProps {
   row: FollowRowModel;
@@ -53,7 +53,7 @@ export function FollowRow({ row, onRerun, onUnfollow, className }: FollowRowProp
   return (
     <div data-follow-row={row.id} className={cx("flex flex-col gap-4 py-5 md:flex-row md:items-start md:gap-6", className)}>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <span className={SECTION_LABEL}>
+        <span className={MONO_LABEL}>
           {row.kindLabel}
           {row.jobLabel ? ` · ${row.jobLabel}` : ""}
         </span>
@@ -63,7 +63,7 @@ export function FollowRow({ row, onRerun, onUnfollow, className }: FollowRowProp
         {note && look ? (
           <Link
             href={note.href}
-            className="group mt-1 flex min-w-0 items-center gap-2 rounded-sm border border-line bg-surface px-2.5 py-1.5 transition-colors hover:border-line-strong"
+            className="group mt-1 flex min-w-0 items-center gap-2 rounded-sm border border-line bg-surface px-2.5 py-1.5 transition-colors duration-150 hover:border-line-strong hover:bg-canvas active:bg-sunken"
             data-note-status={note.status}
           >
             <span className={cx("flex shrink-0 items-center", look.className)}>
@@ -74,20 +74,20 @@ export function FollowRow({ row, onRerun, onUnfollow, className }: FollowRowProp
               <span className={cx("max-w-full shrink-0 truncate rounded-xs px-1.5 py-0.5 text-[12px] leading-4 font-semibold", NOTE_TAG[note.status])}>
                 {note.text}
               </span>
-              {note.headline ? <span className="min-w-0 truncate type-label font-normal text-ink-2 max-md:hidden"> · {note.headline}</span> : null}
+              {note.headline ? <span className="min-w-0 truncate text-[13px] leading-5 text-ink-2 max-md:hidden">{note.headline}</span> : null}
             </span>
-            <time dateTime={note.createdAt} className="shrink-0 font-mono text-[11px] leading-4 text-ink-3 tabular-nums">
-              · {note.day}
+            <time dateTime={note.createdAt} className="shrink-0 font-mono text-[11px] leading-4 text-ink-2 tabular-nums">
+              {note.day}
             </time>
-            <Icon name="chevron-right" size={14} className="shrink-0 text-ink-3 transition-colors group-hover:text-ink" />
+            <Icon name="chevron-right" size={14} className="shrink-0 text-ink-3 transition-[color,transform] duration-150 group-hover:translate-x-0.5 group-hover:text-ink" />
           </Link>
         ) : (
-          <span className="type-label font-normal text-ink-3">No note yet. Run it to get the first one.</span>
+          <span className="text-[13px] leading-5 text-ink-2">No note yet</span>
         )}
         {row.pending && rerun.kind !== "running" ? (
           <Link
             href={row.pending.href}
-            className="flex items-center gap-2 self-start rounded-sm bg-caution-soft px-2.5 py-1.5 type-label font-semibold text-caution-ink hover:underline"
+            className="flex items-center gap-2 self-start rounded-sm bg-caution-soft px-2.5 py-1.5 type-label font-semibold text-caution-ink hover:underline motion-safe:animate-rise"
             data-follow-pending="true"
           >
             <Icon name="triangle-alert" size={14} className="shrink-0 text-caution" />
@@ -97,7 +97,7 @@ export function FollowRow({ row, onRerun, onUnfollow, className }: FollowRowProp
         {rerun.kind === "running" ? (
           <Link
             href={`/run/${encodeURIComponent(rerun.runId)}`}
-            className="flex items-center gap-2 self-start type-label font-semibold text-accent hover:underline"
+            className="flex items-center gap-2 self-start type-label font-semibold text-accent hover:underline motion-safe:animate-rise"
             data-rerun="running"
           >
             <Spinner size={14} />
@@ -105,13 +105,13 @@ export function FollowRow({ row, onRerun, onUnfollow, className }: FollowRowProp
           </Link>
         ) : null}
         {rerun.kind === "error" ? (
-          <p role="alert" className="m-0 flex items-start gap-2 type-label font-normal text-ink-2" data-rerun="error">
+          <p role="alert" className="m-0 flex items-start gap-2 type-label font-normal text-ink-2 motion-safe:animate-rise" data-rerun="error">
             <Icon name="circle-x" size={14} className="mt-0.5 shrink-0 text-danger" />
             <span>{rerun.message}</span>
           </p>
         ) : null}
         {rerun.kind === "ended" ? (
-          <p className="m-0 flex items-start gap-2 type-label font-normal text-ink-2" data-rerun="ended">
+          <p className="m-0 flex items-start gap-2 type-label font-normal text-ink-2 motion-safe:animate-rise" data-rerun="ended">
             <Icon name="triangle-alert" size={14} className="mt-0.5 shrink-0 text-caution" />
             <span>
               {rerun.message}{" "}
@@ -123,10 +123,15 @@ export function FollowRow({ row, onRerun, onUnfollow, className }: FollowRowProp
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1 md:pt-6">
-        <Button variant="secondary" size="sm" icon="rotate-ccw" loading={working} loadingLabel="Re-running…" disabled={working} onClick={onRerun}>
+        <Button
+          variant={note ? "secondary" : "primary"}
+          trailing={null}
+          size="sm"
+          icon={note ? "rotate-ccw" : "play"}
+          loading={working} loadingLabel="Re-running…" disabled={working} onClick={onRerun}>
           {row.rerunLabel}
         </Button>
-        <Button variant="quiet" size="sm" icon="x" disabled={working} onClick={onUnfollow} aria-label={`Unfollow ${row.label}`} title="Unfollow">
+        <Button variant="quiet" size="sm" icon="x" trailing={null} disabled={working} onClick={onUnfollow} aria-label={`Unfollow ${row.label}`} title="Unfollow">
           <span className="md:sr-only">Unfollow</span>
         </Button>
       </div>
@@ -190,12 +195,13 @@ export function FollowingView({ state, reruns = {}, now, timeZone, onRerun, onUn
   }
   if (state.follows.length === 0) {
     return (
-      <div className={cx("flex flex-col items-start gap-5 rounded-md border border-line bg-surface p-8 max-md:p-6", className)}>
-        <span className="flex size-10 items-center justify-center rounded-sm bg-sunken text-ink-2">
+      <div className={cx("flex flex-col items-start gap-4 rounded-md border border-line-strong bg-surface p-12 max-md:p-6 motion-safe:animate-rise", className)}>
+        <span className="flex size-11 items-center justify-center rounded-full bg-sunken text-ink-2">
           <Icon name="list-checks" size={20} />
         </span>
-        <p className="m-0 max-w-[520px] type-body text-ink-2">{EMPTY_TEXT}</p>
-        <ButtonLink variant="primary" size="sm" href={NEW_QUESTION_HREF}>
+        <h2 className="m-0 font-display text-[22px] leading-7 font-medium text-ink">{EMPTY_HEAD}</h2>
+        <p className="m-0 max-w-[560px] text-[15px] leading-6 text-ink-2">{EMPTY_TEXT.slice(EMPTY_HEAD.length + 1)}</p>
+        <ButtonLink variant="primary" size="md" icon="plus" trailing={null} href={NEW_QUESTION_HREF}>
           Ask a question
         </ButtonLink>
       </div>
@@ -203,23 +209,21 @@ export function FollowingView({ state, reruns = {}, now, timeZone, onRerun, onUn
   }
   const full = state.follows.length >= state.max;
   return (
-    <div className={cx("flex flex-col", className)}>
+    <div className={cx("flex flex-col motion-safe:animate-rise", className)}>
       <div className="flex items-baseline justify-between gap-4 border-b border-ink pb-2.5">
-        <p className="m-0 type-caption text-ink-3" data-follow-count={state.follows.length}>
-          {state.follows.length} followed · kept on this browser only
+        <p className="m-0 font-mono text-[12px] leading-4 text-ink-2 tabular-nums" data-follow-count={state.follows.length}>
+          {state.follows.length} followed
         </p>
-        <span className={cx(SECTION_LABEL, "max-md:hidden")} aria-hidden="true">
-          Latest note · actions
-        </span>
+        {full ? (
+          <span className="inline-flex items-center gap-1.5 type-label font-normal text-caution-ink" data-follow-full="true">
+            <Icon name="triangle-alert" size={13} className="shrink-0 text-caution" />
+            List full. Unfollow one to add another.
+          </span>
+        ) : null}
       </div>
-      {full ? (
-        <p className="m-0 mt-4 type-label font-normal text-ink-2" data-follow-full="true">
-          This browser follows as many as it can keep. Unfollow one to follow something new.
-        </p>
-      ) : null}
       <ul className="m-0 flex list-none flex-col divide-y divide-line border-b border-line p-0">
-        {state.follows.map((follow) => (
-          <li key={follow.id}>
+        {state.follows.map((follow, i) => (
+          <li key={follow.id} className="motion-safe:animate-rise" style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}>
             <FollowRow
               row={followRowModel(follow, reruns[follow.id] ?? RERUN_IDLE, now, timeZone)}
               onRerun={onRerun ? () => onRerun(follow) : undefined}
@@ -228,37 +232,7 @@ export function FollowingView({ state, reruns = {}, now, timeZone, onRerun, onUn
           </li>
         ))}
       </ul>
-      <p className="m-0 mt-4 max-w-[640px] type-caption text-ink-3">
-        Notes are what each run found on the day shown. Nothing here says a note changed; open two answers side by side to
-        compare them yourself.
-      </p>
     </div>
-  );
-}
-
-const NOTES: ReadonlyArray<{ icon: IconName; title: string; text: string }> = [
-  { icon: "user-round", title: "Kept on this browser", text: "Follows live in this browser's cookie. Another browser, or a cleared cookie, starts empty." },
-  { icon: "circle-pause", title: "Nothing updates by itself", text: "No alerts, change markers or scheduled refreshes. A note is what the last run found, on the day shown." },
-  { icon: "rotate-ccw", title: "A re-run reads today's data", text: "It is a fresh run, not a saved answer." },
-  { icon: "file-text", title: "Your last note stays", text: "If a re-run is stopped, declined or needs your pick, the note you had is kept until a re-run finishes." },
-  { icon: "list-checks", title: "One follow per subject", text: "Following again refreshes it and keeps the newer note." },
-];
-
-/** The margin notes beside the list: how following behaves, in five short facts. */
-export function FollowingNotes({ className }: { className?: string }) {
-  return (
-    <aside aria-label="How following works" className={cx("flex flex-col gap-6", className)}>
-      <h2 className={cx("m-0", SECTION_LABEL)}>How following works</h2>
-      {NOTES.map((n) => (
-        <div key={n.title} className="flex flex-col gap-1">
-          <span className="flex items-center gap-2 type-label font-semibold text-ink">
-            <Icon name={n.icon} size={14} className="shrink-0 text-ink-2" />
-            {n.title}
-          </span>
-          <p className="m-0 type-label font-normal text-ink-3">{n.text}</p>
-        </div>
-      ))}
-    </aside>
   );
 }
 

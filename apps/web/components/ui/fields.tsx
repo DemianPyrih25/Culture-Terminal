@@ -5,8 +5,7 @@ import { useId, type InputHTMLAttributes, type ReactNode, type Ref, type SelectH
 import { cx } from "./cx";
 import { Icon } from "./icons";
 
-const FIELD_FRAME =
-  "flex h-10 w-full items-center rounded-sm border bg-surface transition-[border-color,box-shadow]";
+const FIELD_FRAME = "flex h-9 w-full items-center rounded-sm border bg-surface max-md:h-11 transition-[border-color,box-shadow]";
 
 /** Border colours of a field frame: accent with the soft ring while focused, danger on error. */
 function frameTone(error: ReactNode): string {
@@ -14,7 +13,7 @@ function frameTone(error: ReactNode): string {
     ? "border-danger focus-within:shadow-[0_0_0_3px_var(--color-danger-soft)]"
     : "border-line-strong hover:border-ink-3 focus-within:border-accent focus-within:hover:border-accent focus-within:shadow-[0_0_0_3px_var(--color-accent-soft)]";
 }
-const FIELD_LABEL = "type-label text-ink";
+const FIELD_LABEL = "text-[12px] leading-4 font-medium text-[#33363d]";
 
 interface FieldChrome {
   /** The label above the field (13/500 ink). */
@@ -27,14 +26,7 @@ interface FieldChrome {
   className?: string;
 }
 
-function FieldShell({
-  id,
-  label,
-  help,
-  error,
-  className,
-  children,
-}: FieldChrome & { id: string; children: ReactNode }) {
+function FieldShell({ id, label, help, error, className, children }: FieldChrome & { id: string; children: ReactNode }) {
   const note = error ?? help;
   return (
     <div className={cx("flex w-full flex-col gap-1.5", className)}>
@@ -43,7 +35,7 @@ function FieldShell({
       </label>
       {children}
       {note ? (
-        <p id={`${id}-note`} className={cx("type-caption", error ? "text-danger-ink" : "text-ink-3")}>
+        <p id={`${id}-note`} className={cx("type-caption", error ? "text-danger-ink" : "text-ink-2")}>
           {note}
         </p>
       ) : null}
@@ -52,7 +44,9 @@ function FieldShell({
 }
 
 export type InputProps = FieldChrome &
-  Omit<InputHTMLAttributes<HTMLInputElement>, "className"> & { ref?: Ref<HTMLInputElement> };
+  Omit<InputHTMLAttributes<HTMLInputElement>, "className"> & {
+    ref?: Ref<HTMLInputElement>;
+  };
 
 /** Input: label, 40 px field, help line. */
 export function Input({ label, help, error, className, id, ref, ...rest }: InputProps) {
@@ -66,7 +60,7 @@ export function Input({ label, help, error, className, id, ref, ...rest }: Input
           id={inputId}
           aria-invalid={error ? true : undefined}
           aria-describedby={error || help ? `${inputId}-note` : undefined}
-          className="h-full min-w-0 flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-3 disabled:cursor-not-allowed disabled:text-ink-3"
+          className="h-full min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-3 max-md:text-[16px] disabled:cursor-not-allowed disabled:text-ink-3"
           {...rest}
         />
       </div>
@@ -75,7 +69,10 @@ export function Input({ label, help, error, className, id, ref, ...rest }: Input
 }
 
 export type SelectProps = FieldChrome &
-  Omit<SelectHTMLAttributes<HTMLSelectElement>, "className"> & { children: ReactNode; ref?: Ref<HTMLSelectElement> };
+  Omit<SelectHTMLAttributes<HTMLSelectElement>, "className"> & {
+    children: ReactNode;
+    ref?: Ref<HTMLSelectElement>;
+  };
 
 /** Select: a native select drawn as the 40 px field with a chevron. */
 export function Select({ label, help, error, className, id, children, ref, ...rest }: SelectProps) {
@@ -89,7 +86,7 @@ export function Select({ label, help, error, className, id, children, ref, ...re
           id={selectId}
           aria-invalid={error ? true : undefined}
           aria-describedby={error || help ? `${selectId}-note` : undefined}
-          className="h-full w-full min-w-0 cursor-pointer appearance-none bg-transparent pr-9 pl-3 text-[14px] text-ink outline-none disabled:cursor-not-allowed disabled:text-ink-3"
+          className="h-full w-full min-w-0 cursor-pointer appearance-none bg-transparent pr-9 pl-3 text-[13px] text-ink max-md:text-[16px] outline-none disabled:cursor-not-allowed disabled:text-ink-3"
           {...rest}
         >
           {children}

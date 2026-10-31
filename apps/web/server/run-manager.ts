@@ -787,6 +787,16 @@ export class RunManager {
     return this.active.size;
   }
 
+  /** Read only, for Settings: public runs this visitor holds here, running or queued (VISITOR_MAX_ACTIVE counts these). */
+  heldBy(visitor: string): number {
+    return this.activeVisitorRuns(visitor);
+  }
+
+  /** Read only, for Settings: agent runs of the lane on its slots here. */
+  laneHeld(lane: Lane): number {
+    return this.activeAgentRuns(lane);
+  }
+
   /** Agent runs waiting for a slot here (D24), those still being admitted to the queue included. */
   queuedCount(): number {
     return this.queue.size;

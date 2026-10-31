@@ -1,12 +1,12 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { FOLLOWS_PER_VISITOR_MAX } from "@ct/contracts/values";
+import { useEffect, useState } from "react";
 import { useFollows } from "../following/follow-button";
 import { useAccess } from "../protection/use-access";
 import { cx } from "../ui/cx";
-import { laneName, secondsWords, serviceView, type PlanFacts, type ServiceView } from "./plan-facts";
+import { laneName, serviceView, type ServiceView } from "./plan-facts";
 import { SETTINGS_LABEL } from "./settings-nav";
+import { fetchUsage, usageRows, type Usage, type UsageRow, type UsageTone } from "./usage";
 
 const TONE_DOT: Record<ServiceView["tone"], string> = {
   good: "bg-good",
@@ -15,128 +15,134 @@ const TONE_DOT: Record<ServiceView["tone"], string> = {
   muted: "bg-ink-3",
 };
 
-function Section({ label, id, children }: { label: string; id: string; children: ReactNode }) {
-  return (
-    <section aria-labelledby={id} className="flex flex-col gap-3">
-      <h2 id={id} className={SETTINGS_LABEL}>
-        {label}
-      </h2>
-      <div className="rounded-card border border-line bg-surface">{children}</div>
-    </section>
-  );
+const BAR: Record<UsageTone, string> = { accent: "bg-accent", caution: "bg-caution", danger: "bg-danger" };
+const LEFT: Record<UsageTone, string> = { accent: "text-ink", caution: "text-caution-ink", danger: "text-danger-ink" };
+
+/** How often an open page reads the usage again, while visible. */
+const USAGE_REFRESH_MS = 60_000;
+
+/** The visitor's usage (GET /api/access?usage=1), read on mount and every minute; `undefined` until the first read. */
+function useUsage(): { usage: Usage | null | undefined; elapsedS: number } {
+  const [read, setRead] = useState<{ usage: Usage | null; at: number } | undefined>(undefined);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      const usage = await fetchUsage();
+      if (alive) {
+        const at = Date.now();
+        setRead({ usage, at });
+        setNow(at);
+      }
+    };
+    void load();
+    const timer = setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, USAGE_REFRESH_MS);
+    const tick = setInterval(() => setNow(Date.now()), 15_000);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+      clearInterval(tick);
+    };
+  }, []);
+  return { usage: read?.usage, elapsedS: read ? Math.max(0, Math.floor((now - read.at) / 1000)) : 0 };
 }
 
-/** One figure in a row of three: a label over a mono number and its unit. */
-function Figure({ label, value, unit }: { label: string; value: ReactNode; unit: string }) {
+/** One limit: name and reset on the left, "used X of Y" and "Z left" in mono on the right, a thin bar under both. */
+function LimitRow({ row }: { row: UsageRow }) {
   return (
-    <div className="flex flex-col gap-1 px-6 py-5 max-md:px-5 max-md:py-4">
-      <dt className="text-[13px] leading-[18px] text-ink-3">{label}</dt>
-      <dd className="flex items-baseline gap-1.5">
-        <span className="font-mono text-[22px] leading-7 text-ink tabular-nums">{value}</span>
-        <span className="text-[13px] leading-[18px] text-ink-2">{unit}</span>
-      </dd>
-    </div>
-  );
-}
-
-function Row({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-baseline justify-between gap-6 px-6 py-4 max-md:flex-col max-md:gap-1 max-md:px-5">
-      <dt className="text-[14px] leading-5 text-ink">{label}</dt>
-      <dd className="text-right text-[14px] leading-5 text-ink-2 max-md:text-left">{children}</dd>
-    </div>
+    <li className="flex flex-col gap-3 px-5 py-4" data-testid={`usage-${row.key}`}>
+      <div className="flex items-end justify-between gap-6 max-sm:flex-col max-sm:items-start max-sm:gap-2">
+        <div className="flex min-w-0 flex-col gap-1">
+          <p className="text-[15px] leading-[22px] font-semibold text-ink">{row.name}</p>
+          <p className="text-[13px] leading-5 text-ink-2">{row.resets}</p>
+        </div>
+        <div className="flex shrink-0 items-baseline gap-5 font-mono tabular-nums">
+          <p className="flex items-baseline gap-1.5 text-ink-2">
+            <span className="text-[13px] leading-5">used</span>
+            <span className="text-[26px] leading-8 font-medium text-ink">{row.used}</span>
+            <span className="text-[13px] leading-5">of {row.limit}</span>
+          </p>
+          <p className="flex items-baseline gap-1.5 text-ink-2">
+            <span className={cx("text-[26px] leading-8 font-medium", LEFT[row.tone])}>{row.left}</span>
+            <span className="text-[13px] leading-5">left</span>
+          </p>
+        </div>
+      </div>
+      <div
+        role="progressbar"
+        aria-label={row.name}
+        aria-valuemin={0}
+        aria-valuemax={row.limit}
+        aria-valuenow={Math.min(row.used, row.limit)}
+        className="h-1 w-full overflow-hidden rounded-full bg-sunken"
+      >
+        <div className={cx("h-full rounded-full transition-[width] duration-300", BAR[row.tone])} style={{ width: `${row.share * 100}%` }} />
+      </div>
+    </li>
   );
 }
 
 /**
- * Settings > Plan & usage: the visitor's access and its state (GET /api/access), the answer limits in
- * force on this server, the run queue, and Following and Screener allowances. Every figure is the
- * running server's own setting or a live read; nothing here is a sample.
+ * Settings > Plan & usage: the plan, and one row per limit this visitor can reach with what is used
+ * and left, read live from the server (GET /api/access?usage=1, GET /api/follows). A limit whose use
+ * cannot be read is left out, never shown with a guessed figure.
  */
-export function PlanUsage({ facts }: { facts: PlanFacts }) {
+export function PlanUsage() {
   const access = useAccess();
   const follows = useFollows();
-  const lane = access?.lane;
-  const review = lane === "judge";
+  const { usage, elapsedS } = useUsage();
+  const review = access?.lane === "judge";
   const service = serviceView(access === null ? undefined : access.mode, access?.message ?? null, access?.until ?? null);
-  const limits = review
-    ? { atOnce: facts.review.slots, perHour: facts.review.perHour, perDay: facts.review.perDay }
-    : { atOnce: facts.visitor.maxActive, perHour: facts.visitor.perHour, perDay: facts.visitor.perDay };
-  const followMax = follows.kind === "ready" ? follows.max : FOLLOWS_PER_VISITOR_MAX;
+  const followUse = follows.kind === "ready" ? { used: follows.follows.length, max: follows.max } : null;
+  const rows = usageRows(usage ?? null, followUse, elapsedS);
+  const loading = usage === undefined || follows.kind === "loading";
 
   return (
-    <div className="flex flex-col gap-10 max-md:gap-8" data-testid="settings-plan">
-      <header className="flex flex-col gap-2">
-        <h1 className="type-display-m text-ink max-md:type-display-m-sm">Plan &amp; usage</h1>
-        <p className="text-[15px] leading-6 text-ink-2">Your access, the limits on new answers and how they count.</p>
+    <div className="flex flex-col" data-testid="settings-plan">
+      <header className="flex animate-rise flex-col gap-3 pb-10 max-md:pb-8">
+        <h1 className="font-display text-[38px] leading-[46px] font-medium tracking-[-0.01em] text-ink max-md:text-[30px] max-md:leading-9">
+          Plan &amp; usage
+        </h1>
       </header>
 
-      <Section label="Plan" id="settings-plan-access">
-        <div className="flex flex-col gap-4 px-6 py-6 max-md:px-5 max-md:py-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="font-display text-[24px] leading-8 text-ink">{access ? laneName(lane) : " "}</p>
-            <p className="flex items-center gap-2 text-[13px] leading-[18px] text-ink-2" aria-live="polite">
-              <span aria-hidden className={cx("size-2 rounded-full", TONE_DOT[service.tone])} />
+      <section aria-labelledby="settings-plan-name" className="flex animate-rise flex-col gap-3 border-t border-line pt-7 pb-10 max-md:pt-6 max-md:pb-8">
+        <h2 id="settings-plan-name" className={SETTINGS_LABEL}>
+          Plan
+        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <p className="font-display text-[26px] leading-8 font-medium text-ink">{access ? laneName(access.lane) : " "}</p>
+          <p aria-live="polite">
+            <span className="inline-flex items-center gap-2 rounded-control border border-line bg-surface px-2.5 py-1.5 font-mono text-[12px] leading-4 text-ink-2">
+              <span aria-hidden className={cx("size-1.5 rounded-full", TONE_DOT[service.tone])} />
               <span className="font-medium text-ink">{service.label}</span>
-            </p>
-          </div>
-          <p className="text-[14px] leading-[22px] text-ink-2">
-            {review
-              ? "This browser holds a review pass. Its answers run on capacity held for reviewers, shared by everyone with a pass."
-              : "There are no paid plans or billing yet. Everyone uses the same open access, with the limits below."}
-          </p>
-          {service.detail ? <p className="border-t border-line pt-4 text-[13px] leading-5 text-ink-2">{service.detail}</p> : null}
-        </div>
-      </Section>
-
-      <Section label="Answer limits" id="settings-plan-limits">
-        <dl className="grid grid-cols-3 divide-x divide-line max-md:grid-cols-1 max-md:divide-x-0 max-md:divide-y">
-          <Figure label="At once" value={limits.atOnce} unit={limits.atOnce === 1 ? "answer" : "answers"} />
-          <Figure label="Per hour" value={limits.perHour} unit={limits.perHour === 1 ? "answer" : "answers"} />
-          <Figure label="Per 24 hours" value={limits.perDay} unit={limits.perDay === 1 ? "answer" : "answers"} />
-        </dl>
-        <p className="border-t border-line px-6 py-4 text-[13px] leading-5 text-ink-2 max-md:px-5">
-          {review
-            ? "Counted for all review passes together. "
-            : "Counted per visitor. "}
-          Each new answer counts for an hour and for 24 hours after it starts. Answers you already have, cached
-          answers and replays do not count.
-        </p>
-      </Section>
-
-      <Section label="Queue" id="settings-plan-queue">
-        <dl className="divide-y divide-line">
-          <Row label="When the server is busy">
-            {facts.queue.max > 0
-              ? `New answers wait in order, up to ${secondsWords(facts.queue.waitS)}`
-              : "New answers are refused until a slot frees"}
-          </Row>
-        </dl>
-      </Section>
-
-      <Section label="Following and screener" id="settings-plan-other">
-        <dl className="divide-y divide-line">
-          <Row label="Following">
-            {follows.kind === "ready" ? (
-              <span className="font-mono tabular-nums">
-                <span className="text-ink">{follows.follows.length}</span> of {followMax}
-              </span>
-            ) : (
-              <span className="font-mono tabular-nums">Up to {followMax}</span>
-            )}
-          </Row>
-          <Row label="Screener">
-            <span className="font-mono tabular-nums">
-              {facts.screener.perMinute} a minute · {facts.screener.perHour} an hour
             </span>
-          </Row>
-        </dl>
-      </Section>
+          </p>
+        </div>
+        {service.tone === "caution" || service.tone === "danger" ? <p className="text-[13px] leading-5 text-ink-2">{service.detail}</p> : null}
+      </section>
 
-      <p className="text-[13px] leading-5 text-ink-3">
-        A running count of the answers you have used today is not shown yet. When a limit is reached, the question
-        box says so and when you can ask again.
-      </p>
+      <section
+        aria-labelledby="settings-plan-usage"
+        style={{ animationDelay: "50ms" }}
+        className="flex animate-rise flex-col gap-4 border-t border-line pt-7 max-md:pt-6"
+      >
+        <h2 id="settings-plan-usage" className={SETTINGS_LABEL}>
+          {review ? "Usage · shared by all review passes" : "Usage"}
+        </h2>
+        {rows.length > 0 ? (
+          <ul className="flex flex-col divide-y divide-line rounded-card border border-line bg-surface" aria-busy={loading}>
+            {rows.map((row) => (
+              <LimitRow key={row.key} row={row} />
+            ))}
+          </ul>
+        ) : (
+          <p className="rounded-card border border-line bg-surface px-5 py-4 text-[13px] leading-5 text-ink-2">
+            {loading ? "Reading your usage…" : "Your usage could not be read just now."}
+          </p>
+        )}
+      </section>
     </div>
   );
 }

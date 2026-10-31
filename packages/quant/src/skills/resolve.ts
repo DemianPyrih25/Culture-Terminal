@@ -29,7 +29,9 @@ import { normaliseName, withoutHostBilling } from "./normalise";
 /**
  * S0 resolve_entities (SPEC §5.3, D20): one /search per mention, and only an exact normalised name
  * of the right type is applied (a podcast's name may carry its host billing, withoutHostBilling). Ambiguous and unmatched names are offered with their candidates and
- * never substituted; popularity is shown but never used to choose.
+ * never substituted; popularity is shown but never used to choose. The one exception is the run's own
+ * reading of a name (ResolveFallback, the gate's known-alias and leading-name rules): it may apply a result
+ * the mention's own search returned, and the trace, evidence and digest row say the name was read so.
  */
 
 export type SearchResult = QlooSearchEntity;
@@ -112,6 +114,24 @@ export function unmatchedLimitation(text: string, matchClass: Exclude<ResolveMat
 type ResolveInput = ToolInput<"resolve_entities">;
 type Mention = ResolveInput["mentions"][number];
 
+/**
+ * The run's reading of a name with no exact match (the agent's knownNameReading): one of `results`, or null
+ * to keep the miss. A result the search did not return, or of another type, is never applied.
+ */
+export type ResolveFallback = (
+  mention: { text: string; type: EntityType },
+  results: readonly SearchResult[],
+  match: Exclude<ResolveMatchClass, "exact">,
+) => SearchResult | null;
+
+/** The fallback's reading, kept only when it is one of the mention's own results of the right type. */
+function readingOf(fallback: ResolveFallback | null, mention: Mention, results: readonly SearchResult[], c: MatchClassification): SearchResult | undefined {
+  if (fallback === null || c.matchClass === "exact") return undefined;
+  const read = fallback({ text: mention.text, type: mention.type }, results, c.matchClass);
+  const urn = entityTypeUrn(mention.type);
+  return results.find((r) => r.entity_id === read?.entity_id && r.types.includes(urn));
+}
+
 function draftFromSearch(r: SearchResult, type: EntityType): EntityDraft {
   return {
     entityId: r.entity_id,
@@ -123,9 +143,9 @@ function draftFromSearch(r: SearchResult, type: EntityType): EntityDraft {
   };
 }
 
-function alternativeNames(c: MatchClassification): string | null {
-  if (c.alternatives.length === 0) return null;
-  return c.alternatives
+function alternativeNames(alternatives: readonly MatchAlternative[]): string | null {
+  if (alternatives.length === 0) return null;
+  return alternatives
     .map((a) => safeText(a.disambiguation ? `${a.name} (${a.disambiguation})` : a.name, 60))
     .join("; ");
 }
@@ -141,9 +161,18 @@ interface Accumulator {
   exact: number;
 }
 
-function recordSearch(ctx: SkillCtx, acc: Accumulator, mention: Mention, results: readonly SearchResult[], meta: QlooCallMeta): void {
+function recordSearch(
+  ctx: SkillCtx,
+  acc: Accumulator,
+  mention: Mention,
+  results: readonly SearchResult[],
+  meta: QlooCallMeta,
+  fallback: ResolveFallback | null,
+): void {
   const c = classifyMatches(mention, results);
-  const applied = c.matchClass === "exact" ? c.exact[0] : undefined;
+  const read = readingOf(fallback, mention, results, c);
+  const applied = c.matchClass === "exact" ? c.exact[0] : read;
+  const alternatives = read === undefined ? c.alternatives : c.alternatives.filter((a) => a.result.entity_id !== read.entity_id);
   const text = safeText(mention.text);
   let ref: EntityRef | null = null;
 
@@ -162,12 +191,18 @@ function recordSearch(ctx: SkillCtx, acc: Accumulator, mention: Mention, results
     calls: [meta],
     status: applied !== undefined ? "ok" : results.length === 0 ? "empty" : "partial",
     summary:
-      applied !== undefined
-        ? `'${text}' (${mention.type}): exact match.`
-        : unmatchedLimitation(text, c.matchClass === "ambiguous" ? "ambiguous" : "not_found"),
+      read !== undefined
+        ? `'${text}' (${mention.type}): no exact match; read as '${safeText(read.name)}' (a verified short name, or an expected name written short), a result its own search returned.`
+        : applied !== undefined
+          ? `'${text}' (${mention.type}): exact match.`
+          : unmatchedLimitation(text, c.matchClass === "ambiguous" ? "ambiguous" : "not_found"),
     flags: applied !== undefined ? [] : ["SECONDARY_ENTITY_DROPPED"],
   });
   acc.evidenceIds.push(evidence.id);
+
+  if (read !== undefined) {
+    acc.notices.push(`'${text}' has no exact match; code read it as '${safeText(read.name)}', a result its own search returned; say "read as" when you cite it.`);
+  }
 
   if (applied !== undefined && ref !== null) {
     const popularity = applied.popularity ?? null;
@@ -194,26 +229,29 @@ function recordSearch(ctx: SkillCtx, acc: Accumulator, mention: Mention, results
     name: text,
     values: {
       type: mention.type,
-      match: c.matchClass,
+      // A reading counts as a match, as in the gate's resolve event; read_as (only on a reading) names it.
+      match: applied !== undefined ? "exact" : c.matchClass,
       matched: applied !== undefined ? safeText(applied.name) : null,
-      alternatives: alternativeNames(c),
+      alternatives: alternativeNames(alternatives),
+      ...(read !== undefined ? { read_as: safeText(read.name) } : {}),
     },
   });
   acc.mentions.push({
     mention: mention.text,
     role: "secondary",
     entityType: mention.type,
-    match: c.matchClass,
+    match: applied !== undefined ? "exact" : c.matchClass,
     ref,
     name: applied?.name ?? null,
     popularity: applied?.popularity ?? null,
     disambiguation: applied?.disambiguation ?? null,
-    alternatives: c.alternatives.map((a) => ({ name: a.name, disambiguation: a.disambiguation, popularity: a.popularity })),
+    alternatives: alternatives.map((a) => ({ name: a.name, disambiguation: a.disambiguation, popularity: a.popularity })),
     source: "tool",
+    ...(read !== undefined ? { alias: read.name } : {}),
   });
 }
 
-async function runResolve(input: ResolveInput, ctx: SkillCtx): Promise<SkillResult> {
+async function runResolve(input: ResolveInput, ctx: SkillCtx, fallback: ResolveFallback | null): Promise<SkillResult> {
   const target: DigestTarget = { tool: "resolve_entities", step: input.step_id };
   const requests = input.mentions.map(searchParams);
   const attempts = await attemptAll(requests.map((p) => (p === null ? null : () => ctx.qloo.search(p))));
@@ -231,7 +269,7 @@ async function runResolve(input: ResolveInput, ctx: SkillCtx): Promise<SkillResu
   input.mentions.forEach((mention, i) => {
     const attempt = attempts[i];
     if (attempt?.kind === "ok") {
-      recordSearch(ctx, acc, mention, attempt.value.data.results, attempt.value.meta);
+      recordSearch(ctx, acc, mention, attempt.value.data.results, attempt.value.meta, fallback);
       return;
     }
     const truncated = attempt?.kind === "truncated";
@@ -270,13 +308,18 @@ async function runResolve(input: ResolveInput, ctx: SkillCtx): Promise<SkillResu
   );
 }
 
-export const resolveEntitiesSkill: SkillFor<"resolve_entities"> = {
-  id: "resolve_entities",
-  mnemonic: "RES",
-  kitWorkflows: ANALYST_TOOLS.resolve_entities.kitWorkflows,
-  input: ANALYST_TOOLS.resolve_entities.input,
-  estimateCalls: (input, probe) => countUncached(probe, "/search", input.mentions.map(searchParams)),
-  run: runResolve,
-  // The method bullet only: buildLimitations writes each raised flag's sentence from FLAG_TEXT.
-  limitations: () => [...SKILL_LIMITATIONS.resolve_entities],
-};
+/** resolve_entities with the run's reading of a name that has no exact match; null is exact only. */
+export function resolveEntitiesSkillWith(fallback: ResolveFallback | null): SkillFor<"resolve_entities"> {
+  return {
+    id: "resolve_entities",
+    mnemonic: "RES",
+    kitWorkflows: ANALYST_TOOLS.resolve_entities.kitWorkflows,
+    input: ANALYST_TOOLS.resolve_entities.input,
+    estimateCalls: (input, probe) => countUncached(probe, "/search", input.mentions.map(searchParams)),
+    run: (input, ctx) => runResolve(input, ctx, fallback),
+    // The method bullet only: buildLimitations writes each raised flag's sentence from FLAG_TEXT.
+    limitations: () => [...SKILL_LIMITATIONS.resolve_entities],
+  };
+}
+
+export const resolveEntitiesSkill: SkillFor<"resolve_entities"> = resolveEntitiesSkillWith(null);

@@ -5,8 +5,8 @@ import type { PlotBaseProps, PlotTable } from "./types";
 
 /**
  * DivergingPair (N09 tenant_mix, area_profile: "What this area has more and less of"). One row per group:
- * a 112 px group label (13/600 ink-2), then the "less" side (label, value, second bar up to the zero line)
- * and the "more" side (accent bar, value, label). Bars are lengths on a log2 scale around the baseline, so
+ * a 112 px group label (13/600 ink-2), then the "less" side (label, value, red bar up to the zero line)
+ * and the "more" side (green bar, value, label). Bars are lengths on a log2 scale around the baseline, so
  * 0.5× is as long as 2×. The "Less here | More here" key sits over the zero line. Phones stack each group.
  */
 
@@ -55,7 +55,7 @@ function Bar({ tone, share }: { tone: "less" | "more"; share: number }) {
     <span
       aria-hidden="true"
       data-bar={tone}
-      className={cx("h-3 shrink-0", tone === "less" ? "rounded-l-xs bg-second" : "rounded-r-xs bg-accent")}
+      className={cx("h-3 shrink-0", tone === "less" ? "rounded-l-xs bg-danger" : "rounded-r-xs bg-good")}
       style={{ width: `calc(${BAR} * ${share.toFixed(4)})` }}
     />
   );
@@ -64,7 +64,7 @@ function Bar({ tone, share }: { tone: "less" | "more"; share: number }) {
 function KeyDot({ tone, children }: { tone: "less" | "more"; children: string }) {
   return (
     <span className="inline-flex items-center gap-1.5 type-label text-ink-2">
-      <span aria-hidden="true" className={cx("size-2 rounded-full", tone === "less" ? "bg-second" : "bg-accent")} />
+      <span aria-hidden="true" className={cx("size-2 rounded-full", tone === "less" ? "bg-danger" : "bg-good")} />
       {children}
     </span>
   );
@@ -150,7 +150,7 @@ export function DivergingPair({ groups, keyLabels = PAIR_KEY, baseline = 1, labe
                   <span className="relative h-2 w-full overflow-hidden rounded-xs bg-sunken">
                     <span
                       aria-hidden="true"
-                      className={cx("absolute inset-y-0 left-0 rounded-xs", side === "less" ? "bg-second" : "bg-accent")}
+                      className={cx("absolute inset-y-0 left-0 rounded-xs", side === "less" ? "bg-danger" : "bg-good")}
                       style={{ width: `${(shares[i]![side] * 100).toFixed(2)}%` }}
                     />
                   </span>

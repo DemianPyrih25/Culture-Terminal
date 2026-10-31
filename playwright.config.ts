@@ -39,6 +39,8 @@ const MOCK_ENV = {
   TURNSTILE_SITE_KEY: "",
   TURNSTILE_SECRET_KEY: "",
   FAKE_RUN_SECONDS: "45",
+  // No sign-in gate for the mock smoke: "/" is the question page and app routes are open.
+  AUTH_REQUIRED: "0",
   NEXT_TELEMETRY_DISABLED: "1",
 };
 

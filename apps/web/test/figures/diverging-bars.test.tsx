@@ -196,7 +196,7 @@ describe("DivergingBars · butterfly", () => {
     expect(text(plot)).toContain("Brand Alpha");
     const young = rowMarkup(plot, "25_to_29");
     expect(young).toContain('class="fill-accent" data-sign="positive"');
-    expect(young).toContain('class="fill-second" data-sign="negative"');
+    expect(young).toContain('class="fill-danger" data-sign="negative"');
     expect(young.match(/data-zero=/g)).toHaveLength(2);
     expect(text(young)).toContain("0.36");
     expect(text(young)).toContain(`${MINUS}0.05`);
@@ -213,8 +213,8 @@ describe("DivergingBars · butterfly", () => {
     const [downA, downB] = rects(rowMarkup(plot, "down"));
     expect(upA!.cls).toBe("fill-accent");
     expect(upB!.cls).toBe("fill-chart-muted");
-    expect(downA!.cls).toBe("fill-second");
-    expect(downB!.cls).toBe("fill-second");
+    expect(downA!.cls).toBe("fill-danger");
+    expect(downB!.cls).toBe("fill-danger");
     expect(downA!.x).not.toBe(upA!.x);
     expect(downB!.x).not.toBe(upB!.x);
     // Each panel's zero line (drawn half a pixel right of its position for a crisp stroke).

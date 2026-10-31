@@ -97,7 +97,8 @@ test("the ledger lists every request behind the answer, each with its exact call
   const drawer = page.getByRole("dialog", { name: "How we know" });
   await expect(drawer).toBeVisible();
   const tab = drawer.getByRole("tab", { name: /^Sources \(\d+\)$/ });
-  const listed = Number(/\((\d+)\)/.exec(await tab.innerText())?.[1] ?? "0");
+  // The count is in the tab's accessible name ("Sources (9)"); its brackets are for screen readers only.
+  const listed = Number(/\((\d+)\)/.exec((await tab.getAttribute("aria-label")) ?? "")?.[1] ?? "0");
   expect(listed, "the answer's sources").toBeGreaterThan(0);
   await tab.click();
   await expect(tab).toHaveAttribute("aria-selected", "true");

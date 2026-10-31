@@ -59,21 +59,33 @@ export interface WorkingViewProps {
 
 const RISE = "motion-safe:animate-rise";
 
+/** A small entrance stagger for a row of cards (40 ms apart). */
+const STAGGER = ["", "[animation-delay:40ms]", "[animation-delay:80ms]", "[animation-delay:120ms]"] as const;
+const stagger = (i: number): string => STAGGER[Math.min(i, STAGGER.length - 1)] ?? "";
+
 /** One lookup in the live evidence rail: what it fetched, then its trace in mono. */
 function FeedRow({ row }: { row: IncomingRequest }) {
+  // "Qloo /v2/insights · tags for a brand": the source and endpoint, then what it asked for.
+  const cut = row.text.indexOf(" · ");
+  const head = cut > 0 ? row.text.slice(0, cut) : row.text;
+  const rest = cut > 0 ? row.text.slice(cut + 3).replace(/ · (fetching|queued)$/, "") : null;
   return (
-    <li className="flex min-w-0 flex-col gap-0.5 py-3" data-incoming={row.state}>
-      <p className="flex items-start gap-2 type-label text-ink">
-        <span className="flex h-[18px] shrink-0 items-center">
-          {row.state === "fetching" ? (
-            <Spinner size={12} className="text-accent" />
-          ) : (
-            <Icon name={row.state === "queued" ? "circle-dashed" : "circle-check"} size={12} className={row.state === "queued" ? "text-ink-3" : "text-accent"} />
-          )}
-        </span>
-        <span className="min-w-0 [overflow-wrap:anywhere]">{row.text}</span>
-      </p>
-      <p className="pl-5 font-mono text-[11px] leading-4 text-ink-3 [overflow-wrap:anywhere]">{row.trace}</p>
+    <li className="flex min-w-0 gap-3 py-3 motion-safe:animate-rise" data-incoming={row.state}>
+      <span className="flex h-[18px] w-4 shrink-0 items-center">
+        {row.state === "fetching" ? (
+          <Spinner size={12} className="text-accent" />
+        ) : (
+          <Icon name={row.state === "queued" ? "circle-dashed" : "circle-check"} size={12} className={row.state === "queued" ? "text-ink-3" : "text-good"} />
+        )}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <p className="flex min-w-0 items-baseline justify-between gap-2">
+          <span className="min-w-0 text-[12px] leading-[18px] font-medium text-ink [overflow-wrap:anywhere]">{head}</span>
+          {row.state === "fetching" ? <span className="shrink-0 font-mono text-[10px] leading-4 text-accent">running</span> : null}
+        </p>
+        {rest ? <p className="text-[11px] leading-4 text-ink-2 [overflow-wrap:anywhere]">{rest}</p> : null}
+        <p className="font-mono text-[10px] leading-4 text-ink-3 [overflow-wrap:anywhere]">{row.trace}</p>
+      </div>
     </li>
   );
 }
@@ -84,8 +96,8 @@ function EvidenceFeed({ rows, lookups }: { rows: readonly IncomingRequest[]; loo
   return (
     <aside aria-label="Live evidence" data-evidence-feed className="flex min-w-0 flex-col gap-2 xl:sticky xl:top-6 xl:self-start">
       <div className="flex items-baseline justify-between gap-3 border-b border-line pb-2">
-        <h2 className="type-overline text-ink-3">Live evidence</h2>
-        <p className="font-mono text-[11px] leading-4 text-ink-3 tabular-nums">
+        <h2 className="type-overline text-ink-2">Live evidence</h2>
+        <p className="font-mono text-[11px] leading-4 text-ink-2 tabular-nums">
           {total} {total === 1 ? "lookup" : "lookups"}
         </p>
       </div>
@@ -96,10 +108,15 @@ function EvidenceFeed({ rows, lookups }: { rows: readonly IncomingRequest[]; loo
           ))}
         </ul>
       ) : (
-        <p className="py-3 type-label text-ink-3">Nothing fetched yet. Lookups appear here as they land.</p>
+        <p className="py-3 type-label text-ink-2">Nothing fetched yet.</p>
       )}
     </aside>
   );
+}
+
+/** "7 sources so far", or "7 of ~12 sources" once the plan gave an estimate. */
+function sourceCount(n: number, expected: number | null): string {
+  return expected !== null && expected > n ? `${n} of ~${expected} sources` : `${n} ${n === 1 ? "source" : "sources"} so far`;
 }
 
 /** An end-state card spans 8 of 12 columns (744 at 1440), as the verdict card does. */
@@ -126,7 +143,23 @@ export function WorkingView({
   const pillar = state.intent?.pillar ?? model.header.pillar;
   const topic = pillar ? topicForPillar(pillar) : null;
   const job = state.intent?.job ?? model.header.job;
-  const eyebrow = topic ? [topic.label, job ? WORKING_JOB_LABEL[job] : null].filter(Boolean).join(" · ") : "";
+  const eyebrowText = topic ? [topic.label, job ? WORKING_JOB_LABEL[job] : null].filter(Boolean).join(" · ") : "";
+  const eyebrow = live ? (
+    <span className="inline-flex flex-wrap items-center gap-x-2.5 gap-y-1">
+      {eyebrowText ? <span>{eyebrowText}</span> : null}
+      <span className="inline-flex items-center gap-1.5 rounded-sm bg-accent-soft px-1.5 py-0.5 font-mono text-[10px] leading-3 font-medium tracking-[0.06em] text-accent" data-live-tag>
+        <span aria-hidden className="size-1.5 rounded-full bg-accent motion-safe:animate-pulse" />
+        LIVE
+      </span>
+    </span>
+  ) : mode === "replay" ? (
+    <span className="inline-flex flex-wrap items-center gap-x-2.5 gap-y-1" data-replay-bar>
+      {eyebrowText ? <span>{eyebrowText}</span> : null}
+      <Tag preset="recording" />
+    </span>
+  ) : (
+    eyebrowText
+  );
 
   const stopButton = cancellable ? <StopButton phase={stop.phase} press={stop.press} /> : null;
   const replayControls = replay ? <ReplayControls {...replay} /> : null;
@@ -142,8 +175,6 @@ export function WorkingView({
   const place = mode === "live" ? queuedPlace(state) : null;
   // The live evidence rail: only while the run is being made (a replay or an ended run has no feed).
   const feed = live && terminal === null ? (model.live?.incoming ?? []) : null;
-  // A run that stopped will not score its guesses: the caption does not promise it.
-  const guessCaption = state.ended !== null ? "Written before any data." : undefined;
 
   let slot: ReactNode;
   if (terminal?.kind === "needs_input") {
@@ -172,6 +203,8 @@ export function WorkingView({
         readAsLine={model.method.interpretation?.readAs?.line ?? null}
         lookups={lookups}
         since={live ? (model.live?.since ?? null) : null}
+        count={!replay && model.live && model.live.progress.sourcesIn > 0 ? sourceCount(model.live.progress.sourcesIn, model.live.progress.sourcesExpected) : null}
+        fetching={live ? (model.live?.incoming.find((r) => r.state === "fetching") ?? null) : null}
         announcement={progress.announcement}
         variant={replay ? "replay" : "live"}
       />
@@ -182,50 +215,37 @@ export function WorkingView({
     <>
       {keyNumbers.length > 0 ? (
         <div className="grid gap-4 md:grid-cols-3" data-key-numbers="draft">
-          {keyNumbers.map((k) => (
-            <KeyNumber key={k.label} {...k} draft onSource={undefined} className={cx(RISE, k.className)} />
+          {keyNumbers.map((k, i) => (
+            <KeyNumber key={k.label} {...k} draft onSource={undefined} className={cx(RISE, stagger(i), k.className)} />
           ))}
         </div>
       ) : null}
-      <div className="grid gap-4 lg:grid-cols-12">
-        {chart ? <div className={cx("min-w-0 lg:col-span-8", RISE)}>{chart}</div> : null}
-        {priors.length > 0 ? (
-          <GuessesCard priors={priors} variant={chart ? "side" : "full"} caption={guessCaption} className={cx(chart ? "lg:col-span-4" : "lg:col-span-12", RISE)} />
-        ) : null}
+      <div className={cx("grid gap-4", chart !== null && priors.length > 0 && "lg:grid-cols-[minmax(0,1fr)_300px]")}>
+        {chart ? <div className={cx("min-w-0", RISE)}>{chart}</div> : null}
+        {priors.length > 0 ? <GuessesCard priors={priors} variant={chart ? "side" : "full"} className={RISE} /> : null}
       </div>
     </>
   ) : priors.length > 0 ? (
-    <GuessesCard priors={priors} variant="full" caption={guessCaption} className={RISE} />
+    <GuessesCard priors={priors} variant="full" className={RISE} />
   ) : null;
-  const evidenceNote =
-    mode === "replay"
-      ? "Played back from the stored run. Drafts appear as they did live."
-      : state.ended !== null
-        ? "Kept from the run. Not checked."
-        : "Drafts appear as data lands. Nothing here is checked yet.";
+  const evidenceTag = state.ended !== null || mode === "replay" ? "Not checked" : "Draft · not checked";
 
   return (
     <SiteShell header="working" mobileHeader="answer" backHref={ANSWERS_HREF} sharePath={sharePath} mainClassName="pt-8 pb-16 max-md:pt-4 max-md:pb-12">
-      <div className={cx("flex flex-col gap-10 max-md:gap-8", feed !== null && "xl:grid xl:grid-cols-[minmax(0,1fr)_280px] xl:items-start xl:gap-12")}>
+      <div className={cx("flex flex-col gap-10 max-md:gap-8", feed !== null && "xl:grid xl:grid-cols-[minmax(0,1fr)_300px] xl:items-start xl:gap-10")}>
         <div className="flex min-w-0 flex-col gap-10 max-md:gap-8">
           <div data-working={mode} data-run={runId} className="flex flex-col gap-6 max-md:gap-4">
             <PageHead topic={topic?.key ?? null} eyebrow={eyebrow} question={question ?? "Your question"} actions={actions} mobileActions={actions} />
-            {replay ? (
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-control border border-line bg-sunken px-4 py-2.5" data-replay-bar>
-                <Tag preset="recording" />
-                <p className="min-w-0 flex-1 type-label text-ink-2">
-                  This is a recording of a finished run, played at {replay.speed}×. Nothing is fetched, and picks are closed here.
-                </p>
-              </div>
-            ) : null}
-            {slot}
+            <div className={RISE}>{slot}</div>
             {connectionLost && live ? <ReconnectingState /> : null}
           </div>
           {evidence ? (
-            <section aria-label="Evidence so far" className="flex flex-col gap-4">
-              <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-b border-line pb-2">
-                <h2 className="type-overline text-ink-3">Evidence so far</h2>
-                <p className="type-caption text-ink-3">{evidenceNote}</p>
+            <section aria-label="Evidence so far" className={cx("flex flex-col gap-4", RISE)}>
+              <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 border-b border-line pb-3">
+                <h2 className="type-title-sm text-ink">Evidence so far</h2>
+                <Tag tone="muted">
+                  {evidenceTag}
+                </Tag>
               </div>
               {evidence}
             </section>

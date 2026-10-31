@@ -16,7 +16,7 @@ const { answerFromRun, answerFromSummary, ANSWERS_SNAPSHOT_MAX, BriefsError, byN
   "../../components/library/answers"
 );
 const { verdictText } = await import("../../components/library/format");
-const { EMPTY_TEXT, YourAnswersView } = await import("../../components/library/your-answers");
+const { EMPTY_DETAIL, YourAnswersView } = await import("../../components/library/your-answers");
 const { brief, briefList } = await import("./briefs");
 type AnswerItem = import("../../components/library/answers").AnswerItem;
 
@@ -163,8 +163,9 @@ describe("the list's states", () => {
 
   it("is an empty well that asks a question, with no examples to open", () => {
     const out = html(<YourAnswersView state={{ kind: "ready", items: [], now: NOW }} />);
-    expect(out).toContain(EMPTY_TEXT);
-    expect(out).toMatch(/href="\/#ask"[^>]*>.*Ask a question/);
+    expect(out).toContain(EMPTY_DETAIL);
+    expect(out).toContain("No answers yet");
+    expect(out).toMatch(/href="[^"]*#ask"[^>]*>.*Ask a question/);
     expect(out).not.toMatch(/example/i);
   });
 
@@ -177,6 +178,21 @@ describe("the list's states", () => {
     expect(out.indexOf(MINE_WORKING)).toBeLessThan(out.indexOf(MINE_DONE));
     expect(out).toContain(">Today</time>");
     expect(out).toContain(">Yesterday</time>");
+  });
+
+  it("gives every row an always-visible trash button and the list a Clear history, when they can act", () => {
+    const items: AnswerItem[] = [
+      { runId: MINE_DONE, question: "Juniper Cola vs Brand Beta, by city", status: "done", note: "Taste island", createdAt: "2026-10-25T10:00:00.000Z" },
+    ];
+    const bare = html(<YourAnswersView state={{ kind: "ready", items, now: NOW }} />);
+    expect(bare).not.toContain("Remove from your answers");
+    expect(bare).not.toContain("Clear history");
+    const out = html(<YourAnswersView state={{ kind: "ready", items, now: NOW }} onRemove={() => undefined} onClear={() => undefined} />);
+    expect(out).toContain('aria-label="Remove from your answers: Juniper Cola vs Brand Beta, by city"');
+    expect(out).toContain('data-icon="trash-2"');
+    expect(out).toContain("Clear history");
+    const button = /<button[^>]*aria-label="Remove from your answers[^"]*"[^>]*>/.exec(out)?.[0] ?? "";
+    expect(button).not.toMatch(/opacity-0|max-md:hidden/);
   });
 });
 

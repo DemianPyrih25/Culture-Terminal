@@ -116,15 +116,12 @@ export function followRowModel(follow: Follow, rerun: RerunState, now: number, t
   };
 }
 
-export const EMPTY_TEXT =
-  "You don't follow anything yet. On an answer or a brand profile, press Follow to keep its brand, place or question here with its latest note.";
+/** The empty panel's heading; EMPTY_TEXT starts with it. */
+export const EMPTY_HEAD = "You don't follow anything yet.";
+export const EMPTY_TEXT = `${EMPTY_HEAD} On an answer or a brand profile, press Follow to keep it here.`;
 
-/** The page's lead: what a follow is, and what it is not (§2.4: no alerts, nothing compared). */
-export const LEAD_TEXT =
-  "The brands, places and questions you follow on this browser, each with its latest note. Re-run one to read it again with today's data. Nothing here updates by itself and there are no alerts.";
-/** LEAD_TEXT in two parts: what the page holds, then how it behaves (set smaller under it). */
-export const LEAD_MAIN = "The brands, places and questions you follow on this browser, each with its latest note.";
-export const LEAD_NOTE = "Re-run one to read it again with today's data. Nothing here updates by itself and there are no alerts.";
+/** The page's one honest limit beside the title (§2.4: no alerts, nothing refreshes by itself). */
+export const LEAD_NOTE = "Updates only when you re-run · No alerts";
 
 // The Follow button ------------------------------------------------------------------------------
 

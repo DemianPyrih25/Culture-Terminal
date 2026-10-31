@@ -13,7 +13,7 @@ import { useHowWeKnow } from "../drawer";
  */
 
 /** The small-caps section label of the Ledger direction (11 px, tracked, ink-3), over each block of the answer. */
-export const SECTION_LABEL = "text-[11px] leading-4 font-semibold uppercase tracking-[0.12em] text-ink-3";
+export const SECTION_LABEL = "text-[11px] leading-4 font-semibold uppercase tracking-[0.12em] text-ink-2";
 
 /**
  * The verdict block (redesign-v3 xU0kc): not a card but the head of the reading column, ruled off below.
@@ -32,7 +32,10 @@ export function VerdictCard({ verdict, topic, className }: { verdict: AnswerVerd
         {verdict.confidence ? <ConfidenceChip level={verdict.confidence} lowered={verdict.lowered} onFullBreakdown={method} /> : null}
       </div>
       <div className="flex flex-col gap-4">
-        <h2 id="verdict-title" className="max-w-[720px] font-display text-[34px] leading-[40px] font-medium tracking-[-0.015em] text-ink [overflow-wrap:anywhere] max-md:text-[28px] max-md:leading-[34px]">
+        <h2
+          id="verdict-title"
+          className="max-w-[720px] font-display text-[34px] leading-[40px] font-medium tracking-[-0.015em] text-ink [overflow-wrap:anywhere] max-md:text-[28px] max-md:leading-[34px]"
+        >
           {verdict.line}
         </h2>
         {verdict.kind === "not_enough" ? <p className="type-lead text-ink">Here&apos;s what we found.</p> : null}
@@ -77,7 +80,11 @@ export function VerdictCard({ verdict, topic, className }: { verdict: AnswerVerd
   );
 }
 
-const STEP_WORD: Readonly<Record<AnswerStep["word"], string>> = { Now: "text-accent", Next: "text-ink-3", Later: "text-ink-3" };
+const STEP_WORD: Readonly<Record<AnswerStep["word"], string>> = {
+  Now: "text-accent",
+  Next: "text-ink-2",
+  Later: "text-ink-2",
+};
 const STEPS_SHOWN = 3;
 
 /** Next steps: a serif title and ruled rows, each with its NOW / NEXT / LATER word in mono. */
@@ -99,7 +106,7 @@ export function NextStepsCard({ steps, className }: { steps: readonly AnswerStep
       </div>
       <ol id={listId} className="flex flex-col">
         {shown.map((s, i) => (
-          <li key={i} className="flex gap-4 border-t border-line py-3">
+          <li key={i} className={cx("flex gap-4 border-t border-line py-3", i >= STEPS_SHOWN && "animate-rise")}>
             <span className={cx("w-14 shrink-0 pt-[3px] font-mono text-[11px] leading-[18px] font-medium tracking-[0.06em] uppercase", STEP_WORD[s.word])}>{s.word}</span>
             <span className="type-body text-ink">{s.text}</span>
           </li>
@@ -121,9 +128,7 @@ function NameList({ names, icon, heading }: { names: AnswerGhost["ai"]; icon: Ic
           <li key={`${n.name}-${i}`} className="flex min-w-0 items-center gap-2.5 max-md:gap-2">
             <Monogram name={n.name} size={24} />
             {/* Long names wrap; a card never cuts a name with an ellipsis (ANSWER_QUALITY §11). Phones use 13 px. */}
-            <span className="min-w-0 type-body text-ink [overflow-wrap:anywhere] max-md:text-[13px] max-md:leading-[18px]">
-              {n.name}
-            </span>
+            <span className="min-w-0 type-body text-ink [overflow-wrap:anywhere] max-md:text-[13px] max-md:leading-[18px]">{n.name}</span>
             {n.both ? (
               <>
                 <Icon name="check" size={14} className="shrink-0 text-good-ink" />
@@ -159,14 +164,14 @@ export function ChangeCard({ changes, className }: { changes: readonly string[];
   const id = useId();
   const how = useHowWeKnow();
   return (
-    <section aria-labelledby={id} className={cx("flex flex-col gap-4 rounded-card bg-caution-soft p-6 max-md:p-5", className)}>
+    <section aria-labelledby={id} className={cx("flex flex-col gap-2 rounded-md bg-caution-soft px-[18px] py-4", className)}>
       <h2 id={id} className="text-[11px] leading-4 font-semibold tracking-[0.12em] text-caution-ink uppercase">
         What could change this
       </h2>
       {changes.length > 0 ? (
-        <ul className="flex flex-col gap-3">
+        <ul className="flex flex-col">
           {changes.map((c, i) => (
-            <li key={i} className="flex gap-3 type-body text-ink">
+            <li key={i} className="flex gap-2.5 border-t border-[#A86A0033] py-2.5 text-[14px] leading-[22px] text-ink">
               <span aria-hidden="true" className="shrink-0 text-caution">
                 &mdash;
               </span>
@@ -195,7 +200,7 @@ function Argument({ argument, n }: { argument: BriefArgument; n: number }) {
     <li className="flex flex-col gap-2 border-t border-line pt-4">
       <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="type-body-strong text-ink">
-          <span className="mr-2 font-mono text-[13px] font-medium text-ink-3">{n}</span>
+          <span className="mr-2 font-mono text-[13px] font-medium text-ink-2">{n}</span>
           {argument.sectionLabel}
         </span>
         <Tag tone={STRENGTH_TONE[argument.strength]}>{STRENGTH_LABEL[argument.strength]}</Tag>
@@ -224,38 +229,45 @@ export function WhyRow({ why }: { why: AnswerModel["why"] }) {
   const panel = useId();
   if (why.count === 0 && (!why.thesis || why.thesis.length === 0)) return null;
   return (
-    <section aria-label="Why we think this" className="border-y border-line">
+    <section aria-label="Why we think this" className="border-t border-ink">
       <h2>
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={panel}
-          onClick={() => setOpen(!open)}
-          className="flex min-h-14 w-full items-center gap-2 text-left"
-        >
-          <Icon name={open ? "chevron-up" : "chevron-down"} size={16} className="shrink-0 text-ink" />
-          <span className="font-display text-[20px] leading-7 font-medium text-ink">Why we think this</span>
+        <button type="button" aria-expanded={open} aria-controls={panel} onClick={() => setOpen(!open)} className="group flex min-h-14 w-full items-center gap-2 text-left">
+          <Icon name="chevron-down" size={16} className={cx("shrink-0 text-ink transition-transform duration-200 motion-reduce:transition-none", open && "rotate-180")} />
+          <span className="font-display text-[20px] leading-7 font-medium text-ink transition-colors duration-150 group-hover:text-accent">Why we think this</span>
           {why.count > 0 ? (
-            <span className="type-body text-ink-3">
+            <span className="text-[13px] leading-5 text-ink-2">
               {" "}
               · {why.count} {why.count === 1 ? "reason" : "reasons"}
             </span>
           ) : null}
         </button>
       </h2>
-      <div id={panel} hidden={!open} className="flex flex-col gap-4 pb-6">
-        {why.thesis && why.thesis.length > 0 ? (
-          <p className="max-w-[720px] type-body text-ink-2">
-            <AnswerProse inlines={why.thesis} />
-          </p>
-        ) : null}
-        {why.arguments.length > 0 ? (
-          <ol className="flex flex-col gap-4">
-            {why.arguments.map((a, i) => (
-              <Argument key={a.id} argument={a} n={i + 1} />
-            ))}
-          </ol>
-        ) : null}
+      {/* Height and opacity ease open and shut (grid rows 0fr to 1fr); a shut panel is inert, so it is out of the tab order and the accessibility tree. */}
+      <div
+        id={panel}
+        inert={!open}
+        data-open={open}
+        className={cx(
+          "grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none",
+          open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
+        )}
+      >
+        <div className="min-h-0 overflow-hidden">
+          <div className="flex flex-col gap-4 pb-6">
+            {why.thesis && why.thesis.length > 0 ? (
+              <p className="max-w-[720px] font-display text-[17px] leading-[27px] text-ink-2">
+                <AnswerProse inlines={why.thesis} />
+              </p>
+            ) : null}
+            {why.arguments.length > 0 ? (
+              <ol className="flex flex-col gap-4">
+                {why.arguments.map((a, i) => (
+                  <Argument key={a.id} argument={a} n={i + 1} />
+                ))}
+              </ol>
+            ) : null}
+          </div>
+        </div>
       </div>
     </section>
   );
@@ -282,13 +294,12 @@ export function ConceptNote({ text, level = null, className }: { text: string; l
     <section
       aria-label="What was tested"
       data-concept-note={level ?? "true"}
-      className={cx("flex flex-wrap items-center gap-x-3 gap-y-2 rounded-card bg-caution-soft px-4 py-3", className)}
+      className={cx("flex flex-wrap items-baseline gap-x-3 gap-y-1.5 border-b border-line py-2.5", className)}
     >
-      <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-chip bg-surface px-2.5 text-[13px] leading-[18px] font-semibold text-ink">
-        <Icon name="corner-down-right" size={14} className="text-ink-2" />
+      <span className="inline-flex shrink-0 items-center rounded-[3px] px-[7px] py-[3px] text-[11px] leading-4 font-semibold bg-caution-soft text-caution-ink">
         {level === "category" ? "Category-level read" : "Not in the data"}
       </span>
-      <p className="min-w-0 flex-1 type-body text-caution-ink [overflow-wrap:anywhere]">{text}</p>
+      <p className="min-w-0 flex-1 text-[13px] leading-5 text-ink-2 [overflow-wrap:anywhere]">{text}</p>
     </section>
   );
 }
@@ -297,21 +308,17 @@ export function ConceptNote({ text, level = null, className }: { text: string; l
 export const UNLISTED_TEXT = "Only people with this link can open this answer. Search engines don't list it, and a shared link shows no preview image.";
 
 /**
- * A reader's own answer, not a curated showcase (D31): a note strip under the page head that says the
- * page is unlisted. One chip and one plain sentence, as the read-as note.
+ * A reader's own answer, not a curated showcase (D31): one chip under the page head that says the page is
+ * unlisted; the full sentence is its tooltip and its accessible description.
  */
 export function UnlistedNote({ className }: { className?: string }) {
   return (
-    <section
-      aria-label="Unlisted answer"
-      data-unlisted="true"
-      className={cx("flex flex-wrap items-center gap-x-3 gap-y-2 rounded-card bg-sunken px-4 py-3", className)}
-    >
-      <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-chip bg-surface px-2.5 text-[13px] leading-[18px] font-semibold text-ink">
-        <Icon name="link" size={14} className="text-ink-2" />
-        Unlisted · user question
+    <section aria-label="Unlisted answer" data-unlisted="true" className={cx("flex flex-wrap items-baseline gap-x-3 gap-y-1.5 border-b border-line py-2.5", className)}>
+      <span title={UNLISTED_TEXT} className="inline-flex shrink-0 items-center rounded-[3px] px-[7px] py-[3px] text-[11px] leading-4 font-semibold gap-1 bg-sunken text-ink-2">
+        <Icon name="link" size={11} className="text-ink-2" />
+        Private link
+        <span className="sr-only">: {UNLISTED_TEXT}</span>
       </span>
-      <p className="min-w-0 flex-1 type-body text-ink-2 [overflow-wrap:anywhere]">{UNLISTED_TEXT}</p>
     </section>
   );
 }
@@ -323,16 +330,11 @@ export function UnlistedNote({ className }: { className?: string }) {
  */
 export function ReadAsNote({ readAs, className }: { readAs: AnswerReadAs; className?: string }) {
   return (
-    <section
-      aria-label="How we read your question"
-      data-read-as="true"
-      className={cx("flex flex-wrap items-center gap-x-3 gap-y-2 rounded-card bg-caution-soft px-4 py-3", className)}
-    >
-      <span className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-chip bg-surface px-2.5 text-[13px] leading-[18px] font-semibold text-ink">
-        <Icon name="corner-down-right" size={14} className="text-ink-2" />
+    <section aria-label="How we read your question" data-read-as="true" className={cx("flex flex-wrap items-baseline gap-x-3 gap-y-1.5 border-b border-line py-2.5", className)}>
+      <span className="inline-flex shrink-0 items-center rounded-[3px] px-[7px] py-[3px] text-[11px] leading-4 font-semibold bg-accent-soft text-accent">
         Read as: {readAs.jobLabel}
       </span>
-      <p className="min-w-0 flex-1 type-body text-caution-ink [overflow-wrap:anywhere]">{readAs.text}</p>
+      <p className="min-w-0 flex-1 text-[13px] leading-5 text-ink-2 [overflow-wrap:anywhere]">{readAs.text}</p>
     </section>
   );
 }

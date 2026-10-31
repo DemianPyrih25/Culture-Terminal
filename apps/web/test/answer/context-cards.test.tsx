@@ -117,11 +117,11 @@ describe("the context views", () => {
 });
 
 describe("the context cards", () => {
-  it("draws the AI card with its heading, caption, groups and footer, dashed and apart", () => {
+  it("draws the AI card with its heading, groups and footer (no explainer caption), on its own tint apart", () => {
     const html = renderToStaticMarkup(<AiContextCard view={aiContextView(ai())} />);
     expect(html).toContain(AI_CONTEXT_HEADING);
-    expect(text(html)).toContain(AI_CONTEXT_CAPTION);
-    expect(html).toContain("border-dashed");
+    expect(text(html)).not.toContain(AI_CONTEXT_CAPTION);
+    expect(html).toContain("bg-[#EDEBF5]");
     expect(html).toContain('data-context-kind="deal"');
     expect(text(html)).toContain("Kestrel Tonic is described as a family-owned maker.");
     expect(html).not.toMatch(/\d+\s*%/);
@@ -130,7 +130,7 @@ describe("the context cards", () => {
   it("draws the web card with escaped claims and nofollow ugc links in a new tab", () => {
     const html = renderToStaticMarkup(<WebContextCard view={webContextView(web({ items: [{ ...web().items[0]!, claim: "A <script>alert(1)</script> claim with enough length." }] }))} />);
     expect(html).toContain(WEB_CONTEXT_HEADING);
-    expect(text(html)).toContain(WEB_CONTEXT_CAPTION);
+    expect(text(html)).not.toContain(WEB_CONTEXT_CAPTION);
     expect(html).not.toContain("<script>");
     expect(html).toContain('rel="nofollow noopener noreferrer ugc"');
     expect(html).toContain('target="_blank"');

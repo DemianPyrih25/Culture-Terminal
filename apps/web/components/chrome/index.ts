@@ -3,7 +3,18 @@
 export { Footer } from "./footer";
 export { Header, PAGE_COLUMN } from "./header";
 export type { HeaderProps, HeaderVariant, MobileHeaderVariant } from "./header";
-export { BackButton, focusAskField, MenuSheetButton, NewQuestionLink, ShareIconButton, SidebarNav, useShareLink } from "./header-actions";
+export {
+  BackButton,
+  focusAskField,
+  MenuSheetButton,
+  NewQuestionLink,
+  ShareIconButton,
+  ShellAccount,
+  SidebarNav,
+  SidebarRecent,
+  SlashShortcut,
+  useShareLink,
+} from "./header-actions";
 export type { MenuItem } from "./header-actions";
 export {
   ANSWERS_HREF,
@@ -22,7 +33,7 @@ export {
   STATUS_HREF,
 } from "./links";
 export type { NavItem, NavKey } from "./links";
-export { LogoMark } from "./logo-mark";
+export { InitialMark, LogoMark } from "./logo-mark";
 export { PageHead } from "./page-head";
 export type { PageHeadProps } from "./page-head";
 export { SiteShell } from "./site-shell";

@@ -22,7 +22,7 @@ const VARIANT: Record<ButtonVariant, string> = {
   primary:
     "gap-2 rounded-sm bg-accent text-white hover:bg-accent-hover active:bg-accent-ink disabled:bg-sunken disabled:text-ink-3 disabled:shadow-[inset_0_0_0_1px_var(--color-line)] aria-disabled:bg-sunken aria-disabled:text-ink-3",
   secondary:
-    "gap-2 rounded-sm border border-line-strong bg-surface text-ink hover:border-ink-3 hover:bg-canvas active:bg-sunken disabled:border-line disabled:bg-surface disabled:text-ink-3 aria-disabled:text-ink-3",
+    "gap-2 rounded-sm border border-line-strong bg-surface text-ink hover:border-ink-3 hover:bg-[#fbf9f5] active:bg-sunken disabled:border-line disabled:bg-surface disabled:text-ink-3 aria-disabled:text-ink-3",
   quiet:
     "gap-2 rounded-sm text-ink-2 hover:bg-sunken hover:text-ink active:bg-line disabled:bg-transparent disabled:text-ink-3 aria-disabled:text-ink-3",
   link: "gap-1.5 rounded-xs text-accent hover:underline hover:underline-offset-4 active:text-accent-ink disabled:text-ink-3 disabled:no-underline",
@@ -34,15 +34,23 @@ const VARIANT: Record<ButtonVariant, string> = {
 // button set the same property.
 const FILLED: Record<ButtonSize, string> = {
   sm: "h-8 px-3 text-[13px] leading-[18px]",
-  md: "h-9 px-3.5 text-[14px] leading-5",
+  md: "h-9 px-3.5 text-[13px] leading-[18px]",
   lg: "h-11 px-[18px] text-[15px] leading-5",
 };
 const HEIGHT: Record<ButtonVariant, Record<ButtonSize, string>> = {
   primary: FILLED,
   secondary: FILLED,
   destructive: FILLED,
-  quiet: { sm: "h-8 px-2 text-[13px] leading-[18px]", md: "h-9 px-2.5 text-[14px] leading-5", lg: "h-11 px-3 text-[15px] leading-5" },
-  link: { sm: "text-[13px] leading-[18px]", md: "text-[14px] leading-5", lg: "text-[15px] leading-5" },
+  quiet: {
+    sm: "h-8 px-2 text-[13px] leading-[18px]",
+    md: "h-9 px-2.5 text-[13px] leading-[18px]",
+    lg: "h-11 px-3 text-[15px] leading-5",
+  },
+  link: {
+    sm: "text-[13px] leading-[18px]",
+    md: "text-[13px] leading-[18px]",
+    lg: "text-[15px] leading-5",
+  },
 };
 
 /** Icon sizes: 16 in buttons, 14 in the small ones and on links, 18 in the large ones. */
@@ -98,8 +106,7 @@ function Content({
       </>
     );
   }
-  const trail =
-    trailing !== undefined ? trailing : variant === "primary" || variant === "link" ? ("arrow-right" as IconName) : null;
+  const trail = trailing !== undefined ? trailing : variant === "primary" || variant === "link" ? ("arrow-right" as IconName) : null;
   // A disabled filled button shows the label alone (03 Buttons · Disabled).
   const filled = variant === "primary" || variant === "destructive";
   const showTrail = trail !== null && !(disabled && filled);
@@ -121,7 +128,9 @@ function Content({
 }
 
 export type ButtonProps = ButtonContent &
-  Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & { ref?: Ref<HTMLButtonElement> };
+  Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & {
+    ref?: Ref<HTMLButtonElement>;
+  };
 
 /** C/Button: primary, secondary, quiet, link and destructive in three sizes. `type` defaults to "button". */
 export function Button({
@@ -148,15 +157,7 @@ export function Button({
       className={buttonClassName(variant, size, cx(fullWidth && "w-full", className))}
       {...rest}
     >
-      <Content
-        variant={variant}
-        size={size}
-        icon={icon}
-        trailing={trailing}
-        loading={loading}
-        loadingLabel={loadingLabel}
-        disabled={disabled}
-      >
+      <Content variant={variant} size={size} icon={icon} trailing={trailing} loading={loading} loadingLabel={loadingLabel} disabled={disabled}>
         {children}
       </Content>
     </button>
@@ -166,16 +167,7 @@ export function Button({
 export type ButtonLinkProps = ButtonContent & Omit<ComponentProps<typeof Link>, "children">;
 
 /** A next/link styled as a button. Defaults to the link variant ("Your answers →"). */
-export function ButtonLink({
-  variant = "link",
-  size = "md",
-  icon,
-  trailing,
-  fullWidth,
-  children,
-  className,
-  ...rest
-}: ButtonLinkProps) {
+export function ButtonLink({ variant = "link", size = "md", icon, trailing, fullWidth, children, className, ...rest }: ButtonLinkProps) {
   return (
     <Link className={buttonClassName(variant, size, cx(fullWidth && "w-full", className))} {...rest}>
       <Content variant={variant} size={size} icon={icon} trailing={trailing}>
@@ -208,14 +200,7 @@ export function iconButtonClassName(size: "md" | "lg" = "md", className?: string
 /** C/IconButton: a 36 px square (r4; 44 on phones) with an 18 px ink-2 icon; sunken on hover. Its label is its tooltip. */
 export function IconButton({ label, icon, children, size = "md", className, type, title, ref, ...rest }: IconButtonProps) {
   return (
-    <button
-      ref={ref}
-      type={type ?? "button"}
-      aria-label={label}
-      title={title ?? label}
-      className={iconButtonClassName(size, className)}
-      {...rest}
-    >
+    <button ref={ref} type={type ?? "button"} aria-label={label} title={title ?? label} className={iconButtonClassName(size, className)} {...rest}>
       {icon ? <Icon name={icon} size={18} /> : children}
     </button>
   );

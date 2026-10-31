@@ -2,6 +2,7 @@
 
 import type { PickerCandidate, ScreenerAnswer, ScreenerColumn, ScreenerResult } from "@ct/contracts";
 import { SCREENER_MARKETS_MAX, SCREENER_QUERY_MAX, SCREENER_ROWS_DEFAULT } from "@ct/contracts/values";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { HumanCheckPanel, sharedHumanFetch, useHumanCheck } from "../protection/human-check-panel";
@@ -45,7 +46,7 @@ const SEED_OPTIONS = [
 ];
 
 /** A section label: small caps, tracked, quiet (Ledger). */
-const SECTION_LABEL = "text-[11px] leading-4 font-semibold tracking-[0.08em] text-ink-3 uppercase";
+const SECTION_LABEL = "text-[11px] leading-4 font-semibold tracking-[0.1em] text-ink-2 uppercase";
 
 /**
  * The day's screens are used up (the server's daily budget answer). Limits and usage live on Settings
@@ -84,12 +85,12 @@ async function postScreen(body: unknown): Promise<Status> {
 function Candidates({ candidates, onPick }: { candidates: readonly PickerCandidate[]; onPick: (key: string) => void }) {
   return (
     <ul className="flex flex-col divide-y divide-line overflow-hidden rounded-control border border-line bg-surface" aria-label="Candidates">
-      {candidates.map((c) => (
-        <li key={c.key}>
+      {candidates.map((c, i) => (
+        <li key={c.key} className="animate-rise" style={{ animationDelay: `${Math.min(i * 30, 240)}ms` }}>
           <button
             type="button"
             onClick={() => onPick(c.key)}
-            className="flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-canvas focus-visible:bg-canvas"
+            className="flex min-h-14 w-full items-center gap-3 px-4 py-2.5 text-left transition-colors duration-150 hover:bg-canvas focus-visible:bg-canvas active:bg-sunken"
             data-candidate={c.key}
           >
             <Monogram name={c.name} size={32} />
@@ -107,32 +108,46 @@ function Candidates({ candidates, onPick }: { candidates: readonly PickerCandida
 
 function Notes({ items }: { items: readonly string[] }) {
   const [shown, setShown] = useState(true);
+  const reduce = useReducedMotion();
   if (items.length === 0) return null;
   return (
-    <div className="flex flex-col gap-3 rounded-control border border-line bg-sunken/50 px-5 py-4">
+    <div className="flex flex-col gap-4 rounded-sm border border-line bg-canvas px-6 py-5">
       <div className="flex items-center gap-2">
         <Icon name="triangle-alert" size={14} className="text-caution" />
-        <h3 className="type-label font-semibold text-ink">Limits of this screen</h3>
+        <h3 className="text-[14px] leading-5 font-semibold text-ink">Limits of this screen</h3>
         <button
           type="button"
           onClick={() => setShown((v) => !v)}
           aria-expanded={shown}
           aria-controls="screen-limits"
-          className="ml-auto type-label font-medium text-accent hover:text-accent-hover"
+          className="ml-auto type-label font-medium text-accent transition-colors duration-150 hover:text-accent-hover"
         >
           {shown ? "Hide" : "Show"}
         </button>
       </div>
-      <ul id="screen-limits" hidden={!shown} className="grid gap-x-10 gap-y-2 lg:grid-cols-2" aria-label="Limits of this screen">
-        {items.map((note) => (
-          <li key={note} className="flex gap-2.5 type-label text-ink-2">
-            <span aria-hidden="true" className="shrink-0 text-ink-3">
-              —
-            </span>
-            {note}
-          </li>
-        ))}
-      </ul>
+      <AnimatePresence initial={false}>
+        {shown ? (
+          <motion.div
+            key="limits"
+            initial={reduce ? false : { height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={reduce ? { opacity: 0, transition: { duration: 0 } } : { height: 0, opacity: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="overflow-hidden"
+          >
+            <ul id="screen-limits" className="grid gap-x-10 gap-y-2 lg:grid-cols-2" aria-label="Limits of this screen">
+              {items.map((note) => (
+                <li key={note} className="flex gap-2 text-[13px] leading-5 text-ink-2">
+                  <span aria-hidden="true" className="shrink-0 text-ink-3">
+                    —
+                  </span>
+                  {note}
+                </li>
+              ))}
+            </ul>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }
@@ -142,13 +157,10 @@ const MAP_BRANDS_MAX = 14;
 
 function AddMap({ onAdd, busy }: { onAdd: () => void; busy: boolean }) {
   return (
-    <Card padding="default" className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-8" data-screen-map="offer">
-      <div className="flex max-w-[640px] flex-col gap-1.5">
+    <Card padding="default" className="flex animate-rise flex-col gap-4 sm:flex-row sm:items-center sm:justify-between sm:gap-8" data-screen-map="offer">
+      <div className="flex flex-col gap-1.5">
         <h3 className={SECTION_LABEL}>Category Taste Map</h3>
-        <p className="type-label text-ink-2">
-          Places the top {MAP_BRANDS_MAX} brands by how alike their audiences are, and measures distinctiveness. Code only, no AI model; the table&apos;s own
-          requests are reused.
-        </p>
+        <p className="font-mono text-[12px] leading-4 text-ink-2">Top {MAP_BRANDS_MAX} brands · distinctiveness</p>
       </div>
       <Button variant="secondary" onClick={onAdd} loading={busy} disabled={busy} className="shrink-0">
         Draw the taste map
@@ -165,16 +177,16 @@ function Result({ screen, onCopied, onAddMap, busy }: { screen: ScreenerResult; 
   const kind = screen.seed.by === "tag" ? "Category screen" : "Brands near a seed";
   const caption = `${kind}: ${screen.seed.label}, ${screen.rows.length} brands`;
   return (
-    <section className="flex flex-col gap-5" aria-labelledby="screen-title" data-screen="ok">
-      <header className="flex flex-col gap-3 border-t border-line pt-8 sm:flex-row sm:items-end sm:justify-between">
-        <div className="flex min-w-0 flex-col gap-1">
+    <section className="flex animate-rise flex-col gap-5" aria-labelledby="screen-title" data-screen="ok">
+      <header className="flex flex-col gap-3 border-b border-line-strong pb-4 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
+        <div className="flex min-w-0 flex-col gap-2.5">
           <span className={SECTION_LABEL}>{kind}</span>
-          <h2 id="screen-title" className="font-display text-[28px] leading-9 font-semibold tracking-[-0.01em] text-ink max-md:text-[24px] max-md:leading-8">
+          <h2 id="screen-title" className="font-display text-[28px] leading-9 font-medium tracking-[-0.01em] text-ink max-md:text-[24px] max-md:leading-8">
             {screen.seed.label}
           </h2>
-          <p className="type-label text-ink-3">
+          <p className="font-mono text-[12px] leading-4 text-ink-2">
             {screen.rows.length} brands
-            {screen.markets.length > 0 ? ` · ${screen.markets.map((m) => m.label).join(", ")}` : ""} · code only, no AI model
+            {screen.markets.length > 0 ? ` · ${screen.markets.map((m) => m.label).join(", ")}` : ""}
           </p>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1.5 self-start rounded-sm bg-sunken px-2.5 py-1 font-mono text-[12px] leading-4 text-ink-2 sm:self-auto">
@@ -188,21 +200,20 @@ function Result({ screen, onCopied, onAddMap, busy }: { screen: ScreenerResult; 
           Qloo returned no brands for this screen. Try a broader category, or a seed brand.
         </InlineState>
       ) : (
-        <div className="flex flex-col gap-3">
-          <ScreenerTable
-            caption={caption}
-            columns={screen.columns}
-            rows={screen.rows}
-            sort={sort}
-            onSort={(key) => setSort((s) => nextSort(s, key))}
-            onCell={(rowKey, col) => setOpen({ rowKey, column: col })}
-            selected={open}
-          />
-          <p className="type-caption text-ink-3">Select any value to see the Qloo requests behind it. No composite score: each column stands on its own.</p>
-        </div>
+        <ScreenerTable
+          caption={caption}
+          columns={screen.columns}
+          rows={screen.rows}
+          sort={sort}
+          onSort={(key) => setSort((s) => nextSort(s, key))}
+          onCell={(rowKey, col) => setOpen({ rowKey, column: col })}
+          selected={open}
+        />
       )}
       {screen.map ? (
-        <ScreenerMapSlot map={screen.map} screen={screen} />
+        <div className="animate-rise">
+          <ScreenerMapSlot map={screen.map} screen={screen} />
+        </div>
       ) : onAddMap && screen.rows.length > 0 && !screen.requests.some((r) => r.purpose === "taste_map") ? (
         <AddMap onAdd={onAddMap} busy={busy} />
       ) : null}
@@ -252,9 +263,9 @@ function AnswerView({ status, onPick, onCopied, onAddMap, onRetry, adding }: Ans
       return null;
     case "loading":
       return (
-        <div className="flex flex-col gap-4" data-screen="loading">
+        <div className="flex animate-rise flex-col gap-4" data-screen="loading">
           <InlineState tone="neutral" icon="loader-circle">
-            Screening: finding the brands, then reading ages and markets. This takes a few seconds.
+            Screening…
           </InlineState>
           <LoadingTable />
         </div>
@@ -263,6 +274,7 @@ function AnswerView({ status, onPick, onCopied, onAddMap, onRetry, adding }: Ans
       return (
         <InlineState
           tone="danger"
+          className="animate-rise"
           data-screen="error"
           action={
             <Button variant="quiet" size="sm" onClick={onRetry}>
@@ -281,7 +293,7 @@ function AnswerView({ status, onPick, onCopied, onAddMap, onRetry, adding }: Ans
         case "pick":
         case "not_found":
           return (
-            <section className="flex max-w-[744px] flex-col gap-4 border-t border-line pt-8" data-screen={a.kind}>
+            <section className="flex max-w-[744px] animate-rise flex-col gap-4 border-t border-line pt-8" data-screen={a.kind}>
               <h2 className="type-title text-ink max-md:type-title-sm">{a.kind === "pick" ? "Which one?" : "Not found"}</h2>
               <p className="type-body text-ink-2">{a.message}</p>
               {a.candidates.length > 0 ? <Candidates candidates={a.candidates} onPick={onPick} /> : null}
@@ -293,6 +305,7 @@ function AnswerView({ status, onPick, onCopied, onAddMap, onRetry, adding }: Ans
               <InlineState
                 tone="neutral"
                 icon="clock-4"
+                className="animate-rise"
                 data-screen="unavailable"
                 action={
                   <Link href="/settings" prefetch={false} className="type-label font-medium whitespace-nowrap text-accent hover:text-accent-hover">
@@ -304,7 +317,7 @@ function AnswerView({ status, onPick, onCopied, onAddMap, onRetry, adding }: Ans
               </InlineState>
             );
           return (
-            <InlineState tone="neutral" icon={a.retryAfterS !== null ? "clock-4" : "circle-pause"} data-screen="unavailable">
+            <InlineState tone="neutral" icon={a.retryAfterS !== null ? "clock-4" : "circle-pause"} className="animate-rise" data-screen="unavailable">
               {a.message}
             </InlineState>
           );
@@ -372,16 +385,21 @@ export function ScreenerView({ markets: marketOptions, initial }: ScreenerViewPr
   const labelOf = (id: string) => marketOptions.find((m) => m.id === id)?.label ?? id;
 
   return (
-    <div className="flex flex-col gap-10 pt-10 pb-16 max-md:gap-6 max-md:pt-6 max-md:pb-10">
-      <header className="flex max-w-[760px] flex-col gap-3">
+    <div className="flex flex-col gap-12 pt-9 pb-16 max-md:gap-6 max-md:pt-6 max-md:pb-10">
+      <header className="flex animate-rise flex-wrap items-end justify-between gap-x-6 gap-y-2 lg:max-w-[820px]">
         <h1 className="type-display-m text-ink max-md:type-display-m-sm">Brand screener</h1>
-        <p className="type-lead text-ink-2 max-md:text-[16px] max-md:leading-6">
-          Rank the brands of a category, or the brands nearest a seed brand, on taste fit, next-gen tilt, metro breadth, popularity and how far they sit under the radar.
-        </p>
+        <Link
+          href="/method"
+          prefetch={false}
+          className="inline-flex items-center gap-1 text-[13px] leading-5 font-semibold text-accent transition-colors duration-150 hover:text-accent-hover"
+        >
+          Method
+          <Icon name="arrow-right" size={13} />
+        </Link>
       </header>
 
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-10">
-        <Card className="flex min-w-0 flex-1 flex-col gap-5 lg:max-w-[820px]" aria-labelledby="screen-form-title">
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
+        <Card className="flex min-w-0 flex-1 animate-rise flex-col gap-5 [animation-delay:40ms] lg:max-w-[820px]" aria-labelledby="screen-form-title">
           <h2 id="screen-form-title" className="sr-only">
             What to screen
           </h2>
@@ -396,7 +414,14 @@ export function ScreenerView({ markets: marketOptions, initial }: ScreenerViewPr
                 maxLength={SCREENER_QUERY_MAX}
                 autoComplete="off"
                 spellCheck={false}
-                placeholder={by === "tag" ? "A Qloo brand category, e.g. energy drinks" : "A brand name"}
+                placeholder={by === "tag" ? "Energy drinks" : "A brand name"}
+                help={
+                  <span className="flex justify-end">
+                    <span className="shrink-0 font-mono text-ink-3 tabular-nums">
+                      {query.length} / {SCREENER_QUERY_MAX}
+                    </span>
+                  </span>
+                }
                 error={fieldError ?? undefined}
                 className="sm:flex-1"
               />
@@ -433,7 +458,7 @@ export function ScreenerView({ markets: marketOptions, initial }: ScreenerViewPr
                       <button
                         type="button"
                         onClick={() => setMarkets((m) => m.filter((x) => x !== id))}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-sm bg-accent-soft px-2.5 type-label font-medium text-accent-ink hover:bg-accent-soft/70"
+                        className="inline-flex h-7 animate-rise items-center gap-1.5 rounded-sm border border-map-2 bg-accent-soft pr-2 pl-2.5 text-[12px] leading-4 font-semibold text-accent transition-colors duration-150 hover:bg-map-1 active:bg-map-2"
                         aria-label={`Remove ${labelOf(id)}`}
                       >
                         {labelOf(id)}
@@ -445,27 +470,16 @@ export function ScreenerView({ markets: marketOptions, initial }: ScreenerViewPr
               ) : null}
             </div>
             <Checkbox checked={map} onChange={(e) => setMap(e.target.checked)}>
-              Measure distinctiveness with the taste map
+              Taste map (distinctiveness)
             </Checkbox>
             <div className="flex border-t border-line pt-5 max-sm:flex-col">
-              <Button type="submit" variant="primary" loading={status.kind === "loading"} disabled={status.kind === "loading"}>
+              <Button type="submit" variant="primary" icon="play" trailing={null} loading={status.kind === "loading"} disabled={status.kind === "loading"}>
                 Run screen
               </Button>
             </div>
           </form>
           <HumanCheckPanel check={human} />
         </Card>
-        <aside className="flex flex-col gap-3 lg:w-[300px] lg:shrink-0 lg:pt-2" aria-labelledby="screen-reading-title">
-          <h2 id="screen-reading-title" className={SECTION_LABEL}>
-            Reading this screen
-          </h2>
-          <p className="type-label text-ink-2">No composite score. Each column stands on its own, and empty cells say why they are empty instead of showing 0.</p>
-          <p className="type-label text-ink-2">Group-level taste data from Qloo, not sales, share or revenue.</p>
-          <Link href="/method" prefetch={false} className="inline-flex items-center gap-1 type-label font-medium text-accent hover:text-accent-hover">
-            How each column is computed
-            <Icon name="arrow-right" size={13} />
-          </Link>
-        </aside>
       </div>
 
       <AnswerView

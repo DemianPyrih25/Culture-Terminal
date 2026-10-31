@@ -36,14 +36,11 @@ export function CellDrawer({ screen, row, column, onClose, onCopied }: CellDrawe
       subtitle={open && cell ? `${row.label} · ${column.label}: ${cellText(cell).text}` : undefined}
     >
       {open && cell ? (
-        <div className="flex flex-col gap-6" data-cell-drawer={column.key}>
+        <div className="flex animate-rise flex-col gap-6" data-cell-drawer={column.key}>
           <div className="flex flex-col gap-3">
             <p className="type-body text-ink-2">{absenceText(column.key, cell) ?? COLUMN_HINT[column.key]}</p>
             <p className="flex flex-wrap items-center gap-x-2 gap-y-1 type-label text-ink-3">
-              <span className="rounded-sm bg-sunken px-2 py-0.5">
-                <span className="font-semibold text-ink">{column.badge === "MEASURED" ? "Measured:" : "Derived:"}</span>{" "}
-                {column.badge === "MEASURED" ? "Qloo's own value." : "computed in code from the requests below."}
-              </span>
+              <span className="rounded-sm bg-sunken px-2 py-0.5 font-semibold text-ink">{column.badge === "MEASURED" ? "Measured" : "Derived"}</span>
               <Link href={methodHref(column.formulaId)} prefetch={false} className="inline-flex items-center gap-1 font-medium text-accent hover:text-accent-hover">
                 How it is computed
                 <Icon name="arrow-up-right" size={13} />
@@ -56,10 +53,14 @@ export function CellDrawer({ screen, row, column, onClose, onCopied }: CellDrawe
                 Qloo requests behind this cell · {requests.length}
               </h3>
               <ul className="flex flex-col gap-3" aria-label="Requests behind this cell">
-                {requests.map((entry) => {
+                {requests.map((entry, i) => {
                   const { lookup, query } = requestLookup(entry, now);
                   return (
-                    <li key={entry.id} className="flex flex-col gap-2 rounded-control border border-line bg-surface p-3">
+                    <li
+                      key={entry.id}
+                      className="flex animate-rise flex-col gap-2 rounded-control border border-line bg-surface p-3"
+                      style={{ animationDelay: `${Math.min(60 + i * 40, 300)}ms` }}
+                    >
                       <span className="flex flex-wrap items-baseline gap-x-2 type-label">
                         <span className="font-mono text-[12px] font-semibold text-accent">{entry.id}</span>
                         <span className="font-medium text-ink">{PURPOSE_LABEL[entry.purpose]}</span>

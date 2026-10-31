@@ -1,5 +1,5 @@
-// The marketing landing (/welcome): every call to action leads to the ask box, OpenStreetMap is named as a
-// source, all 13 jobs are listed, and no usage numbers, prices or sign-up appear.
+// The marketing landing (/welcome, and "/" for signed-out visitors): calls to action lead to account creation
+// and sign-in, OpenStreetMap is named as a source, all 13 jobs are listed, and no usage numbers or prices appear.
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { DESKS } from "../../components/landing/content";
@@ -17,10 +17,12 @@ describe("LandingPage", () => {
     expect(DESKS.flatMap((d) => d.jobs)).toHaveLength(13);
   });
 
-  it("sends calls to action to Home and the method, with no sign-up", () => {
-    expect(html).toContain('href="/"');
+  it("sends calls to action to sign-up, sign-in and the method", () => {
+    expect(html).toContain('href="/signup"');
+    expect(html).toContain('href="/login"');
     expect(html).toContain('href="/method"');
-    expect(html).not.toMatch(/sign in|sign up|create account/i);
+    expect(html).toMatch(/Create account/);
+    expect(html).toMatch(/Sign in/);
   });
 
   it("states no usage numbers or prices", () => {

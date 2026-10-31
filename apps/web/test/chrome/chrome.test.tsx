@@ -16,7 +16,7 @@ describe("header", () => {
     expect(out).toMatch(/<a[^>]*href="\/"[^>]*>.*Culture Terminal<\/span><\/a>/);
     expect(out).toContain('aria-label="Main"');
     expect(SITE_NAV.map((n) => [n.label, n.href])).toEqual([
-      ["Ask", "/"],
+      ["Ask", "/home"],
       ["Your answers", "/briefs"],
       ["Following", "/following"],
       ["Screener", "/screener"],
@@ -45,7 +45,7 @@ describe("header", () => {
 
   it("adds New question on inner pages only, pointing at Home's box", () => {
     expect(html(<Header variant="inner" />)).toContain(`href="${NEW_QUESTION_HREF}"`);
-    expect(NEW_QUESTION_HREF).toBe("/#ask");
+    expect(NEW_QUESTION_HREF).toBe("/home#ask");
     expect(html(<Header variant="working" />)).not.toContain(`href="${NEW_QUESTION_HREF}"`);
   });
 

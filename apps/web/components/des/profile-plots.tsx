@@ -20,28 +20,31 @@ const barWidth = (ratio: number, room: number): CSSProperties => ({
   width: `calc((100% - ${room}px) * ${Math.max(0, Math.min(1, ratio))})`,
 });
 
-/** DivergingRows: a zero line at the centre; more than average to the right (accent), less to the left (second). */
+/** Rows of a plot rise in one after another on arrival (CSS, once; off under reduced motion). */
+const stagger = (i: number) => ({ animationDelay: `${200 + Math.min(i, 10) * 30}ms` });
+
+/** DivergingRows: a zero line at the centre; more than average to the right (green), less to the left (red). */
 export function DivergingRows({ rows, label }: { rows: readonly FanRow[]; label: string }) {
   const max = Math.max(DIVERGING_MIN_SCALE, ...rows.map((r) => Math.abs(r.value ?? 0)));
   return (
     <div role="img" aria-label={label} className="relative mx-auto w-full max-w-[504px] py-1" data-plot="diverging">
       <span aria-hidden="true" className="absolute inset-y-0 left-1/2 w-px bg-line-strong" />
-      {rows.map((row) => {
+      {rows.map((row, i) => {
         const v = row.value;
-        const name = <span className="min-w-0 type-label font-normal text-ink [overflow-wrap:anywhere]">{row.label}</span>;
-        const value = v === null ? null : <span className="shrink-0 type-mono text-ink-2 tabular-nums">{signed(v)}</span>;
+        const name = <span className="min-w-0 type-label font-normal text-ink-2 [overflow-wrap:anywhere]">{row.label}</span>;
+        const value = v === null ? null : <span className="shrink-0 type-mono text-ink tabular-nums">{signed(v)}</span>;
         return (
-          <div key={row.key} className="grid min-h-9 grid-cols-2 items-center py-1" data-row={row.label} aria-hidden="true">
+          <div key={row.key} className="grid min-h-9 animate-rise grid-cols-2 items-center py-1" style={stagger(i)} data-row={row.label} aria-hidden="true">
             {v === null ? (
               <>
                 <span className="flex min-w-0 justify-end pr-3">{name}</span>
-                <span className="pl-3 type-mono text-ink-3">{NO_DATA}</span>
+                <span className="pl-3 type-mono text-ink-2">{NO_DATA}</span>
               </>
             ) : v >= 0 ? (
               <>
                 <span className="flex min-w-0 justify-end pr-3">{name}</span>
                 <span className="flex min-w-0 items-center gap-2">
-                  <span className="h-2.5 flex-none rounded-r-xs bg-accent" style={barWidth(v / max, 60)} />
+                  <span className="h-2.5 flex-none rounded-r-xs bg-div-p3" style={barWidth(v / max, 60)} />
                   {value}
                 </span>
               </>
@@ -49,7 +52,7 @@ export function DivergingRows({ rows, label }: { rows: readonly FanRow[]; label:
               <>
                 <span className="flex min-w-0 items-center justify-end gap-2">
                   {value}
-                  <span className="h-2.5 flex-none rounded-l-xs bg-second" style={barWidth(-v / max, 60)} />
+                  <span className="h-2.5 flex-none rounded-l-xs bg-div-n2" style={barWidth(-v / max, 60)} />
                 </span>
                 <span className="flex min-w-0 pl-3">{name}</span>
               </>
@@ -78,10 +81,10 @@ export function TagGroups({ families }: { families: readonly TagFamily[] }) {
     <dl className="flex flex-col gap-6 max-md:gap-5">
       {families.map((family) => (
         <div key={family.label} className="flex flex-col gap-2" data-tag-family={family.label}>
-          <dt className="text-[11px] leading-4 font-semibold tracking-[0.08em] text-ink-3 uppercase">{family.label}</dt>
+          <dt className="text-[11px] leading-4 font-semibold tracking-[0.08em] text-ink-2 uppercase">{family.label}</dt>
           <dd className="flex flex-wrap gap-1.5">
             {family.tags.map((tag, i) => (
-              <span key={`${i}-${tag}`} className={cx(CHIP, "bg-sunken py-1 text-[13px] leading-[18px] text-ink")}>
+              <span key={`${i}-${tag}`} className={cx(CHIP, "rounded-[3px] bg-sunken px-[9px] py-1 font-normal text-ink-2")}>
                 {tag}
                 {/* Read as a list, not one run-on word. */}
                 {i < family.tags.length - 1 ? <span className="sr-only"> · </span> : null}
@@ -108,27 +111,27 @@ export function NeighbourColumns({ columns }: { columns: readonly NeighbourColum
           className="flex min-w-0 flex-col gap-1 lg:px-4 lg:first:pl-0 lg:last:pr-0"
           data-domain={column.key}
         >
-          <h3 className="m-0 flex items-center gap-1.5 border-b border-line pb-2 text-[13px] leading-[18px] font-semibold text-ink">
+          <h3 className="m-0 flex items-center gap-1.5 border-b border-line pb-2.5 text-[12px] leading-4 font-semibold text-ink-2">
             <Icon name={column.icon} size={14} className="shrink-0" />
             {column.label}
           </h3>
           {column.rows.length === 0 ? (
-            <p className="py-3 type-label font-normal text-ink-3">{NO_DATA}</p>
+            <p className="py-3 type-label font-normal text-ink-2">{NO_DATA}</p>
           ) : (
             <ol className="flex flex-col">
               {column.rows.map((row) => (
                 <li key={`${row.rank}-${row.name}`} className="flex min-h-12 items-start gap-2.5 py-2">
-                  <span className="w-4 shrink-0 pt-[3px] type-mono text-ink-3 tabular-nums">{row.rank}</span>
+                  <span className="w-4 shrink-0 pt-[3px] type-mono text-ink-2 tabular-nums">{row.rank}</span>
                   <Monogram name={row.name} size={24} />
                   <span className="flex min-w-0 flex-col gap-0.5">
                     {row.href ? (
                       <Link
                         href={row.href}
                         prefetch={false}
-                        className="group inline-flex min-w-0 items-center gap-1 rounded-sm type-label text-ink hover:text-accent"
+                        className="group inline-flex min-w-0 items-center gap-1 rounded-sm type-label text-accent transition-colors duration-150 hover:text-accent-hover hover:underline"
                       >
                         <span className="min-w-0 [overflow-wrap:anywhere]">{row.name}</span>
-                        <Icon name="arrow-up-right" size={12} className="shrink-0 text-ink-3 group-hover:text-accent" />
+                        <Icon name="arrow-up-right" size={12} className="shrink-0 text-accent" />
                       </Link>
                     ) : (
                       <span className="min-w-0 type-label text-ink [overflow-wrap:anywhere]">{row.name}</span>
@@ -164,8 +167,8 @@ export function TravelBars({ rows, label }: { rows: readonly TravelRow[]; label:
   return (
     <div role="img" aria-label={label} data-plot="travel">
       <ol aria-hidden="true" className="flex flex-col divide-y divide-line [--room:132px] max-md:[--room:44px]">
-        {rows.map((row) => (
-          <li key={row.label} className="flex min-h-11 items-center gap-4 py-1.5 max-md:gap-3">
+        {rows.map((row, i) => (
+          <li key={row.label} className="flex min-h-11 animate-rise items-center gap-4 py-1.5 max-md:gap-3" style={stagger(i)}>
             <span className="flex w-[200px] shrink-0 flex-col max-md:w-[148px]">
               <span className={cx("min-w-0 type-label text-ink [overflow-wrap:anywhere]", row.rank === 1 ? "font-semibold" : "font-normal")}>
                 {row.label}
@@ -181,7 +184,7 @@ export function TravelBars({ rows, label }: { rows: readonly TravelRow[]; label:
                 className="absolute top-1/2 flex -translate-y-1/2 items-center gap-2 bg-surface px-1.5 whitespace-nowrap"
                 style={{ left: `calc(${end(row.fit)} + 2px)` }}
               >
-                <span className={cx("type-mono tabular-nums", row.rank === 1 ? "text-accent" : "text-ink-3")}>#{row.rank}</span>
+                <span className={cx("type-mono tabular-nums", row.rank === 1 ? "font-semibold text-accent" : "text-ink-2")}>#{row.rank}</span>
                 {row.gem ? <Tag preset="hidden-gem" className="max-md:hidden" /> : null}
               </span>
             </span>

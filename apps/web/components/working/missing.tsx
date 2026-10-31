@@ -12,9 +12,9 @@ export type MissingKind = "not_found" | "no_page" | "unavailable" | "running" | 
 const COPY: Readonly<Record<MissingKind, { icon: IconName; line: string; detail: string | null; action: string }>> = {
   not_found: { icon: "search-x", line: "There's no answer at this link.", detail: null, action: "Ask a question" },
   no_page: { icon: "search-x", line: "There's no page at this link.", detail: null, action: "Ask a question" },
-  unavailable: { icon: "wifi-off", line: "We couldn't load this answer right now.", detail: "Please try again in a moment.", action: "Try again" },
-  running: { icon: "loader-circle", line: "This answer is still being made.", detail: "This link works as soon as it's finished.", action: "Follow it live" },
-  no_answer: { icon: "circle-pause", line: "This answer wasn't finished.", detail: "The run shows where it stopped and what to do next.", action: "Open the run" },
+  unavailable: { icon: "wifi-off", line: "We couldn't load this answer right now.", detail: null, action: "Try again" },
+  running: { icon: "loader-circle", line: "This answer is still being made.", detail: null, action: "Follow it live" },
+  no_answer: { icon: "circle-pause", line: "This answer wasn't finished.", detail: null, action: "Open the run" },
 };
 
 export function AnswerMissing({ kind, runId }: { kind: MissingKind; runId?: string }) {
@@ -23,7 +23,7 @@ export function AnswerMissing({ kind, runId }: { kind: MissingKind; runId?: stri
   const href = kind === "not_found" || kind === "no_page" ? NEW_QUESTION_HREF : kind === "unavailable" ? (runHref ?? "/") : (runHref ?? NEW_QUESTION_HREF);
   return (
     <SiteShell header="inner" mainClassName="flex flex-col items-center py-24 max-md:py-12">
-      <Card padding="lg" data-missing={kind} className="flex w-full max-w-[552px] flex-col items-center gap-4 text-center">
+      <Card padding="lg" data-missing={kind} className="flex w-full max-w-[552px] flex-col items-center gap-4 text-center motion-safe:animate-rise">
         <Icon name={copy.icon} size={32} className="text-ink-3" />
         <h1 className="type-title text-ink">{copy.line}</h1>
         {copy.detail ? <p className="type-body text-ink-2">{copy.detail}</p> : null}

@@ -13,3 +13,4 @@ export * from "./repos/showcases";
 export * from "./repos/follows";
 export * from "./repos/contextCache";
 export * from "./repos/featureUses";
+export * from "./repos/users";

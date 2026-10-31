@@ -72,17 +72,17 @@ export function WhichOneCard({ runId, mention, candidates, canPick, editHref, re
     <Card aria-label="Which one?" data-state-card="pick" className={cx("flex flex-col gap-4", className)}>
       <h2 className="type-title text-ink max-md:type-title-sm">&quot;{mention}&quot; could mean a few things. Which one?</h2>
       <ul className="flex flex-col gap-2" aria-label="Candidates">
-        {candidates.map((c) => {
+        {candidates.map((c, i) => {
           const reach = reachWord(c.popularity);
           return (
-            <li key={c.key}>
+            <li key={c.key} className={cx("motion-safe:animate-rise", i === 1 && "[animation-delay:40ms]", i === 2 && "[animation-delay:80ms]", i >= 3 && "[animation-delay:120ms]")}>
               <button
                 type="button"
                 onClick={() => void pick(c.key)}
                 disabled={closed || picking !== null}
                 aria-busy={picking === c.key ? true : undefined}
                 data-candidate={c.key}
-                className="flex min-h-14 w-full items-center gap-3 rounded-control border border-line bg-surface px-4 py-2 text-left transition-[border-color,box-shadow] hover:border-line-strong hover:shadow-xs disabled:cursor-not-allowed disabled:hover:border-line disabled:hover:shadow-none"
+                className="flex min-h-14 w-full items-center gap-3 rounded-control border border-line bg-surface px-4 py-2 text-left transition-[border-color,box-shadow,transform] duration-150 ease-out hover:border-line-strong hover:shadow-xs active:translate-y-px disabled:active:translate-y-0 disabled:cursor-not-allowed disabled:hover:border-line disabled:hover:shadow-none"
               >
                 <Monogram name={c.name} size={32} />
                 <span className="flex min-w-0 flex-1 flex-col">
@@ -100,11 +100,7 @@ export function WhichOneCard({ runId, mention, candidates, canPick, editHref, re
         Not listed?
         <ButtonLink href={editHref}>Edit question</ButtonLink>
       </p>
-      {replay ? (
-        <p className="px-4 type-label text-ink-2" data-picks="replay">
-          This is a recording, so picks are closed here.
-        </p>
-      ) : !canPick ? (
+      {replay ? null : !canPick ? (
         <p className="px-4 type-label text-ink-2">Picks open in a moment.</p>
       ) : null}
       {/* Always in the accessibility tree, so the message is announced when it arrives. */}

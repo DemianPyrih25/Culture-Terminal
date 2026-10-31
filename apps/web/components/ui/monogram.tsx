@@ -2,7 +2,7 @@ import { cx } from "./cx";
 
 /** subject: the run's subject (accent). second: the comparison (orange). mono-1..4: neutrals by name. */
 export type MonogramPalette = "subject" | "second" | "mono-1" | "mono-2" | "mono-3" | "mono-4";
-export type MonogramSize = 20 | 24 | 32 | 48 | 56;
+export type MonogramSize = 20 | 24 | 32 | 36 | 48 | 56;
 
 const NEUTRALS = ["mono-1", "mono-2", "mono-3", "mono-4"] as const;
 
@@ -20,6 +20,7 @@ const SIZE: Readonly<Record<MonogramSize, string>> = {
   20: "size-5 rounded-xs text-[8.5px]",
   24: "size-6 rounded-xs text-[10px]",
   32: "size-8 rounded-sm text-[13.5px]",
+  36: "size-9 rounded-sm text-[15px]",
   48: "size-12 rounded-md text-[20px]",
   56: "size-14 rounded-md text-[23.5px]",
 };
@@ -38,8 +39,7 @@ export function monogramInitials(name: string): string {
   const kept = words.length > 1 && LEADING.has(words[0]!.toLowerCase()) ? words.slice(1) : words;
   if (kept.length === 0) return "";
   const letters = (w: string) => Array.from(w.replace(/[^\p{L}]/gu, ""));
-  const initials =
-    kept.length >= 2 ? `${letters(kept[0]!)[0] ?? ""}${letters(kept[1]!)[0] ?? ""}` : letters(kept[0]!).slice(0, 2).join("");
+  const initials = kept.length >= 2 ? `${letters(kept[0]!)[0] ?? ""}${letters(kept[1]!)[0] ?? ""}` : letters(kept[0]!).slice(0, 2).join("");
   return initials.toLocaleUpperCase("en-US");
 }
 
@@ -69,12 +69,7 @@ export function Monogram({ name, size = 24, palette, className }: MonogramProps)
     <span
       aria-hidden="true"
       data-palette={tone}
-      className={cx(
-        "inline-flex shrink-0 items-center justify-center leading-none font-semibold select-none",
-        SIZE[size],
-        PALETTE[tone],
-        className,
-      )}
+      className={cx("inline-flex shrink-0 items-center justify-center leading-none font-semibold select-none", SIZE[size], PALETTE[tone], className)}
     >
       {monogramInitials(name)}
     </span>

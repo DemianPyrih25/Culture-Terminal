@@ -4,11 +4,11 @@
 /** The id of the element holding Home's question field (the field itself or a wrapper around it). */
 export const ASK_FIELD_ID = "ask";
 
-/** Home: the question box. */
-export const ASK_HREF = "/";
+/** Home: the question box (signed-in visitors; "/" is the landing page). */
+export const ASK_HREF = "/home";
 
 /** "New question": Home with the question box focused. */
-export const NEW_QUESTION_HREF = `/#${ASK_FIELD_ID}`;
+export const NEW_QUESTION_HREF = `${ASK_HREF}#${ASK_FIELD_ID}`;
 
 /** The visitor's own answers. */
 export const ANSWERS_HREF = "/briefs";
@@ -61,7 +61,7 @@ export const SITE_LINKS: readonly { label: string; href: string }[] = [
 /** The section a path belongs to, for pages that do not name one. /method counts as How it works. */
 export function navKeyForPath(path: string | null | undefined): NavKey | null {
   if (!path) return null;
-  if (path === "/" || path === "/ask") return "ask";
+  if (path === "/" || path === ASK_HREF || path === "/ask") return "ask";
   if (path.startsWith(ANSWERS_HREF)) return "answers";
   if (path.startsWith(FOLLOWING_HREF)) return "following";
   if (path.startsWith(SCREENER_HREF)) return "screener";

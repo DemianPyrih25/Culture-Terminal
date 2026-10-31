@@ -51,7 +51,7 @@ export function SuggestionList({ id, groups, activeKey, onPick, onHover, classNa
                     }}
                     onMouseEnter={() => onHover?.(row)}
                     className={cx(
-                      "flex h-11 cursor-pointer items-center gap-3 rounded-sm px-3 transition-colors",
+                      "flex h-11 cursor-pointer items-center gap-3 rounded-sm px-3 transition-colors duration-150",
                       active ? "bg-sunken" : "hover:bg-sunken",
                     )}
                   >

@@ -6,7 +6,7 @@ export const metadata: Metadata = {
   description: LANDING_META.description,
 };
 
-/** /welcome, the marketing landing for business buyers. Static; every call to action leads to Home. */
+/** /welcome, the marketing landing for business buyers. Calls to action lead to /signup and /login. */
 export default function WelcomePage() {
   return <LandingPage />;
 }

@@ -27,25 +27,25 @@ export const LOOK_UP_ID = "look-up";
 function Candidates({ candidates, label }: { candidates: readonly DesCandidate[]; label: string }) {
   return (
     <ul aria-label={label} className="flex flex-col divide-y divide-line overflow-hidden rounded-card border border-line bg-surface">
-      {candidates.map((c) => (
-        <li key={c.key}>
+      {candidates.map((c, i) => (
+        <li key={c.key} className="animate-rise" style={{ animationDelay: `${Math.min(i, 8) * 30}ms` }}>
           <Link
             href={c.href}
             prefetch={false}
-            className="group flex min-h-16 items-center gap-4 px-5 py-3 transition-colors hover:bg-canvas max-sm:gap-3 max-sm:px-4"
+            className="group flex min-h-16 items-center gap-4 px-5 py-3 transition-colors duration-150 hover:bg-canvas active:bg-sunken max-sm:gap-3 max-sm:px-4"
             data-candidate={c.key}
           >
             <Monogram name={c.name} size={32} />
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="truncate type-body-strong text-ink group-hover:text-accent">{c.name}</span>
-              <span className="truncate type-label font-normal text-ink-2">{c.disambiguation ?? "No other detail from Qloo"}</span>
+              <span className="truncate text-[12px] leading-4 text-ink-2">{c.disambiguation ?? "No other detail from Qloo"}</span>
             </span>
             {c.popularity !== null ? (
-              <span className={cx(CHIP, "max-sm:hidden", c.popularity >= WIDELY_KNOWN ? "bg-accent-soft text-accent-ink" : "bg-sunken text-ink-2")}>
+              <span className={cx(CHIP, "max-sm:hidden", c.popularity >= WIDELY_KNOWN ? "bg-accent-soft font-semibold text-accent" : "bg-sunken font-semibold text-ink-2")}>
                 {c.popularity >= WIDELY_KNOWN ? "Widely known" : "Less known"}
               </span>
             ) : null}
-            <Icon name="arrow-right" size={16} className="shrink-0 text-ink-3 group-hover:text-accent" />
+            <Icon name="arrow-right" size={16} className="shrink-0 text-ink-2 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-accent" />
           </Link>
         </li>
       ))}
@@ -89,11 +89,15 @@ function OutcomeCard({ outcome, retry }: { outcome: Exclude<DesOutcome, { kind: 
     case "pick":
       return (
         <section aria-label="Which one" data-state-card="Which one" className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1">
-            <h2 className="type-display-s break-words text-ink max-md:type-display-s-sm">
-              “{outcome.query.name}” could mean a few things. Which one?
-            </h2>
-            <p className="type-body text-ink-2">Nothing is picked for you; each opens its own profile.</p>
+          <div className="flex flex-col gap-1.5">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <h2 className="font-display text-[20px] leading-7 font-medium break-words text-ink">
+                “{outcome.query.name}” could mean a few things. Which one?
+              </h2>
+              <p className="type-caption text-ink-2">
+                {DES_TYPE_LABEL[outcome.query.type]} · {outcome.candidates.length} {outcome.candidates.length === 1 ? "name" : "names"} in Qloo&apos;s data
+              </p>
+            </div>
           </div>
           <Candidates candidates={outcome.candidates} label="Candidates" />
           <p className="type-label font-normal text-ink-2">Not listed? {lookUpLink}</p>
@@ -102,7 +106,7 @@ function OutcomeCard({ outcome, retry }: { outcome: Exclude<DesOutcome, { kind: 
     case "not_found":
       return (
         <StateCard icon="search-x" label="Name not found" title={`“${outcome.query.name}” isn't in Qloo's data.`}>
-          <p className="type-body text-ink-2">Check the spelling or use the full name. Nothing was swapped in for you.</p>
+          <p className="type-body text-ink-2">Check the spelling or use the full name.</p>
           {outcome.candidates.length > 0 ? (
             <div className="flex flex-col gap-3 pt-1">
               <h3 className={EYEBROW}>Closest names in Qloo</h3>
@@ -115,7 +119,6 @@ function OutcomeCard({ outcome, retry }: { outcome: Exclude<DesOutcome, { kind: 
       return (
         <StateCard icon="ban" label="Not looked up" title="We only profile public figures.">
           <p className="type-body text-ink-2">{outcome.message}</p>
-          <p className="type-label font-normal text-ink-3">Group-level taste only: no individuals.</p>
         </StateCard>
       );
     case "unavailable":
@@ -179,27 +182,37 @@ function OutcomeCard({ outcome, retry }: { outcome: Exclude<DesOutcome, { kind: 
 /** The search card, which every state ends on. */
 function LookUp({ title, name, type, error }: { title: string; name?: string; type?: DesType; error?: string | null }) {
   return (
-    <Card id={LOOK_UP_ID} aria-labelledby={`${LOOK_UP_ID}-title`} className="flex scroll-mt-6 flex-col gap-4">
-      <h2 id={`${LOOK_UP_ID}-title`} className="type-display-s text-ink max-md:type-display-s-sm">
-        {title}
-      </h2>
+    <Card id={LOOK_UP_ID} aria-labelledby={`${LOOK_UP_ID}-title`} className="flex scroll-mt-6 flex-col gap-4 p-6 max-md:p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 id={`${LOOK_UP_ID}-title`} className="font-display text-[18px] leading-6 font-medium text-ink">
+          {title}
+        </h2>
+      </div>
       <DesSearch name={name} type={type} error={error} />
-      <p className="type-caption text-ink-3">
-        A brand, artist, public figure, podcast, TV show or film. Places aren&apos;t profiled: ask a question about a place instead.
-      </p>
     </Card>
   );
 }
 
-function Page({ title, labelLine, lead, children }: { title: string; labelLine?: string; lead?: string; children: ReactNode }) {
+function Page({
+  title,
+  labelLine,
+  children,
+}: {
+  title: string;
+  labelLine?: string;
+  children: ReactNode;
+}) {
   return (
-    <div className="flex max-w-[744px] flex-col gap-8 pt-12 pb-16 max-md:gap-6 max-md:pt-6 max-md:pb-10">
-      <header className="flex flex-col gap-2">
-        {labelLine ? <p className={EYEBROW}>{labelLine}</p> : null}
-        <h1 className="type-display-m break-words text-ink max-md:type-display-m-sm">{title}</h1>
-        {lead ? <p className="mt-1 type-body text-ink-2 md:text-[16px] md:leading-[26px]">{lead}</p> : null}
-      </header>
-      {children}
+    <div className="pt-10 pb-16 max-md:pt-6 max-md:pb-10">
+      <div className="flex min-w-0 max-w-[820px] flex-col gap-10 max-md:gap-6 [&>*]:animate-rise [&>*:nth-child(2)]:[animation-delay:60ms] [&>*:nth-child(3)]:[animation-delay:120ms]">
+        <header className="flex flex-col gap-3">
+          {labelLine ? <p className={EYEBROW}>{labelLine}</p> : null}
+          <h1 className="font-display text-[40px] leading-[46px] font-medium tracking-[-0.01em] break-words text-ink max-md:type-display-m-sm">
+            {title}
+          </h1>
+        </header>
+        {children}
+      </div>
     </div>
   );
 }
@@ -219,7 +232,6 @@ export function ProfileStateView({ query, outcome, error = null }: ProfileStateV
       <Page
         title="Look up a profile"
         labelLine="Audience profiles"
-        lead="See who a brand's, artist's or show's fans are, what else they love, and where their taste travels."
       >
         <LookUp title="Name and type" name={query?.name} type={query?.type} error={error} />
       </Page>
@@ -229,7 +241,10 @@ export function ProfileStateView({ query, outcome, error = null }: ProfileStateV
   const refused = outcome.kind === "refused";
   const retry = outcome.kind === "failed" || outcome.kind === "limited" ? desHref(query) : null;
   return (
-    <Page title={refused ? "Look up a profile" : query.name} labelLine={refused ? undefined : `${DES_TYPE_LABEL[query.type]} · Audience profile`}>
+    <Page
+      title={refused ? "Look up a profile" : query.name}
+      labelLine={refused ? undefined : `${DES_TYPE_LABEL[query.type]} · Audience profile`}
+    >
       <OutcomeCard outcome={outcome} retry={retry} />
       <LookUp title="Look up another" name={refused ? "" : undefined} type={query.type} />
     </Page>

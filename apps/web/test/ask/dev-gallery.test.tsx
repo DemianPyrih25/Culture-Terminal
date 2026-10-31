@@ -42,7 +42,7 @@ describe("/dev/ask", () => {
     expect(html).toContain("We don&#x27;t answer political targeting questions. Try this instead:");
     expect(html).toContain("New questions reopen at 8:00 pm your time.");
     expect(html).toContain("Juniper Cola · audience profile");
-    expect(html).toContain("No answers yet.");
+    expect(html).toContain("No answers yet");
     expect(html).not.toMatch(/example|showcase/i);
     expect(fetch).not.toHaveBeenCalled();
   });

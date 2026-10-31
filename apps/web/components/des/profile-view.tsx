@@ -7,7 +7,7 @@ import { Hatch } from "../ui/skeleton";
 import { KeyNumber } from "../ui/key-number";
 import { FollowButton, profileFollowOption } from "../following";
 import { Monogram } from "../ui/monogram";
-import { Icon } from "../ui/icons";
+import { cx } from "../ui/cx";
 import { useToast } from "../ui/toast";
 import { EYEBROW } from "./eyebrow";
 import { LookUpAnother } from "./look-up";
@@ -21,9 +21,12 @@ import { DivergingRows, FansTable, NeighbourColumns, NeighboursTable, TagGroups,
  * How we know on the request behind it.
  */
 
+/** The cards' small-caps kind line and Source in ink-2, so they read clearly on white. */
+const CARD = "[&_.type-overline]:text-ink-2 [&_button]:text-ink-2";
+
 function EntityHeader({ profile, onHow }: { profile: ProfileModel; onHow: () => void }) {
   return (
-    <header className="flex flex-col gap-5 border-b border-line pb-6 max-md:gap-4 max-md:pb-5" data-entity-header="true">
+    <header className="flex animate-rise flex-col gap-5 max-md:gap-4" data-entity-header="true">
       <div className="flex min-w-0 items-center gap-4">
         <Monogram name={profile.name} size={56} palette="subject" className="max-md:hidden" />
         <Monogram name={profile.name} size={48} palette="subject" className="md:hidden" />
@@ -31,13 +34,10 @@ function EntityHeader({ profile, onHow }: { profile: ProfileModel; onHow: () => 
           <p className={EYEBROW} data-label-line="true">
             {profile.labelLine}
           </p>
-          <h1 className="type-display-m break-words text-ink max-md:type-display-m-sm">{profile.name}</h1>
+          <h1 className="font-display text-[42px] leading-[48px] font-medium tracking-[-0.01em] break-words text-ink max-md:type-display-m-sm">{profile.name}</h1>
         </div>
       </div>
-      <p className="max-w-[640px] type-body text-ink-2 md:text-[16px] md:leading-[26px]">
-        Who its fans are, what else they love, and where their taste travels.
-        {profile.lookedUpAs ? <span className="mt-1 block type-label font-normal text-ink-3">Looked up as “{profile.lookedUpAs}”.</span> : null}
-      </p>
+      {profile.lookedUpAs ? <p className="text-[12px] leading-4 text-ink-2">Looked up as “{profile.lookedUpAs}”.</p> : null}
       <div className="flex flex-wrap items-start gap-2 max-md:w-full">
         <ButtonLink href={profile.askHref} prefetch={false} variant="primary" className="max-md:w-full max-md:justify-center">
           Ask about {profile.name}
@@ -52,68 +52,12 @@ function EntityHeader({ profile, onHow }: { profile: ProfileModel; onHow: () => 
   );
 }
 
-/** The margin rail beside the profile on wide screens: what was checked, the limits, following and freshness. */
-function MarginRail({ profile, onSources }: { profile: ProfileModel; onSources: () => void }) {
-  const { how } = profile;
-  const all = how.total > 0 && how.traced === how.total;
+/** A block that fades in and rises 8 px once, on arrival (CSS only, so it never replays on re-render). */
+function Rise({ delay = 0, className, children }: { delay?: number; className?: string; children: ReactNode }) {
   return (
-    <aside aria-label="About this profile" className="flex flex-col gap-8 max-xl:hidden" data-profile-rail="true">
-      <section className="flex flex-col gap-3">
-        <h2 className={EYEBROW}>How we know</h2>
-        <ul className="flex flex-col gap-2.5 type-label font-normal text-ink-2">
-          <li className="flex gap-2">
-            <Icon
-              name={all ? "badge-check" : "triangle-alert"}
-              size={14}
-              className={all ? "mt-0.5 shrink-0 text-good" : "mt-0.5 shrink-0 text-caution"}
-            />
-            {all ? `All ${how.total} numbers traced to a Qloo request.` : `${how.traced} of ${how.total} numbers traced to a Qloo request.`}
-          </li>
-          <li className="flex gap-2">
-            <Icon name="circle-check" size={14} className="mt-0.5 shrink-0 text-ink-3" />
-            {how.matched}
-          </li>
-          <li className="flex gap-2">
-            <Icon name="circle-check" size={14} className="mt-0.5 shrink-0 text-ink-3" />
-            Code only. No AI model writes or reads any of this page.
-          </li>
-        </ul>
-        <button
-          type="button"
-          onClick={onSources}
-          className="inline-flex w-fit items-center gap-1.5 type-label text-accent hover:text-accent-hover hover:underline"
-        >
-          Sources ({how.sources.length})
-          <Icon name="arrow-right" size={14} />
-        </button>
-      </section>
-      {how.notes.length > 0 ? (
-        <section className="flex flex-col gap-3 border-t border-line pt-6">
-          <h2 className={EYEBROW}>Good to know</h2>
-          <ul className="flex flex-col gap-2.5">
-            {how.notes.map((note) => (
-              <li key={note} className="flex gap-2 type-label font-normal text-ink-2">
-                <span aria-hidden="true" className="mt-[7px] size-1 shrink-0 rounded-full bg-ink-3" />
-                {note}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-      {profile.type === "brand" ? (
-        <section className="flex flex-col gap-3 border-t border-line pt-6">
-          <h2 className={EYEBROW}>Following</h2>
-          <p className="type-label font-normal text-ink-2">
-            Follow saves one question you can re-run at any time: how healthy {profile.name}&apos;s audience taste is, and who its nearest substitutes
-            are.
-          </p>
-        </section>
-      ) : null}
-      <section className="flex flex-col gap-3 border-t border-line pt-6">
-        <h2 className={EYEBROW}>Freshness</h2>
-        <p className="type-label font-normal text-ink-2">A profile is read from Qloo again after one hour.</p>
-      </section>
-    </aside>
+    <div className={cx("animate-rise", className)} style={{ animationDelay: `${delay}ms` }}>
+      {children}
+    </div>
   );
 }
 
@@ -146,15 +90,15 @@ export function ProfileView({ profile }: { profile: ProfileModel }) {
   const { fans, tags, neighbours, travel } = profile;
 
   return (
-    <div className="grid grid-cols-1 gap-12 pt-12 pb-16 max-md:pt-6 max-md:pb-10 xl:grid-cols-[minmax(0,1fr)_240px]" data-profile="true">
+    <div className="pt-9 pb-16 max-md:pt-6 max-md:pb-10" data-profile="true">
       <div className="flex min-w-0 flex-col gap-8 max-md:gap-6">
         <EntityHeader profile={profile} onHow={() => setHow({ tab: "summary", receipt: null })} />
 
-        <div className="flex flex-col gap-8 max-md:gap-5">
+        <div className="flex flex-col gap-10 max-md:gap-5">
           <section aria-label="Key numbers" className="grid grid-cols-3 gap-4 max-md:grid-cols-1 max-md:gap-3">
-            {profile.keyNumbers.map((k) => (
+            {profile.keyNumbers.map((k, i) => (
+              <Rise key={k.id} delay={60 + i * 40} className="flex flex-col [&>*]:flex-1">
               <KeyNumber
-                key={k.id}
                 variant="word"
                 value={k.value}
                 label={k.label}
@@ -162,10 +106,11 @@ export function ProfileView({ profile }: { profile: ProfileModel }) {
                 onSource={source(k.receipt)}
                 selected={selected(k.receipt)}
               />
+              </Rise>
             ))}
           </section>
 
-          <div className="grid grid-cols-2 gap-6 max-lg:grid-cols-1 max-md:gap-4">
+          <Rise delay={180} className="grid grid-cols-2 gap-6 max-lg:grid-cols-1 max-md:gap-4">
             <ChartCard
               kind="Who the fans are"
               title={fans.title}
@@ -174,7 +119,7 @@ export function ProfileView({ profile }: { profile: ProfileModel }) {
               onSource={source(fans.receipt)}
               table={fans.rows.length > 0 ? <FansTable rows={fans.rows} label={fans.title} /> : undefined}
               caption={fans.rows.length > 0 ? caption("Relative to the average audience, not shares of customers.", fans.gap) : undefined}
-              className="h-full [&>[data-view]]:flex-1"
+              className={cx(CARD, "h-full [&>[data-view]]:flex-1")}
             >
               {fans.rows.length > 0 ? <DivergingRows rows={fans.rows} label={fans.title} /> : <Empty gap={fans.gap} />}
             </ChartCard>
@@ -185,17 +130,19 @@ export function ProfileView({ profile }: { profile: ProfileModel }) {
               stacked
               onSource={source(tags.receipt)}
               caption={tags.families.length > 0 ? tags.caption : undefined}
-              className="h-full [&>[data-view]]:flex-1"
+              className={cx(CARD, "h-full [&>[data-view]]:flex-1")}
             >
               {tags.families.length > 0 ? <TagGroups families={tags.families} /> : <Empty gap={tags.gap} />}
             </ChartCard>
-          </div>
+          </Rise>
 
+          <Rise delay={240}>
           <ChartCard
             kind="What else their fans love"
             title={neighbours.title}
             titleAs="h2"
             stacked
+            className={CARD}
             onSource={source(neighbours.receipt)}
             table={neighbours.columns.length > 0 ? <NeighboursTable columns={neighbours.columns} label={neighbours.title} /> : undefined}
             caption={
@@ -204,22 +151,24 @@ export function ProfileView({ profile }: { profile: ProfileModel }) {
           >
             {neighbours.columns.length > 0 ? <NeighbourColumns columns={neighbours.columns} /> : <Empty gap={neighbours.gap} />}
           </ChartCard>
+          </Rise>
 
+          <Rise delay={300}>
           <ChartCard
             kind="Places their fans travel to"
             title={travel.title}
             titleAs="h2"
             stacked
+            className={CARD}
             onSource={source(travel.receipt)}
             table={travel.rows.length > 0 ? <TravelTable rows={travel.rows} label={travel.title} /> : undefined}
             caption={travel.rows.length > 0 ? caption("Places their fans are drawn to, not where they live.", travel.gap) : undefined}
           >
             {travel.rows.length > 0 ? <TravelBars rows={travel.rows} label={travel.title} /> : <Empty gap={travel.gap} />}
           </ChartCard>
+          </Rise>
         </div>
       </div>
-
-      <MarginRail profile={profile} onSources={() => setHow({ tab: "sources", receipt: null })} />
 
       <ProfileDrawer how={profile.how} target={how} onTarget={setHow} onClose={() => setHow(null)} onCopied={() => show("Copied")} />
       {toast}

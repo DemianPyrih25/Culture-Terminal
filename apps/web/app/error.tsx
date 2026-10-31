@@ -16,7 +16,7 @@ export default function ErrorPage({ error, retry }: { error: Error & { digest?: 
     <SiteShell header="inner" mainClassName="flex flex-col items-center gap-5 py-24 max-md:py-10">
       <title>Something went wrong · Culture Terminal</title>
       <ErrorCard digest={error.digest} onRetry={retry} />
-      <p className="max-w-[600px] text-center type-caption text-ink-3">Quote the reference if you contact support; it points us to the exact failure.</p>
+      <p className="max-w-[600px] text-center text-[12px] leading-[18px] text-ink-2">Quote the reference if you contact support; it points us to the exact failure.</p>
     </SiteShell>
   );
 }

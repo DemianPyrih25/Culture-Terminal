@@ -462,7 +462,7 @@ function Dumbbell({
       ) : null}
       {hasSecond && v1 !== null ? <circle cx={px(x(v1))} cy={px(mid)} r={4.5} className="fill-chart-muted" /> : null}
       {v0 !== null ? (
-        <circle cx={px(x(v0))} cy={px(mid)} r={4.75} className={below ? "fill-second" : "fill-accent"} />
+        <circle cx={px(x(v0))} cy={px(mid)} r={4.75} className={below ? "fill-danger" : "fill-good"} />
       ) : v1 !== null && x(v1) >= cx ? (
         <MissingNote x={span[0]} y={mid} reason={reason} />
       ) : (
@@ -553,7 +553,7 @@ function ValueColumns({
             y={px(y)}
             textAnchor="end"
             fontSize={12}
-            className={`font-mono tabular-nums ${flat ? "fill-ink-2" : delta > 0 ? "fill-accent" : "fill-second"}`}
+            className={`font-mono tabular-nums ${flat ? "fill-ink-2" : delta > 0 ? "fill-good" : "fill-danger"}`}
           >
             {`${flat ? "=" : delta > 0 ? "▲" : "▼"} ${formatNumber(Math.abs(delta), unit, { ...style, signed: false })}`}
           </text>
@@ -709,7 +709,7 @@ function Butterfly(props: DivergingBarsProps & { label: string; style: NumberSty
                     y={px(mid - 4.5)}
                     width={px(Math.abs(end - zero))}
                     height={9}
-                    className={cell.value < 0 ? "fill-second" : s.fill}
+                    className={cell.value < 0 ? "fill-danger" : s.fill}
                     data-sign={cell.value < 0 ? "negative" : "positive"}
                   />
                 );
@@ -744,7 +744,7 @@ function Butterfly(props: DivergingBarsProps & { label: string; style: NumberSty
                     fontSize={12}
                     strokeWidth={3}
                     paintOrder="stroke"
-                    className={`stroke-surface font-mono tabular-nums ${outward ? "fill-ink-2" : "fill-second"}`}
+                    className={`stroke-surface font-mono tabular-nums ${outward ? "fill-ink-2" : "fill-danger"}`}
                   >
                     {formatNumber(cell.value, data.unit, style)}
                   </text>

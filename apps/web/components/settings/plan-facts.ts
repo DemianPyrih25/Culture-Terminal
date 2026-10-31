@@ -1,22 +1,5 @@
 import type { Lane, Mode } from "@ct/contracts";
 
-/**
- * What the Plan & usage page can say for certain, read on the server from the running config
- * (server/config.ts, server/screener/limits.ts) and passed in as plain numbers. A visitor's own count
- * of answers started today is not readable in the browser yet, so the page shows the limits and how
- * they count, never an invented "used" figure.
- */
-export interface PlanFacts {
-  /** The public lane, per visitor (VISITOR_MAX_ACTIVE, VISITOR_HOURLY_CAP, VISITOR_DAILY_CAP). */
-  visitor: { maxActive: number; perHour: number; perDay: number };
-  /** The review lane, shared by everyone holding a review pass (JUDGE_RUN_*). */
-  review: { slots: number; perHour: number; perDay: number };
-  /** The run queue: answers that may wait for a slot, and the seconds each may wait. */
-  queue: { max: number; waitS: number };
-  /** The screener, per visitor (screens served from its cache count toward none of these). */
-  screener: { perMinute: number; perHour: number };
-}
-
 export interface ServiceView {
   tone: "good" | "caution" | "danger" | "muted";
   label: string;
@@ -66,13 +49,4 @@ export function serviceView(mode: Mode | null | undefined, message: string | nul
 export function laneName(lane: Lane | undefined): string {
   if (lane === "judge") return "Review access";
   return "Open access";
-}
-
-/** "2 minutes", "90 seconds". */
-export function secondsWords(s: number): string {
-  if (s >= 60 && s % 60 === 0) {
-    const m = s / 60;
-    return `${m} ${m === 1 ? "minute" : "minutes"}`;
-  }
-  return `${s} ${s === 1 ? "second" : "seconds"}`;
 }

@@ -36,6 +36,7 @@ import type { AgentRunOptions, AgentRunResult } from "../run";
 import { POSITION_FAILED, recordPosition } from "../report/position";
 import { recordScorecard } from "../scorecard";
 import { SIDE_TIMEOUTS, startSideContext, WEB_SEARCH_USD_PER_SEARCH, type ContextCache, type SideClient, type SideConfig, type SideContextHandle, type SideContextResult } from "../side";
+import { analystNameReading } from "./aliases";
 import { areaMentionsToGeo } from "./areaMentions";
 import { runAreaMetros } from "./areas";
 import { loadRunAudiences, NO_RUN_AUDIENCES } from "./audiences";
@@ -497,6 +498,8 @@ export async function executeRun(options: AgentRunOptions): Promise<AgentRunResu
       }),
       qlooEnabled,
       privatePersons: privatePersonNames(read),
+      // The analyst's own lookups read known aliases as the gate does; the question's names never take a leading match.
+      resolveFallback: analystNameReading(read.mentions),
       now,
       abortCode,
       // Only a skill that put evidence in the note adds its limitations to the report.

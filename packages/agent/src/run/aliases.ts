@@ -1,5 +1,5 @@
 import { entityTypeUrn, EntityType, type Mention, type QlooSearchEntity } from "@ct/contracts";
-import { normaliseName } from "@ct/quant";
+import { normaliseName, type ResolveFallback } from "@ct/quant";
 import { z } from "zod";
 import raw from "../../../../config/brand_aliases.json";
 
@@ -97,4 +97,18 @@ export function knownNameReading(
   const aliased = aliasMatch(mention, results, aliases);
   if (aliased !== null) return aliased;
   return leading && match === "not_found" ? leadingNameMatch(mention, results, entityTypeUrn(mention.entity_type)) : null;
+}
+
+/**
+ * The ANALYST's resolve_entities reading (SkillRunnerDeps.resolveFallback): knownNameReading over the
+ * mention's own search, with the gate's rules. A name the question gave (one of `questionMentions`) takes a
+ * verified alias only; any other name is one the run expected, so it may also take the leading-name reading.
+ */
+export function analystNameReading(
+  questionMentions: readonly Pick<Mention, "text">[],
+  aliases: readonly BrandAlias[] = BRAND_ALIASES,
+): ResolveFallback {
+  const questionNames = new Set(questionMentions.map((m) => normaliseName(m.text)));
+  return (mention, results, match) =>
+    knownNameReading({ text: mention.text, entity_type: mention.type }, results, match, !questionNames.has(normaliseName(mention.text)), aliases);
 }

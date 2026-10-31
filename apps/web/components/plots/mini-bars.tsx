@@ -4,8 +4,8 @@ import { NoDataMark, PlotEmpty, PlotFigure, PlotTagView, tagText } from "./parts
 import type { PlotBaseProps, PlotTable, PlotTag } from "./types";
 
 /**
- * C/MiniBar columns (N08 "What this area has more and less of"): a "More here" column (accent) and a
- * "Less here" column (second), each row a name 13/500 ink + value 13/500 ink-2 + optional tag over an
+ * C/MiniBar columns (N08 "What this area has more and less of"): a "More here" column (green) and a
+ * "Less here" column (red), each row a name 13/500 ink + value 13/500 ink-2 + optional tag over an
  * 8 px sunken track (240 wide). Lengths are log2 distances from the baseline, on one scale for both
  * columns, so 0.5× and 2× draw alike.
  */
@@ -59,7 +59,7 @@ export function MiniBarColumns({ columns, baseline = 1, label, emptyLabel, class
         {columns.map((col, c) => (
           <div key={col.key ?? col.label} data-column={col.key ?? col.label} className="flex min-w-0 flex-col gap-3">
             <span className="inline-flex items-center gap-1.5 text-[13px] leading-[18px] font-semibold text-ink-2">
-              <span aria-hidden="true" className={cx("size-2 rounded-full", col.tone === "accent" ? "bg-accent" : "bg-second")} />
+              <span aria-hidden="true" className={cx("size-2 rounded-full", col.tone === "accent" ? "bg-good" : "bg-danger")} />
               {col.label}
             </span>
             {col.rows.length === 0 ? (
@@ -80,7 +80,7 @@ export function MiniBarColumns({ columns, baseline = 1, label, emptyLabel, class
                         <span
                           aria-hidden="true"
                           data-bar={col.tone}
-                          className={cx("absolute inset-y-0 left-0 rounded-xs", col.tone === "accent" ? "bg-accent" : "bg-second")}
+                          className={cx("absolute inset-y-0 left-0 rounded-xs", col.tone === "accent" ? "bg-good" : "bg-danger")}
                           style={{ width: `${(shares[c]![r]! * 100).toFixed(2)}%` }}
                         />
                       </span>

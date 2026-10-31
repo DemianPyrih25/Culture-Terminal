@@ -5,11 +5,9 @@
 // /dev/brief viewer (invented entities, D29) with invented context blocks.
 import { describe, expect, it, vi } from "vitest";
 import {
-  AI_CONTEXT_CAPTION,
   AI_CONTEXT_HEADING,
   AiContextBlock,
   JOB_VALUES,
-  WEB_CONTEXT_CAPTION,
   WEB_CONTEXT_HEADING,
   WebContextBlock,
   type Metric,
@@ -83,9 +81,8 @@ describe.each(JOB_VALUES.map((job) => [job] as const))("the %s answer page", (jo
 
   it("labels the context blocks as apart from the measured answer", () => {
     expect(page).toContain(AI_CONTEXT_HEADING);
-    expect(page).toContain(AI_CONTEXT_CAPTION);
+    expect(page).toContain("Context · not measured, not checked");
     expect(page).toContain(WEB_CONTEXT_HEADING);
-    expect(page).toContain(WEB_CONTEXT_CAPTION);
     expect(html.indexOf("data-context-row=")).toBeGreaterThan(html.indexOf("Why we think this"));
   });
 });

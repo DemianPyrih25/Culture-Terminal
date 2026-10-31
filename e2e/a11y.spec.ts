@@ -37,6 +37,9 @@ const ROUTES = [...PAGES, ...ANSWERS, ...DEV];
 /** An invented name: the mock DES describes any name from its hash (no Qloo value, D29). */
 const PROFILE = "/d/Juniper%20Cola";
 
+// Entrance animations fade content in; axe reads the settled page, as a visitor does after a moment.
+test.use({ reducedMotion: "reduce" });
+
 const WIDTHS = [
   { name: "1440", width: 1440, height: 900 },
   { name: "390", width: 390, height: 844 },

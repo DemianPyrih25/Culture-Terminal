@@ -1,6 +1,7 @@
 "use client";
 
 import type { ScreenerColumn, ScreenerColumnMeta, ScreenerRow } from "@ct/contracts";
+import { motion, useReducedMotion } from "motion/react";
 import Link from "next/link";
 import { ScrollRegion } from "../figures/scroll-region";
 import { methodHref } from "../figures/figure-frame";
@@ -54,7 +55,7 @@ function SortHead({ label, sortKey, sort, onSort, numeric, hint, formulaId }: { 
           onClick={() => onSort(sortKey)}
           title={hint}
           className={cx(
-            "inline-flex items-center gap-1 rounded-sm text-[11px] leading-4 font-semibold tracking-[0.06em] whitespace-nowrap uppercase hover:text-ink",
+            "inline-flex items-center gap-1 rounded-sm text-[11px] leading-4 font-semibold tracking-[0.06em] whitespace-nowrap uppercase transition-colors duration-150 hover:text-ink",
             active ? "text-ink" : "text-ink-3",
           )}
           data-sort-key={sortKey}
@@ -74,6 +75,7 @@ function SortHead({ label, sortKey, sort, onSort, numeric, hint, formulaId }: { 
 
 export function ScreenerTable({ caption, columns, rows, sort, onSort, onCell, selected }: ScreenerTableProps) {
   const sorted = sortRows(rows, sort);
+  const reduce = useReducedMotion();
   return (
     <ScrollRegion label={caption} className="rounded-control border border-line bg-surface">
       <table className="w-full min-w-[880px] border-collapse text-left tabular-nums" data-screener-table="true">
@@ -90,10 +92,18 @@ export function ScreenerTable({ caption, columns, rows, sort, onSort, onCell, se
           </tr>
         </thead>
         <tbody>
-          {sorted.map((row) => {
+          {sorted.map((row, i) => {
             const seed = row.flags.includes("SEED");
             return (
-              <tr key={row.key} className={cx("h-12 border-b border-line last:border-b-0", seed ? "bg-accent-soft/40" : "hover:bg-canvas/60")} data-row={row.key}>
+              <motion.tr
+                key={row.key}
+                // A row fades in once, when the screen arrives; a re-sort only moves it.
+                initial={reduce ? false : { opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.22, ease: "easeOut", delay: Math.min(i * 0.025, 0.3) }}
+                className={cx("h-12 border-b border-line transition-colors duration-150 last:border-b-0", seed ? "bg-accent-soft/40" : "hover:bg-canvas/60")}
+                data-row={row.key}
+              >
                 <td className="py-2 pr-2 pl-4 font-mono text-[12px] text-ink-3">{row.rank}</td>
                 <th scope="row" className="px-3 py-2 text-left font-normal">
                   <span className="flex flex-col">
@@ -119,7 +129,7 @@ export function ScreenerTable({ caption, columns, rows, sort, onSort, onCell, se
                         data-cell={c.key}
                         data-missing={missing || undefined}
                         className={cx(
-                          "inline-flex w-full items-center justify-end gap-2.5 rounded-sm px-1.5 py-1 text-right whitespace-nowrap transition-colors hover:bg-sunken",
+                          "inline-flex w-full items-center justify-end gap-2.5 rounded-sm px-1.5 py-1 text-right whitespace-nowrap transition-colors duration-150 hover:bg-sunken active:bg-line",
                           missing ? "text-[13px] text-ink-3 italic" : "font-mono text-[13px] leading-5 text-ink",
                           on && "bg-accent-soft ring-1 ring-accent",
                         )}
@@ -130,7 +140,7 @@ export function ScreenerTable({ caption, columns, rows, sort, onSort, onCell, se
                     </td>
                   );
                 })}
-              </tr>
+              </motion.tr>
             );
           })}
         </tbody>

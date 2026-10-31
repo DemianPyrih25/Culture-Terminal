@@ -432,7 +432,7 @@ function SlateStyleTable(props: RankedTableProps & { style: NumberStyle }) {
                           y={3}
                           width={px(Math.abs(clamp(bar(cell.value), 0, 120) - zero))}
                           height={3}
-                          className={cell.value < 0 ? "fill-second" : grey ? "fill-chart-muted" : "fill-accent"}
+                          className={cell.value < 0 ? "fill-danger" : grey ? "fill-chart-muted" : "fill-good"}
                         />
                         {props.tick != null ? (
                           <rect x={px(clamp(bar(props.tick), 0, 119))} y={1} width={1} height={7} className="fill-ink-3" />
@@ -615,7 +615,7 @@ function RankedBars(props: RankedTableProps & { label: string; style: NumberStyl
                   y={y + 6}
                   width={px(Math.abs(x(cell.value) - zero))}
                   height={6}
-                  className={cell.value < 0 ? "fill-second" : grey ? "fill-chart-muted" : "fill-accent"}
+                  className={cell.value < 0 ? "fill-danger" : grey ? "fill-chart-muted" : "fill-good"}
                   data-sign={cell.value < 0 ? "negative" : "positive"}
                 />
               )}

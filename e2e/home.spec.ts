@@ -47,8 +47,8 @@ test("Your answers lists only this browser's runs, and starts empty", async ({ p
   await open(page, "/briefs");
   await expect(page).toHaveTitle(/^Your answers · Culture Terminal$/);
   await expect(page.getByRole("heading", { level: 1, name: "Your answers" })).toBeVisible();
-  await expect(page.getByText("No answers yet.", { exact: false })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Ask a question" })).toHaveAttribute("href", "/#ask");
+  await expect(page.getByRole("heading", { level: 2, name: "No answers yet" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Ask a question" })).toHaveAttribute("href", "/home#ask");
   await expectNoExamples(page);
   await expectNoSideScroll(page);
   await shot(page, testInfo, "your-answers-empty");

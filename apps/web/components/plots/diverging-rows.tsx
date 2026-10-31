@@ -4,7 +4,7 @@ import type { PlotBaseProps, PlotTable } from "./types";
 
 /**
  * C/DivergingRow, stacked (N12 and N14 "Who the fans are"). A 1 px ink-3 zero line at the centre; more
- * than average is an accent bar to the right, less a second bar to the left. The value sits outside the
+ * than average is a green (good) bar to the right, less a red (danger) bar to the left. The value sits outside the
  * bar's end (8 px gap), signed with U+2212; the label sits on the other side of zero, 12 px from the line.
  * Scale: px per unit = (half-width − 60) / max(0.48, max |v|).
  */
@@ -76,8 +76,8 @@ export function DivergingRows({
                 <span className="flex min-w-0 items-center justify-end gap-2">
                   {less ? (
                     <>
-                      <span className="font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums">{text}</span>
-                      <span aria-hidden="true" data-bar="less" className="h-3 shrink-0 rounded-l-xs bg-second" style={{ width }} />
+                      <span className="font-mono text-[12px] leading-[18px] font-medium text-danger tabular-nums">{text}</span>
+                      <span aria-hidden="true" data-bar="less" className="h-3 shrink-0 rounded-l-xs bg-danger" style={{ width }} />
                     </>
                   ) : v === null ? (
                     <NoDataMark className="mr-3" />
@@ -88,8 +88,8 @@ export function DivergingRows({
                 <span className="flex min-w-0 items-center gap-2">
                   {v !== null && !less ? (
                     <>
-                      <span aria-hidden="true" data-bar="more" className="h-3 shrink-0 rounded-r-xs bg-accent" style={{ width }} />
-                      <span className="font-mono text-[12px] leading-[18px] text-ink-2 tabular-nums">{text}</span>
+                      <span aria-hidden="true" data-bar="more" className="h-3 shrink-0 rounded-r-xs bg-good" style={{ width }} />
+                      <span className="font-mono text-[12px] leading-[18px] font-medium text-good tabular-nums">{text}</span>
                     </>
                   ) : (
                     <span className="min-w-0 pl-3 type-body text-ink [overflow-wrap:anywhere]">{row.label}</span>

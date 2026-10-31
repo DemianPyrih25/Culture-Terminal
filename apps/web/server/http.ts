@@ -8,7 +8,14 @@ import { isRunId } from "../lib/run-id";
 import { getAccessService, HUMAN_CHECK_HEADER, isAdmin, type HumanCheck } from "./access";
 import type { ModeDecision, ModeService } from "./breakers";
 import { clientIp } from "./client-ip";
-import { llmDailyUsdCapFromEnv, modeOverrideFromEnv } from "./config";
+import {
+  judgeRunDailyCapFromEnv,
+  judgeRunHourlyCapFromEnv,
+  judgeRunMaxActiveFromEnv,
+  llmDailyUsdCapFromEnv,
+  modeOverrideFromEnv,
+  visitorLimitsFromEnv,
+} from "./config";
 import {
   getAnswerCache,
   getAnthropic,
@@ -19,6 +26,7 @@ import {
   getPublicDataClient,
   getQlooClient,
   getRunManager,
+  getScreenerService,
   getStoredMode,
   lastKnownMode,
   setMode,
@@ -39,6 +47,7 @@ import { parseCursor, sseResponse } from "./sse";
 import { migrationsApplied } from "./startup";
 import { runEventStream } from "./stream";
 import { TURNSTILE_TOKEN_MAX } from "./turnstile";
+import { readUsage, type AccessUsage } from "./usage/usage";
 import { appVersion } from "./version";
 
 // Route handlers stay thin: they call these, so @ct/db is imported only under server/ (PLAN §10.1).
@@ -663,7 +672,10 @@ export async function accessStatus(request: Request): Promise<Response> {
     log.warn({ err }, "access: could not decide the mode");
     return null;
   });
-  const decision = await within(decided, HEALTH_DB_TIMEOUT_MS, null);
+  // ?usage=1 (Settings > Plan & usage) adds the visitor's usage; page loads ask without it and read nothing more.
+  const wantsUsage = new URL(request.url).searchParams.get("usage") === "1";
+  const counted = wantsUsage ? within(visitorUsage(lane, access.clientKey(request)), HEALTH_DB_TIMEOUT_MS, null) : Promise.resolve(null);
+  const [decision, usage] = await Promise.all([within(decided, HEALTH_DB_TIMEOUT_MS, null), counted]);
   return json({
     lane,
     mode: decision?.mode ?? null,
@@ -671,7 +683,33 @@ export async function accessStatus(request: Request): Promise<Response> {
     until: decision?.until ?? null,
     turnstile: access.siteKey === null ? null : { siteKey: access.siteKey },
     verified: access.isVerified(request),
+    ...(usage ? { usage } : {}),
   });
+}
+
+/** The visitor's usage for GET /api/access?usage=1 (server/usage/usage.ts); null when none of it can be read. */
+async function visitorUsage(lane: Lane, visitor: string | null): Promise<AccessUsage | null> {
+  // Without an address on the public lane no per-visitor limit applies, so there is nothing to count.
+  if (lane === "public" && visitor === null) return null;
+  try {
+    const runs = getRunManager();
+    return await readUsage(
+      {
+        db: getDatabase(),
+        lane,
+        visitor,
+        visitorLimits: visitorLimitsFromEnv(),
+        judge: { slots: judgeRunMaxActiveFromEnv(), perHour: judgeRunHourlyCapFromEnv(), perDay: judgeRunDailyCapFromEnv() },
+        heldBy: (v) => runs.heldBy(v),
+        laneHeld: (l) => runs.laneHeld(l),
+        screener: (v) => getScreenerService().visitorUsage(v),
+      },
+      (err, part) => log.warn({ err, part }, "access: could not read the usage"),
+    );
+  } catch (err) {
+    log.warn({ err }, "access: could not read the usage");
+    return null;
+  }
 }
 
 /**

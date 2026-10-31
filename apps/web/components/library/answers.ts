@@ -1,4 +1,4 @@
-import type { RunStatus } from "@ct/contracts";
+import type { ConfidenceBand, Pillar, RunStatus } from "@ct/contracts";
 import { RUN_STATUS_VALUES } from "@ct/contracts/values";
 import { object, oneOf, readAs, str, type Read } from "../../lib/read";
 import { isRunId } from "../../lib/run-id";
@@ -24,6 +24,10 @@ export interface AnswerItem {
   /** The verdict tag of a done answer, or the status in words ("Working…", "Stopped", "Declined"). */
   note: string;
   createdAt: string;
+  /** The answer's desk, when the list names it (runs read one by one carry none). */
+  pillar?: Pillar | null;
+  /** The confidence band of a finished answer; unfinished answers are not rated. */
+  confidence?: ConfidenceBand | null;
 }
 
 /** Most ids one list request names (GET /api/runs takes up to 50). */
@@ -52,6 +56,8 @@ export function answerFromSummary(brief: BriefSummary): AnswerItem {
     status: partial ? "partial" : "done",
     note: partial ? "Partial answer" : verdictText(brief),
     createdAt: brief.createdAt,
+    pillar: brief.pillar,
+    confidence: brief.confidence?.band ?? null,
   };
 }
 

@@ -3,6 +3,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   browserStorage,
+  clearRecentRuns,
+  forgetRun,
+  restoreRun,
   readRecentRunIds,
   recentIdsParam,
   rememberRun,
@@ -93,5 +96,29 @@ describe("recent briefs storage", () => {
     const param = recentIdsParam(ids) ?? "";
     expect(param.split(",")).toEqual(ids.slice(0, RECENT_BRIEFS_QUERY_MAX));
     expect(recentIdsParam(["bad id", id(1)])).toBe(id(1));
+  });
+});
+
+describe("forgetting, restoring and clearing", () => {
+  it("forgets a run and puts it back at its old place", () => {
+    const storage = new MemoryStorage();
+    for (const n of [3, 2, 1]) rememberRun(id(n), storage);
+    expect(forgetRun(id(2), storage)).toBe(1);
+    expect(readRecentRunIds(storage)).toEqual([id(1), id(3)]);
+    expect(forgetRun(id(9), storage)).toBe(-1);
+    expect(restoreRun(id(2), 1, storage)).toEqual([id(1), id(2), id(3)]);
+    expect(restoreRun(id(2), 0, storage)).toEqual([id(1), id(2), id(3)]);
+    expect(restoreRun(id(4), 99, storage)).toEqual([id(1), id(2), id(3), id(4)]);
+    expect(restoreRun("bad id", 0, storage)).toEqual([id(1), id(2), id(3), id(4)]);
+  });
+
+  it("clears the list, and never throws without storage", () => {
+    const storage = new MemoryStorage();
+    rememberRun(id(1), storage);
+    expect(clearRecentRuns(storage)).toBe(true);
+    expect(readRecentRunIds(storage)).toEqual([]);
+    expect(clearRecentRuns(null)).toBe(false);
+    expect(forgetRun(id(1), null)).toBe(-1);
+    expect(restoreRun(id(1), 0, null)).toEqual([id(1)]);
   });
 });

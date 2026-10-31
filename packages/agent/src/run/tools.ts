@@ -26,7 +26,15 @@ import {
 import { ensureMetrosIn } from "@ct/geo";
 import type { RunPublic } from "@ct/publicdata";
 import { qlooErrorCode, type RunQloo } from "@ct/qloo";
-import { normaliseName, SKILL_LIMITATIONS, SKILLS, skillErrorResult, stampCandidateSources } from "@ct/quant";
+import {
+  normaliseName,
+  resolveEntitiesSkillWith,
+  SKILL_LIMITATIONS,
+  SKILLS,
+  skillErrorResult,
+  stampCandidateSources,
+  type ResolveFallback,
+} from "@ct/quant";
 import type { RunLedger } from "../ledger";
 import { errorText, type AnalystToolErrorCode } from "../llm/notices";
 import type { RunRegistry } from "../registry";
@@ -106,6 +114,11 @@ export interface SkillRunnerDeps {
    * A call that would search for one is refused before any Qloo call (SPEC §4.6).
    */
   privatePersons?: ReadonlySet<string>;
+  /**
+   * The run's reading of a resolve_entities name with no exact match (analystNameReading: the gate's
+   * known-alias and leading-name rules over the mention's own search). Absent or null: exact only.
+   */
+  resolveFallback?: ResolveFallback | null;
   now: () => number;
   /** The error code for a call stopped by its signal: "cancelled" on a cancel, "timeout" at the hard stop. */
   abortCode: () => ErrorCode;
@@ -389,7 +402,9 @@ export async function runSkillCall(deps: SkillRunnerDeps, asked: SkillCall, sign
         candidates: deps.candidates ?? NO_RUN_CANDIDATES,
       };
       await ensureMetrosIn(deps.geo, call.input);
-      result = await skillOf(call.tool).run(call.input, ctx);
+      // resolve_entities reads names as the gate does (known aliases) when the run gives a reading.
+      const skill = call.tool === "resolve_entities" && deps.resolveFallback ? (resolveEntitiesSkillWith(deps.resolveFallback) as unknown as Skill<unknown>) : skillOf(call.tool);
+      result = await skill.run(call.input, ctx);
     }
   } catch (err) {
     const code: ErrorCode = signal.aborted ? deps.abortCode() : (qlooErrorCode(err) ?? publicErrorCode(err) ?? (stop.aborted ? "timeout" : "internal"));

@@ -53,7 +53,6 @@ describe("early: the progress card", () => {
     const html = render(upTo(SAMPLE, "plan"));
     expect(html).toContain('data-guesses="full"');
     expect(text(html)).toContain("Before looking at the data, we guessed");
-    expect(text(html)).toContain("Written before any data. Scored once every number is checked.");
     expect(attrValues(html, "data-guess").every((g) => g === "waiting" || g === "data-in")).toBe(true);
     expect(text(html)).not.toContain("We expected:");
   });
@@ -83,7 +82,6 @@ describe("late: draft numbers and the noticed line", () => {
     expect(html).toContain('data-test-chart="true"');
     expect(html).toContain('data-guesses="side"');
     expect(text(html)).toContain("We guessed, then checked");
-    expect(text(html)).toContain("Scored once every number is checked.");
   });
 
   it("tells the reader when the live stream is lost", () => {
@@ -98,21 +96,21 @@ describe("a run that ended early: its card takes the progress card's slot", () =
     expect(html).not.toContain("data-progress-card");
     expect(html).not.toContain("data-stop=");
     expect(text(slice(html, 'data-state-card="cancelled"', "</section>"))).toBe(
-      "You stopped this answer. Nothing more is fetched. Anything that arrived before you stopped stays below. Run it again",
+      "You stopped this answer. Run it again",
     );
   });
 
   it("failed: the line, Try again and the reason under Details", () => {
     const html = render(endedAs(upTo(SAMPLE, "tool.start"), "failed", "the model did not answer"));
     const card = slice(html, 'data-state-card="failed"', "</section>");
-    expect(text(card)).toContain("This answer couldn't be finished. Please try again. Try again Details");
+    expect(text(card)).toContain("This answer couldn't be finished. Try again Details");
     expect(card).toContain('aria-expanded="false"');
-    expect(card).toMatch(/<ul[^>]*hidden=""[^>]*>.*the model did not answer/);
+    expect(card).toMatch(/aria-hidden="true"[^>]*>.*the model did not answer/);
   });
 
   it("failed after numbers arrived: the compact line", () => {
     const html = render(endedAs(upTo(SAMPLE, "plan"), "failed", null), { keyNumbers: [{ value: "0.84", label: "Closest audience" }] });
-    expect(text(slice(html, 'data-state-card="failed"'))).toContain("This answer couldn't be finished. Please try again.");
+    expect(text(slice(html, 'data-state-card="failed"'))).toContain("This answer couldn't be finished.");
     expect(html).toContain('data-tone="danger"');
     // The guesses that were waiting say the run stopped before the check.
     expect(text(html)).toContain("The run stopped before the check.");
@@ -121,7 +119,7 @@ describe("a run that ended early: its card takes the progress card's slot", () =
   it("partial without a report: the partial card", () => {
     const html = render(endedAs(upTo(SAMPLE, "tool.start"), "incomplete", "hard limit"));
     expect(text(slice(html, 'data-state-card="incomplete"', "</section>"))).toBe(
-      "Partial answer The evidence is here, but the analysis ran out of time to conclude. This partial answer was not checked. Try again",
+      "Partial answer Ran out of time before concluding. Not checked. Try again",
     );
   });
 
@@ -152,9 +150,9 @@ describe("needs input", () => {
     expect(card).not.toMatch(/<button[^>]*disabled=""/);
   });
 
-  it("keeps the picks closed in a replay, and says so", () => {
+  it("keeps the picks closed in a replay", () => {
     const html = render(PICK, { mode: "replay" });
-    expect(html).toContain('data-picks="replay"');
+    expect(html).toContain('data-tag="recording"');
     expect(slice(html, "data-candidate")).toMatch(/^<button[^>]*disabled=""/);
   });
 

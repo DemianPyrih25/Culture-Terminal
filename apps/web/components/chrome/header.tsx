@@ -2,9 +2,19 @@ import Link from "next/link";
 import { buttonClassName } from "../ui/button";
 import { cx } from "../ui/cx";
 import { Icon } from "../ui/icons";
-import { BackButton, MenuSheetButton, NewQuestionLink, ShareIconButton, SidebarNav, type MenuItem } from "./header-actions";
+import {
+  BackButton,
+  MenuSheetButton,
+  NewQuestionLink,
+  ShareIconButton,
+  ShellAccount,
+  SidebarNav,
+  SidebarRecent,
+  SlashShortcut,
+  type MenuItem,
+} from "./header-actions";
 import { ANSWERS_HREF, SETTINGS_HREF, SITE_LINKS, type NavKey } from "./links";
-import { LogoMark } from "./logo-mark";
+import { InitialMark } from "./logo-mark";
 
 /** home and working: sections only. inner: sections and the "New question" button. */
 export type HeaderVariant = "home" | "inner" | "working";
@@ -29,9 +39,14 @@ export const PAGE_COLUMN = "mx-auto w-full max-w-[1176px] px-6 max-md:px-4";
 
 function Wordmark({ compact = false }: { compact?: boolean }) {
   return (
-    <Link href="/" className={cx("flex min-w-0 items-center gap-2.5 rounded-sm", compact && "h-11")}>
-      <LogoMark size={compact ? 20 : 22} />
-      <span className={cx("truncate font-display font-semibold tracking-[-0.01em] text-ink", compact ? "text-[16px] leading-5" : "text-[17px] leading-6")}>
+    <Link href="/" className={cx("flex min-w-0 items-center rounded-sm", compact ? "h-11 gap-2" : "gap-2.5")}>
+      <InitialMark size={compact ? 24 : 22} />
+      <span
+        className={cx(
+          "truncate font-display tracking-[-0.01em] text-ink",
+          compact ? "text-[18px] leading-6 font-semibold" : "text-[16px] leading-5 font-medium",
+        )}
+      >
         Culture Terminal
       </span>
     </Link>
@@ -50,39 +65,42 @@ export function Header({ variant = "inner", active: named, mobile = "default", b
   return (
     <header
       data-header={variant}
-      className="shrink-0 border-b border-line bg-surface lg:sticky lg:top-0 lg:h-dvh lg:w-[232px] lg:border-r lg:border-b-0"
+      className="shrink-0 border-b border-line bg-canvas lg:sticky lg:top-0 lg:h-dvh lg:w-[240px] lg:border-r lg:border-b-0 lg:bg-[#fbf9f5]"
     >
-      <div className="flex h-full flex-col gap-6 overflow-y-auto px-3 pt-5 pb-4 max-lg:hidden">
-        <div className="px-2.5">
+      <div className="flex h-full flex-col overflow-y-auto px-3 pt-4 pb-4 max-lg:hidden">
+        <div className="px-2 pt-0.5 pb-3.5">
           <Wordmark />
         </div>
         {variant === "inner" ? (
-          <NewQuestionLink className={buttonClassName("secondary", "md", "w-full justify-start [&>svg]:text-accent")} />
+          <NewQuestionLink shortcut className={buttonClassName("primary", "md", "mb-2.5 w-full justify-start font-semibold [&>svg]:size-[15px]")} />
         ) : null}
+        <SlashShortcut />
         <SidebarNav active={active} />
-        <div className="mt-auto flex flex-col gap-3 border-t border-line pt-4">
-          <Link
-            href={SETTINGS_HREF}
-            className="flex h-9 items-center gap-2.5 rounded-control px-2.5 text-[14px] leading-5 font-medium text-ink-2 transition-colors hover:bg-sunken hover:text-ink"
-          >
-            <Icon name="user-round" size={16} className="text-ink-3" />
-            Settings
-          </Link>
+        <SidebarRecent />
+        <div className="mt-auto flex flex-col gap-2 pt-6">
           <p className="flex flex-wrap gap-x-4 gap-y-1 px-2.5 type-caption text-ink-2">
-            {SITE_LINKS.filter((link) => link.href !== SETTINGS_HREF).map((link) => (
-              <Link key={link.href} href={link.href} className="rounded-sm hover:text-ink">
-                {link.label}
-              </Link>
-            ))}
+            {SITE_LINKS.map((link) =>
+              link.href === SETTINGS_HREF ? (
+                <Link key={link.href} href={link.href} className="inline-flex items-center gap-1.5 rounded-sm font-medium hover:text-ink">
+                  <Icon name="user-round" size={13} className="text-ink-3" />
+                  {link.label}
+                </Link>
+              ) : (
+                <Link key={link.href} href={link.href} className="rounded-sm hover:text-ink">
+                  {link.label}
+                </Link>
+              ),
+            )}
           </p>
+          <ShellAccount />
         </div>
       </div>
       {mobile === "answer" ? (
-        <div className="flex h-[55px] items-center justify-between pr-3 pl-1 lg:hidden">
+        <div className="flex h-[52px] items-center justify-between pr-2.5 pl-1 lg:hidden">
           <div className="flex items-center gap-1">
             <BackButton href={backHref} />
             <Link href="/" aria-label="Culture Terminal home" className="inline-flex size-11 items-center justify-center rounded-sm">
-              <LogoMark size={20} />
+              <InitialMark size={24} />
             </Link>
           </div>
           <div className="flex items-center">
@@ -91,7 +109,7 @@ export function Header({ variant = "inner", active: named, mobile = "default", b
           </div>
         </div>
       ) : (
-        <div className="flex h-[55px] items-center justify-between gap-3 pr-2 pl-4 lg:hidden">
+        <div className="flex h-[52px] items-center justify-between gap-3 pr-1.5 pl-5 max-md:pl-4 lg:hidden">
           <Wordmark compact />
           <MenuSheetButton active={active} items={menuItems} />
         </div>

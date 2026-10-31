@@ -1,12 +1,14 @@
 // Home (Ledger A): the statement, the question box with its suggestion list, "Understood as" line and
-// inline states, the visitor's recent answers and how every answer is made. /ask renders the same view.
+// inline states, the visitor's recent answers and follows. /ask renders the same view.
 export { AskBox } from "./ask-box";
 export type { AskBoxProps } from "./ask-box";
 export { AskNoticeView, DAILY_CAP_TEXT, isDailyCap, PLAN_HREF } from "./ask-notice";
 export type { AskNoticeViewProps } from "./ask-notice";
-export { HOW_ITEMS, HowBand } from "./how-band";
-export { FOLLOW_UP_SUBLINE, FOLLOW_UP_TITLE, HERO_LINES, HERO_SUBLINE, HomeView } from "./home-view";
+export { FOLLOWING_PREVIEW_MAX, FollowingPreview } from "./following-preview";
+export { FOLLOW_UP_TITLE, HERO_LINES, HomeView, MAP_COVERAGE } from "./home-view";
 export type { HomeViewProps } from "./home-view";
+export { MapCoverageLine } from "./map-coverage-line";
+export { Expand, ExpandItem } from "./motion";
 export { RECENT_ANSWERS_MAX, RecentAnswers } from "./recent-answers";
 export { UnderstoodLine, understoodParts } from "./understood-line";
 export type { UnderstoodParts } from "./understood-line";

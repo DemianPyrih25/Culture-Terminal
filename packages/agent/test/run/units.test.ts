@@ -12,6 +12,7 @@ import { isSkillAvailable, UNAVAILABLE_SKILLS } from "../../src/run/catalogue";
 import { createFollowupDeadline } from "../../src/run/followup";
 import { MARKET_CATALOGUE, unknownMarketIssues } from "../../src/run/markets";
 import { RunEvents, RunMeter } from "../../src/run/meter";
+import { analystNameReading, type BrandAlias } from "../../src/run/aliases";
 import { findPickerChoice, pickerKey } from "../../src/run/picker";
 import { QLOO_DISABLED_NOTICE, runSkillCall, shortError, SkillsRan, withQuestionFocus, type SkillCall, type SkillRunnerDeps } from "../../src/run/tools";
 import { intentFor, mockQloo } from "./support";
@@ -225,6 +226,55 @@ describe("runSkillCall", () => {
     const outcome = await runSkillCall(d, call, controller.signal);
     expect(outcome.isError).toBe(true);
     expect(events.find((e) => e.type === "tool.end")).toMatchObject({ error: { code: "timeout" } });
+  });
+
+  describe("resolve_entities with the run's name reading (the gate's known aliases)", () => {
+    // Invented names only: the mock search offers "<name> Classic" and other variants, never the name itself, for "notfound".
+    const ALIAS: BrandAlias = { alias: "Brand Notfound", names: ["Brand Notfound Classic"], type: "brand" };
+    const resolve = (text: string) => ({
+      ...call,
+      tool: "resolve_entities" as const,
+      input: { mentions: [{ text, type: "brand", metro: null }], trigger_finding_id: null, step_id: "S1" },
+    });
+    const resolveEvent = (events: EventInput[]) => events.find((e) => e.type === "resolve") as Extract<EventInput, { type: "resolve" }> | undefined;
+
+    it("reads a verified alias as the official name its own search returned, and marks the reading", async () => {
+      const { d, events } = deps({ resolveFallback: analystNameReading([], [ALIAS]) });
+      const outcome = await runSkillCall(d, resolve("Brand Notfound"), new AbortController().signal);
+      expect(outcome.result?.status).toBe("ok");
+      const row = outcome.result?.forModel.top_rows[0];
+      expect(row).toMatchObject({ ref: "R2", name: "Brand Notfound", values: { match: "exact", matched: "Brand Notfound Classic", read_as: "Brand Notfound Classic" } });
+      expect(row?.values.alternatives).not.toContain("Brand Notfound Classic");
+      expect(d.registry.entity("R2")).toMatchObject({ name: "Brand Notfound Classic" });
+      expect(resolveEvent(events)?.entities[0]).toMatchObject({ match: "exact", ref: "R2", source: "tool", alias: "Brand Notfound Classic" });
+      expect(d.ledger.snapshot().evidence[0]?.summary).toMatch(/read as 'Brand Notfound Classic'/);
+      expect(outcome.result?.forModel.notices).toEqual([expect.stringContaining("read it as 'Brand Notfound Classic'")]);
+    });
+
+    it("keeps the miss without a reading, for an unknown name, or when the alias's name is not in the search", async () => {
+      for (const fallback of [undefined, analystNameReading([{ text: "Brand Notfound" }], []), analystNameReading([], [{ ...ALIAS, names: ["Other Brand"] }])]) {
+        const { d, events } = deps(fallback === undefined ? {} : { resolveFallback: fallback });
+        const outcome = await runSkillCall(d, resolve("Brand Notfound"), new AbortController().signal);
+        expect(outcome.result?.status).toBe("empty");
+        expect(outcome.result?.forModel.top_rows[0]).toMatchObject({ ref: null, values: { match: "not_found", matched: null } });
+        expect(outcome.result?.forModel.top_rows[0]?.values).not.toHaveProperty("read_as");
+        expect(resolveEvent(events)?.entities[0]).toMatchObject({ match: "not_found", ref: null });
+        expect(resolveEvent(events)?.entities[0]).not.toHaveProperty("alias");
+        expect(outcome.result?.forModel.notices).toEqual([]);
+      }
+    });
+
+    it("keeps an ambiguous name ambiguous, and never applies a reading the search did not return", async () => {
+      const { d } = deps({ resolveFallback: analystNameReading([], [ALIAS]) });
+      const twin = await runSkillCall(d, resolve("Brand Twin"), new AbortController().signal);
+      expect(twin.result?.forModel.top_rows[0]).toMatchObject({ ref: null, values: { match: "ambiguous" } });
+      expect(twin.result?.forModel.top_rows[0]?.values).not.toHaveProperty("read_as");
+      const invented = { entity_id: "synthetic-invented", name: "Brand Notfound Classic", types: ["urn:entity:brand"] };
+      const { d: d2 } = deps({ resolveFallback: () => invented });
+      const outcome = await runSkillCall(d2, resolve("Brand Notfound"), new AbortController().signal);
+      expect(outcome.result?.forModel.top_rows[0]).toMatchObject({ ref: null, values: { match: "not_found" } });
+      expect(outcome.result?.forModel.top_rows[0]?.values).not.toHaveProperty("read_as");
+    });
   });
 
   it("escapes Qloo error text in the model's TOOL_FAILED result", async () => {

@@ -69,6 +69,48 @@ export function rememberRun(runId: string, storage: StorageLike | null = browser
   return ids;
 }
 
+/** Stores `ids` as the list; false when storage is missing, full or blocked. Never throws. */
+function writeIds(ids: readonly string[], storage: StorageLike | null): boolean {
+  if (storage === null) return false;
+  try {
+    storage.setItem(RECENT_BRIEFS_SLOT, JSON.stringify(ids));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Takes a run off this browser's list (the answer itself stays at its link) and returns where it was,
+ * for restoreRun, or -1 when it was not listed. Never throws: with blocked storage the row comes back
+ * on the next visit.
+ */
+export function forgetRun(runId: string, storage: StorageLike | null = browserStorage()): number {
+  const ids = readRecentRunIds(storage);
+  const index = ids.indexOf(runId);
+  if (index === -1) return -1;
+  writeIds([...ids.slice(0, index), ...ids.slice(index + 1)], storage);
+  return index;
+}
+
+/**
+ * Puts a forgotten run back at `index` (clamped to the list; an id already listed stays where it is)
+ * and returns the list as stored. Never throws.
+ */
+export function restoreRun(runId: string, index: number, storage: StorageLike | null = browserStorage()): string[] {
+  const ids = readRecentRunIds(storage);
+  if (!isRunId(runId) || ids.includes(runId)) return ids;
+  const at = Math.max(0, Math.min(Number.isFinite(index) ? Math.trunc(index) : 0, ids.length));
+  const next = [...ids.slice(0, at), runId, ...ids.slice(at)].slice(0, RECENT_BRIEFS_MAX);
+  writeIds(next, storage);
+  return next;
+}
+
+/** Empties this browser's list (shared links keep working). False when storage is missing or blocked. */
+export function clearRecentRuns(storage: StorageLike | null = browserStorage()): boolean {
+  return writeIds([], storage);
+}
+
 /** The `ids` parameter of a list request: the newest RECENT_BRIEFS_QUERY_MAX ids, or null for none. */
 export function recentIdsParam(ids: readonly string[]): string | null {
   const newest = ids.filter(isRunId).slice(0, RECENT_BRIEFS_QUERY_MAX);

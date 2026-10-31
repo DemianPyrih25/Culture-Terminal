@@ -52,7 +52,7 @@ describe("/how-it-works", () => {
 
   it("links to the analysts' reference and to a new question", () => {
     expect(html).toMatch(/<a[^>]*href="\/method"[^>]*>[\s\S]*?For analysts: every formula and rule/);
-    expect(html).toMatch(/<a[^>]*href="\/#ask"[^>]*>[\s\S]*?Ask a question/);
+    expect(html).toMatch(/<a[^>]*href="[^"]*#ask"[^>]*>[\s\S]*?Ask a question/);
   });
 
   it("carries no example and no Concept A remnant", () => {

@@ -478,6 +478,36 @@ export const showcasePins = pgTable(
   (t) => [primaryKey({ name: "showcase_pins_pk", columns: [t.slug, t.mention] })],
 );
 
+/**
+ * Accounts: one row per person. email is stored lowercased and trimmed (unique). password_hash is
+ * "scrypt$N$r$p$salt$hash" (base64url salt and hash); the plain password is never stored.
+ */
+export const users = pgTable(
+  "users",
+  {
+    id: text("id").primaryKey().default(sql`gen_random_uuid()::text`),
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    createdAt: tstz("created_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("users_email_uq").on(t.email)],
+);
+
+/** Signed-in sessions. id is the SHA-256 (hex) of the cookie token; the token itself is never stored. */
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: tstz("created_at").notNull().defaultNow(),
+    expiresAt: tstz("expires_at").notNull(),
+  },
+  (t) => [index("sessions_user_idx").on(t.userId), index("sessions_expires_idx").on(t.expiresAt)],
+);
+
 export type Run = typeof runs.$inferSelect;
 export type NewRun = typeof runs.$inferInsert;
 export type RunEventRow = typeof runEvents.$inferSelect;
@@ -498,3 +528,5 @@ export type FollowRow = typeof follows.$inferSelect;
 export type ContextCacheRow = typeof contextCache.$inferSelect;
 export type FeatureUseRow = typeof featureUses.$inferSelect;
 export type NewFollowRow = typeof follows.$inferInsert;
+export type UserRow = typeof users.$inferSelect;
+export type SessionRow = typeof sessions.$inferSelect;

@@ -359,6 +359,12 @@ describe("GET /api/access", () => {
     });
   });
 
+  it("adds usage only when asked, and none without an address on the public lane", async () => {
+    const body = (await (await http.accessStatus(new Request("http://test.local/api/access?usage=1"))).json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ lane: "public", mode: "live" });
+    expect(body).not.toHaveProperty("usage");
+  });
+
   it("says when the lane is paused, and reports no site key while the check is off", async () => {
     modeInputs.override = "replay_only";
     g.__ctAccess = testAccess({ turnstile: null });

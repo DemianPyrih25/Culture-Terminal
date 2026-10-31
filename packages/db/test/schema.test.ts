@@ -21,7 +21,7 @@ function primaryKeyOf(name: string): string[] {
 }
 
 describe("schema", () => {
-  it("defines exactly the 17 tables of PLAN §3.2 (public data from Part 9, follows from Part 10, context_cache and feature_uses from Part 11)", () => {
+  it("defines exactly the 19 tables of PLAN §3.2 (public data from Part 9, follows from Part 10, context_cache and feature_uses from Part 11, users and sessions for accounts)", () => {
     expect([...byName.keys()].sort()).toEqual(
       [
         "context_cache",
@@ -39,8 +39,10 @@ describe("schema", () => {
         "qloo_calls",
         "run_events",
         "runs",
+        "sessions",
         "showcase_pins",
         "usage_daily",
+        "users",
       ].sort(),
     );
   });

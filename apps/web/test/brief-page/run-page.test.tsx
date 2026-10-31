@@ -101,7 +101,7 @@ describe("RunPage", () => {
     await expect(RunPage(props())).rejects.toThrow("NEXT_NOT_FOUND");
     const html = renderToStaticMarkup(<RunNotFound />);
     expect(text(html)).toContain("There's no answer at this link. Ask a question");
-    expect(html).toContain('href="/#ask"');
+    expect(html).toContain('href="/home#ask"');
     expect(html).not.toMatch(/example/i);
   });
 });

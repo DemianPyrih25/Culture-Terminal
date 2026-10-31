@@ -136,7 +136,8 @@ describe("the list", () => {
     const error = html(<FollowingView state={{ kind: "error", message: "Your follows couldn't be loaded.", retry: true }} now={NOW} onRetry={() => {}} />);
     expect(error).toContain("Try again");
     const empty = html(<FollowingView state={ready([])} now={NOW} />);
-    expect(empty).toContain(EMPTY_TEXT.replace("'", "&#x27;"));
+    expect(empty).toContain(EMPTY_TEXT.slice(EMPTY_TEXT.indexOf(" On ") + 1));
+    expect(empty).toContain("You don&#x27;t follow anything yet.");
     expect(empty).toContain("Ask a question");
   });
 
@@ -233,7 +234,7 @@ describe("the page", () => {
   it("renders the heading, the lead without alerts, and is not indexed", () => {
     const out = html(<FollowingPage />);
     expect(out).toContain("Following");
-    expect(out).toContain("no alerts");
+    expect(out).toContain("No alerts");
     expect(metadata.robots).toMatchObject({ index: false });
   });
 });

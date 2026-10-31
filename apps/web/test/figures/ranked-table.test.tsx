@@ -155,8 +155,8 @@ describe("RankedTable · table (Slate)", () => {
 
   it("draws a negative value left of zero in the negative colour", () => {
     const plot = plotView(render(<RankedTable data={ranked("delta", [["up", 0.4], ["down", -0.3]])} variant="table" title="Signed" />));
-    const [up] = rects(rowMarkup(plot, "up")).filter((r) => r.cls.startsWith("fill-accent"));
-    const [down] = rects(rowMarkup(plot, "down")).filter((r) => r.cls === "fill-second");
+    const [up] = rects(rowMarkup(plot, "up")).filter((r) => r.cls.startsWith("fill-good"));
+    const [down] = rects(rowMarkup(plot, "down")).filter((r) => r.cls === "fill-danger");
     expect(down).toBeDefined();
     expect(down!.width).toBeGreaterThan(0);
     expect(down!.x + down!.width).toBeCloseTo(up!.x, 1);
@@ -213,8 +213,8 @@ describe("RankedTable · lists and bars", () => {
     const plot = plotView(html);
     const [gain] = rects(rowMarkup(plot, "B11"));
     const [loss] = rects(rowMarkup(plot, "B14"));
-    expect(gain!.cls).toBe("fill-accent");
-    expect(loss!.cls).toBe("fill-second");
+    expect(gain!.cls).toBe("fill-good");
+    expect(loss!.cls).toBe("fill-danger");
     expect(loss!.width).toBeGreaterThan(0);
     // Both bars meet at the zero line: the loss ends where the gain starts.
     expect(loss!.x + loss!.width).toBeCloseTo(gain!.x, 1);
@@ -232,7 +232,7 @@ describe("RankedTable · comparison rows from the payload", () => {
     expect(rowMarkup(plot, "R5")).toContain('data-tone="highlight"');
     const bars = plotView(render(<RankedTable data={nearestWithRivals.payload} variant="bars" title="Rivals" />));
     expect(rowMarkup(bars, "R2")).toContain("fill-chart-muted");
-    expect(rowMarkup(bars, "R7")).toContain('class="fill-accent"');
+    expect(rowMarkup(bars, "R7")).toContain('class="fill-good"');
     const lists = render(<RankedTable data={nearestWithRivals.payload} variant="lists" title="Rivals" />);
     expect(rowMarkup(plotView(lists), "R3")).toContain('data-tone="comparison"');
     const rows = tableRows(tableView(lists));

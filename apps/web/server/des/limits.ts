@@ -119,6 +119,20 @@ export class DesLimiter {
     return this.network;
   }
 
+  /**
+   * Read only: one visitor's lookups in the last minute and hour, and the seconds until the start
+   * that frees an hourly place leaves the window (null with none in it). Changes no window.
+   */
+  visitorUsage(visitor: string, now: number): { minute: number; hour: number; hourFreeS: number | null } {
+    const times = (this.visitors.get(visitor) ?? []).filter((t) => t > now - HOUR_MS);
+    const minute = times.filter((t) => t > now - MINUTE_MS).length;
+    const limit = this.limits.visitorPerHour;
+    // Oldest first: below the limit the oldest frees one; at or past it, the start that brings it under.
+    const at = times.length >= limit ? times.length - limit : 0;
+    const t = times[at];
+    return { minute, hour: times.length, hourFreeS: t === undefined ? null : seconds(t + HOUR_MS - now) };
+  }
+
   private visitorWait(times: readonly number[], now: number): DesWait | null {
     const { visitorPerMinute, visitorPerHour } = this.limits;
     const inMinute = times.filter((t) => t > now - MINUTE_MS);
