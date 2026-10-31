@@ -75,9 +75,10 @@ describe("footer", () => {
 });
 
 describe("logo mark", () => {
-  it("draws four squares in the topic colours", () => {
+  it("draws four map tiles: three ledger blues and one warm tile", () => {
     const out = html(<LogoMark />);
-    for (const t of ["brands", "places", "tours", "audiences"]) expect(out).toContain(`var(--color-topic-${t})`);
+    expect(out.match(/<rect /g)).toHaveLength(4);
+    for (const fill of ["#1d3e9e", "#9fb2e0", "#4f6fc0", "#c9792b"]) expect(out).toContain(`fill="${fill}"`);
     expect(html(<LogoMark size={20} />)).toContain('width="9"');
   });
 });

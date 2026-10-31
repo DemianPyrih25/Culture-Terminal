@@ -38,7 +38,7 @@ import { buildTearsheet, SECTION_SKILL, type SectionRun } from "./tearsheet";
 import type { VettedPerson } from "./vetted";
 
 /**
- * The DES tearsheet (P1 #1, SPEC D11 "the Bloomberg DES <GO>"): code only, $0 LLM. For one name and
+ * The DES tearsheet (P1 #1, SPEC D11): code only, $0 LLM. For one name and
  * type it runs the agent's own resolution gate (exact normalised name and type, D20: a tie is a
  * picker, a miss offers candidates and applies none), then Audience DNA, the cultural neighbourhood
  * and travel taste through the QUANT skills' public exports, exactly as an opening scan would, and

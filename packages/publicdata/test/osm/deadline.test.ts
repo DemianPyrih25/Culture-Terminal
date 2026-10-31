@@ -120,6 +120,8 @@ describe("the OpenStreetMap deadline of one tool call", () => {
     live = false;
     const call = track(h.client.standalone().forTool(null).osmCounts(COUNTS));
     await h.elapse(OSM_CALL_DEADLINE_MS);
+    // The stale read after the abort is still a few awaits away on a slow runner; wait for it to settle.
+    await vi.waitFor(() => expect(call.settled).toBe(true));
     expect(call.error).toBeUndefined();
     expect(call.value?.meta).toMatchObject({ cache: "stale", stale: true });
     expect(call.value?.data.counts["area-b"]?.cafe).toBe(3);

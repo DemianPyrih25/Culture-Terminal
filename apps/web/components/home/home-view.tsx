@@ -2,6 +2,7 @@ import { followsUp, type AskParent } from "../ask/ask-parent";
 import { AskBox } from "./ask-box";
 import { FollowingPreviewLazy as FollowingPreview } from "./following-preview-lazy";
 import { RecentAnswers } from "./recent-answers";
+import { WhatToAsk } from "./what-to-ask";
 
 export interface HomeViewProps {
   /** /ask?q=: the box opens with it and sends it at once. */
@@ -35,6 +36,7 @@ export function HomeView({ initialQuestion = "", parent = null }: HomeViewProps)
         </h1>
       </div>
       <AskBox key={parent?.runId ?? ""} initialQuestion={initialQuestion} parent={parent} className="animate-rise [animation-delay:60ms]" />
+      {following ? null : <WhatToAsk className="mt-5" />}
       <RecentAnswers className="mt-14 max-md:mt-10" />
       <FollowingPreview className="mt-14 max-md:mt-10" />
     </div>
