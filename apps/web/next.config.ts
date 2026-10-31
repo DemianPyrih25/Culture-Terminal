@@ -4,7 +4,7 @@ import type { NextConfig } from "next";
 
 const repoRoot = path.join(__dirname, "..", "..");
 
-// Local development keeps one .env at the repository root. Variables already set (Railway, CI) win.
+// Local development keeps one .env at the repository root. Variables already set (Render, CI) win.
 const rootEnv = path.join(repoRoot, ".env");
 if (existsSync(rootEnv)) process.loadEnvFile(rootEnv);
 

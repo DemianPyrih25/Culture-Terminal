@@ -54,6 +54,18 @@ describe("live transport for Overpass", () => {
     expect(() => createPublicHttpTransport({ secUserAgent: null, censusApiKey: null, osmUserAgent: "bad\nagent" })).toThrow(/OSM_USER_AGENT/);
   });
 
+  it("allows the fallback endpoint too, with the same User-Agent, and nothing else", async () => {
+    const f = fakeFetch();
+    const fallbackUrl = "https://overpass-fallback.example.org/api/interpreter";
+    const transport = createPublicHttpTransport({ secUserAgent: null, censusApiKey: null, osmUserAgent: UA, osmOverpassFallbackUrl: fallbackUrl, fetch: f.fetch });
+    await transport(countsRequest());
+    await transport(countsRequest(fallbackUrl));
+    expect(f.seen.map((s) => s.url)).toEqual(["https://overpass-api.de/api/interpreter", fallbackUrl]);
+    expect(f.seen[1]?.init.headers).toMatchObject({ "User-Agent": UA });
+    expect(publicDataErrorCode(await transport(countsRequest("https://overpass.example.org/api/interpreter")).catch((e: unknown) => e))).toBe("bad_request");
+    expect(f.seen).toHaveLength(2);
+  });
+
   it("reads Retry-After as seconds or an HTTP date", () => {
     expect(parseRetryAfter(null, 0)).toBeNull();
     expect(parseRetryAfter("7", 0)).toBe(7);
@@ -77,11 +89,17 @@ describe("environment", () => {
     expect(createPublicDataClient(publicDataOptionsFromEnv({ QLOO_MOCK: "1" }, deps)).configured.osm).toBe(true);
   });
 
-  it("checks OSM_OVERPASS_URL and OSM_DAILY_MAX", () => {
+  it("checks OSM_OVERPASS_URL, OSM_OVERPASS_FALLBACK_URL and OSM_DAILY_MAX", () => {
     const custom = publicDataOptionsFromEnv({ OSM_OVERPASS_URL: "https://overpass.example.org/api/interpreter" }, deps);
     expect(custom.osmOverpassUrl).toBe("https://overpass.example.org/api/interpreter");
     expect(() => publicDataOptionsFromEnv({ OSM_OVERPASS_URL: "ftp://example.org/x" }, deps)).toThrow(/OSM_OVERPASS_URL/);
     expect(() => publicDataOptionsFromEnv({ OSM_OVERPASS_URL: "https://user:pw@example.org/api" }, deps)).toThrow(/OSM_OVERPASS_URL/);
+    expect(custom.osmOverpassFallbackUrl).toBeNull();
+    const withFallback = publicDataOptionsFromEnv({ OSM_OVERPASS_FALLBACK_URL: " https://overpass-fallback.example.org/api/interpreter " }, deps);
+    expect(withFallback.osmOverpassFallbackUrl).toBe("https://overpass-fallback.example.org/api/interpreter");
+    expect(() => publicDataOptionsFromEnv({ OSM_OVERPASS_FALLBACK_URL: "ftp://example.org/x" }, deps)).toThrow(/OSM_OVERPASS_FALLBACK_URL/);
+    expect(() => publicDataOptionsFromEnv({ OSM_OVERPASS_FALLBACK_URL: "https://example.org/api?x=1" }, deps)).toThrow(/OSM_OVERPASS_FALLBACK_URL/);
+    expect(() => publicDataOptionsFromEnv({ OSM_OVERPASS_FALLBACK_URL: "https://overpass-api.de/api/interpreter" }, deps)).toThrow(/another Overpass endpoint/);
     expect(osmDailyMaxFromEnv({ OSM_DAILY_MAX: "500" })).toBe(500);
     expect(osmDailyMaxFromEnv({ OSM_DAILY_MAX: "" })).toBe(2000);
     expect(() => osmDailyMaxFromEnv({ OSM_DAILY_MAX: "-3" })).toThrow(/OSM_DAILY_MAX/);

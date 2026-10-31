@@ -1,8 +1,9 @@
 import type { EventInput } from "@ct/contracts";
 import { RunEventInput } from "@ct/contracts";
 import { afterEach, describe, expect, it } from "vitest";
-import { resetSideLatches, startSideContext, type SideClient, type SideContextOptions } from "../../src/side";
-import { SIDE_NOTES } from "../../src/side/outcome";
+import { usdFor } from "../../src/pricing";
+import { resetSideLatches, sideRequestEstimateUsd, startSideContext, type SideClient, type SideContextOptions } from "../../src/side";
+import { SIDE_NOTES, WEB_SEARCH_FEE_USD } from "../../src/side/outcome";
 import { after, aiMessage, cited, CONFIG, hangs, intentFixture, memoryCache, NOW, scriptedClient, searchResults, searchUse, webMessage } from "./support";
 
 afterEach(() => resetSideLatches());
@@ -129,6 +130,8 @@ describe("startSideContext", () => {
     expect(o.events).toHaveLength(2);
     expect(client.requests).toHaveLength(0);
     expect(result.models).toEqual({ ai: null, web: null });
+    expect(result.usd).toBe(0);
+    expect(o.events.map((e) => ("usd" in e ? e.usd : null))).toEqual([0, 0]);
   });
 
   it("serves cached blocks at no cost and still emits their events", async () => {
@@ -141,6 +144,50 @@ describe("startSideContext", () => {
     expect(result.usd).toBe(0);
     expect(result.ai.cached && result.web.cached).toBe(true);
     expect(o.events).toHaveLength(2);
+  });
+
+  it("charges a success its reported usage, search fees included", async () => {
+    const ai = aiMessage(AI_ANSWER);
+    const result = await startSideContext(options(routedClient(ai, WEB))).settled(5_000);
+    const expected = usdFor("claude-sonnet-5-5", ai.usage) + usdFor("claude-haiku-5-5", WEB.usage) + WEB_SEARCH_FEE_USD;
+    expect(result.usd).toBeCloseTo(expected, 12);
+  });
+
+  it("charges the estimate for a call cut off by an unexpected internal error after its request was sent", async () => {
+    // A response without usage makes the call throw after its request left, before any cost is known.
+    const client = scriptedClient([aiMessage(AI_ANSWER, { usage: undefined as never })]);
+    const o = options(client, { config: { ...CONFIG, webEnabled: false } });
+    const result = await startSideContext(o).settled(5_000);
+    expect(client.requests).toHaveLength(1);
+    expect(result.ai).toMatchObject({ status: "failed", note: SIDE_NOTES.aiFailed });
+    const estimate = sideRequestEstimateUsd("claude-sonnet-5-5", client.requests[0]!);
+    expect(result.usd).toBe(estimate);
+    expect(o.events.find((e) => e.type === "context.ai")).toMatchObject({ usd: estimate });
+  });
+
+  it("charges the estimate for a sent call that times out or is stopped with the run", async () => {
+    const timedOut = scriptedClient([hangs]);
+    const slow = await startSideContext(options(timedOut, { config: { ...CONFIG, webEnabled: false, aiTimeoutMs: 30 } })).settled(5_000);
+    expect(slow.ai.status).toBe("timed_out");
+    expect(slow.usd).toBe(sideRequestEstimateUsd("claude-sonnet-5-5", timedOut.requests[0]!));
+
+    const run = new AbortController();
+    let sent: () => void = () => {};
+    const reached = new Promise<void>((r) => {
+      sent = r;
+    });
+    const stopped = scriptedClient([
+      (req, signal) => {
+        sent();
+        return hangs(req, signal);
+      },
+    ]);
+    const handle = startSideContext(options(stopped, { signal: run.signal, config: { ...CONFIG, webEnabled: false } }));
+    await reached;
+    run.abort();
+    const result = await handle.settled(5_000);
+    expect(result.ai).toMatchObject({ status: "failed", note: SIDE_NOTES.stopped });
+    expect(result.usd).toBe(sideRequestEstimateUsd("claude-sonnet-5-5", stopped.requests[0]!));
   });
 
   it("a throwing emit never breaks the run", async () => {

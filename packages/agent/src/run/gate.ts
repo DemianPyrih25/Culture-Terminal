@@ -1,5 +1,4 @@
 import {
-  entityTypeUrn,
   placeSearchMarket,
   type EntityRegistry,
   type EventInputOf,
@@ -15,7 +14,7 @@ import {
   type RunCandidates,
 } from "@ct/contracts";
 import { classifyMatches, normaliseName, searchParams, unmatchedLimitation, type MatchAlternative } from "@ct/quant";
-import { aliasMatch, BRAND_ALIASES, leadingNameMatch, type BrandAlias } from "./aliases";
+import { BRAND_ALIASES, knownNameReading, type BrandAlias } from "./aliases";
 import { pickerKey } from "./picker";
 
 /**
@@ -126,14 +125,16 @@ type Resolution =
   | { applied: QlooSearchEntity; alternatives: readonly MatchAlternative[]; alias?: string }
   | { applied: null; match: Miss; alternatives: readonly MatchAlternative[] };
 
-function classify(mention: Mention, results: readonly QlooSearchEntity[], aliases: readonly BrandAlias[]): Resolution {
+/** `leading`: an obvious candidate, which may also take the leading-name reading (knownNameReading). */
+function classify(mention: Mention, results: readonly QlooSearchEntity[], aliases: readonly BrandAlias[], leading: boolean): Resolution {
   const c = classifyMatches({ text: mention.text, type: mention.entity_type }, results);
   const applied = c.matchClass === "exact" ? c.exact[0] : undefined;
   if (applied !== undefined) return { applied, alternatives: c.alternatives };
-  // A verified alias accepts the result the search returned under the official name, never anything else.
-  const aliased = aliasMatch(mention, results, aliases);
-  if (aliased !== null) return { applied: aliased, alternatives: c.alternatives, alias: aliased.name };
-  return { applied: null, match: c.matchClass === "ambiguous" ? "ambiguous" : "not_found", alternatives: c.alternatives };
+  const match = c.matchClass === "ambiguous" ? "ambiguous" : "not_found";
+  // A verified alias (or an expected name's leading match) accepts a result the search returned, never anything else.
+  const read = knownNameReading(mention, results, match, leading, aliases);
+  if (read !== null) return { applied: read, alternatives: c.alternatives, alias: read.name };
+  return { applied: null, match, alternatives: c.alternatives };
 }
 
 function draftOf(r: QlooSearchEntity, mention: Mention, obvious: boolean): Omit<RegisteredEntity, "ref"> {
@@ -293,14 +294,12 @@ export async function runResolutionGate(input: GateInput): Promise<GateOutcome> 
       if (settled.status === "rejected" && target.pin === null) throw settled.reason;
       if (settled.status === "fulfilled") calls.push(settled.value.meta);
       const results = settled.status === "fulfilled" ? settled.value.data.results : [];
-      resolution =
-        target.pin !== null ? await resolvePinned(input, target.pin, results, calls) : classify(mention, results, input.aliases ?? BRAND_ALIASES);
       // An expected name CLERK wrote loosely ("Health-Ade") may take the top result that only adds a word or
       // two ("Health-Ade Kombucha"); the reading is shown like an alias's.
-      if (target.obvious && resolution.applied === null && resolution.match === "not_found") {
-        const lead = leadingNameMatch(mention, results, entityTypeUrn(mention.entity_type));
-        if (lead !== null) resolution = { applied: lead, alternatives: [], alias: lead.name };
-      }
+      resolution =
+        target.pin !== null
+          ? await resolvePinned(input, target.pin, results, calls)
+          : classify(mention, results, input.aliases ?? BRAND_ALIASES, target.obvious);
     } catch (error) {
       if (target.isPrimary) return { kind: "failed", error };
       // An obvious candidate is CLERK's expectation, not the question's: its failure costs nothing.

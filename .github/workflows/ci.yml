@@ -1,4 +1,4 @@
-# CI (PLAN §10.2). Railway's "Wait for CI" deploys main only after every job here is green.
+# CI (PLAN §10.2). Render's autoDeployTrigger: checksPass (render.yaml) deploys main only after every job here is green.
 # Actions are pinned to full commit SHAs; the trailing comment names the release.
 name: CI
 

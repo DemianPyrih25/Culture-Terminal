@@ -1,13 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { WEB_CONTEXT_LIMITS, WebContextBlock, WebContextItem, type TokenUsage } from "@ct/contracts";
+import { WEB_CONTEXT_LIMITS, WebContextBlock, WebContextItem } from "@ct/contracts";
 import { HAIKU_MODEL } from "../anthropic";
 import { GHOST_MARKETS } from "../ghost/places";
 import { toRefusal } from "../llm/stop";
-import { addTokenUsage, emptyTokenUsage, tokenUsageOf, usdFor } from "../pricing";
 import { contextCacheKey, readContext, writeContext } from "./cache";
 import type { SideContextOptions } from "./index";
 import { unbackedNumbers } from "./numbers";
-import { freeOutcome, SIDE_NOTES, webBlock, type CallOutcome } from "./outcome";
+import { freeOutcome, SIDE_NOTES, SideSpend, WEB_SEARCH_FEE_USD, webBlock, type CallOutcome } from "./outcome";
 import { webContextSystem, webContextUser } from "./prompts";
 import { cleanText, cutTitle } from "./text";
 
@@ -25,8 +24,8 @@ export const WEB_CONTEXT_MAX_TOKENS = 1500;
 export const WEB_SEARCH_TOOL_TYPE = "web_search_20250305";
 /** `pause_turn` continuations allowed inside the timeout. */
 export const WEB_MAX_CONTINUATIONS = 2;
-/** USD per billed search ($10 per 1,000). index.ts re-exports it as WEB_SEARCH_USD_PER_SEARCH. */
-export const WEB_SEARCH_FEE_USD = 0.01;
+/** USD per billed search, from outcome.ts. index.ts re-exports it as WEB_SEARCH_USD_PER_SEARCH. */
+export { WEB_SEARCH_FEE_USD };
 export const WEB_CLAIM_MIN_CHARS = 20;
 const MAX_URL_CHARS = 2048;
 
@@ -275,7 +274,12 @@ const ERROR_NOTE: Readonly<Record<string, string>> = {
 export type WebCallInput = Pick<
   SideContextOptions,
   "question" | "intent" | "mode" | "subjectName" | "placeLabel" | "client" | "cache" | "config"
-> & { signal: AbortSignal; now: () => number };
+> & {
+  signal: AbortSignal;
+  now: () => number;
+  /** Where the call charges what it costs; the handle passes its own so an aborted call is still charged. */
+  spend?: SideSpend;
+};
 
 /** WEB_SEARCH_MAX_USES clamped to 1..5. */
 export const clampMaxUses = (n: number): number => (Number.isFinite(n) ? Math.min(5, Math.max(1, Math.round(n))) : 3);
@@ -301,45 +305,38 @@ export async function runWebContext(o: WebCallInput): Promise<CallOutcome<WebCon
   const maxUses = clampMaxUses(o.config.webMaxUses);
   const request = webRequest(maxUses, webContextUser(o), webUserLocation(o.intent.geo));
   const content: Anthropic.ContentBlock[] = [];
-  let usage: TokenUsage = emptyTokenUsage();
-  let tokenUsd = 0;
-  let searches = 0;
+  const spend = o.spend ?? new SideSpend();
   let last: Anthropic.Message | null = null;
-  const cost = (block: WebContextBlock): CallOutcome<WebContextBlock> => ({
-    block,
-    usd: tokenUsd + searches * WEB_SEARCH_FEE_USD,
-    usage,
-    searches,
-    model: last === null ? null : model,
-  });
+  const cost = (block: WebContextBlock): CallOutcome<WebContextBlock> => spend.outcome(block);
 
   for (let turn = 0; turn <= WEB_MAX_CONTINUATIONS; turn += 1) {
     // A pause_turn continuation re-sends the assistant content unchanged; the API carries on from it.
     const body: Anthropic.MessageCreateParamsNonStreaming =
       content.length === 0 ? request : { ...request, messages: [...request.messages, { role: "assistant", content: content as Anthropic.ContentBlockParam[] }] };
     let message: Anthropic.Message;
+    // Every search the request allows counts until the response says how many ran.
+    spend.sent(model, body, maxUses);
     try {
       message = await o.client.create(body, { signal: o.signal, timeout: o.config.webTimeoutMs });
     } catch (err) {
+      spend.failed(err);
       if (!o.signal.aborted && isWebSearchNotEnabled(err)) {
         if (!webSearchNotEnabled) console.warn("[side] web search is not enabled for this API account; web context is off until restart");
         webSearchNotEnabled = true;
         return cost(webBlock("off", SIDE_NOTES.webNotEnabled));
       }
-      return cost(webBlock("failed", SIDE_NOTES.webFailed, last === null ? {} : { model, searches }));
+      return cost(webBlock("failed", SIDE_NOTES.webFailed, last === null ? {} : { model, searches: spend.searches }));
     }
     last = message;
-    usage = addTokenUsage(usage, tokenUsageOf(message.usage));
-    tokenUsd += usdFor(model, message.usage);
-    searches += message.usage.server_tool_use?.web_search_requests ?? 0;
-    if (toRefusal(message)) return cost(webBlock("failed", SIDE_NOTES.webRefused, { model, searches }));
+    spend.answered(model, message);
+    if (toRefusal(message)) return cost(webBlock("failed", SIDE_NOTES.webRefused, { model, searches: spend.searches }));
     content.push(...message.content);
     if (message.stop_reason !== "pause_turn") break;
   }
 
   const retrievedAt = iso(o.now());
   const parsed = webItems(content, retrievedAt);
-  const settled = { model, searches, retrievedAt, droppedForNumbers: parsed.droppedForNumbers };
+  const settled = { model, searches: spend.searches, retrievedAt, droppedForNumbers: parsed.droppedForNumbers };
   if (parsed.items.length === 0 && parsed.results === 0 && parsed.errors.length > 0) {
     const code = parsed.errors[0] ?? "";
     return cost(webBlock("failed", ERROR_NOTE[code] ?? SIDE_NOTES.webFailed, settled));

@@ -1,4 +1,4 @@
-import { EntityType, type Mention, type QlooSearchEntity } from "@ct/contracts";
+import { entityTypeUrn, EntityType, type Mention, type QlooSearchEntity } from "@ct/contracts";
 import { normaliseName } from "@ct/quant";
 import { z } from "zod";
 import raw from "../../../../config/brand_aliases.json";
@@ -78,4 +78,23 @@ export function leadingNameMatch(
   });
   const top = ofType[0];
   return top !== undefined && leading.length === 1 && leading[0] === top ? top : null;
+}
+
+/**
+ * The one reading of a name with no exact match, shared by the gate and meant for the ANALYST's own
+ * resolve_entities: a verified known alias of the mention's type (aliasMatch) for any name, else, only when
+ * `leading` (a name the run expected, never one the question gave) and the search matched nothing (never an
+ * ambiguous name), the unique top result that adds a word or two (leadingNameMatch). Null keeps the miss.
+ * Either way the result is one the mention's own /search returned, and the caller shows the reading.
+ */
+export function knownNameReading(
+  mention: Pick<Mention, "text" | "entity_type">,
+  results: readonly QlooSearchEntity[],
+  match: "ambiguous" | "not_found",
+  leading: boolean,
+  aliases: readonly BrandAlias[] = BRAND_ALIASES,
+): QlooSearchEntity | null {
+  const aliased = aliasMatch(mention, results, aliases);
+  if (aliased !== null) return aliased;
+  return leading && match === "not_found" ? leadingNameMatch(mention, results, entityTypeUrn(mention.entity_type)) : null;
 }

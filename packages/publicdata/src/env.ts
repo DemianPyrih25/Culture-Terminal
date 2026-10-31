@@ -2,7 +2,7 @@ import { resolveQlooEnv } from "@ct/qloo";
 import type { PublicDataClientOptions, PublicDataEnvDeps, PublicTransport } from "./api";
 import { createPublicHttpTransport, isHeaderSafe } from "./http-transport";
 import { createMockPublicTransport } from "./mock";
-import { DEFAULT_OSM_DAILY_MAX, DEFAULT_OSM_OVERPASS_URL, overpassTarget } from "./osm/client";
+import { DEFAULT_OSM_DAILY_MAX, DEFAULT_OSM_OVERPASS_URL, overpassFallbackTarget, overpassTarget } from "./osm/client";
 
 /**
  * Client options from the environment:
@@ -19,6 +19,8 @@ import { DEFAULT_OSM_DAILY_MAX, DEFAULT_OSM_OVERPASS_URL, overpassTarget } from 
  *   configured: local_supply is not planned and the run says so (OSM_NOT_CONFIGURED).
  * - OSM_OVERPASS_URL: the Overpass endpoint (default https://overpass-api.de/api/interpreter); an
  *   http(s) URL with no credentials or query.
+ * - OSM_OVERPASS_FALLBACK_URL: a second Overpass endpoint, checked the same way (unset by default: no
+ *   fallback). When the primary fails or is too slow, one request goes there inside the same deadline.
  * - OSM_DAILY_MAX: Overpass network requests per UTC day for the whole deploy (default 2000).
  * - QLOO_TAG labels call rows; the environment (dev, prod, mock) is resolved as for the Qloo client.
  */
@@ -32,13 +34,15 @@ export function publicDataOptionsFromEnv(env: NodeJS.ProcessEnv, deps: PublicDat
   if (osmUserAgent !== null && !isHeaderSafe(osmUserAgent)) {
     throw new Error("OSM_USER_AGENT must be one line of printable ASCII, e.g. \"Culture Terminal (ops@example.com)\"");
   }
-  const osmOverpassUrl = overpassTarget(env.OSM_OVERPASS_URL?.trim() || DEFAULT_OSM_OVERPASS_URL).url;
+  const osmOverpass = overpassTarget(env.OSM_OVERPASS_URL?.trim() || DEFAULT_OSM_OVERPASS_URL);
+  const osmOverpassUrl = osmOverpass.url;
+  const osmOverpassFallbackUrl = overpassFallbackTarget(env.OSM_OVERPASS_FALLBACK_URL, osmOverpass)?.url ?? null;
   const osmDailyMax = osmDailyMaxFromEnv(env);
   const censusApiKey = env.CENSUS_API_KEY?.trim() || null;
   const transport: PublicTransport =
     publicEnv === "mock"
       ? createMockPublicTransport()
-      : createPublicHttpTransport({ secUserAgent, censusApiKey, osmUserAgent, osmOverpassUrl, fetch: deps.fetch });
+      : createPublicHttpTransport({ secUserAgent, censusApiKey, osmUserAgent, osmOverpassUrl, osmOverpassFallbackUrl, fetch: deps.fetch });
   return {
     env: publicEnv,
     transport,
@@ -47,6 +51,7 @@ export function publicDataOptionsFromEnv(env: NodeJS.ProcessEnv, deps: PublicDat
     secUserAgent,
     osmUserAgent,
     osmOverpassUrl,
+    osmOverpassFallbackUrl,
     osmDailyMax,
     logger: deps.logger,
   };

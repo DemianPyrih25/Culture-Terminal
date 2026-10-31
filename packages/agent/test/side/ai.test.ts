@@ -1,8 +1,10 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { AiContextBlock } from "@ct/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { tokenUsageOf, usdFor } from "../../src/pricing";
 import { presenceApplies, runAiContext, type AiCallInput } from "../../src/side/ai";
 import { resetSideLatches } from "../../src/side";
-import { SIDE_NOTES } from "../../src/side/outcome";
+import { SIDE_NOTES, sideRequestEstimateUsd } from "../../src/side/outcome";
 import { aiMessage, badRequest, CONFIG, intentFixture, memoryCache, NOW, scriptedClient } from "./support";
 
 afterEach(() => {
@@ -50,8 +52,15 @@ describe("runAiContext", () => {
     expect(out.block.model).toBe("claude-sonnet-5-5");
     expect(out.block.generatedAt).toBe(new Date(NOW).toISOString());
     expect(out.block.cached).toBe(false);
-    expect(out.usd).toBeGreaterThan(0);
     expect(AiContextBlock.safeParse(out.block).success).toBe(true);
+  });
+
+  it("charges a success its reported usage", async () => {
+    const message = aiMessage(ANSWER);
+    const out = await runAiContext(input(scriptedClient([message])));
+    expect(out.usd).toBe(usdFor("claude-sonnet-5-5", message.usage));
+    expect(out.usage).toEqual(tokenUsageOf(message.usage));
+    expect(out.model).toBe("claude-sonnet-5-5");
   });
 
   it("sends Sonnet with between_tools, low effort, a json format and the escaped question", async () => {
@@ -102,15 +111,29 @@ describe("runAiContext", () => {
   it("fails in reader words on a refusal, bad JSON or an API error, keeping what was billed", async () => {
     const refusal = aiMessage(ANSWER, { stop_reason: "refusal" });
     const bad = aiMessage(ANSWER, { content: [{ type: "text", text: "not json", citations: null }] });
-    const client = scriptedClient([refusal, bad, new Error("network down")]);
+    const overloaded = new Anthropic.InternalServerError(529, { type: "error", error: { type: "overloaded_error", message: "Overloaded" } }, "Overloaded", new Headers());
+    const client = scriptedClient([refusal, bad, overloaded]);
     const a = await runAiContext(input(client));
     expect(a.block).toMatchObject({ status: "failed", note: SIDE_NOTES.aiRefused });
-    expect(a.usd).toBeGreaterThan(0);
+    expect(a.usd).toBe(usdFor("claude-sonnet-5-5", refusal.usage));
     const b = await runAiContext(input(client));
     expect(b.block).toMatchObject({ status: "failed", note: SIDE_NOTES.aiFailed });
+    expect(b.usd).toBe(usdFor("claude-sonnet-5-5", bad.usage));
+    // The API answered with an error status: nothing was generated, so nothing is billed.
     const c = await runAiContext(input(client));
     expect(c.block).toMatchObject({ status: "failed", note: SIDE_NOTES.aiFailed });
     expect(c.usd).toBe(0);
+  });
+
+  it("charges the worst-case estimate when a sent request fails without a response", async () => {
+    const client = scriptedClient([new Error("socket hang up")]);
+    const out = await runAiContext(input(client));
+    expect(out.block).toMatchObject({ status: "failed", note: SIDE_NOTES.aiFailed });
+    const estimate = sideRequestEstimateUsd("claude-sonnet-5-5", client.requests[0]!);
+    expect(estimate).toBeGreaterThan(usdFor("claude-sonnet-5-5", aiMessage(ANSWER).usage));
+    expect(out.usd).toBe(estimate);
+    // Estimates add USD only: the receipt's tokens stay the reported ones.
+    expect(out.usage).toEqual({ input: 0, output: 0, cacheRead: 0, cacheCreation: 0 });
   });
 
   it("drops presence markets when there is no subject", async () => {

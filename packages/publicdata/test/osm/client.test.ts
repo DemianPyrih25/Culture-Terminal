@@ -124,7 +124,8 @@ describe("OpenStreetMap through the public-data client", () => {
     // 31 days on (a new UTC day, but the counter there is already full): the expired copy answers.
     h.clock.advance(31 * DAY);
     h.store.counters.set(`osm.count.${new Date(h.clock.now()).toISOString().slice(0, 10)}`, 2);
-    const stale = await api.osmCounts({ shapes: [CIRCLE], types: [CAFE] });
+    // A new tool call: the first one's OpenStreetMap deadline is long past.
+    const stale = await h.client.standalone().forTool(null).osmCounts({ shapes: [CIRCLE], types: [CAFE] });
     expect(stale.meta).toMatchObject({ cache: "stale", stale: true });
     expect(h.transport.requests).toHaveLength(2);
   });
@@ -181,8 +182,9 @@ describe("OpenStreetMap through the public-data client", () => {
     await api.osmCounts(COUNTS);
     await h.client.flush();
     h.clock.advance(OSM_TTL_MS + DAY);
-    const res = await api.osmCounts(COUNTS);
+    const res = await h.client.standalone().forTool(null).osmCounts(COUNTS);
     expect(res.meta).toMatchObject({ cache: "stale", stale: true, reference: `osm-${OSM_BASE}` });
+    expect(h.transport.requests).toHaveLength(3);
     expect(res.data.counts["area-a"]?.cafe).toBe(3);
   });
 

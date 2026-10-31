@@ -1,7 +1,7 @@
 import { PUBLIC_ENDPOINTS } from "@ct/contracts";
 import { PublicDataError, type PublicRequest, type PublicTransport } from "./api";
 import { publicQueryString } from "./canonical";
-import { OSM_TIMEOUT_MS, overpassTarget } from "./osm/client";
+import { OSM_TIMEOUT_MS, overpassFallbackTarget, overpassTarget } from "./osm/client";
 
 /**
  * The live transport: one HTTPS GET per attempt to the three SEC and Census hosts only, a 20 s timeout
@@ -9,9 +9,10 @@ import { OSM_TIMEOUT_MS, overpassTarget } from "./osm/client";
  * missing or invalid key with one). SEC gets SEC_USER_AGENT verbatim as its User-Agent, as SEC's
  * fair-access policy requires; Census gets CENSUS_API_KEY as the `key` query parameter, added here on
  * the wire only, so it is in no cache key, call row, event or provenance. OpenStreetMap is the one POST,
- * and only to the configured OSM_OVERPASS_URL: the form body `data=<QL>` (a read-only query), with
- * OSM_USER_AGENT as the User-Agent the Overpass usage policy asks for, and a 45 s timeout (the query
- * itself is limited to 25 s). Errors never carry the URL.
+ * and only to the configured OSM_OVERPASS_URL or OSM_OVERPASS_FALLBACK_URL: the form body `data=<QL>` (a
+ * read-only query), with OSM_USER_AGENT as the User-Agent the Overpass usage policy asks for (both
+ * instances), and a 45 s timeout (the query itself is limited to 25 s; the client's per-call deadline
+ * aborts sooner through the signal). Errors never carry the URL.
  */
 
 export const PUBLIC_TIMEOUT_MS = 20_000;
@@ -32,8 +33,10 @@ export interface PublicHttpTransportOptions {
   censusApiKey: string | null;
   /** Sent verbatim as the User-Agent to Overpass; null or absent makes every OpenStreetMap request fail with not_configured. */
   osmUserAgent?: string | null;
-  /** The Overpass endpoint (default https://overpass-api.de/api/interpreter); OpenStreetMap requests go nowhere else. */
+  /** The Overpass endpoint (default https://overpass-api.de/api/interpreter); OpenStreetMap requests go nowhere else but the fallback. */
   osmOverpassUrl?: string;
+  /** OSM_OVERPASS_FALLBACK_URL: the one other Overpass endpoint requests may go to; null or absent allows none. */
+  osmOverpassFallbackUrl?: string | null;
   timeoutMs?: number;
   /** Timeout of one Overpass request (default 45 s: a busy instance queues it first). */
   osmTimeoutMs?: number;
@@ -67,18 +70,20 @@ export function createPublicHttpTransport(options: PublicHttpTransportOptions): 
   const osmUserAgent = options.osmUserAgent?.trim() || null;
   if (osmUserAgent !== null && !isHeaderSafe(osmUserAgent)) throw new Error("OSM_USER_AGENT must be printable ASCII on one line");
   const overpass = overpassTarget(options.osmOverpassUrl);
+  const overpassTargets = [overpass, overpassFallbackTarget(options.osmOverpassFallbackUrl, overpass)].filter((t) => t !== null);
   const maxBytes = options.maxBytes ?? PUBLIC_MAX_RESPONSE_BYTES;
   const fetchImpl = options.fetch ?? globalThis.fetch;
 
   const transport = async (request: PublicRequest, signal?: AbortSignal) => {
     const osm = request.source === "osm";
-    if (osm ? request.host !== overpass.host || request.path !== overpass.path : !HOSTS.has(request.host)) {
+    const target = osm ? overpassTargets.find((t) => t.host === request.host && t.path === request.path) : undefined;
+    if (osm ? target === undefined : !HOSTS.has(request.host)) {
       throw new PublicDataError("bad_request", `host ${request.host} is not a public-data host`, { source: request.source });
     }
     if ((request.method === "POST") !== osm) {
       throw new PublicDataError("bad_request", `${request.method ?? "GET"} is not how ${request.host} is read`, { source: request.source });
     }
-    let url = osm ? overpass.url : publicUrl(request);
+    let url = target !== undefined ? target.url : publicUrl(request);
     const headers: Record<string, string> = { Accept: "application/json" };
     let body: string | undefined;
     if (osm) {

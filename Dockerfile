@@ -35,7 +35,7 @@ ENV NODE_ENV=production \
     NEXT_MANUAL_SIG_HANDLE=true
 WORKDIR /app
 # NEXT_MANUAL_SIG_HANDLE: Next.js leaves SIGTERM to apps/web/server/startup.ts, which drains active
-# runs (SHUTDOWN_GRACE_MS, under Railway's 200 s drainingSeconds) before the process exits.
+# runs (SHUTDOWN_GRACE_MS, under Render's 200 s maxShutdownDelaySeconds in render.yaml) before the process exits.
 
 # outputFileTracingRoot is the repository root, so the standalone tree mirrors the monorepo and
 # the server lives at apps/web/server.js. Static assets and public/ are not traced and are copied.

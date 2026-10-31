@@ -1,5 +1,5 @@
 // `pnpm db:migrate`: applies pending migrations, then exits. For local and manual use; the server
-// also applies migrations itself on startup (RUN_MIGRATIONS), and there is no Railway pre-deploy step.
+// also applies migrations itself on startup (RUN_MIGRATIONS), and there is no Render pre-deploy step.
 import { resolveDatabaseUrl, warnDefaultUrlOnce } from "./client";
 import { loadRootEnv } from "./load-root-env";
 import { migrateUrl, resolveMigrationsFolder } from "./migrate";

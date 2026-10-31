@@ -156,7 +156,7 @@ const UNSAVED_REASON = "The run could not be saved.";
 const AGENT_WATCHDOG_MS = DEFAULT_RUN_LIMITS.hardMs + 60_000;
 /**
  * After a stop, runAgent gets this long to return before the run ends without it. Short enough that
- * SIGTERM's drain (SHUTDOWN_GRACE_MS, 180 s) plus this stays inside Railway's 200 s.
+ * SIGTERM's drain (SHUTDOWN_GRACE_MS, 180 s) plus this stays inside Render's 200 s shutdown delay.
  */
 const AGENT_STOP_GRACE_MS = 10_000;
 /** The picker's /search lookup gives up after this; the gate's own call cached the answer. */

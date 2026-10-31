@@ -22,7 +22,7 @@ const RETRY_FIRST_MS = 5000;
 const RETRY_MAX_MS = 60_000;
 /**
  * SIGTERM waits at most this long for the Qloo client's background writes. With the drain
- * (SHUTDOWN_GRACE_MS plus an agent's stop grace) and closing the pool, it stays inside Railway's 200 s.
+ * (SHUTDOWN_GRACE_MS plus an agent's stop grace) and closing the pool, it stays inside Render's 200 s shutdown delay.
  */
 const QLOO_FLUSH_MS = 3000;
 /**
@@ -206,7 +206,7 @@ async function flushPublicData(): Promise<void> {
 }
 
 /**
- * SIGTERM (a Railway redeploy): refuse new runs at once, give active runs the grace period, then
+ * SIGTERM (a Render redeploy): refuse new runs at once, give active runs the grace period, then
  * mark the rest incomplete, and let the Qloo client finish its writes. With NEXT_MANUAL_SIG_HANDLE
  * set, Next.js leaves the signal to us and we close the pool and exit after that; otherwise Next.js
  * exits when its open connections close, and any run cut short there is finalized as an orphan by

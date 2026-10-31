@@ -12,12 +12,11 @@ import {
 import { z } from "zod";
 import { HAIKU_MODEL, SONNET_MODEL, type LlmModel } from "../anthropic";
 import { toRefusal } from "../llm/stop";
-import { tokenUsageOf, usdFor } from "../pricing";
 import { MARKET_CATALOGUE } from "../run/markets";
 import { contextCacheKey, readContext, writeContext } from "./cache";
 import type { SideContextOptions } from "./index";
 import { numberProblems } from "./numbers";
-import { aiBlock, freeOutcome, SIDE_NOTES, type CallOutcome } from "./outcome";
+import { aiBlock, freeOutcome, SIDE_NOTES, SideSpend, type CallOutcome } from "./outcome";
 import { AI_CONTEXT_SYSTEM, aiContextUser } from "./prompts";
 import { cleanText } from "./text";
 
@@ -124,7 +123,12 @@ export function aiItems(answer: AiContextAnswer): { items: AiContextItem[]; drop
 export type AiCallInput = Pick<
   SideContextOptions,
   "question" | "intent" | "mode" | "subjectName" | "placeLabel" | "client" | "cache" | "config"
-> & { signal: AbortSignal; now: () => number };
+> & {
+  signal: AbortSignal;
+  now: () => number;
+  /** Where the call charges what it costs; the handle passes its own so an aborted call is still charged. */
+  spend?: SideSpend;
+};
 
 const iso = (ms: number): string => new Date(ms).toISOString();
 
@@ -151,22 +155,32 @@ export async function runAiContext(o: AiCallInput): Promise<CallOutcome<AiContex
     }
   }
 
+  const spend = o.spend ?? new SideSpend();
   const user = aiContextUser(o);
   const live = model === SONNET_MODEL;
   const thinking: Thinking = !live ? { type: "disabled" } : useAdaptive ? { type: "adaptive" } : { type: "between_tools" };
-  const send = (t: Thinking) => o.client.create(aiRequest(model, t, user), { signal: o.signal, timeout: o.config.aiTimeoutMs });
+  const send = async (t: Thinking): Promise<Anthropic.Message> => {
+    const request = aiRequest(model, t, user);
+    spend.sent(model, request);
+    try {
+      return await o.client.create(request, { signal: o.signal, timeout: o.config.aiTimeoutMs });
+    } catch (err) {
+      spend.failed(err);
+      throw err;
+    }
+  };
 
   let message: Anthropic.Message;
   try {
     message = await send(thinking);
   } catch (err) {
     if (o.signal.aborted || !(live && thinking.type === "between_tools" && err instanceof Anthropic.BadRequestError)) {
-      return freeOutcome(aiBlock("failed", SIDE_NOTES.aiFailed));
+      return spend.outcome(aiBlock("failed", SIDE_NOTES.aiFailed));
     }
     try {
       message = await send({ type: "adaptive" });
     } catch {
-      return freeOutcome(aiBlock("failed", SIDE_NOTES.aiFailed));
+      return spend.outcome(aiBlock("failed", SIDE_NOTES.aiFailed));
     }
     if (!useAdaptive) {
       useAdaptive = true;
@@ -174,9 +188,9 @@ export async function runAiContext(o: AiCallInput): Promise<CallOutcome<AiContex
     }
   }
 
+  spend.answered(model, message);
   const answered = iso(o.now());
-  const cost = { usd: usdFor(model, message.usage), usage: tokenUsageOf(message.usage), searches: 0, model };
-  const fail = (note: string): CallOutcome<AiContextBlock> => ({ ...cost, block: aiBlock("failed", note, { model }) });
+  const fail = (note: string): CallOutcome<AiContextBlock> => spend.outcome(aiBlock("failed", note, { model }));
   // stop_reason first, before any content is read.
   if (toRefusal(message)) return fail(SIDE_NOTES.aiRefused);
   const text = message.content.find((b): b is Anthropic.TextBlock => b.type === "text")?.text;
@@ -196,6 +210,7 @@ export async function runAiContext(o: AiCallInput): Promise<CallOutcome<AiContex
   const block = AiContextBlock.parse(
     aiBlock(status, status === "empty" ? SIDE_NOTES.aiEmpty : null, { items, presenceMarkets, model, generatedAt: answered, droppedForNumbers }),
   );
-  await writeContext(o.cache, { key, kind: "ai", model, body: block, usd: cost.usd });
-  return { ...cost, block };
+  const outcome = spend.outcome(block);
+  await writeContext(o.cache, { key, kind: "ai", model, body: block, usd: outcome.usd });
+  return outcome;
 }

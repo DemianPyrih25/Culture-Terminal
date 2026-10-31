@@ -197,12 +197,12 @@ export function shutdownGraceMsFromEnv(env: NodeJS.ProcessEnv = process.env): nu
 
 /**
  * The site's public origin, for the absolute URLs page metadata needs (a showcase's og:image and
- * twitter:image): PUBLIC_SITE_URL, else Railway's RAILWAY_PUBLIC_DOMAIN. A bare host gets https://.
+ * twitter:image): PUBLIC_SITE_URL, else Render's RENDER_EXTERNAL_URL. A bare host gets https://.
  * Undefined when unset or not a URL: Next then falls back to http://localhost:<PORT> instead of the
  * root layout failing to load, which would fail every page while /api/health stays green.
  */
 export function publicSiteUrlFromEnv(env: NodeJS.ProcessEnv = process.env): URL | undefined {
-  const raw = env.PUBLIC_SITE_URL?.trim() || env.RAILWAY_PUBLIC_DOMAIN?.trim() || "";
+  const raw = env.PUBLIC_SITE_URL?.trim() || env.RENDER_EXTERNAL_URL?.trim() || "";
   if (raw === "") return undefined;
   try {
     return new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);

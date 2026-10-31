@@ -231,6 +231,16 @@ export interface PublicDataClientOptions {
   osmUserAgent?: string | null;
   /** OSM_OVERPASS_URL (default DEFAULT_OSM_OVERPASS_URL): its host and path are what requests and provenance name. */
   osmOverpassUrl?: string;
+  /**
+   * OSM_OVERPASS_FALLBACK_URL: tried once, inside the same deadline, when the primary fails or is too slow
+   * (the transport must allow it too). Provenance names the instance that answered.
+   */
+  osmOverpassFallbackUrl?: string | null;
+  /**
+   * Wall time for all the OpenStreetMap requests made through one forTool() API together (default
+   * OSM_CALL_DEADLINE_MS, 12 s); null for none. Off by default in mock and with osmLongQueries (the warm-up).
+   */
+  osmDeadlineMs?: number | null;
   /** OSM_DAILY_MAX: Overpass network requests per UTC day for the whole deploy (default 2000). */
   osmDailyMax?: number;
   /**
@@ -256,7 +266,10 @@ export interface PublicRunScope {
 }
 
 export interface RunPublic {
-  /** Calls made through the returned API are attributed to this tool call (null for bookkeeping calls). */
+  /**
+   * Calls made through the returned API are attributed to this tool call (null for bookkeeping calls).
+   * Its OpenStreetMap requests share one deadline from the first (osmDeadlineMs): take one API per tool call.
+   */
   forTool(toolCallId: string | null): PublicDataApi;
   /** For the agent ledger: `runQloo.provenance(id) ?? runPublic.provenance(id)`. */
   provenance(publicCallId: string): PublicProvenanceRequest | null;

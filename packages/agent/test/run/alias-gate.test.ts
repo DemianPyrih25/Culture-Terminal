@@ -5,7 +5,7 @@ import type { Mention } from "@ct/contracts";
 import { describe, expect, it } from "vitest";
 import aliasConfig from "../../../../config/brand_aliases.json";
 import { createEntityRegistry } from "../../src/registry";
-import { aliasMatch, BRAND_ALIASES, BrandAliasConfig, leadingNameMatch, verifiedAliases, type BrandAlias } from "../../src/run/aliases";
+import { aliasMatch, BRAND_ALIASES, BrandAliasConfig, knownNameReading, leadingNameMatch, verifiedAliases, type BrandAlias } from "../../src/run/aliases";
 import { runResolutionGate } from "../../src/run/gate";
 import { intentFor, mockQloo } from "./support";
 
@@ -52,6 +52,28 @@ describe("leadingNameMatch (expected candidates written loosely)", () => {
     expect(leadingNameMatch(want, [r("Fizzwell Kombucha Company Limited")] as never, BRAND)).toBeNull();
     expect(leadingNameMatch(want, [r("Fizzwellness Labs")] as never, BRAND)).toBeNull();
     expect(leadingNameMatch(want, [r("Fizzwell Kombucha", ["urn:entity:place"])] as never, BRAND)).toBeNull();
+  });
+});
+
+describe("knownNameReading (the gate's one reading of a name with no exact match)", () => {
+  const BRAND = "urn:entity:brand";
+  const r = (name: string) => ({ entity_id: `id-${name}`, name, types: [BRAND] });
+  const SHORT: BrandAlias = { alias: "QBX", names: ["Quillby Box Kitchen"], type: "brand" };
+  const qbx = { text: "QBX", entity_type: "brand" as const };
+
+  it("reads a short alias as the official name its own search returned, leading or not", () => {
+    const results = [r("QBX Labs Studio Co"), r("Quillby Box Kitchen")] as never;
+    expect(knownNameReading(qbx, results, "not_found", false, [SHORT])?.name).toBe("Quillby Box Kitchen");
+    expect(knownNameReading(qbx, results, "ambiguous", true, [SHORT])?.name).toBe("Quillby Box Kitchen");
+  });
+
+  it("keeps an ambiguous name a miss, and takes the leading match only when asked and nothing matched", () => {
+    const fizz = { text: "Fizzwell", entity_type: "brand" as const };
+    const results = [r("Fizzwell Kombucha"), r("Other")] as never;
+    expect(knownNameReading(fizz, results, "ambiguous", true, [])).toBeNull();
+    expect(knownNameReading(fizz, results, "not_found", false, [])).toBeNull();
+    expect(knownNameReading(fizz, results, "not_found", true, [])?.name).toBe("Fizzwell Kombucha");
+    expect(knownNameReading(qbx, [r("Quillby Box")] as never, "not_found", true, [SHORT])).toBeNull();
   });
 });
 

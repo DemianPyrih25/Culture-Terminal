@@ -7,6 +7,7 @@ import { z } from "zod";
 import { isRunId } from "../lib/run-id";
 import { getAccessService, HUMAN_CHECK_HEADER, isAdmin, type HumanCheck } from "./access";
 import type { ModeDecision, ModeService } from "./breakers";
+import { clientIp } from "./client-ip";
 import { llmDailyUsdCapFromEnv, modeOverrideFromEnv } from "./config";
 import {
   getAnswerCache,
@@ -702,6 +703,26 @@ const AdminModeBody = z.strictObject({ mode: Mode, reason: z.string().trim().min
  * replay-only the Qloo breaker set), and answers 503 when it could not be stored, since the other
  * processes and a restart would not see it. 404 without the token, as while ADMIN_TOKEN is unset.
  */
+/**
+ * The address headers the host sends with this request and the address clientIp takes from them,
+ * behind ADMIN_TOKEN: after a deploy, to choose CLIENT_IP_HEADER (docs/PROD_SETUP.md). Only the
+ * caller's own addresses; nothing is stored.
+ */
+export function adminIp(request: Request): Response {
+  if (!isAdmin(request)) return json({ error: "Not found." }, 404);
+  const h = (name: string) => request.headers.get(name);
+  return json({
+    used: clientIp(request),
+    clientIpHeader: process.env.CLIENT_IP_HEADER?.trim() || null,
+    headers: {
+      "x-forwarded-for": h("x-forwarded-for"),
+      "cf-connecting-ip": h("cf-connecting-ip"),
+      "true-client-ip": h("true-client-ip"),
+      "x-real-ip": h("x-real-ip"),
+    },
+  });
+}
+
 export async function adminMode(request: Request): Promise<Response> {
   if (!isAdmin(request)) return json({ error: "Not found." }, 404);
   let mode: z.infer<typeof AdminModeBody> | null = null;

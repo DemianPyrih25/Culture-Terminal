@@ -67,15 +67,15 @@ describe("agent run limits from the environment", () => {
 describe("the public site URL from the environment", () => {
   it("is undefined when unset or blank, so Next falls back to localhost", () => {
     expect(publicSiteUrlFromEnv(env())).toBeUndefined();
-    expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: " ", RAILWAY_PUBLIC_DOMAIN: "" }))).toBeUndefined();
+    expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: " ", RENDER_EXTERNAL_URL: "" }))).toBeUndefined();
   });
 
-  it("reads a full URL, gives a bare host https://, and falls back to Railway's public domain", () => {
+  it("reads a full URL, gives a bare host https://, and falls back to Render's external URL", () => {
     expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: "https://culture-terminal.example" }))?.href).toBe("https://culture-terminal.example/");
     expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: " culture-terminal.example " }))?.href).toBe("https://culture-terminal.example/");
     expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: "http://localhost:3100" }))?.href).toBe("http://localhost:3100/");
-    expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: " ", RAILWAY_PUBLIC_DOMAIN: "web.railway.example" }))?.href).toBe("https://web.railway.example/");
-    expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: "culture-terminal.example", RAILWAY_PUBLIC_DOMAIN: "web.railway.example" }))?.host).toBe("culture-terminal.example");
+    expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: " ", RENDER_EXTERNAL_URL: "https://web.render.example" }))?.href).toBe("https://web.render.example/");
+    expect(publicSiteUrlFromEnv(env({ PUBLIC_SITE_URL: "culture-terminal.example", RENDER_EXTERNAL_URL: "https://web.render.example" }))?.host).toBe("culture-terminal.example");
   });
 
   it("is undefined for a value that is not a URL, instead of failing the root layout", () => {

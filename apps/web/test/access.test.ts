@@ -66,6 +66,15 @@ describe("signed values and cookies", () => {
     expect(clientIp(undefined)).toBeNull();
   });
 
+  it("reads the header CLIENT_IP_HEADER names instead, when set", () => {
+    const req = new Request("http://test.local/", {
+      headers: { "x-forwarded-for": "198.51.100.7, 203.0.113.9", "cf-connecting-ip": "192.0.2.44" },
+    });
+    expect(clientIp(req, env({ CLIENT_IP_HEADER: " CF-Connecting-IP " }))).toBe("192.0.2.44");
+    expect(clientIp(req, env({ CLIENT_IP_HEADER: "true-client-ip" }))).toBeNull();
+    expect(clientIp(req, env({ CLIENT_IP_HEADER: "" }))).toBe("203.0.113.9");
+  });
+
   it("keys the visitor by a salted hash of that address, the same in every process with the same salt", () => {
     const from = (ip: string) => new Request("http://test.local/", { headers: { "x-forwarded-for": ip } });
     const salted = testAccess({ ipSalt: "salt-for-tests" });

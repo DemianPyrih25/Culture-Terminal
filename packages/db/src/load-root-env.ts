@@ -9,7 +9,7 @@ export function rootEnvPath(): string {
 
 /**
  * Loads the root .env the way apps/web/next.config.ts does, so `pnpm db:migrate` follows the same
- * DATABASE_URL as the app. Variables already set (shell, CI, Railway) win. Tests never call this.
+ * DATABASE_URL as the app. Variables already set (shell, CI, Render) win. Tests never call this.
  * Returns whether a file was loaded.
  */
 export function loadRootEnv(file: string = rootEnvPath()): boolean {

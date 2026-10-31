@@ -1,7 +1,8 @@
 import { WebContextBlock } from "@ct/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { usdFor } from "../../src/pricing";
 import { resetSideLatches } from "../../src/side";
-import { SIDE_NOTES } from "../../src/side/outcome";
+import { SIDE_NOTES, sideRequestEstimateUsd, WEB_SEARCH_FEE_USD } from "../../src/side/outcome";
 import { isWebSearchLatched, parsePageAge, runWebContext, safeUrl, webItems, type WebCallInput } from "../../src/side/web";
 import {
   badRequest,
@@ -159,10 +160,25 @@ describe("runWebContext", () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
+  it("charges a cut-off request its worst case, every allowed search included, on top of turns already answered", async () => {
+    const paused = webMessage([searchUse("srv_1", "q"), searchResults("srv_1", [{ url: A, title: "t", page_age: null }])], 1, {
+      stop_reason: "pause_turn",
+    });
+    const client = scriptedClient([paused, new Error("socket hang up")]);
+    const out = await runWebContext(input(client));
+    expect(out.block).toMatchObject({ status: "failed", note: SIDE_NOTES.webFailed, searches: 1 });
+    expect(out.searches).toBe(1);
+    const answered = usdFor("claude-haiku-5-5", paused.usage) + WEB_SEARCH_FEE_USD;
+    const estimate = sideRequestEstimateUsd("claude-haiku-5-5", client.requests[1]!, CONFIG.webMaxUses);
+    expect(estimate).toBeGreaterThan(CONFIG.webMaxUses * WEB_SEARCH_FEE_USD);
+    expect(out.usd).toBeCloseTo(answered + estimate, 12);
+  });
+
   it("does not latch on an unrelated 400", async () => {
     const client = scriptedClient([badRequest("max_tokens: too large")]);
     const out = await runWebContext(input(client));
     expect(out.block.status).toBe("failed");
+    expect(out.usd).toBe(0);
     expect(isWebSearchLatched()).toBe(false);
   });
 

@@ -4,6 +4,11 @@ Notable changes to Culture Terminal. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+### Changed: hosting on Render
+
+- `render.yaml` replaces `railway.json`: a Docker web service (1 CPU / 2 GB, no sleep, healthcheck `/api/health`, deploy after CI passes, 200 s shutdown delay) and its Postgres. The app reads `RENDER_GIT_COMMIT` and `RENDER_EXTERNAL_URL`.
+- `CLIENT_IP_HEADER` names the header that carries the visitor address (for example `cf-connecting-ip`); `GET /api/admin/ip` (behind `ADMIN_TOKEN`) shows what the host sends.
+
 ### Added: Foundation
 
 - Gating probe of the Qloo hackathon API (`tools/probe/run-probe.ts`) and the frozen Qloo parameter allowlist (`packages/qloo/src/allowlist.ts`). Findings are recorded as shapes and booleans only.

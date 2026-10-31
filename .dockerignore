@@ -44,5 +44,5 @@ playwright-report
 **/Thumbs.db
 Dockerfile
 .dockerignore
-railway.json
+render.yaml
 docker-compose.yml

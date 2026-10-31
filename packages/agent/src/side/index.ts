@@ -3,7 +3,7 @@ import type { AiContextBlock, EventInput, Intent, MarketId, TokenUsage, WebConte
 import type { AnalystMode } from "../anthropic";
 import { addTokenUsage } from "../pricing";
 import { resetAiLatch, runAiContext } from "./ai";
-import { aiBlock, freeOutcome, SIDE_NOTES, webBlock, type CallOutcome } from "./outcome";
+import { aiBlock, SIDE_NOTES, SideSpend, webBlock, type CallOutcome } from "./outcome";
 import { resetWebLatch, runWebContext, WEB_SEARCH_FEE_USD } from "./web";
 
 /**
@@ -15,6 +15,8 @@ import { resetWebLatch, runWebContext, WEB_SEARCH_FEE_USD } from "./web";
  * Each block emits its `context.*` event once, as soon as it settles (a cache hit and an `off` block
  * included), so the live page fills in early. A call that outlives its own timeout or the caller's
  * `settled` deadline is aborted and settles as `timed_out`; the run's abort settles both without an event.
+ * Whatever way a call ends, what it cost is charged (SideSpend): a request cut off before its response
+ * counts at its worst case, so the run's meter and the daily spend never miss it.
  */
 
 export interface SideConfig {
@@ -80,7 +82,7 @@ export const WEB_SEARCH_USD_PER_SEARCH = WEB_SEARCH_FEE_USD;
 
 export { numberProblems, unbackedNumbers } from "./numbers";
 export { contextCacheKey, CONTEXT_TTL_MS } from "./cache";
-export { SIDE_NOTES } from "./outcome";
+export { SIDE_NOTES, SideSpend, sideRequestEstimateUsd } from "./outcome";
 
 /** Tests only: forget the process-wide latches (web search not enabled, between_tools fallback). */
 export function resetSideLatches(): void {
@@ -97,7 +99,7 @@ interface Call<B> {
 }
 
 interface CallSpec<B> {
-  run: (signal: AbortSignal) => Promise<CallOutcome<B>>;
+  run: (signal: AbortSignal, spend: SideSpend) => Promise<CallOutcome<B>>;
   timeoutMs: number;
   timedOut: () => B;
   failed: () => B;
@@ -109,6 +111,8 @@ interface CallSpec<B> {
 
 function startCall<B>(spec: CallSpec<B>): Call<B> {
   const controller = new AbortController();
+  // The call charges into this as it goes, so an outcome the handle settles itself still carries the cost.
+  const spend = new SideSpend();
   let done: CallOutcome<B> | null = null;
   let resolve: (outcome: CallOutcome<B>) => void = () => {};
   const promise = new Promise<CallOutcome<B>>((r) => {
@@ -117,7 +121,7 @@ function startCall<B>(spec: CallSpec<B>): Call<B> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const onAbort = () => {
     controller.abort();
-    finish(freeOutcome(spec.stopped()), false);
+    finish(spend.outcome(spec.stopped()), false);
   };
   function finish(outcome: CallOutcome<B>, announce = true): void {
     if (done !== null) return;
@@ -130,7 +134,7 @@ function startCall<B>(spec: CallSpec<B>): Call<B> {
   const expire = () => {
     if (done !== null) return;
     controller.abort();
-    finish(freeOutcome(spec.timedOut()));
+    finish(spend.outcome(spec.timedOut()));
   };
 
   if (spec.runSignal.aborted) {
@@ -140,9 +144,9 @@ function startCall<B>(spec: CallSpec<B>): Call<B> {
     timer = setTimeout(expire, Math.max(0, spec.timeoutMs));
     // A run that ends without settling must not keep a CLI process alive for the rest of the timeout.
     (timer as { unref?: () => void }).unref?.();
-    spec.run(controller.signal).then(
+    spec.run(controller.signal, spend).then(
       (outcome) => finish(outcome),
-      () => finish(freeOutcome(spec.failed())),
+      () => finish(spend.outcome(spec.failed())),
     );
   }
   return { promise, current: () => done, expire };
@@ -182,7 +186,7 @@ export function startSideContext(o: SideContextOptions): SideContextHandle {
   };
 
   const ai = startCall<AiContextBlock>({
-    run: (signal) => runAiContext({ ...input, signal }),
+    run: (signal, spend) => runAiContext({ ...input, signal, spend }),
     timeoutMs: o.config.aiTimeoutMs,
     timedOut: () => aiBlock("timed_out", SIDE_NOTES.aiTimedOut),
     failed: () => aiBlock("failed", SIDE_NOTES.aiFailed),
@@ -191,7 +195,7 @@ export function startSideContext(o: SideContextOptions): SideContextHandle {
     runSignal: o.signal,
   });
   const web = startCall<WebContextBlock>({
-    run: (signal) => runWebContext({ ...input, signal }),
+    run: (signal, spend) => runWebContext({ ...input, signal, spend }),
     timeoutMs: o.config.webTimeoutMs,
     timedOut: () => webBlock("timed_out", SIDE_NOTES.webTimedOut),
     failed: () => webBlock("failed", SIDE_NOTES.webFailed),

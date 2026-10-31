@@ -1,0 +1,88 @@
+# Render Blueprint (PLAN §3.2, D1, D2): one Docker web service and its Postgres. docs/PROD_SETUP.md walks
+# through the first deploy. Secrets are `sync: false`: Render asks for them when the Blueprint is first
+# created, and they live only in the service's environment, never in git or a Docker layer.
+services:
+  - type: web
+    name: culture-terminal
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # 1 CPU / 2 GB. The 512 MB plan is too small for the image's 768 MB heap (NODE_OPTIONS), and the free
+    # plan sleeps, which cuts SSE streams and queued runs.
+    plan: 1c-2g
+    region: virginia
+    numInstances: 1
+    # 503 until the database answers and migrations are applied (the server applies them on startup).
+    healthCheckPath: /api/health
+    # Deploys main only after every CI job (.github/workflows/ci.yml) is green.
+    autoDeployTrigger: checksPass
+    # Longer than the 180 s run limit: on SIGTERM the server stops taking runs, ends queued ones and lets
+    # active runs finish (SHUTDOWN_GRACE_MS).
+    maxShutdownDelaySeconds: 200
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: culture-terminal-db
+          property: connectionString
+      - key: PORT
+        value: "3000"
+      # Keys and secrets
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: QLOO_API_KEY
+        sync: false
+      - key: TURNSTILE_SITE_KEY
+        sync: false
+      - key: TURNSTILE_SECRET_KEY
+        sync: false
+      # Hex, at least 24 characters (`openssl rand -hex 16`): it travels in a URL query string.
+      - key: JUDGE_TOKEN
+        sync: false
+      - key: SESSION_HMAC_SECRET
+        generateValue: true
+      - key: IP_HASH_SALT
+        generateValue: true
+      - key: ADMIN_TOKEN
+        generateValue: true
+      # https://terminal.<your domain>; unset falls back to RENDER_EXTERNAL_URL (the onrender.com address).
+      - key: PUBLIC_SITE_URL
+        sync: false
+      # Public data (D46)
+      - key: SEC_USER_AGENT
+        sync: false
+      - key: CENSUS_API_KEY
+        sync: false
+      - key: OSM_USER_AGENT
+        sync: false
+      - key: OSM_DAILY_MAX
+        value: "500"
+      # Tried once, within the 12 s OpenStreetMap limit, when the public primary fails or is slow.
+      - key: OSM_OVERPASS_FALLBACK_URL
+        value: https://overpass.kumi.systems/api/interpreter
+      # Side context calls (D45)
+      - key: AI_CONTEXT_ENABLED
+        value: "1"
+      - key: WEB_SEARCH_ENABLED
+        value: "1"
+      - key: WEB_SEARCH_MAX_USES
+        value: "3"
+      # Qloo. Render starts the new instance before it stops the old one, so two may overlap during a
+      # deploy: 5 requests per second each keeps the pair under the key's limit.
+      - key: QLOO_BASE_URL
+        value: https://hackathon.api.qloo.com
+      - key: QLOO_RPS
+        value: "5"
+      - key: QLOO_DAILY_FRESH_CAP
+        value: "1900"
+      - key: LOG_LEVEL
+        value: info
+
+databases:
+  - name: culture-terminal-db
+    databaseName: culture_terminal
+    user: ct
+    # The smallest paid plan: the free one is deleted after 30 days.
+    plan: 0.1c-256mb
+    region: virginia
+    diskSizeGB: 5
+    # Only the web service connects (over Render's private network).
+    ipAllowList: []

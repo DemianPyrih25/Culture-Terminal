@@ -72,7 +72,7 @@ const ERROR_TEXT: Readonly<Record<PublicDataErrorCode, string>> = {
   not_configured: PUBLIC_NOT_CONFIGURED_REASON.osm,
   not_found: "OpenStreetMap returned nothing for these areas",
   rate_limited: "the OpenStreetMap service is busy or today's request limit is reached; try again later",
-  unavailable: "the OpenStreetMap service could not be reached",
+  unavailable: "the OpenStreetMap server did not answer in time or could not be reached",
   bad_request: "the OpenStreetMap service refused the request",
   invalid_response: "the OpenStreetMap service returned an answer that could not be read",
 };

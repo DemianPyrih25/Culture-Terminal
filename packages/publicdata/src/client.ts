@@ -33,14 +33,18 @@ import { namespaceFor, publicCacheKey, redactPublicParams } from "./canonical";
 import {
   DEFAULT_OSM_DAILY_MAX,
   DEFAULT_OSM_RPS,
+  OSM_CALL_DEADLINE_MS,
   OSM_CONCURRENCY,
+  OSM_FALLBACK_RESERVE_MS,
   OSM_MAX_ATTEMPTS,
   OSM_MAX_RETRY_AFTER_MS,
+  OSM_MIN_ATTEMPT_MS,
   OSM_RETRY_STATUSES,
   OSM_RETRY_WAIT_MS,
   osmCountsSpec,
   osmDailyKvKey,
   osmPlacesSpec,
+  overpassFallbackTarget,
   type OverpassTarget,
   overpassTarget,
 } from "./osm/client";
@@ -68,7 +72,8 @@ import {
  * TTLs: the SEC ticker map and company facts 7 days; Census ACS pinned (a published vintage never
  * changes); OpenStreetMap counts and names 30 days; a 4xx answer 1 day; 429, 5xx, an SEC 403 block, a
  * Census key redirect and an Overpass runtime error are never stored. OpenStreetMap has its own policy
- * (osm/client.ts): one request at a time, 1 s apart, two attempts, and a daily request cap.
+ * (osm/client.ts): one request at a time, 1 s apart, two attempts, a daily request cap, and one deadline
+ * for all the requests of a tool call (with an optional fallback instance inside it).
  */
 
 /** SEC ticker map and company facts. */
@@ -111,9 +116,12 @@ interface ScopeState {
   readonly records: Map<string, PublicCallRecord>;
 }
 
+/** The Overpass instance that answered, when it is not the configured primary (the fallback). */
+type AnsweredBy = { host: string; path: string };
+
 type Outcome =
   | { kind: "cache"; entry: PublicCacheEntry }
-  | { kind: "network"; entry: PublicCacheEntry; httpStatus: number }
+  | { kind: "network"; entry: PublicCacheEntry; httpStatus: number; via?: AnsweredBy }
   | { kind: "stale"; entry: PublicCacheEntry; httpStatus: number | null };
 
 /** How a flight failed, so its leader and followers can each log and react. Never escapes the client. */
@@ -136,13 +144,30 @@ type Verdict =
   | { kind: "client_error" }
   | { kind: "fatal"; error: PublicDataError };
 
-type FetchResult = { kind: "ok"; response: PublicTransportResponse; json: unknown } | { kind: "client_error"; response: PublicTransportResponse };
+type FetchResult = ({ kind: "ok"; response: PublicTransportResponse; json: unknown } | { kind: "client_error"; response: PublicTransportResponse }) & {
+  via?: AnsweredBy;
+};
 
 interface AttemptProgress {
   attempted: boolean;
   lastStatus: number | null;
   /** The OpenStreetMap daily cap refused the request before it left: a stale copy may still answer. */
   capped: boolean;
+  /** The OpenStreetMap deadline passed (queued, in flight or before a retry): a stale copy may still answer. */
+  timedOut: boolean;
+}
+
+/** One OpenStreetMap request's share of its tool call's deadline: a signal that aborts at `until`. */
+interface OsmTimer {
+  readonly until: number;
+  /** The run's signal and the deadline together. */
+  readonly signal: AbortSignal;
+  readonly error: PublicDataError;
+  /** The deadline fired, or the clock says it has passed. */
+  passed(): boolean;
+  /** Too little time is left to start an attempt (under OSM_MIN_ATTEMPT_MS). */
+  tooLate(): boolean;
+  clear(): void;
 }
 
 const encoder = new TextEncoder();
@@ -182,11 +207,13 @@ class PublicDataClientImpl implements PublicDataClient {
   private readonly secUserAgent: string | null;
   private readonly osmUserAgent: string | null;
   private readonly osmTarget: OverpassTarget;
+  private readonly osmFallback: OverpassTarget | null;
+  private readonly osmDeadlineMs: number | null;
   private readonly osmDailyMax: number;
   private readonly osmQueryOptions: { long: boolean };
   /** Requests counted in this process when the store has no shared counter (or it failed). */
   private readonly localDailyCounts = new Map<string, number>();
-  private readonly limiters: Record<"sec" | "census" | "osm", RequestLimiter>;
+  private readonly limiters: Record<"sec" | "census" | "osm" | "osmFallback", RequestLimiter>;
   private readonly cache: PublicResponseCache;
   private readonly flights = new Map<string, Promise<Outcome>>();
   private readonly pending = new Set<Promise<unknown>>();
@@ -204,6 +231,11 @@ class PublicDataClientImpl implements PublicDataClient {
     this.secUserAgent = options.secUserAgent?.trim() || null;
     this.osmUserAgent = options.osmUserAgent?.trim() || null;
     this.osmTarget = overpassTarget(options.osmOverpassUrl);
+    this.osmFallback = overpassFallbackTarget(options.osmOverpassFallbackUrl, this.osmTarget);
+    const deadlineMs =
+      options.osmDeadlineMs !== undefined ? options.osmDeadlineMs : options.env === "mock" || options.osmLongQueries === true ? null : OSM_CALL_DEADLINE_MS;
+    if (deadlineMs !== null && !(Number.isFinite(deadlineMs) && deadlineMs > 0)) throw new RangeError(`osmDeadlineMs must be a positive number of ms or null, got ${deadlineMs}`);
+    this.osmDeadlineMs = deadlineMs;
     const dailyMax = options.osmDailyMax ?? DEFAULT_OSM_DAILY_MAX;
     if (!Number.isInteger(dailyMax) || dailyMax < 0) throw new RangeError(`osmDailyMax must be a whole number ≥ 0, got ${dailyMax}`);
     this.osmDailyMax = dailyMax;
@@ -217,6 +249,8 @@ class PublicDataClientImpl implements PublicDataClient {
       sec: limiter(options.rps?.sec ?? DEFAULT_SEC_RPS),
       census: limiter(options.rps?.census ?? DEFAULT_CENSUS_RPS),
       osm: limiter(options.rps?.osm ?? DEFAULT_OSM_RPS, OSM_CONCURRENCY),
+      // Another server, with its own pace: a request waiting on a hung primary does not hold the fallback.
+      osmFallback: limiter(options.rps?.osm ?? DEFAULT_OSM_RPS, OSM_CONCURRENCY),
     };
     this.cache = new PublicResponseCache({ store: this.store, now: this.now, logger: this.logger, track: (w) => this.track(w) });
   }
@@ -245,14 +279,17 @@ class PublicDataClientImpl implements PublicDataClient {
   }
 
   private api(scope: ScopeState, toolCallId: string | null): PublicDataApi {
+    // One deadline for every OpenStreetMap request of this tool call, from its first.
+    let osmDeadlineAt: number | null = null;
+    const osmDeadline = (): number | null => (this.osmDeadlineMs === null ? null : (osmDeadlineAt ??= this.now() + this.osmDeadlineMs));
     return {
       secTicker: async (ticker) => this.secTicker(scope, toolCallId, ticker),
       secCompanyFacts: async (cik) => this.call(scope, toolCallId, this.factsSpec(padCik(cik))),
       censusAcs: async (geo) => this.censusAcs(scope, toolCallId, geo),
       osmCounts: async (q: OsmCountQuery): Promise<PublicResult<OsmCounts>> =>
-        this.call(scope, toolCallId, osmCountsSpec(this.osmTarget, q, this.osmQueryOptions)),
+        this.call(scope, toolCallId, osmCountsSpec(this.osmTarget, q, this.osmQueryOptions), osmDeadline()),
       osmPlaces: async (q: OsmPlacesQuery): Promise<PublicResult<OsmPlace[]>> =>
-        this.call(scope, toolCallId, osmPlacesSpec(this.osmTarget, q, this.osmQueryOptions)),
+        this.call(scope, toolCallId, osmPlacesSpec(this.osmTarget, q, this.osmQueryOptions), osmDeadline()),
     };
   }
 
@@ -354,7 +391,8 @@ class PublicDataClientImpl implements PublicDataClient {
 
   // The call pipeline ----------------------------------------------------------------------------------------
 
-  private async call<T>(scope: ScopeState, toolCallId: string | null, spec: CallSpec<T>): Promise<PublicResult<T>> {
+  /** `deadlineAt`: when the OpenStreetMap requests of this tool call must be done (null: no deadline). */
+  private async call<T>(scope: ScopeState, toolCallId: string | null, spec: CallSpec<T>, deadlineAt: number | null = null): Promise<PublicResult<T>> {
     scope.signal?.throwIfAborted();
     const request = spec.request;
     if (request.source === "sec" && this.env !== "mock" && this.secUserAgent === null) {
@@ -372,7 +410,8 @@ class PublicDataClientImpl implements PublicDataClient {
       let outcome: Outcome;
       try {
         // A waiter's own cancellation ends its wait; the leader's request carries on for the others.
-        outcome = await (lead ? this.startFlight(scope, key, spec) : untilAborted(existing, scope.signal));
+        // A waiter rides the leader's deadline, which started no later than its own call.
+        outcome = await (lead ? this.startFlight(scope, key, spec, deadlineAt) : untilAborted(existing, scope.signal));
       } catch (err) {
         const failure = err instanceof FlightFailure ? err : new FlightFailure(err, false, null, false);
         if (!lead) {
@@ -390,8 +429,8 @@ class PublicDataClientImpl implements PublicDataClient {
   }
 
   /** Registers the flight before its first await, so a concurrent identical request always joins it. */
-  private startFlight<T>(scope: ScopeState, key: string, spec: CallSpec<T>): Promise<Outcome> {
-    const flight = this.runFlight(scope, key, spec);
+  private startFlight<T>(scope: ScopeState, key: string, spec: CallSpec<T>, deadlineAt: number | null): Promise<Outcome> {
+    const flight = this.runFlight(scope, key, spec, deadlineAt);
     this.flights.set(key, flight);
     const clear = () => {
       if (this.flights.get(key) === flight) this.flights.delete(key);
@@ -400,20 +439,23 @@ class PublicDataClientImpl implements PublicDataClient {
     return flight;
   }
 
-  private async runFlight<T>(scope: ScopeState, key: string, spec: CallSpec<T>): Promise<Outcome> {
+  private async runFlight<T>(scope: ScopeState, key: string, spec: CallSpec<T>, deadlineAt: number | null): Promise<Outcome> {
     const found = await this.cache.lookup(key);
     if (found.fresh) return { kind: "cache", entry: found.fresh };
-    return this.fetchFresh(scope, key, spec, found.expired);
+    return this.fetchFresh(scope, key, spec, found.expired, deadlineAt);
   }
 
-  private async fetchFresh<T>(scope: ScopeState, key: string, spec: CallSpec<T>, expired: PublicCacheEntry | null): Promise<Outcome> {
-    const progress: AttemptProgress = { attempted: false, lastStatus: null, capped: false };
+  private async fetchFresh<T>(scope: ScopeState, key: string, spec: CallSpec<T>, expired: PublicCacheEntry | null, deadlineAt: number | null): Promise<Outcome> {
+    const progress: AttemptProgress = { attempted: false, lastStatus: null, capped: false, timedOut: false };
     try {
-      const result = await this.fetchWithRetry(spec.request, scope.signal, progress);
+      const result =
+        spec.request.source === "osm" && deadlineAt !== null
+          ? await this.fetchOsm(spec.request, scope.signal, progress, deadlineAt)
+          : await this.fetchWithRetry(spec.request, scope.signal, progress);
       if (result.kind === "client_error") {
         const entry = this.entryFrom(key, spec, result.response.status, encoder.encode(shortBody(result.response.body)), ERROR_TTL_MS, scope.runId);
         this.cache.store(entry);
-        return { kind: "network", entry, httpStatus: result.response.status };
+        return { kind: "network", entry, httpStatus: result.response.status, ...viaOf(result) };
       }
       let kept: unknown;
       try {
@@ -427,11 +469,11 @@ class PublicDataClientImpl implements PublicDataClient {
       }
       const entry = this.entryFrom(key, spec, result.response.status, encoder.encode(JSON.stringify(kept)), spec.ttlMs, scope.runId, kept);
       this.cache.store(entry);
-      return { kind: "network", entry, httpStatus: result.response.status };
+      return { kind: "network", entry, httpStatus: result.response.status, ...viaOf(result) };
     } catch (err) {
       if (err instanceof FlightFailure) throw err;
       const aborted = scope.signal?.aborted === true;
-      if (!aborted && (progress.attempted || progress.capped) && isTransient(err) && expired !== null && canServeStale(expired, this.now())) {
+      if (!aborted && (progress.attempted || progress.capped || progress.timedOut) && isTransient(err) && expired !== null && canServeStale(expired, this.now())) {
         this.logger.warn({ source: spec.request.source, path: spec.request.path, err: errorText(err) }, "public data network failed; serving a stale cached answer");
         return { kind: "stale", entry: expired, httpStatus: progress.lastStatus };
       }
@@ -439,73 +481,141 @@ class PublicDataClientImpl implements PublicDataClient {
     }
   }
 
-  private async fetchWithRetry(request: PublicRequest, signal: AbortSignal | undefined, progress: AttemptProgress): Promise<FetchResult> {
+  /**
+   * OpenStreetMap inside its tool call's deadline: the primary's attempts (ending OSM_FALLBACK_RESERVE_MS
+   * early when a fallback is set), then, when the primary failed or ran out of its share and time is left,
+   * one attempt on the fallback instance. Nothing here runs past `deadlineAt`.
+   */
+  private async fetchOsm(request: PublicRequest, signal: AbortSignal | undefined, progress: AttemptProgress, deadlineAt: number): Promise<FetchResult> {
+    const fallback = this.osmFallback;
+    const primaryUntil = fallback === null ? deadlineAt : deadlineAt - OSM_FALLBACK_RESERVE_MS;
+    try {
+      return await this.fetchWithRetry(request, signal, progress, primaryUntil);
+    } catch (err) {
+      if (fallback === null || signal?.aborted || !isTransient(err) || deadlineAt - this.now() < OSM_MIN_ATTEMPT_MS) throw err;
+      this.logger.warn({ source: "osm", err: errorText(err) }, "Overpass primary instance failed; trying the fallback instance");
+      const via = { host: fallback.host, path: fallback.path };
+      const result = await this.fetchWithRetry({ ...request, ...via }, signal, progress, deadlineAt, true);
+      return { ...result, via };
+    }
+  }
+
+  /**
+   * Attempts with retries. `until` (OpenStreetMap only): when this request must be done, queue and retry
+   * wait included; `fallback` makes one attempt through the fallback instance's own limiter.
+   */
+  private async fetchWithRetry(
+    request: PublicRequest,
+    signal: AbortSignal | undefined,
+    progress: AttemptProgress,
+    until: number | null = null,
+    fallback = false,
+  ): Promise<FetchResult> {
     let lastError: PublicDataError | null = null;
-    const limiter = this.limiters[request.source];
+    const limiter = fallback ? this.limiters.osmFallback : this.limiters[request.source];
     const osm = request.source === "osm";
-    const attempts = osm ? OSM_MAX_ATTEMPTS : MAX_ATTEMPTS;
-    for (let attempt = 1; attempt <= attempts; attempt++) {
-      signal?.throwIfAborted();
-      let response: PublicTransportResponse | null = null;
-      if (osm && this.env !== "mock") {
+    const attempts = fallback ? 1 : osm ? OSM_MAX_ATTEMPTS : MAX_ATTEMPTS;
+    const timer = osm && until !== null ? this.osmTimer(until, signal) : null;
+    const requestSignal = timer?.signal ?? signal;
+    try {
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        signal?.throwIfAborted();
+        if (timer?.tooLate()) throw timer.error;
+        let response: PublicTransportResponse | null = null;
+        if (osm && this.env !== "mock") {
+          try {
+            await this.countOsmRequest();
+          } catch (err) {
+            progress.capped = !progress.attempted;
+            throw err;
+          }
+        }
         try {
-          await this.countOsmRequest();
+          const run = limiter.run(() => {
+            // A request whose turn came too close to the deadline is not sent.
+            if (timer?.tooLate()) return Promise.reject(timer.error);
+            progress.attempted = true;
+            return this.transport(request, requestSignal);
+          }, requestSignal);
+          // The limiter holds a queued request until its slot frees: the deadline ends that wait too.
+          response = await (timer === null ? run : untilAborted(run, requestSignal));
         } catch (err) {
-          progress.capped = !progress.attempted;
-          throw err;
+          if (signal?.aborted) throw signal.reason;
+          if (timer?.passed()) throw timer.error;
+          if (err instanceof PublicDataError && err.code === "not_configured") {
+            // Refused before any request left (no key or User-Agent): nothing reached the network.
+            progress.attempted = false;
+            throw err;
+          }
+          // An oversized or refused request comes back the same: a retry would only add load.
+          if (err instanceof PublicDataError && err.code !== "unavailable") throw err;
+          // Overpass: no answer after a long wait is not worth a second one (a stale copy may answer).
+          if (osm) {
+            throw err instanceof PublicDataError
+              ? err
+              : new PublicDataError("unavailable", `request to ${SOURCE_NAME.osm} failed (${errorText(err).slice(0, 120)})`, { source: "osm", cause: err });
+          }
+          lastError =
+            err instanceof PublicDataError
+              ? err
+              : new PublicDataError("unavailable", `request to ${SOURCE_NAME[request.source]} failed (${errorText(err).slice(0, 120)})`, {
+                  source: request.source,
+                  cause: err,
+                });
+        }
+        if (response !== null) {
+          progress.lastStatus = response.status;
+          const verdict = classify(request, response, attempt);
+          switch (verdict.kind) {
+            case "ok":
+              return { kind: "ok", response, json: verdict.json };
+            case "client_error":
+              return { kind: "client_error", response };
+            case "fatal":
+              throw verdict.error;
+            case "retry":
+              lastError = verdict.error;
+              break;
+          }
+        }
+        if (attempt < attempts) {
+          const wait = osm ? osmRetryWaitMs(response) : this.backoffMs(attempt - 1);
+          // Overpass asked for a longer pause than a run can afford: fail now (a stale copy may answer).
+          if (wait === null) break;
+          // A retry the deadline would cut short is not started: fail now (a stale copy or the fallback may answer).
+          if (timer !== null && this.now() + wait + OSM_MIN_ATTEMPT_MS > timer.until) break;
+          await this.sleep(wait, requestSignal);
         }
       }
-      try {
-        response = await limiter.run(() => {
-          progress.attempted = true;
-          return this.transport(request, signal);
-        }, signal);
-      } catch (err) {
-        if (signal?.aborted) throw signal.reason;
-        if (err instanceof PublicDataError && err.code === "not_configured") {
-          // Refused before any request left (no key or User-Agent): nothing reached the network.
-          progress.attempted = false;
-          throw err;
-        }
-        // An oversized or refused request comes back the same: a retry would only add load.
-        if (err instanceof PublicDataError && err.code !== "unavailable") throw err;
-        // Overpass: no answer after a 45 s wait is not worth a second one (a stale copy may answer).
-        if (osm) {
-          throw err instanceof PublicDataError
-            ? err
-            : new PublicDataError("unavailable", `request to ${SOURCE_NAME.osm} failed (${errorText(err).slice(0, 120)})`, { source: "osm", cause: err });
-        }
-        lastError =
-          err instanceof PublicDataError
-            ? err
-            : new PublicDataError("unavailable", `request to ${SOURCE_NAME[request.source]} failed (${errorText(err).slice(0, 120)})`, {
-                source: request.source,
-                cause: err,
-              });
+    } catch (err) {
+      if (timer !== null && !signal?.aborted && (err === timer.error || timer.passed())) {
+        progress.timedOut = true;
+        throw timer.error;
       }
-      if (response !== null) {
-        progress.lastStatus = response.status;
-        const verdict = classify(request, response, attempt);
-        switch (verdict.kind) {
-          case "ok":
-            return { kind: "ok", response, json: verdict.json };
-          case "client_error":
-            return { kind: "client_error", response };
-          case "fatal":
-            throw verdict.error;
-          case "retry":
-            lastError = verdict.error;
-            break;
-        }
-      }
-      if (attempt < attempts) {
-        const wait = osm ? osmRetryWaitMs(response) : this.backoffMs(attempt - 1);
-        // Overpass asked for a longer pause than a run can afford: fail now (a stale copy may answer).
-        if (wait === null) break;
-        await this.sleep(wait, signal);
-      }
+      throw err;
+    } finally {
+      timer?.clear();
     }
     throw lastError ?? new PublicDataError("unavailable", `${SOURCE_NAME[request.source]} did not answer`, { source: request.source });
+  }
+
+  /** One OpenStreetMap request's deadline: aborts its queue wait, attempt or retry wait at `until`. */
+  private osmTimer(until: number, signal: AbortSignal | undefined): OsmTimer {
+    const seconds = Math.round((this.osmDeadlineMs ?? OSM_CALL_DEADLINE_MS) / 1000);
+    const error = new PublicDataError("unavailable", `${SOURCE_NAME.osm} did not answer in time (the OpenStreetMap step is limited to ${seconds} s)`, {
+      source: "osm",
+    });
+    const controller = new AbortController();
+    const handle = setTimeout(() => controller.abort(error), Math.max(0, until - this.now()));
+    (handle as { unref?: () => void }).unref?.();
+    return {
+      until,
+      signal: signal === undefined ? controller.signal : AbortSignal.any([signal, controller.signal]),
+      error,
+      passed: () => controller.signal.aborted || this.now() >= until,
+      tooLate: () => controller.signal.aborted || until - this.now() < OSM_MIN_ATTEMPT_MS,
+      clear: () => clearTimeout(handle),
+    };
   }
 
   /**
@@ -594,14 +704,15 @@ class PublicDataClientImpl implements PublicDataClient {
     else cache = scope.runId !== null && entry.originRunId !== null && entry.originRunId !== scope.runId ? "reused" : "hit";
     if (outcome.kind === "cache") this.cache.recordHit(entry.key);
 
+    const via = outcome.kind === "network" ? outcome.via : undefined;
     const base = {
       publicCallId,
       toolCallId,
       runId: scope.runId,
       source: spec.request.source,
       endpoint: spec.request.endpoint,
-      host: spec.request.host,
-      path: spec.request.path,
+      host: via?.host ?? spec.request.host,
+      path: via?.path ?? spec.request.path,
       query: { ...spec.request.query },
       paramsRedacted: traceParams(spec.request),
       ...requestBody(spec.request),
@@ -727,6 +838,9 @@ class PublicDataClientImpl implements PublicDataClient {
     void tracked.then(() => this.pending.delete(tracked));
   }
 }
+
+/** `{ via }` when the fallback instance answered, else nothing. */
+const viaOf = (result: FetchResult): { via?: AnsweredBy } => (result.via === undefined ? {} : { via: result.via });
 
 /** The trace and call-log params: the shortened query, or a POST's trace summary. */
 function traceParams(request: PublicRequest): Record<string, string> {

@@ -16,7 +16,7 @@ export type Queryable = PgDatabase<PostgresJsQueryResultHKT, Schema>;
 export const DEV_DATABASE_URL = "postgres://ct:ct@localhost:5433/culture_terminal";
 
 export interface DbOptions {
-  /** Pool size. Railway Hobby Postgres allows ~100 connections; one web instance needs few. */
+  /** Pool size. Render's smallest Postgres allows ~100 connections; one web instance needs few. */
   max?: number;
   /** Per-statement timeout in ms; 0 disables it (the migrator uses 0). */
   statementTimeoutMs?: number;

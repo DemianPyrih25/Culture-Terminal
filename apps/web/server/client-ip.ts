@@ -3,11 +3,18 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { isIPv4, isIPv6 } from "node:net";
 
 /**
- * The visitor's address (SPEC §10.3): the right-most X-Forwarded-For entry, which Railway's edge
- * appends, so a visitor cannot choose it by sending the header themselves. Null without one (local
- * dev, tests), where no per-visitor limit applies.
+ * The visitor's address (SPEC §10.3). With CLIENT_IP_HEADER set (e.g. cf-connecting-ip on Render,
+ * whose Cloudflare edge overwrites it), that header's first value; else the right-most
+ * X-Forwarded-For entry, which the host's edge appends, so a visitor cannot choose it by sending the
+ * header themselves. GET /api/admin/ip shows what the host sends. Null without one (local dev,
+ * tests), where no per-visitor limit applies.
  */
-export function clientIp(request: Request | undefined): string | null {
+export function clientIp(request: Request | undefined, env: NodeJS.ProcessEnv = process.env): string | null {
+  const header = env.CLIENT_IP_HEADER?.trim().toLowerCase() ?? "";
+  if (header !== "") {
+    const first = request?.headers.get(header)?.split(",")[0]?.trim() ?? "";
+    return first === "" ? null : first;
+  }
   const entries = request?.headers.get("x-forwarded-for")?.split(",") ?? [];
   const last = entries.at(-1)?.trim() ?? "";
   return last === "" ? null : last;
